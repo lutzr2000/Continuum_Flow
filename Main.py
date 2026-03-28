@@ -5,7 +5,7 @@ from Helper import compute_CFL,compute_divergence
 
 rho = 1.225
 nu = 1.5e-5
-dt = 0.0005
+dt = 0.001
 delta = 0.02
 
 nx = 512
@@ -17,7 +17,7 @@ x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
 
-u_initial = np.zeros_like(X)
+u_initial = np.ones_like(X)*10
 v_initial = np.zeros_like(X)
 p_initial = np.zeros_like(X)
 
@@ -36,7 +36,7 @@ def compute_F(vel):
     neg_part = np.maximum(-vel/denom, 0)
     return pos_part, neg_part
 
-def update_x_velocity(u,v,p):
+def update_x_velocity(u, v, p, Fx=None, Fy=None):
     """
     updates the velocity field in the x direction based on the momentum equation. Discretization with first order upwind
 
@@ -61,11 +61,16 @@ def update_x_velocity(u,v,p):
     convection = u[1:-1, 1:-1] * dt / delta * (u_east - u_west) + v[1:-1, 1:-1] * dt / delta * (u_north - u_south)
     diffusion = nu * (dt / delta**2 * (u[1:-1, 2:] - 2 * u[1:-1, 1:-1] + u[1:-1, 0:-2]) + dt / delta**2 * (u[2:, 1:-1] - 2 * u[1:-1, 1:-1] + u[0:-2, 1:-1]))
     pressure_gradient = dt / (2 * rho * delta) * (p[1:-1, 2:] - p[1:-1, 0:-2])
+
+    if Fx is not None:
+        force_term_x = dt / rho * Fx[1:-1, 1:-1]
+    else:
+        force_term_x = 0
    
-    un[1:-1, 1:-1] = u[1:-1, 1:-1] - convection - pressure_gradient + diffusion
+    un[1:-1, 1:-1] = u[1:-1, 1:-1] - convection - pressure_gradient + diffusion + force_term_x 
     return un
 
-def update_y_velocity(u, v, p):
+def update_y_velocity(u, v, p, Fx=None, Fy=None):
     """
     updates the velocity field in the y direction based on the momentum equation.
     Discretization with first order upwind (consistent with update_x_velocity)
@@ -93,11 +98,16 @@ def update_y_velocity(u, v, p):
     diffusion = nu * (dt / delta**2 * (v[1:-1, 2:] - 2 * v[1:-1, 1:-1] + v[1:-1, 0:-2]) + dt / delta**2 * (v[2:, 1:-1] - 2 * v[1:-1, 1:-1] + v[0:-2, 1:-1]))
     pressure_gradient = dt / (2 * rho * delta) * (p[2:, 1:-1] - p[0:-2, 1:-1])
 
-    vn[1:-1, 1:-1] = v[1:-1, 1:-1]- convection- pressure_gradient+ diffusion
+    if Fy is not None:
+        force_term_y = dt / rho * Fy[1:-1, 1:-1]
+    else:
+        force_term_y = 0
+
+    vn[1:-1, 1:-1] = v[1:-1, 1:-1]- convection- pressure_gradient + diffusion + force_term_y
 
     return vn
 
-def pressure_equation_right_side(u,v,b):
+def pressure_equation_right_side(u, v, b, Fx=None, Fy=None):
     """
     computes the right hand side of the pressure poisson equation
 
@@ -115,11 +125,18 @@ def pressure_equation_right_side(u,v,b):
     dv_dx = (v[1:-1, 2:] - v[1:-1, 0:-2]) / (2 * delta)
     divergence = du_dx + dv_dy
     nonlinear = du_dx**2 + 2 * du_dy * dv_dx + dv_dy**2
-    b[1:-1, 1:-1] = rho * ( (1 / dt) * divergence - nonlinear )
+
+    b[1:-1, 1:-1] = rho * ((1/dt) * divergence - nonlinear)
+
+    # add divergence of forcing terms
+    if Fx is not None and Fy is not None:
+        dFx_dx = (Fx[1:-1, 2:] - Fx[1:-1, 0:-2]) / (2*delta)
+        dFy_dy = (Fy[2:, 1:-1] - Fy[0:-2, 1:-1]) / (2*delta)
+        b[1:-1, 1:-1] -= rho * (dFx_dx + dFy_dy)
 
     return b
 
-def pressure_poisson_l1norm(u, v, p, l1norm_target, max_iter=50):
+def pressure_poisson_l1norm(u, v, p, Fx=None, Fy=None, l1norm_target = 1e-3, max_iter=50):
     """
     Solves the pressure Poisson equation iteratively using L1 norm convergence criterion.
 
@@ -135,7 +152,7 @@ def pressure_poisson_l1norm(u, v, p, l1norm_target, max_iter=50):
         niter (int): number of iterations performed
     """
     b = np.zeros_like(p)
-    b = pressure_equation_right_side(u, v, b)
+    b = pressure_equation_right_side(u, v, b, Fx, Fy)
     l1norm = 1.0
     niter = 0
 
@@ -154,6 +171,31 @@ def pressure_poisson_l1norm(u, v, p, l1norm_target, max_iter=50):
 
     return p, niter
 
+def actuator_disk_force(u, v, X, Y):
+    """
+    Returns Fx, Fy for an actuator disk in the domain.
+    Args:
+        X, Y: meshgrid arrays
+        t: current time (optional)
+    Returns:
+        Fx, Fy: 2D arrays with force values
+    """
+    Fx = np.zeros_like(X)  
+    Fy = np.zeros_like(Y)  
+    
+    x_center = nx/4*delta  
+    y_center = ny/2*delta 
+    width = 4 
+    radius = 0.3     
+
+    mask = (np.abs(X - x_center) <= width*delta/2) & (np.abs(Y - ny/2*delta) <= radius)
+    ct=1     
+    u_disk = np.sqrt(np.mean(u[mask])**2+np.mean(v[mask])**2)
+
+    Fx[mask] = -0.5 * rho * ct * u_disk**2 / delta
+    
+    return Fx, Fy
+
 def main():
     print("Initialise")
     u = u_initial.copy()
@@ -169,7 +211,7 @@ def main():
 
         # Geschwindigkeit initial
         vmag = np.sqrt(u**2 + v**2)
-        vmin_v, vmax_v = 0, 30.0  # Farbskala für Geschwindigkeit
+        vmin_v, vmax_v = 0, 15.0  # Farbskala für Geschwindigkeit
         im_vel = ax1.imshow(vmag, origin='lower', cmap='viridis',
                             extent=[x.min(), x.max(), y.min(), y.max()],
                             vmin=vmin_v, vmax=vmax_v)
@@ -179,7 +221,7 @@ def main():
         ax1.set_ylabel("y")
 
         # Druck initial
-        pmin, pmax = -10000.0, 10000.0  # Beispielwerte für Farbskala
+        pmin, pmax = -100.0, 100.0  # Beispielwerte für Farbskala
         im_p = ax2.imshow(p, origin='lower', cmap='coolwarm',
                           extent=[x.min(), x.max(), y.min(), y.max()],
                           vmin=pmin, vmax=pmax)
@@ -191,14 +233,17 @@ def main():
     print("Start time itteration")
     for n in range(nt):
         print(f"Timestep {n} of {nt} steps")
+
+        Fx, Fy = actuator_disk_force(u, v, X, Y)
+
         un = u.copy()
         vn = v.copy()
         pn = p.copy()
 
-        p,niter = pressure_poisson_l1norm(un, vn, pn, 1e-4)
+        p,niter = pressure_poisson_l1norm(un, vn, pn, Fx, Fy, 1e-4)
         print(f"Number of pressure itterations: {niter}")
-        u = update_x_velocity(un, vn, p)
-        v = update_y_velocity(un, vn, p)
+        u = update_x_velocity(un, vn, p, Fx, Fy)
+        v = update_y_velocity(un, vn, p, Fx, Fy)
         u, v = velocity_BC(u, v)
 
         CFL = compute_CFL(u,v,dt,delta)
