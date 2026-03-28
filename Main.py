@@ -1,15 +1,16 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import time
 from Boundary_Conditions import pressure_BC,velocity_BC
 from Helper import compute_CFL,compute_divergence
 
 rho = 1.225
 nu = 1.5e-5
-dt = 0.001
-delta = 0.02
+dt = 0.0005
+delta = 0.01
 
-nx = 512
-ny = 128
+nx = 1024
+ny = 256
 t_max = 10
 nt = int(t_max/dt)
  
@@ -17,7 +18,13 @@ x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
 
-u_initial = np.ones_like(X)*10
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+noise = np.random.randn(*X.shape)
+smooth_noise = gaussian_filter(noise, sigma=4)  # sigma = Glättungsstärke
+
+u_initial = np.ones_like(X)*2+smooth_noise*50
 v_initial = np.zeros_like(X)
 p_initial = np.zeros_like(X)
 
@@ -48,7 +55,7 @@ def update_x_velocity(u, v, p, Fx=None, Fy=None):
         un (2d-array): new u-velocity field
     """
     un = u.copy()
-    fe1, fe2 = compute_F(un)       
+    fe1, fe2 = compute_F(u)       
     fw1, fw2 = fe1, fe2
     u_east = u[1:-1, 1:-1] * fe1[1:-1, 1:-1] + u[1:-1, 2:] * fe2[1:-1, 1:-1]     
     u_west = u[1:-1, 0:-2] * fw1[1:-1, 1:-1] + u[1:-1, 1:-1]* fw2[1:-1, 1:-1]
@@ -136,7 +143,7 @@ def pressure_equation_right_side(u, v, b, Fx=None, Fy=None):
 
     return b
 
-def pressure_poisson_l1norm(u, v, p, Fx=None, Fy=None, l1norm_target = 1e-3, max_iter=50):
+def pressure_poisson_l1norm(u, v, p, Fx=None, Fy=None, l1norm_target = 1e-3, max_iter=500):
     """
     Solves the pressure Poisson equation iteratively using L1 norm convergence criterion.
 
@@ -163,7 +170,7 @@ def pressure_poisson_l1norm(u, v, p, Fx=None, Fy=None, l1norm_target = 1e-3, max
         laplace_x = pn[1:-1, 2:] + pn[1:-1, 0:-2]
         laplace_y = pn[2:, 1:-1] + pn[0:-2, 1:-1]
 
-        p[1:-1, 1:-1] = (laplace_x * delta**2 + laplace_y * delta**2) / (2 * (delta**2 + delta**2)) - (delta**2 * delta**2) / (2 * (delta**2 + delta**2)) * b[1:-1, 1:-1]
+        p[1:-1, 1:-1] = 0.25 * (laplace_x + laplace_y - delta**2 * b[1:-1, 1:-1])
 
         p = pressure_BC(p)
 
@@ -196,6 +203,40 @@ def actuator_disk_force(u, v, X, Y):
     
     return Fx, Fy
 
+# def main():
+#     print("Initialise")
+#     u = u_initial.copy()
+#     v = v_initial.copy()
+#     p = p_initial.copy()
+
+#     print("Start time itteration")
+#     for n in range(nt):
+#         start_time = time.time()
+
+#         Fx=None
+#         Fy=None
+
+#         un = u.copy()
+#         vn = v.copy()
+#         pn = p.copy()
+
+#         p,niter = pressure_poisson_l1norm(un, vn, pn, Fx, Fy, 1e-6)
+#         u = update_x_velocity(un, vn, p, Fx, Fy)
+#         v = update_y_velocity(un, vn, p, Fx, Fy)
+#         u, v = velocity_BC(u, v)
+
+#         CFL = compute_CFL(u,v,dt,delta)
+#         _ , div_l1 = compute_divergence(u,v,delta)
+#         end_time = time.time()
+
+#         # Output
+#         print("#################################################")
+#         print(f"Timestep {n} of {nt} steps")
+#         print(f"Number of pressure itterations: {niter}")
+#         print(f"CFL-Condition: {np.round(CFL,5)}")
+#         print(f"Divergence of velocity field: {div_l1}")
+#         print(f"Time per timestep: {end_time - start_time:.4f} s")
+
 def main():
     print("Initialise")
     u = u_initial.copy()
@@ -211,7 +252,7 @@ def main():
 
         # Geschwindigkeit initial
         vmag = np.sqrt(u**2 + v**2)
-        vmin_v, vmax_v = 0, 15.0  # Farbskala für Geschwindigkeit
+        vmin_v, vmax_v = -5, 5  # Farbskala für Geschwindigkeit
         im_vel = ax1.imshow(vmag, origin='lower', cmap='viridis',
                             extent=[x.min(), x.max(), y.min(), y.max()],
                             vmin=vmin_v, vmax=vmax_v)
@@ -232,25 +273,25 @@ def main():
     ###########################################################################
     print("Start time itteration")
     for n in range(nt):
-        print(f"Timestep {n} of {nt} steps")
+        start_time = time.time()
 
-        Fx, Fy = actuator_disk_force(u, v, X, Y)
+        #Fx, Fy = actuator_disk_force(u, v, X, Y)
+        Fx=None
+        Fy=None
 
         un = u.copy()
         vn = v.copy()
         pn = p.copy()
 
         p,niter = pressure_poisson_l1norm(un, vn, pn, Fx, Fy, 1e-4)
-        print(f"Number of pressure itterations: {niter}")
         u = update_x_velocity(un, vn, p, Fx, Fy)
         v = update_y_velocity(un, vn, p, Fx, Fy)
         u, v = velocity_BC(u, v)
 
         CFL = compute_CFL(u,v,dt,delta)
-        print(f"CFL-Condition: {np.round(CFL,5)}")
-
         _ , div_l1 = compute_divergence(u,v,delta)
-        print(f"Divergence of velocity field: {div_l1}")
+        end_time = time.time()
+
         ###########################################################################
         if plot:
             # Geschwindigkeit updaten
@@ -266,8 +307,12 @@ def main():
 
             plt.pause(0.00001)
         ###########################################################################
-    if plot == True:
-        plt.ioff()
-        plt.show()
+        # Output
+        print("#################################################")
+        print(f"Timestep {n} of {nt} steps")
+        print(f"CFL-Condition: {np.round(CFL,5)}")
+        print(f"Number of pressure itterations: {niter}")
+        print(f"Divergence of velocity field: {div_l1}")
+        print(f"Time per timestep: {end_time - start_time:.4f} s")
 
 main()
