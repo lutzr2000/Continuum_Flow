@@ -1,11 +1,12 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from Boundary_Conditions import pressure_BC,velocity_BC
-from Helper import compute_CFL
+from Helper import compute_CFL,compute_divergence
 
-rho = 1
-nu = 0.001
-dt = 0.001
-delta = 0.01
+rho = 1.225
+nu = 1.5e-5
+dt = 0.0005
+delta = 0.02
 
 nx = 512
 ny = 128
@@ -153,25 +154,6 @@ def pressure_poisson_l1norm(u, v, p, l1norm_target, max_iter=50):
 
     return p, niter
 
-def apply_obstacle(u, v, X, Y, x0, y0, radius):
-    """
-    Setzt die Geschwindigkeit innerhalb eines kreisförmigen Hindernisses auf 0 (no-slip)
-    
-    Parameters:
-        u, v : np.ndarray
-            Geschwindigkeit
-        X, Y : np.ndarray
-            Gitterkoordinaten
-        x0, y0 : float
-            Zentrum des Kreises
-        radius : float
-            Radius des Kreises
-    """
-    mask = (X - x0)**2 + (Y - y0)**2 <= radius**2
-    u[mask] = 0.0
-    v[mask] = 0.0
-    return u, v
-
 def main():
     print("Initialise")
     u = u_initial.copy()
@@ -181,25 +163,30 @@ def main():
     plot = True
 
     ###########################################################################
-    if plot == True:
-        import matplotlib.pyplot as plt
+    if plot:
         plt.ion()
-        fig, ax = plt.subplots(figsize=(7,5))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,10))
 
-        # Geschwindigkeit als Betrag initial
+        # Geschwindigkeit initial
         vmag = np.sqrt(u**2 + v**2)
-        
-        # feste Farbskala von Anfang an
-        vmin, vmax = 0, 4.0  # hier z.B. 0 bis 2 m/s, anpassen je nach erwarteter Geschwindigkeit
+        vmin_v, vmax_v = 0, 30.0  # Farbskala für Geschwindigkeit
+        im_vel = ax1.imshow(vmag, origin='lower', cmap='viridis',
+                            extent=[x.min(), x.max(), y.min(), y.max()],
+                            vmin=vmin_v, vmax=vmax_v)
+        cbar1 = plt.colorbar(im_vel, ax=ax1, label='Velocity magnitude')
+        ax1.set_title("Velocity magnitude")
+        ax1.set_xlabel("x")
+        ax1.set_ylabel("y")
 
-        # imshow für animierte Kontur
-        im = ax.imshow(vmag, origin='lower', cmap='viridis',
-                    extent=[x.min(), x.max(), y.min(), y.max()],
-                    vmin=vmin, vmax=vmax)  # feste Farbskala
-        cbar = plt.colorbar(im, ax=ax, label='Velocity magnitude')  # einmalig
-
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
+        # Druck initial
+        pmin, pmax = -10000.0, 10000.0  # Beispielwerte für Farbskala
+        im_p = ax2.imshow(p, origin='lower', cmap='coolwarm',
+                          extent=[x.min(), x.max(), y.min(), y.max()],
+                          vmin=pmin, vmax=pmax)
+        cbar2 = plt.colorbar(im_p, ax=ax2, label='Pressure')
+        ax2.set_title("Pressure")
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("y")
     ###########################################################################
     print("Start time itteration")
     for n in range(nt):
@@ -208,30 +195,31 @@ def main():
         vn = v.copy()
         pn = p.copy()
 
-        p,niter = pressure_poisson_l1norm(un, vn, pn, 1e-3)
+        p,niter = pressure_poisson_l1norm(un, vn, pn, 1e-4)
         print(f"Number of pressure itterations: {niter}")
         u = update_x_velocity(un, vn, p)
         v = update_y_velocity(un, vn, p)
         u, v = velocity_BC(u, v)
 
-        # circle_collider
-        x0 = 0.2 * x.max()       # center in x
-        y0 = 0.5 * y.max()       # center in y
-        radius = 0.3           # R
-        u, v = apply_obstacle(u, v, X, Y, x0, y0, radius)
-
         CFL = compute_CFL(u,v,dt,delta)
         print(f"CFL-Condition: {np.round(CFL,5)}")
+
+        _ , div_l1 = compute_divergence(u,v,delta)
+        print(f"Divergence of velocity field: {div_l1}")
         ###########################################################################
-        if plot == True:
-            # Geschwindigkeit Betrag
+        if plot:
+            # Geschwindigkeit updaten
             vmag = np.sqrt(u**2 + v**2)
+            im_vel.set_data(vmag)
+            im_vel.set_clim(vmin_v, vmax_v)  # feste Farbskala
+            ax1.set_title(f"Velocity magnitude, Time = {n*dt:.3f} s")
 
-            # Update imshow-Daten
-            im.set_data(vmag)
+            # Druck updaten
+            im_p.set_data(p)
+            im_p.set_clim(pmin, pmax)  # feste Farbskala
+            ax2.set_title(f"Pressure, Time = {n*dt:.3f} s")
 
-            ax.set_title(f"Time {n*dt:.3f} s")
-            plt.pause(0.0001)
+            plt.pause(0.00001)
         ###########################################################################
     if plot == True:
         plt.ioff()
