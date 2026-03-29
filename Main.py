@@ -1,26 +1,26 @@
-import matplotlib.pyplot as plt
 import numpy as np
 import time
-from Boundary_Conditions import pressure_BC,velocity_BC
+from Boundary_Conditions import neumann_boundary_condition, dirichlet_boundary_condition, obstacle_boundary_conditions_velocity, obstacle_boundary_conditions_pressure
+from Obstacles import circle
 from Helper import compute_CFL,compute_divergence
+from plot_functions import plot_velocity_pressure
 from numba import njit, prange
-from scipy.sparse import diags, kron, eye
 
 # fluid
 rho = 1.225
-nu = 1.5e-5
+nu = 1.81e-5
 
 # time
 t_max = 10
-dt = 0.002
+dt = 0.001
 
 # solver
-div_target = 0.001
-max_iter = 500
+tolerance = 0.01
+max_iter = 50
 precision = np.float32
 
 # resolution
-delta = 0.01
+delta = 0.02
 nx = 1024
 ny = 256
 nt = int(t_max/dt)
@@ -28,19 +28,22 @@ x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
 
-###################################################
-import numpy as np
-from scipy.ndimage import gaussian_filter
-
-noise = np.random.randn(*X.shape)
-smooth_noise = gaussian_filter(noise, sigma=4)  # sigma = Glättungsstärke
-###################################################
-
 # initial conditions
-u_initial = np.ones_like(X).astype(precision)*2+smooth_noise*10
+u_initial = np.ones_like(X).astype(precision)*5
 v_initial = np.zeros_like(X).astype(precision)
 p_initial = np.zeros_like(X).astype(precision)
 
+# Geometry
+circle1_mask = circle(X,Y,nx*0.2*delta,ny*0.5*delta,0.5)
+circle2_mask = circle(X,Y,nx*0.3*delta,ny*0.3*delta,0.6)
+circle3_mask = circle(X,Y,nx*0.5*delta,ny*0.8*delta,0.3)
+
+obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+
+# Reynolds number
+Re = np.max(u_initial)*ny*delta/nu
+print(f"Reynolds number: {Re}")
+time.sleep(1)
 ###################################################
 
 def compute_F(vel):
@@ -160,16 +163,16 @@ def pressure_equation_right_side(u, v, b, Fx=None, Fy=None):
     return b
 
 @njit(parallel=True)
-def pressure_poisson(u, v, p, Fx=None, Fy=None, div_target=1e-5, max_iter=500):
+def pressure_poisson(u, v, p, Fx=None, Fy=None, dp_target=1e-6, max_iter=500):
     """
-    Solves the pressure Poisson equation iteratively until the velocity field
-    is sufficiently divergence-free.
+    Solves the pressure Poisson equation iteratively until the change in 
+    the pressure field is smaller than a target threshold.
 
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         p (2d-array): pressure field (initial guess)
-        div_target (float): target divergence for convergence
+        dp_target (float): target max change in pressure for convergence
         max_iter (int): maximum number of iterations
 
     Returns:
@@ -180,59 +183,81 @@ def pressure_poisson(u, v, p, Fx=None, Fy=None, div_target=1e-5, max_iter=500):
     b = pressure_equation_right_side(u, v, b, Fx, Fy)
 
     niter = 0
-    divergence_l1 = 1.0
+    dp_max = 1.0 
 
-    while divergence_l1 > div_target and niter < max_iter:
+    while dp_max > dp_target and niter < max_iter:
         niter += 1
+        p_old = p.copy()
+
         laplace_x = p[1:-1, 2:] + p[1:-1, 0:-2]
         laplace_y = p[2:, 1:-1] + p[0:-2, 1:-1]
 
         p[1:-1, 1:-1] = 0.25 * (laplace_x + laplace_y - delta**2 * b[1:-1, 1:-1])
-        p = pressure_BC(p)
-        
-        du_dx = (u[1:-1, 2:] - u[1:-1, 0:-2]) / (2*delta)
-        dv_dy = (v[2:, 1:-1] - v[0:-2, 1:-1]) / (2*delta)
-        divergence = du_dx + dv_dy
 
-        divergence_l1 = np.mean(np.abs(divergence))
-    
+        # BCs
+        p = apply_pressure_BC(p)
+        p = obstacle_boundary_conditions_pressure(p, obstacle_mask)
+
+        # change of pressure field per itteration
+        dp_max = np.max(np.abs(p - p_old))
+
     return p, niter
+
+@njit
+def apply_velocity_BC(u,v):
+    """
+    Applies a set of velocity boundary conditions to all sides
+
+    Args:
+        u (2d-array): u-velocity field
+        v (2d-array): v-velocity field
+
+    Returns:
+        u (2d-array): u-velocity field
+        v (2d-array): v-velocity field
+    """
+    v = dirichlet_boundary_condition(v, "bottom", 0.0) 
+    u = neumann_boundary_condition(u, "bottom")
+
+    v = dirichlet_boundary_condition(v, "top", 0.0)  
+    u = neumann_boundary_condition(u, "top")  
+
+    u = dirichlet_boundary_condition(u, "left", 5.0)
+    v = dirichlet_boundary_condition(v, "left", 0.0)
+
+    u = neumann_boundary_condition(u, "right")
+    v = neumann_boundary_condition(v, "right")
+
+    return u,v
+
+@njit
+def apply_pressure_BC(p):
+    """
+    Applies a set of pressure boundary conditions to all sides
+
+    Args:
+        p (2d-array): pressure field
+
+    Returns:
+        p (2d-array): pressure field
+    """
+    p = neumann_boundary_condition(p, "bottom") 
+    p = neumann_boundary_condition(p, "top") 
+    p = neumann_boundary_condition(p, "left")  
+    p = neumann_boundary_condition(p, "right") 
+    return p
+
 
 def main():
     print("Initialise")
     u = u_initial.copy()
     v = v_initial.copy()
     p = p_initial.copy()
+    u,v = apply_velocity_BC(u,v)
+    p = apply_pressure_BC(p)
+    u,v = obstacle_boundary_conditions_velocity(u,v,obstacle_mask)
+    p = obstacle_boundary_conditions_pressure(p,obstacle_mask)
 
-    plot = True
-    n_plot = 1
-
-    ###########################################################################
-    if plot:
-        plt.ion()
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,10))
-
-        # Geschwindigkeit initial
-        vmag = np.sqrt(u**2 + v**2)
-        vmin_v, vmax_v = -5, 5  # Farbskala für Geschwindigkeit
-        im_vel = ax1.imshow(vmag, origin='lower', cmap='viridis',
-                            extent=[x.min(), x.max(), y.min(), y.max()],
-                            vmin=vmin_v, vmax=vmax_v)
-        cbar1 = plt.colorbar(im_vel, ax=ax1, label='Velocity magnitude')
-        ax1.set_title("Velocity magnitude")
-        ax1.set_xlabel("x")
-        ax1.set_ylabel("y")
-
-        # Druck initial
-        pmin, pmax = -100.0, 100.0  # Beispielwerte für Farbskala
-        im_p = ax2.imshow(p, origin='lower', cmap='coolwarm',
-                          extent=[x.min(), x.max(), y.min(), y.max()],
-                          vmin=pmin, vmax=pmax)
-        cbar2 = plt.colorbar(im_p, ax=ax2, label='Pressure')
-        ax2.set_title("Pressure")
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("y")
-    ###########################################################################
     print("Start time itteration")
     for n in range(nt):
         start_time = time.time()
@@ -244,27 +269,26 @@ def main():
         vn = v.copy()
         pn = p.copy()
 
-        p,niter = pressure_poisson(un, vn, pn, Fx, Fy, div_target, max_iter)
+        p,niter = pressure_poisson(un, vn, pn, Fx, Fy, tolerance, max_iter)
         u = update_x_velocity(un, vn, p, Fx, Fy)
         v = update_y_velocity(un, vn, p, Fx, Fy)
-        u, v = velocity_BC(u, v)
+        
+        # BCs
+        u,v = apply_velocity_BC(u,v)
+        p = apply_pressure_BC(p)
+      
+        u,v = obstacle_boundary_conditions_velocity(u,v,obstacle_mask)
+        p = obstacle_boundary_conditions_pressure(p,obstacle_mask)
 
         CFL = compute_CFL(u,v,dt,delta)
         _ , div_l1 = compute_divergence(u,v,delta)
         end_time = time.time()
 
         ###########################################################################
-        if plot and n % n_plot == 0:  
-            vmag = np.sqrt(u**2 + v**2)
-            im_vel.set_data(vmag)
-            im_vel.set_clim(vmin_v, vmax_v)
-            ax1.set_title(f"Velocity magnitude, Time = {n*dt:.3f} s")
-
-            im_p.set_data(p)
-            im_p.set_clim(pmin, pmax)
-            ax2.set_title(f"Pressure, Time = {n*dt:.3f} s")
-
-            plt.pause(0.000001)  
+        plot = True
+        n_plot = 40
+        if plot and n % n_plot == 0:
+            plot_velocity_pressure(X,Y,u,v,p,n,dt,obstacle_mask)
         ###########################################################################
         # Output
         print("#################################################")
