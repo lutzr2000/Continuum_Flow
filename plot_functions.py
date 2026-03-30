@@ -66,10 +66,6 @@ from netCDF4 import Dataset
 import numpy as np
 import os
 
-from netCDF4 import Dataset
-import os
-import numpy as np
-
 def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
     """
     Lädt alle Zeitschritte aus einer NetCDF Datei und plottet sie.
@@ -108,10 +104,11 @@ def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
     dataset.close()
 
 # resolution
-dt=0.001
-delta = 0.01
+dt=1/24
+delta = 0.02
 nx = 1024
 ny = 256
+#nt = int(t_max/dt)
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)

@@ -1,7 +1,7 @@
 import netCDF4 as nc
 import numpy as np
 
-def initialize_netcdf(filename, nx, ny, n_time_steps, delta, X, Y):
+def initialize_netcdf(filename, nx, ny, X, Y):
     """
     Erstellt eine leere NetCDF Datei mit den Variablen u, v, p.
     Kompression aktiviert, Datentyp float32.
