@@ -108,10 +108,10 @@ def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
     dataset.close()
 
 # resolution
-dt=0.01
-delta = 0.08
-nx = 512
-ny = 64
+dt=0.001
+delta = 0.01
+nx = 1024
+ny = 256
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
