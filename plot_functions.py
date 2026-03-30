@@ -26,7 +26,7 @@ def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Bl
     cmap = cm.viridis.copy()
     cmap.set_bad(color='black') 
     masked_speed = np.ma.masked_invalid(speed_colored)
-    levels_v = np.linspace(0, 10, 200)
+    levels_v = np.linspace(0, 12, 200)
     cf_v = axes[0].contourf(X, Y, masked_speed, levels=levels_v, cmap=cmap)
     cbar_v = fig.colorbar(cf_v, ax=axes[0], orientation='vertical')
     cbar_v.set_label('Velocity Magnitude [m/s]', fontsize=font_size)

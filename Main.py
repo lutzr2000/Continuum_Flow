@@ -11,7 +11,7 @@ rho = 1.225
 nu = 1.81e-5
 
 # time
-t_max = 10
+t_max = 20
 dt = 0.001
 
 # solver
@@ -21,7 +21,7 @@ precision = np.float32
 
 # resolution
 delta = 0.02
-nx = 1024
+nx = 2048
 ny = 256
 nt = int(t_max/dt)
 x = np.linspace(0,(nx-1)*delta,nx)
@@ -29,14 +29,17 @@ y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
 
 # initial conditions
-u_initial = np.ones_like(X).astype(precision)*5
+inflow_speed =  4 * 5 * y * (ny*delta - y) / (ny*delta)**2
+
+u_initial = (np.ones_like(X) * inflow_speed[:, np.newaxis]).astype(precision)
+#u_initial = np.ones_like(X).astype(precision)*5
 v_initial = np.zeros_like(X).astype(precision)
 p_initial = np.zeros_like(X).astype(precision)
 
 # Geometry
 circle1_mask = circle(X,Y,nx*0.2*delta,ny*0.5*delta,0.5)
-circle2_mask = circle(X,Y,nx*0.3*delta,ny*0.3*delta,0.6)
-circle3_mask = circle(X,Y,nx*0.5*delta,ny*0.8*delta,0.3)
+circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
+circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
 
 obstacle_mask = circle1_mask | circle2_mask | circle3_mask
 
@@ -217,12 +220,12 @@ def apply_velocity_BC(u,v):
         v (2d-array): v-velocity field
     """
     v = dirichlet_boundary_condition(v, "bottom", 0.0) 
-    u = neumann_boundary_condition(u, "bottom")
+    u = dirichlet_boundary_condition(u, "bottom", 0.0)
 
     v = dirichlet_boundary_condition(v, "top", 0.0)  
-    u = neumann_boundary_condition(u, "top")  
+    u = dirichlet_boundary_condition(u, "top", 0.0)  
 
-    u = dirichlet_boundary_condition(u, "left", 5.0)
+    u = dirichlet_boundary_condition(u, "left", inflow_speed)
     v = dirichlet_boundary_condition(v, "left", 0.0)
 
     u = neumann_boundary_condition(u, "right")
@@ -268,6 +271,8 @@ def main():
         un = u.copy()
         vn = v.copy()
         pn = p.copy()
+
+        # maybe switch order first velocity than pressure, more accurate to chorins projection method
 
         p,niter = pressure_poisson(un, vn, pn, Fx, Fy, tolerance, max_iter)
         u = update_x_velocity(un, vn, p, Fx, Fy)
