@@ -1,18 +1,18 @@
 import numpy as np
 import time
+import sys
 from Boundary_Conditions import neumann_boundary_condition, dirichlet_boundary_condition, obstacle_boundary_conditions_velocity, obstacle_boundary_conditions_pressure
 from Obstacles import circle
 from Helper import compute_CFL,compute_divergence
-from plot_functions import plot_velocity_pressure
-from numba import njit, prange
+from Output import initialize_netcdf,write_to_netcdf,close_netcdf
 
 # fluid
 rho = 1.225
 nu = 1.81e-5
 
 # time
-t_max = 20
-dt = 0.001
+t_max = 5
+dt = 0.01
 
 # solver
 tolerance = 0.01
@@ -20,13 +20,20 @@ max_iter = 50
 precision = np.float32
 
 # resolution
-delta = 0.02
-nx = 2048
-ny = 256
+delta = 0.08
+nx = 512
+ny = 64
 nt = int(t_max/dt)
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
+
+# i/o
+output_fps = 24
+print_frequency = 10
+output_frequency = int(1/output_fps/dt)
+print("Output frequency: ",output_frequency)
+outpath = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 
 # initial conditions
 inflow_speed =  4 * 5 * y * (ny*delta - y) / (ny*delta)**2
@@ -135,7 +142,6 @@ def update_y_velocity(u, v, p, Fx=None, Fy=None):
 
     return vn
 
-@njit
 def pressure_equation_right_side(u, v, b, Fx=None, Fy=None):
     """
     computes the right hand side of the pressure poisson equation
@@ -165,7 +171,6 @@ def pressure_equation_right_side(u, v, b, Fx=None, Fy=None):
 
     return b
 
-@njit(parallel=True)
 def pressure_poisson(u, v, p, Fx=None, Fy=None, dp_target=1e-6, max_iter=500):
     """
     Solves the pressure Poisson equation iteratively until the change in 
@@ -206,7 +211,6 @@ def pressure_poisson(u, v, p, Fx=None, Fy=None, dp_target=1e-6, max_iter=500):
 
     return p, niter
 
-@njit
 def apply_velocity_BC(u,v):
     """
     Applies a set of velocity boundary conditions to all sides
@@ -233,7 +237,6 @@ def apply_velocity_BC(u,v):
 
     return u,v
 
-@njit
 def apply_pressure_BC(p):
     """
     Applies a set of pressure boundary conditions to all sides
@@ -261,7 +264,10 @@ def main():
     u,v = obstacle_boundary_conditions_velocity(u,v,obstacle_mask)
     p = obstacle_boundary_conditions_pressure(p,obstacle_mask)
 
+    dataset, u_var, v_var, p_var = initialize_netcdf(outpath, nx, ny, nt, delta, X, Y)
+
     print("Start time itteration")
+    sys.stdout.write(f"\rProgress: [0%]")
     for n in range(nt):
         start_time = time.time()
 
@@ -271,8 +277,6 @@ def main():
         un = u.copy()
         vn = v.copy()
         pn = p.copy()
-
-        # maybe switch order first velocity than pressure, more accurate to chorins projection method
 
         p,niter = pressure_poisson(un, vn, pn, Fx, Fy, tolerance, max_iter)
         u = update_x_velocity(un, vn, p, Fx, Fy)
@@ -289,18 +293,22 @@ def main():
         _ , div_l1 = compute_divergence(u,v,delta)
         end_time = time.time()
 
-        ###########################################################################
-        plot = True
-        n_plot = 40
-        if plot and n % n_plot == 0:
-            plot_velocity_pressure(X,Y,u,v,p,n,dt,obstacle_mask)
-        ###########################################################################
-        # Output
-        print("#################################################")
-        print(f"Timestep {n} of {nt} steps")
-        print(f"CFL-Condition: {np.round(CFL,5)}")
-        print(f"Number of pressure itterations: {niter}")
-        print(f"Divergence of velocity field: {div_l1}")
-        print(f"Time per timestep: {end_time - start_time:.4f} s")
+        if  n % print_frequency == 0:
+            # Output
+            print("#################################################")
+            print(f"Timestep {n} of {nt} steps")
+            print(f"CFL-Condition: {np.round(CFL,5)}")
+            print(f"Number of pressure itterations: {niter}")
+            print(f"Divergence of velocity field: {div_l1}")
+            print(f"Simulation time for timestep: {end_time - start_time:.4f} s")
+            sys.stdout.write(f"\rProgress: [{np.round(n/nt*100,3)}%]")
+            sys.stdout.flush()
+
+        if n % output_frequency == 0:
+            timestep_index = n // output_frequency
+            write_to_netcdf(u_var, v_var, p_var, timestep_index, u, v, p)
+    
+    close_netcdf(dataset)
+    print("Simulation finished!")
 
 main()

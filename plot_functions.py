@@ -2,8 +2,9 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 import numpy as np 
+from Obstacles import circle
 
-def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Blenderzeug\BlenderCFD\Output"):
+def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Blenderzeug\BlenderCFD\Test"):
     font_size = 20
     plt.rcParams.update({
         "text.usetex": False,
@@ -60,3 +61,70 @@ def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Bl
 
     plt.savefig(outpath + rf"\step_{n}.png", dpi=100)
     plt.close()
+
+from netCDF4 import Dataset
+import numpy as np
+import os
+
+from netCDF4 import Dataset
+import os
+import numpy as np
+
+def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
+    """
+    Lädt alle Zeitschritte aus einer NetCDF Datei und plottet sie.
+
+    Args:
+        nc_path (str): Pfad zur NetCDF Datei
+        obstacle_mask (2D array): Maske der Hindernisse
+        outpath (str): Ausgabeordner für PNGs
+        dt (float): Zeitschrittgröße
+    """
+    # Sicherstellen, dass der Ausgabeordner existiert
+    os.makedirs(outpath, exist_ok=True)
+
+    # Datei öffnen
+    dataset = Dataset(nc_path, 'r')
+
+    # Dimensionen
+    nt = dataset.dimensions['time'].size
+    X = np.array(dataset.variables['x'][:])
+    Y = np.array(dataset.variables['y'][:])
+    X, Y = np.meshgrid(X, Y)
+
+    u_var = dataset.variables['u']
+    v_var = dataset.variables['v']
+    p_var = dataset.variables['p']
+
+    # Schleife über alle Zeitschritte
+    for n in range(nt):
+        u = np.array(u_var[n, :, :])
+        v = np.array(v_var[n, :, :])
+        p = np.array(p_var[n, :, :])
+        
+        # Plot erstellen
+        plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath)
+
+    dataset.close()
+
+# resolution
+dt=0.01
+delta = 0.08
+nx = 512
+ny = 64
+x = np.linspace(0,(nx-1)*delta,nx)
+y = np.linspace(0,(ny-1)*delta,ny)
+X, Y = np.meshgrid(x, y)
+
+
+# Geometry
+circle1_mask = circle(X,Y,nx*0.2*delta,ny*0.5*delta,0.5)
+circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
+circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
+
+obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+
+nc_path = r"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
+outpath = r"C:\Blenderzeug\BlenderCFD\Test"
+
+plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt)

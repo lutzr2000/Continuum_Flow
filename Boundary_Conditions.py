@@ -1,6 +1,4 @@
-from numba import njit, prange
 
-@njit
 def neumann_boundary_condition(field, side):
     """
     Applies a neumann boundary condition to a given field and side
@@ -22,7 +20,6 @@ def neumann_boundary_condition(field, side):
         field[:, -1] = field[:, -2]
     return field
 
-@njit
 def dirichlet_boundary_condition(field, side, value):
     """
     Applies a diriclet boundary condition to a given field and side
@@ -63,7 +60,6 @@ def obstacle_boundary_conditions_velocity(u,v,mask):
 
     return u,v
 
-@njit
 def obstacle_boundary_conditions_pressure(p,mask):
     """
     Applies zero pressure to a given mask

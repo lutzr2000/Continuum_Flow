@@ -1,5 +1,3 @@
-from numba import njit, prange
-
 def circle(X,Y,x_center,y_center,R):
     """
     Creates a boolean mask for a circular obstacle
