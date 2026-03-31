@@ -33,8 +33,7 @@ RHO = 1.225
 NU = 1.81e-5
 
 # time
-T_MAX = 30
-DT_MIN = 0.0001
+T_MAX = 10
 CFL_MAX = 0.8
 
 # solver 
@@ -324,7 +323,7 @@ def main():
     next_output_time = 0
     output_index = 0
 
-    dataset, u_var, v_var, p_var = Output_Functions.initialize_netcdf(OUTPATH, NX, NY, X, Y)
+    dataset, u_var, v_var, p_var, time_var = Output_Functions.initialize_netcdf(OUTPATH, NX, NY, X, Y)
 
     print("Start time iteration")
     if OUTPUT_STATUS:
@@ -362,10 +361,10 @@ def main():
             print("Solver diverged")
             break
 
-        # NetCDF schreiben
+        # Write netCDF
         while t >= next_output_time:
             print(f"Writing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
-            Output_Functions.write_to_netcdf(u_var, v_var, p_var, output_index, u, v, p, PRECISION)
+            Output_Functions.write_to_netcdf(u_var, v_var, p_var, time_var, output_index, t, u, v, p, PRECISION)
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
             if OUTPUT_STATUS:
@@ -381,9 +380,6 @@ def main():
 
         # dynamic time step
         dt_new = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
-
-        if dt_new < DT_MIN:
-            dt_new = DT_MIN
 
         # dt limiter
         dt_max_increase = dt * 1.5
