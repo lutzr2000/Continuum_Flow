@@ -60,7 +60,7 @@ def dirichlet_boundary_condition(field, side, value):
 @njit
 def obstacle_boundary_conditions_velocity(u,v,mask):
     """
-    Applies no slip conditions on a given mask
+    Applies no slip conditions to a given mask
 
     Args:
         u (2d-array): u-velocity field
@@ -91,10 +91,53 @@ def obstacle_boundary_conditions_pressure(p,mask):
     Returns:
         p (2d-array): pressure field
     """
-    # the loops are necessary because of numba, maybe remove later
     for i in range(p.shape[0]):
         for j in range(p.shape[1]):
             if mask[i, j]:
                 p[i, j] = 0.0
 
+    return p
+
+@njit
+def apply_velocity_BC(u,v):
+    """
+    Applies a set of velocity boundary conditions to all sides
+
+    Args:
+        u (2d-array): u-velocity field
+        v (2d-array): v-velocity field
+
+    Returns:
+        u (2d-array): u-velocity field
+        v (2d-array): v-velocity field
+    """
+    v = dirichlet_boundary_condition(v, "bottom", 0.0) 
+    u = dirichlet_boundary_condition(u, "bottom", 0.0) 
+
+    v = dirichlet_boundary_condition(v, "top", 0.0)  
+    u = dirichlet_boundary_condition(u, "top", 0.0)  
+
+    u = dirichlet_boundary_condition(u, "left", 5.0)
+    v = dirichlet_boundary_condition(v, "left", 0.0)
+
+    u = neumann_boundary_condition(u, "right")
+    v = neumann_boundary_condition(v, "right")
+
+    return u,v
+
+@njit
+def apply_pressure_BC(p):
+    """
+    Applies a set of pressure boundary conditions to all sides
+
+    Args:
+        p (2d-array): pressure field
+
+    Returns:
+        p (2d-array): pressure field
+    """
+    p = neumann_boundary_condition(p, "bottom") 
+    p = neumann_boundary_condition(p, "top") 
+    p = neumann_boundary_condition(p, "left")  
+    p = neumann_boundary_condition(p, "right") 
     return p

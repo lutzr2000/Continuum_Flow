@@ -1,3 +1,18 @@
+"""
+Description:
+    A finite difference based CFD solver for Blender. Convetion is discretized by first order upwind,
+    diffusion and pressure by central differencing. The pressure velocity coupling is done by solving
+    a poisson equation.
+
+    This code is based on the methods presented here:
+    https://drzgan.github.io/Python_CFD/15.1.%20Cavity%20flow%20with%20upwind%20scheme.html
+    Huge thanks to Dr. Zhengtao Gan.
+"""
+
+# ===============================
+# Import
+# ===============================
+
 import numpy as np
 import time
 import sys
@@ -5,104 +20,81 @@ import sys
 from numba import njit, prange
 
 import Boundary_Conditions as BC
-from Obstacles import circle
-from Output import initialize_netcdf,write_to_netcdf,close_netcdf
-import Helper
+import Obstacles 
+import Output_Functions
+import Helper_Functions
+
+# ===============================
+# Parameters
+# ===============================
 
 # fluid
-rho = 1.225
-nu = 0.01#1.81e-5
+RHO = 1.225
+NU = 1.81e-5
 
 # time
-t_max = 10
-dt_minimum = 0.001
-CFL_max = 0.8
+T_MAX = 30
+DT_MIN = 0.0001
+CFL_MAX = 0.8
 
 # solver 
-tolerance = 0.01
-max_iter = 50
-precision = np.float32
+TOLERANCE = 0.01
+MAX_ITER = 8
+PRECISION = np.float32
 
 # resolution
-delta = 0.04
-nx = 512
-ny = 128
-#nt = int(t_max/dt)
-x = np.linspace(0,(nx-1)*delta,nx)
-y = np.linspace(0,(ny-1)*delta,ny)
+DELTA = 0.04
+NX = 1024
+NY = 128
+x = np.linspace(0,(NX-1)*DELTA,NX)
+y = np.linspace(0,(NY-1)*DELTA,NY)
 X, Y = np.meshgrid(x, y)
 
-# i/o
-output_fps = 24
-print_frequency = 100
-output_time_step = 1/output_fps
-outpath = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
-output_step_tolerance = output_time_step*0.1
-output_status = True
+# output
+OUTPUT_FPS = 24
+PRINT_FREQUENCY = 100
+OUTPUT_TIME_STEP = 1/OUTPUT_FPS
+OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
+OUTPUT_STATUS = True
 
 # initial conditions
-inflow_speed =  5
-
-u_initial = np.ones_like(X).astype(precision)*inflow_speed
-v_initial = np.zeros_like(X).astype(precision)
-p_initial = np.zeros_like(X).astype(precision)
+u_initial = np.ones_like(X).astype(PRECISION)*5
+v_initial = np.zeros_like(X).astype(PRECISION)
+p_initial = np.zeros_like(X).astype(PRECISION)
 
 # Geometry
-circle1_mask = circle(X,Y,nx*0.2*delta,ny*0.5*delta,0.5)
-circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
-circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
+circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.5*DELTA,0.5)
+circle2_mask = Obstacles.circle(X,Y,NX*0.25*DELTA,NY*0.3*DELTA,0.6)
+circle3_mask = Obstacles.circle(X,Y,NX*0.4*DELTA,NY*0.8*DELTA,0.3)
 
 obstacle_mask = circle1_mask | circle2_mask | circle3_mask
-obstacle_mask = np.zeros((nx, ny), dtype=bool)
 
-# Reynolds number
-Re = np.max(u_initial)*ny*delta/nu
-print(f"Reynolds number: {Re}")
-time.sleep(1)
-###################################################
 
-@njit
-def compute_F(vel):
-    """
-    Computes mask for the signs of a given velocity field
-
-    Args:
-        vel (2d-array): velocity field
-    Returns:
-        pos_part (2d-array): mask with positive signs
-        neg_part (2d-array): mask with negative signs
-    """
-    Nx, Ny = vel.shape
-    pos_part = np.zeros((Nx, Ny), dtype=np.float64)
-    neg_part = np.zeros((Nx, Ny), dtype=np.float64)
-
-    for i in range(Nx):
-        for j in range(Ny):
-            denom = abs(vel[i,j]) + 1e-6
-            ratio = vel[i,j] / denom
-            pos_part[i,j] = ratio if ratio > 0.0 else 0.0
-            neg_part[i,j] = -ratio if ratio < 0.0 else 0.0
-
-    return pos_part, neg_part
+# ===============================
+# Functions
+# ===============================
 
 @njit(parallel=True)
-def update_x_velocity(u, v, p, dt, Fx=None, Fy=None):
+def update_x_velocity(u, v, p, dt, Fx=None):
     """
-    updates the velocity field in the x direction based on the momentum equation. Discretization with first order upwind
+    Updates the velocity field in the x direction based on the momentum equation. Discretization with first order upwind
+    for the convection term. Central differences for the Diffusion term. Forcing source term is optional
 
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         p (2d-array): p-pressure field
+        dt (float): time step
+        Fx (2d-array,optional): x-Forcing field
     Returns:
         un (2d-array): new u-velocity field
     """
     Nx, Ny = u.shape
     un = u.copy()
 
-    dt_over_delta = dt / delta
-    dt_over_2rho_delta = dt / (2 * rho * delta)
-    dt_over_delta2 = dt / (delta**2)
+    dt_over_DELTA = dt / DELTA
+    dt_over_2RHO_delta = dt / (2 * RHO * DELTA)
+    dt_over_DELTA2 = dt / (DELTA**2)
 
     # Loop over interior points, parallel over rows
     for i in prange(1, Nx-1):
@@ -123,19 +115,19 @@ def update_x_velocity(u, v, p, dt, Fx=None, Fy=None):
                 u_north = u[i+1, j]
                 u_south = u[i, j]
 
-            convection = dt_over_delta * (u[i, j] * (u_east - u_west) + v[i, j] * (u_north - u_south))
+            convection = dt_over_DELTA * (u[i, j] * (u_east - u_west) + v[i, j] * (u_north - u_south))
 
             # Diffusion (central difference)
-            diffusion = nu * dt_over_delta2 * (
+            diffusion = NU * dt_over_DELTA2 * (
                 (u[i, j+1] - 2*u[i, j] + u[i, j-1]) +
                 (u[i+1, j] - 2*u[i, j] + u[i-1, j])
             )
 
             # Pressure gradient
-            pressure_gradient = dt_over_2rho_delta * (p[i, j+1] - p[i, j-1])
+            pressure_gradient = dt_over_2RHO_delta * (p[i, j+1] - p[i, j-1])
 
             # Force term
-            force_term_x = dt / rho * Fx[i, j] if Fx is not None else 0.0
+            force_term_x = dt / RHO * Fx[i, j] if Fx is not None else 0.0
 
             # Update velocity
             un[i, j] = u[i, j] - convection - pressure_gradient + diffusion + force_term_x
@@ -143,30 +135,32 @@ def update_x_velocity(u, v, p, dt, Fx=None, Fy=None):
     return un
 
 @njit(parallel=True)
-def update_y_velocity(u, v, p, dt, Fx=None, Fy=None):
+def update_y_velocity(u, v, p, dt, Fy=None):
     """
-    updates the velocity field in the y direction based on the momentum equation.
-    Discretization with first order upwind (consistent with update_x_velocity)
+    Updates the velocity field in the y direction based on the momentum equation. Discretization with first order upwind
+    for the convection term. Central differences for the Diffusion term. Forcing source term is optional
 
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
-        p (2d-array): pressure field
-
+        p (2d-array): p-pressure field
+        dt (float): time step
+        Fy (2d-array,optional): y-Forcing field
     Returns:
         vn (2d-array): new v-velocity field
     """
     Nx, Ny = v.shape
     vn = v.copy()
 
-    dt_over_delta = dt / delta
-    dt_over_2rho_delta = dt / (2 * rho * delta)
-    dt_over_delta2 = dt / (delta**2)
+    dt_over_DELTA = dt / DELTA
+    dt_over_2RHO_delta = dt / (2 * RHO * DELTA)
+    dt_over_DELTA2 = dt / (DELTA**2)
 
-    for i in prange(1, Nx-1):   # parallel über i
+    # Loop over interior points, parallel over rows
+    for i in prange(1, Nx-1):   
         for j in range(1, Ny-1):
 
-            # --- Upwind convection in x-direction ---
+            # Convection in x-direction (first-order upwind)
             if u[i, j] >= 0:
                 v_east = v[i, j]
                 v_west = v[i, j-1]
@@ -174,7 +168,7 @@ def update_y_velocity(u, v, p, dt, Fx=None, Fy=None):
                 v_east = v[i, j+1]
                 v_west = v[i, j]
 
-            # --- Upwind convection in y-direction ---
+            # Convection in y-direction (first-order upwind)
             if v[i, j] >= 0:
                 v_north = v[i, j]
                 v_south = v[i-1, j]
@@ -182,24 +176,24 @@ def update_y_velocity(u, v, p, dt, Fx=None, Fy=None):
                 v_north = v[i+1, j]
                 v_south = v[i, j]
 
-            convection = dt_over_delta * (
+            convection = dt_over_DELTA * (
                 u[i, j] * (v_east - v_west) +
                 v[i, j] * (v_north - v_south)
             )
 
-            # --- Diffusion ---
-            diffusion = nu * dt_over_delta2 * (
+            # Diffusion (central difference)
+            diffusion = NU * dt_over_DELTA2 * (
                 (v[i, j+1] - 2*v[i, j] + v[i, j-1]) +
                 (v[i+1, j] - 2*v[i, j] + v[i-1, j])
             )
 
-            # --- Pressure gradient (y-direction) ---
-            pressure_gradient = dt_over_2rho_delta * (p[i+1, j] - p[i-1, j])
+            # Pressure gradient
+            pressure_gradient = dt_over_2RHO_delta * (p[i+1, j] - p[i-1, j])
 
-            # --- Force term ---
-            force_term_y = dt / rho * Fy[i, j] if Fy is not None else 0.0
+            # Force term
+            force_term_y = dt / RHO * Fy[i, j] if Fy is not None else 0.0
 
-            # --- Update ---
+            # Update velocity
             vn[i, j] = v[i, j] - convection - pressure_gradient + diffusion + force_term_y
 
     return vn
@@ -212,7 +206,10 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
-        p (2d-array): pressure field
+        b (2d-array): empty b field
+        dt (float): time step
+        Fx (2d-array,optional): x-Forcing field
+        Fy (2d-array,optional): y-Forcing field
 
     Returns:
         b (2d-array): right hand side of pressure poisson euaqtion
@@ -223,24 +220,24 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
         Fx_old = Fx.copy()
     if Fy is not None:
         Fy_old = Fy.copy()
-
+    
     for i in range(1, u.shape[0] - 1):
         for j in range(1, u.shape[1] - 1):
-            du_dx = (u_old[i, j+1] - u_old[i, j-1]) / (2 * delta)
-            dv_dy = (v_old[i+1, j] - v_old[i-1, j]) / (2 * delta)
-            du_dy = (u_old[i+1, j] - u_old[i-1, j]) / (2 * delta)
-            dv_dx = (v_old[i, j+1] - v_old[i, j-1]) / (2 * delta)
+            du_dx = (u_old[i, j+1] - u_old[i, j-1]) / (2 * DELTA)
+            dv_dy = (v_old[i+1, j] - v_old[i-1, j]) / (2 * DELTA)
+            du_dy = (u_old[i+1, j] - u_old[i-1, j]) / (2 * DELTA)
+            dv_dx = (v_old[i, j+1] - v_old[i, j-1]) / (2 * DELTA)
 
             divergence = du_dx + dv_dy
             nonlinear = du_dx**2 + 2 * du_dy * dv_dx + dv_dy**2
 
-            b[i, j] = rho * ((1/dt) * divergence - nonlinear)
+            b[i, j] = RHO * ((1/dt) * divergence - nonlinear)
 
             # add forcing terms
             if Fx is not None and Fy is not None:
-                dFx_dx = (Fx_old[i, j+1] - Fx_old[i, j-1]) / (2*delta)
-                dFy_dy = (Fy_old[i+1, j] - Fy_old[i-1, j]) / (2*delta)
-                b[i, j] -= rho * (dFx_dx + dFy_dy)
+                dFx_dx = (Fx_old[i, j+1] - Fx_old[i, j-1]) / (2*DELTA)
+                dFy_dy = (Fy_old[i+1, j] - Fy_old[i-1, j]) / (2*DELTA)
+                b[i, j] -= RHO * (dFx_dx + dFy_dy)
 
     return b
 
@@ -248,18 +245,21 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
 def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, dp_target=1e-6, max_iter=500):
     """
     Solves the pressure Poisson equation iteratively until the change in 
-    the pressure field is smaller than a target threshold.
+    the pressure field is smaller than a target threshold or the max_iter count is reached.
 
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         p (2d-array): pressure field (initial guess)
+        dt (float): time step
+        Fx (2d-array,optional): x-Forcing field
+        Fy (2d-array,optional): y-Forcing field
         dp_target (float): target max change in pressure for convergence
-        max_iter (int): maximum number of iterations
+        max_iter (int): maximum NUmber of iterations
 
     Returns:
         p (2d-array): updated pressure field
-        niter (int): number of iterations performed
+        niter (int): NUmber of iterations performed
     """
     Ny, Nx = p.shape
     b = np.zeros_like(p)
@@ -277,64 +277,25 @@ def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, dp_target=1e-6, max_iter=500
             for i in prange(1, Ny-1):
                 for j in range(1, Nx-1):
                     if (i + j) % 2 == color:
-                        temp = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - delta**2 * b[i, j])
+                        temp = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - DELTA**2 * b[i, j])
                         dp_max = max(dp_max, abs(temp - p[i, j]))
                         p[i, j] = temp
 
             # BCs
-            p = apply_pressure_BC(p)
+            p = BC.apply_pressure_BC(p)
             p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
 
     return p, niter
 
-@njit
-def apply_velocity_BC(u,v):
-    """
-    Applies a set of velocity boundary conditions to all sides
-
-    Args:
-        u (2d-array): u-velocity field
-        v (2d-array): v-velocity field
-
-    Returns:
-        u (2d-array): u-velocity field
-        v (2d-array): v-velocity field
-    """
-    v = BC.dirichlet_boundary_condition(v, "bottom", 0.0) 
-    u = BC.dirichlet_boundary_condition(u, "bottom", 0.0) 
-
-    v = BC.dirichlet_boundary_condition(v, "top", 0.0)  
-    u = BC.dirichlet_boundary_condition(u, "top", 0.0)  
-
-    u = BC.dirichlet_boundary_condition(u, "left", inflow_speed)
-    v = BC.dirichlet_boundary_condition(v, "left", 0.0)
-
-    u = BC.neumann_boundary_condition(u, "right")
-    v = BC.neumann_boundary_condition(v, "right")
-
-    return u,v
-
-@njit
-def apply_pressure_BC(p):
-    """
-    Applies a set of pressure boundary conditions to all sides
-
-    Args:
-        p (2d-array): pressure field
-
-    Returns:
-        p (2d-array): pressure field
-    """
-    p = BC.neumann_boundary_condition(p, "bottom") 
-    p = BC.neumann_boundary_condition(p, "top") 
-    p = BC.neumann_boundary_condition(p, "left")  
-    p = BC.neumann_boundary_condition(p, "right") 
-    return p
+# ===============================
+# Main
+# ===============================
 
 def main():
     print("Initialise")
-    print("Cell count: ",int(nx*ny))
-    start_total_time = time.time() 
+    print("Cell count: ",int(NX*NY))
+
+    # fields
     u = u_initial.copy()
     v = v_initial.copy()
     p = p_initial.copy()
@@ -344,33 +305,33 @@ def main():
     un = np.empty_like(u)
     vn = np.empty_like(v)
     pn = np.empty_like(p)
-    
-    # Initial BCs
-    u, v = apply_velocity_BC(u, v)
-    p = apply_pressure_BC(p)
-    u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
-    p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-
-    dataset, u_var, v_var, p_var = initialize_netcdf(outpath, nx, ny, X, Y)
-
-    print("Start time iteration")
-    if output_status:
-        sys.stdout.write(f"\rProgress: [0%]")
-
-    # time summation for every block
-    total_loop_time = 0.0
-
-    # dynamic time stepping
-    t = 0
-    dt = Helper.compute_new_timestep(u,v,delta,nu,CFL_max)
-    next_output_time = 0
-    output_index = 0
 
     np.copyto(un, u)
     np.copyto(vn, v)
     np.copyto(pn, p)
+    
+    # Initial BCs
+    u, v = BC.apply_velocity_BC(u, v)
+    p = BC.apply_pressure_BC(p)
+    u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
+    p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
 
-    while t < t_max:
+    # values
+    start_total_time = time.time() 
+    total_loop_time = 0.0
+    t = 0
+    dt = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
+    next_output_time = 0
+    output_index = 0
+
+    dataset, u_var, v_var, p_var = Output_Functions.initialize_netcdf(OUTPATH, NX, NY, X, Y)
+
+    print("Start time iteration")
+    if OUTPUT_STATUS:
+        sys.stdout.write(f"\rProgress: [0%]")
+
+    # main loop
+    while t < T_MAX:
         loop_start_time = time.time()
 
         Fx.fill(0)
@@ -381,44 +342,52 @@ def main():
         np.copyto(pn, p)
 
         # Pressure Poisson
-        p, niter = pressure_poisson(un, vn, pn, dt, Fx, Fy, tolerance, max_iter)
+        p, niter = pressure_poisson(un, vn, pn, dt, Fx, Fy, TOLERANCE, MAX_ITER)
 
         # Velocity updates
-        u = update_x_velocity(un, vn, p, dt, Fx, Fy)
-        v = update_y_velocity(un, vn, p, dt, Fx, Fy)
+        u = update_x_velocity(un, vn, p, dt, Fx)
+        v = update_y_velocity(un, vn, p, dt, Fy)
 
         # Boundary Conditions & Obstacles
-        u, v = apply_velocity_BC(u, v)
-        p = apply_pressure_BC(p)
+        u, v = BC.apply_velocity_BC(u, v)
+        p = BC.apply_pressure_BC(p)
         u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
+
+        CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
+
+        if CFL > 1:
+            print("CFL condition violated!!!")
+            print("Decrease time step")
+            print("Solver diverged")
+            break
 
         # NetCDF schreiben
         while t >= next_output_time:
             print(f"Writing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
-            write_to_netcdf(u_var, v_var, p_var, output_index, u, v, p)
+            Output_Functions.write_to_netcdf(u_var, v_var, p_var, output_index, u, v, p, PRECISION)
             output_index += 1
-            next_output_time += output_time_step
-            if output_status:
+            next_output_time += OUTPUT_TIME_STEP
+            if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
-                print(f"CFL-Condition: {np.round(Helper.compute_CFL(u,v,dt,delta),5)}")
-                print(f"Number of pressure iterations: {niter}")
-                sys.stdout.write(f"\rProgress: [{(t/t_max*100):.3f}%]")
+                print(f"CFL-Condition: {np.round(CFL,5)}")
+                print(f"NUmber of pressure iterations: {niter}")
+                sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
 
         # loop count
         t += dt
 
-        # new dt
-        dt_new = Helper.compute_new_timestep(u,v,delta,nu,CFL_max)
+        # dynamic time step
+        dt_new = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
 
-        if dt_new < dt_minimum:
-            dt_new = dt_minimum
+        if dt_new < DT_MIN:
+            dt_new = DT_MIN
 
         # dt limiter
-        dt_max_increase = dt * 1.1
-        dt_max_decrease = dt * 0.9
+        dt_max_increase = dt * 1.5
+        dt_max_decrease = dt * 0.5
 
         if dt_new > dt_max_increase:
             dt = dt_max_increase
@@ -427,12 +396,14 @@ def main():
         else:
             dt = dt_new
 
+        # timing
         loop_end_time = time.time()
         total_loop_time += loop_end_time - loop_start_time
 
-    close_netcdf(dataset)
+    Output_Functions.close_netcdf(dataset)
     end_total_time = time.time()
 
+    # conclusion
     print("Simulation finished!")
     print(f"Total runtime: {end_total_time - start_total_time:.4f} seconds")
     print(f"Total time spent in main loop: {total_loop_time:.4f} seconds")

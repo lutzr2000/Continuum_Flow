@@ -1,10 +1,31 @@
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 import numpy as np 
 from Obstacles import circle
 
-def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Blenderzeug\BlenderCFD\Test"):
+from netCDF4 import Dataset
+import os
+import imageio
+from Obstacles import circle
+
+def plot_all_to_mp4(nc_path, obstacle_mask, outpath, dt, video_name="simulation.mp4"):
+    os.makedirs(outpath, exist_ok=True)
+    
+    dataset = Dataset(nc_path, 'r')
+
+    X = np.array(dataset.variables['x'][:])
+    Y = np.array(dataset.variables['y'][:])
+    X, Y = np.meshgrid(X, Y)
+
+    u_all = np.array(dataset.variables['u'][:])
+    v_all = np.array(dataset.variables['v'][:])
+    p_all = np.array(dataset.variables['p'][:])
+
+    nt = u_all.shape[0]
+
+    # ---------------- Figure & Layout ----------------
     font_size = 20
     plt.rcParams.update({
         "text.usetex": False,
@@ -20,93 +41,70 @@ def plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath=rf"C:\Bl
 
     fig, axes = plt.subplots(2, 1, figsize=(19.2, 10.8), dpi=100, constrained_layout=True)
 
-    # ---------------- Velocity ----------------
-    speed = np.sqrt(u**2 + v**2)
-    speed_colored = speed.copy()
-    speed_colored[obstacle_mask] = np.nan  
-    cmap = cm.viridis.copy()
-    cmap.set_bad(color='black') 
-    masked_speed = np.ma.masked_invalid(speed_colored)
-    levels_v = np.linspace(0, 12, 200)
-    cf_v = axes[0].contourf(X, Y, masked_speed, levels=levels_v, cmap=cmap)
-    cbar_v = fig.colorbar(cf_v, ax=axes[0], orientation='vertical')
+    # ---------------- Initial plots ----------------
+    speed0 = np.sqrt(u_all[0]**2 + v_all[0]**2)
+    speed0[obstacle_mask] = np.nan
+    cmap_speed = cm.viridis.copy()
+    cmap_speed.set_bad(color='black')
+    im_v = axes[0].imshow(speed0, origin='lower', cmap=cmap_speed, vmin=0, vmax=12)
+    cbar_v = fig.colorbar(im_v, ax=axes[0], orientation='vertical')
     cbar_v.set_label('Velocity Magnitude [m/s]', fontsize=font_size)
-
-    # ---------------- Pressure ----------------
-    p_colored = p.copy()
-    p_colored[obstacle_mask] = np.nan
-    cmap_p = cm.coolwarm.copy()
-    cmap_p.set_bad(color='black')
-    masked_p = np.ma.masked_invalid(p_colored)
-
-    levels_p = np.linspace(-50, 50, 200)
-    cf_p = axes[1].contourf(X, Y, masked_p, levels=levels_p, cmap=cmap_p)
-    cbar_p = fig.colorbar(cf_p, ax=axes[1], orientation='vertical')
-    cbar_p.set_label('Pressure [Pa]', fontsize=font_size)
-
-    # ---------------- Layout ----------------
     axes[0].set_xlabel('x [m]')
     axes[0].set_ylabel('y [m]')
-    axes[0].set_title(f'Velocity Magnitude at Time {np.round(n*dt,6)} seconds')
     axes[0].axis('equal')
-    for spine in axes[0].spines.values():
-        spine.set_linewidth(2.5)
 
+    p0 = p_all[0].copy()
+    p0[obstacle_mask] = np.nan
+    cmap_p = cm.coolwarm.copy()
+    cmap_p.set_bad(color='black')
+    im_p = axes[1].imshow(p0, origin='lower', cmap=cmap_p, vmin=-50, vmax=50)
+    cbar_p = fig.colorbar(im_p, ax=axes[1], orientation='vertical')
+    cbar_p.set_label('Pressure [Pa]', fontsize=font_size)
     axes[1].set_xlabel('x [m]')
     axes[1].set_ylabel('y [m]')
-    axes[1].set_title(f'Pressure Field at Time {np.round(n*dt,6)} seconds')
     axes[1].axis('equal')
+
+    for spine in axes[0].spines.values():
+        spine.set_linewidth(2.5)
     for spine in axes[1].spines.values():
         spine.set_linewidth(2.5)
 
-    plt.savefig(outpath + rf"\step_{n}.png", dpi=100)
-    plt.close()
+    # ---------------- Video Writer ----------------
+    video_path = os.path.join(outpath, video_name)
+    writer = imageio.get_writer(video_path, fps=int(1/dt))
 
-from netCDF4 import Dataset
-import numpy as np
-import os
-
-def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
-    """
-    Lädt alle Zeitschritte aus einer NetCDF Datei und plottet sie.
-
-    Args:
-        nc_path (str): Pfad zur NetCDF Datei
-        obstacle_mask (2D array): Maske der Hindernisse
-        outpath (str): Ausgabeordner für PNGs
-        dt (float): Zeitschrittgröße
-    """
-    # Sicherstellen, dass der Ausgabeordner existiert
-    os.makedirs(outpath, exist_ok=True)
-
-    # Datei öffnen
-    dataset = Dataset(nc_path, 'r')
-
-    # Dimensionen
-    nt = dataset.dimensions['time'].size
-    X = np.array(dataset.variables['x'][:])
-    Y = np.array(dataset.variables['y'][:])
-    X, Y = np.meshgrid(X, Y)
-
-    u_var = dataset.variables['u']
-    v_var = dataset.variables['v']
-    p_var = dataset.variables['p']
-
-    # Schleife über alle Zeitschritte
     for n in range(nt):
-        u = np.array(u_var[n, :, :])
-        v = np.array(v_var[n, :, :])
-        p = np.array(p_var[n, :, :])
-        
-        # Plot erstellen
-        plot_velocity_pressure(X, Y, u, v, p, n, dt, obstacle_mask, outpath)
+        print(f"Rendering frame {n+1}/{nt}...")
 
+        # Update velocity
+        speed = np.sqrt(u_all[n]**2 + v_all[n]**2)
+        speed[obstacle_mask] = np.nan
+        im_v.set_data(speed)
+        axes[0].set_title(f'Velocity Magnitude at Time {n*dt:.4f} s')
+
+        # Update pressure
+        p_frame = p_all[n].copy()
+        p_frame[obstacle_mask] = np.nan
+        im_p.set_data(p_frame)
+        axes[1].set_title(f'Pressure Field at Time {n*dt:.4f} s')
+
+        # Canvas → RGB
+        buffer, (w, h) = fig.canvas.print_to_buffer()
+        image = np.frombuffer(buffer, dtype=np.uint8).reshape((h, w, 4))
+        image = image[:, :, :3]  # RGB
+
+        # Write frame to video
+        writer.append_data(image)
+
+    writer.close()
+    plt.close(fig)
     dataset.close()
+    print(f"Video saved to {video_path}")
 
 # resolution
 dt=1/24
-delta = 0.01
-nx = 512
+delta = 0.04
+nx = 1024
 ny = 128
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
@@ -119,9 +117,8 @@ circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
 circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
 
 obstacle_mask = circle1_mask | circle2_mask | circle3_mask
-obstacle_mask = np.zeros((ny, nx), dtype=bool)
 
 nc_path = r"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 outpath = r"C:\Blenderzeug\BlenderCFD\Test"
 
-plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt)
+plot_all_to_mp4(nc_path, obstacle_mask, outpath, dt)

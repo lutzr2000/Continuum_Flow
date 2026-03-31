@@ -13,7 +13,7 @@ def compute_CFL(u,v,dt,delta):
         delta (float): space resolution
 
     Returns:
-        b (2d-array): right hand side of pressure poisson euaqtion
+        CFL (flaot): CFL number
     """
     max_u = 0.0
     max_v = 0.0
@@ -33,18 +33,19 @@ def compute_CFL(u,v,dt,delta):
 @njit
 def compute_new_timestep(u, v, delta, nu, CFL_max):
     """
-    Computes a stable time step based on maximum CFL condition.
+    Computes a stable time step based on maximum CFL condition for convection and diffusion.
     
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         delta (float): space resolution
-        CFL_max (float): desired CFL number
+        nu (float): viscosity
+        CFL_max (float): maximum CFL number
 
     Returns:
         dt (float): stable time step
     """
-    eps = 1e-12
+    EPS = 1e-12
     nx, ny = u.shape
     
     abs_u_max = 0.0
@@ -57,8 +58,8 @@ def compute_new_timestep(u, v, delta, nu, CFL_max):
             if abs(v[i,j]) > abs_v_max:
                 abs_v_max = abs(v[i,j])
     
-    dt_x = CFL_max * delta / max(abs_u_max, eps)
-    dt_y = CFL_max * delta / max(abs_v_max, eps)
+    dt_x = CFL_max * delta / max(abs_u_max, EPS)
+    dt_y = CFL_max * delta / max(abs_v_max, EPS)
     
     dt_conv = min(dt_x, dt_y)
     dt_diff = 0.25 * delta**2 / nu
@@ -68,7 +69,7 @@ def compute_new_timestep(u, v, delta, nu, CFL_max):
 @njit
 def compute_divergence(u, v, delta):
     """
-    computes divergence of a 2-d velocity field without the edges
+    computes divergence of a 2-d velocity field without the boundary
 
     Args:
         u (2d-array): u-velocity field
