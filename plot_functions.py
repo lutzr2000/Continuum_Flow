@@ -105,10 +105,9 @@ def plot_all_from_netcdf(nc_path, obstacle_mask, outpath, dt):
 
 # resolution
 dt=1/24
-delta = 0.02
-nx = 1024
-ny = 256
-#nt = int(t_max/dt)
+delta = 0.01
+nx = 512
+ny = 128
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
 X, Y = np.meshgrid(x, y)
@@ -120,6 +119,7 @@ circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
 circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
 
 obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+obstacle_mask = np.zeros((ny, nx), dtype=bool)
 
 nc_path = r"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 outpath = r"C:\Blenderzeug\BlenderCFD\Test"

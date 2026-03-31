@@ -11,12 +11,12 @@ import Helper
 
 # fluid
 rho = 1.225
-nu = 1.81e-5
+nu = 0.01#1.81e-5
 
 # time
-t_max = 1
-dt_minimum = 0.00001
-CFL_max = 0.9
+t_max = 10
+dt_minimum = 0.001
+CFL_max = 0.8
 
 # solver 
 tolerance = 0.01
@@ -24,9 +24,9 @@ max_iter = 50
 precision = np.float32
 
 # resolution
-delta = 0.02
-nx = 1024
-ny = 256
+delta = 0.04
+nx = 512
+ny = 128
 #nt = int(t_max/dt)
 x = np.linspace(0,(nx-1)*delta,nx)
 y = np.linspace(0,(ny-1)*delta,ny)
@@ -53,6 +53,7 @@ circle2_mask = circle(X,Y,nx*0.25*delta,ny*0.3*delta,0.6)
 circle3_mask = circle(X,Y,nx*0.4*delta,ny*0.8*delta,0.3)
 
 obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+obstacle_mask = np.zeros((nx, ny), dtype=bool)
 
 # Reynolds number
 Re = np.max(u_initial)*ny*delta/nu
@@ -300,10 +301,10 @@ def apply_velocity_BC(u,v):
         v (2d-array): v-velocity field
     """
     v = BC.dirichlet_boundary_condition(v, "bottom", 0.0) 
-    u = BC.neumann_boundary_condition(u, "bottom")
+    u = BC.dirichlet_boundary_condition(u, "bottom", 0.0) 
 
     v = BC.dirichlet_boundary_condition(v, "top", 0.0)  
-    u = BC.neumann_boundary_condition(u, "top")  
+    u = BC.dirichlet_boundary_condition(u, "top", 0.0)  
 
     u = BC.dirichlet_boundary_condition(u, "left", inflow_speed)
     v = BC.dirichlet_boundary_condition(v, "left", 0.0)
@@ -361,10 +362,9 @@ def main():
 
     # dynamic time stepping
     t = 0
-    n = 0
-    k = 0
-    dt = dt_minimum
-    output_step_this_loop=True
+    dt = Helper.compute_new_timestep(u,v,delta,nu,CFL_max)
+    next_output_time = 0
+    output_index = 0
 
     np.copyto(un, u)
     np.copyto(vn, v)
@@ -394,11 +394,11 @@ def main():
         p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
 
         # NetCDF schreiben
-        if output_step_this_loop:
-            timestep_index = int(round(t / output_time_step)) 
-            write_to_netcdf(u_var, v_var, p_var, timestep_index, u, v, p)
-            n += 1
-        if k % 100 == 0:
+        while t >= next_output_time:
+            print(f"Writing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
+            write_to_netcdf(u_var, v_var, p_var, output_index, u, v, p)
+            output_index += 1
+            next_output_time += output_time_step
             if output_status:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
@@ -409,22 +409,27 @@ def main():
 
         # loop count
         t += dt
-        k += 1
 
         # new dt
-        dt = Helper.compute_new_timestep(u,v,delta,CFL_max)
+        dt_new = Helper.compute_new_timestep(u,v,delta,nu,CFL_max)
 
-        if t > n*output_time_step:
-            dt = n*output_time_step-t
-            if dt < dt_minimum:
-                dt = dt_minimum
-            output_step_this_loop = True
-        else: 
-            output_step_this_loop = False
+        if dt_new < dt_minimum:
+            dt_new = dt_minimum
+
+        # dt limiter
+        dt_max_increase = dt * 1.1
+        dt_max_decrease = dt * 0.9
+
+        if dt_new > dt_max_increase:
+            dt = dt_max_increase
+        elif dt_new < dt_max_decrease:
+            dt = dt_max_decrease
+        else:
+            dt = dt_new
 
         loop_end_time = time.time()
         total_loop_time += loop_end_time - loop_start_time
-        
+
     close_netcdf(dataset)
     end_total_time = time.time()
 

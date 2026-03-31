@@ -31,7 +31,7 @@ def compute_CFL(u,v,dt,delta):
     return max(CFL_x, CFL_y)
 
 @njit
-def compute_new_timestep(u, v, delta, CFL_max):
+def compute_new_timestep(u, v, delta, nu, CFL_max):
     """
     Computes a stable time step based on maximum CFL condition.
     
@@ -60,7 +60,9 @@ def compute_new_timestep(u, v, delta, CFL_max):
     dt_x = CFL_max * delta / max(abs_u_max, eps)
     dt_y = CFL_max * delta / max(abs_v_max, eps)
     
-    dt = min(dt_x, dt_y)
+    dt_conv = min(dt_x, dt_y)
+    dt_diff = 0.25 * delta**2 / nu
+    dt = min(dt_conv, dt_diff)
     return dt
 
 @njit
