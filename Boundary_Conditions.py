@@ -99,6 +99,26 @@ def obstacle_boundary_conditions_pressure(p,mask):
     return p
 
 @njit
+def obstacle_boundary_conditions_scalar(phi,mask,value):
+    """
+    Applies a value to the scalar field phi at an obstacle.
+
+    Args:
+        phi (2d-array): scalar field
+        mask (2d-array): mask for obstacle
+        value (2d_array): obstacle scalar value
+
+    Returns:
+        phi (2d-array): scalar field
+    """
+    for i in range(phi.shape[0]):
+        for j in range(phi.shape[1]):
+            if mask[i, j]:
+                phi[i, j] = value
+
+    return phi
+
+@njit
 def apply_velocity_BC(u,v):
     """
     Applies a set of velocity boundary conditions to all sides
@@ -141,3 +161,20 @@ def apply_pressure_BC(p):
     p = neumann_boundary_condition(p, "left")  
     p = neumann_boundary_condition(p, "right") 
     return p
+
+@njit
+def apply_temperature_BC(T):
+    """
+    Applies a set of temperature boundary conditions to all sides
+
+    Args:
+        T (2d-array): temperature field
+
+    Returns:
+        T (2d-array): temperature field
+    """
+    T = neumann_boundary_condition(T, "bottom") 
+    T = neumann_boundary_condition(T, "top") 
+    T = dirichlet_boundary_condition(T, "left", 300)  
+    T = neumann_boundary_condition(T, "right") 
+    return T

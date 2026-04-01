@@ -36,6 +36,7 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=2):
     u_var = dataset.createVariable('u', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
     v_var = dataset.createVariable('v', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
     p_var = dataset.createVariable('p', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
+    T_var = dataset.createVariable('T', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
 
     # time for paraview
     time_var = dataset.createVariable('time', 'f8', ('time',))
@@ -46,10 +47,11 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=2):
     u_var.units = 'm/s'
     v_var.units = 'm/s'
     p_var.units = 'Pa'
+    T_var.units = '°K'
 
-    return dataset, u_var, v_var, p_var, time_var
+    return dataset, u_var, v_var, p_var, T_var, time_var
 
-def write_to_netcdf(u_var, v_var, p_var, time_var, timestep, time_value, u, v, p, precision):
+def write_to_netcdf(u_var, v_var, p_var, T_var, time_var, timestep, time_value, u, v, p, T, precision):
     """
     Writes the current timestep into the datefile created by initialize_netcdf()
 
@@ -70,6 +72,7 @@ def write_to_netcdf(u_var, v_var, p_var, time_var, timestep, time_value, u, v, p
     u_var[timestep, :, :] = u.astype(precision)
     v_var[timestep, :, :] = v.astype(precision)
     p_var[timestep, :, :] = p.astype(precision)
+    T_var[timestep, :, :] = T.astype(precision)
 
 def close_netcdf(dataset):
     """
