@@ -16,6 +16,8 @@ Description:
 import numpy as np
 import time
 import sys
+import threading
+import queue
 
 from numba import njit, prange
 
@@ -28,7 +30,6 @@ import Helper_Functions
 # Parameters
 # ===============================
 
-# TODO Time the code
 # TODO Test tiling for better parallel
 # TODO In general solver only profits very little from parallel CPU why? 
 
@@ -48,9 +49,9 @@ PRECISION = np.float32
 CPU_PARALLEL = False
 
 # resolution
-DELTA = 0.04
-NX = 1024
-NY = 128
+DELTA = 0.04/2
+NX = 1024*2
+NY = 128*2
 x = np.linspace(0,(NX-1)*DELTA,NX)
 y = np.linspace(0,(NY-1)*DELTA,NY)
 X, Y = np.meshgrid(x, y)
@@ -388,12 +389,45 @@ def main():
     # values
     start_total_time = time.time() 
     total_loop_time = 0.0
+    time_pressure_update = 0.0
+    time_velocity_update = 0.0
+    time_general_tranpsort = 0.0
+    time_BC = 0.0
+    time_obstacle = 0.0
+    time_start_copy = 0.0
+    time_writing = 0.0
+    time_compute_step = 0.0
+
     t = 0
     dt = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
     next_output_time = 0
     output_index = 0
 
+    # =============================
+    # ASYNC WRITER SETUP
+    # =============================
     dataset, u_var, v_var, p_var, T_var, time_var = Output_Functions.initialize_netcdf(OUTPATH, NX, NY, X, Y)
+
+    write_queue = queue.Queue(maxsize=5)
+
+    def writer_thread_func():
+        while True:
+            item = write_queue.get()
+            if item is None:
+                break
+
+            (output_index, t, u_c, v_c, p_c, T_c) = item
+
+            Output_Functions.write_to_netcdf(
+                u_var, v_var, p_var, T_var, time_var,
+                output_index, t, u_c, v_c, p_c, T_c, PRECISION
+            )
+
+            write_queue.task_done()
+
+    # Start writer thread
+    writer_thread = threading.Thread(target=writer_thread_func, daemon=True)
+    writer_thread.start()
 
     print("Start time iteration")
     if OUTPUT_STATUS:
@@ -402,50 +436,77 @@ def main():
     # main loop
     while t < T_MAX:
         loop_start_time = time.time()
-
+        t0 = time.perf_counter()
         np.copyto(un, u)
         np.copyto(vn, v)
         np.copyto(pn, p)
         np.copyto(Tn, T)
+        t1 = time.perf_counter()
+        time_start_copy += (t1-t0)
 
         # Pressure Poisson
+        t0 = time.perf_counter()
         p, niter = pressure_poisson(un, vn, pn, dt, Fx, Fy, TOLERANCE, MAX_ITER)
+        t1 = time.perf_counter()
+        time_pressure_update += (t1-t0)
 
         # Velocity updates
+        t0 = time.perf_counter()
         u = update_x_velocity(un, vn, p, dt)
         v = update_y_velocity(un, vn, p, dt)
+        t1 = time.perf_counter()
+        time_velocity_update += (t1-t0)
 
         # Temperature update
+        t0 = time.perf_counter()
         T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE)
+        t1 = time.perf_counter()
+        time_general_tranpsort += (t1-t0)
 
         # Boundary Conditions & Obstacles
+        t0 = time.perf_counter()
         u, v = BC.apply_velocity_BC(u, v)
         p = BC.apply_pressure_BC(p)
         T = BC.apply_temperature_BC(T)
+        t1 = time.perf_counter()
+        time_BC += (t1-t0)
 
+        t0 = time.perf_counter()
         u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
         T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,400)
+        t1 = time.perf_counter()
+        time_obstacle += (t1-t0)
 
         CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
 
         if CFL > 1:
             print(rf"CFL condition violated in at time {t} seconds!")
 
-        # Write netCDF
+        # =============================
+        # ASYNC NETCDF WRITING
+        # =============================
         while t >= next_output_time:
-            print(f"Writing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
-            Output_Functions.write_to_netcdf(u_var, v_var, p_var, T_var, time_var, output_index, t, u, v, p, T, PRECISION)
+            t0 = time.perf_counter()
+
+            print(f"Queueing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
+
+            write_queue.put((output_index,t,u.copy(),v.copy(),p.copy(),T.copy()))
+
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
+
+            t1 = time.perf_counter()
+            time_writing += (t1 - t0)
             if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
                 print(f"CFL-Condition: {np.round(CFL,5)}")
-                print(f"NUmber of pressure iterations: {niter}")
+                print(f"Number of pressure iterations: {niter}")
                 sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
 
+        t0 = time.perf_counter()
         # loop count
         t += dt
 
@@ -463,9 +524,18 @@ def main():
         else:
             dt = dt_new
 
+        t1 = time.perf_counter()
+        time_compute_step += (t1-t0)
+
         # timing
         loop_end_time = time.time()
         total_loop_time += loop_end_time - loop_start_time
+
+    # =============================
+    # CLEAN SHUTDOWN
+    # =============================
+    write_queue.put(None)
+    writer_thread.join()
 
     Output_Functions.close_netcdf(dataset)
     end_total_time = time.time()
@@ -474,5 +544,13 @@ def main():
     print("Simulation finished!")
     print(f"Total runtime: {end_total_time - start_total_time:.4f} seconds")
     print(f"Total time spent in main loop: {total_loop_time:.4f} seconds")
+    print(f"Time spend on array copying: {time_start_copy:.4f} seconds")
+    print(f"Time spend on pressure: {time_pressure_update:.4f} seconds")
+    print(f"Time spend on velocity solve: {time_velocity_update:.4f} seconds")
+    print(f"Time spend on general transport equation: {time_general_tranpsort:.4f} seconds")
+    print(f"Time spend on boundary condtions: {time_BC:.4f} seconds")
+    print(f"Time spend on obstacles: {time_obstacle:.4f} seconds")
+    print(f"Time spend on data writing: {time_writing:.4f} seconds")
+    print(f"Time spend on computing next time step: {time_compute_step:.4f} seconds")
 
 main()

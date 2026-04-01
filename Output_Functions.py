@@ -69,10 +69,10 @@ def write_to_netcdf(u_var, v_var, p_var, T_var, time_var, timestep, time_value, 
         None
     """
     time_var[timestep] = time_value
-    u_var[timestep, :, :] = u.astype(precision)
-    v_var[timestep, :, :] = v.astype(precision)
-    p_var[timestep, :, :] = p.astype(precision)
-    T_var[timestep, :, :] = T.astype(precision)
+    u_var[timestep, :, :] = u
+    v_var[timestep, :, :] = v
+    p_var[timestep, :, :] = p
+    T_var[timestep, :, :] = T
 
 def close_netcdf(dataset):
     """
