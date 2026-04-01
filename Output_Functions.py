@@ -1,7 +1,7 @@
 import netCDF4 as nc
 import numpy as np
 
-def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=2):
+def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=0):
     """
     Create an empty netcdf file.
 
@@ -32,11 +32,19 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=2):
     x_var[:] = X[0, :]
     y_var[:] = Y[:, 0]
 
-    # Variables with compression
-    u_var = dataset.createVariable('u', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
-    v_var = dataset.createVariable('v', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
-    p_var = dataset.createVariable('p', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
-    T_var = dataset.createVariable('T', 'f4', ('time', 'y', 'x'), zlib=True, complevel=comp_level)
+    compression_enabled = comp_level > 0
+    variable_kwargs = {
+        'zlib': compression_enabled,
+        'chunksizes': (1, ny, nx),
+    }
+    if compression_enabled:
+        variable_kwargs['complevel'] = comp_level
+
+    # Variables with optional compression
+    u_var = dataset.createVariable('u', 'f4', ('time', 'y', 'x'), **variable_kwargs)
+    v_var = dataset.createVariable('v', 'f4', ('time', 'y', 'x'), **variable_kwargs)
+    p_var = dataset.createVariable('p', 'f4', ('time', 'y', 'x'), **variable_kwargs)
+    T_var = dataset.createVariable('T', 'f4', ('time', 'y', 'x'), **variable_kwargs)
 
     # time for paraview
     time_var = dataset.createVariable('time', 'f8', ('time',))

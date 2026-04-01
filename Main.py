@@ -16,10 +16,11 @@ Description:
 import numpy as np
 import time
 import sys
+import os
 import threading
 import queue
 
-from numba import njit, prange
+from numba import njit, prange, set_num_threads, get_num_threads
 
 import Boundary_Conditions as BC
 import Obstacles 
@@ -43,10 +44,10 @@ T_MAX = 20
 CFL_MAX = 0.8
 
 # solver 
-TOLERANCE = 0.01
 MAX_ITER = 4
 PRECISION = np.float32
-CPU_PARALLEL = False
+CPU_PARALLEL = True
+RESERVE_CPU_CORES_FOR_IO = 1
 
 # resolution
 DELTA = 0.04/2
@@ -62,6 +63,8 @@ PRINT_FREQUENCY = 100
 OUTPUT_TIME_STEP = 1/OUTPUT_FPS
 OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 OUTPUT_STATUS = True
+WRITE_QUEUE_SIZE = 16
+NETCDF_COMPRESSION_LEVEL = 1
 
 # initial conditions
 u_initial = np.ones_like(X).astype(PRECISION)*5
@@ -278,35 +281,36 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
     Returns:
         b (2d-array): right hand side of pressure poisson euaqtion
     """
-    u_old = u.copy()
-    v_old = v.copy()
-    if Fx is not None:
-        Fx_old = Fx.copy()
-    if Fy is not None:
-        Fy_old = Fy.copy()
-    
-    for i in prange(1, u.shape[0] - 1):
-        for j in range(1, u.shape[1] - 1):
-            du_dx = (u_old[i, j+1] - u_old[i, j-1]) / (2 * DELTA)
-            dv_dy = (v_old[i+1, j] - v_old[i-1, j]) / (2 * DELTA)
-            du_dy = (u_old[i+1, j] - u_old[i-1, j]) / (2 * DELTA)
-            dv_dx = (v_old[i, j+1] - v_old[i, j-1]) / (2 * DELTA)
+    Nx, Ny = u.shape
+
+    # Precompute if forcing is present
+    use_forcing = (Fx is not None) and (Fy is not None)
+
+    for i in prange(1, Nx-1):
+        for j in range(1, Ny-1):
+            # Central differences
+            du_dx = (u[i, j+1] - u[i, j-1]) * 0.5 / DELTA
+            dv_dy = (v[i+1, j] - v[i-1, j]) * 0.5 / DELTA
+            du_dy = (u[i+1, j] - u[i-1, j]) * 0.5 / DELTA
+            dv_dx = (v[i, j+1] - v[i, j-1]) * 0.5 / DELTA
 
             divergence = du_dx + dv_dy
-            nonlinear = du_dx**2 + 2 * du_dy * dv_dx + dv_dy**2
+            nonlinear = du_dx**2 + 2.0 * du_dy * dv_dx + dv_dy**2
 
-            b[i, j] = RHO * ((1/dt) * divergence - nonlinear)
+            b_val = RHO * ((1.0/dt) * divergence - nonlinear)
 
-            # add forcing terms
-            if Fx_old is not None and Fy_old is not None:
-                dFx_dx = (Fx_old[i, j+1] - Fx_old[i, j-1]) / (2*DELTA)
-                dFy_dy = (Fy_old[i+1, j] - Fy_old[i-1, j]) / (2*DELTA)
-                b[i, j] -= RHO * (dFx_dx + dFy_dy)
+            # Add forcing if present
+            if use_forcing:
+                dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * 0.5 / DELTA
+                dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * 0.5 / DELTA
+                b_val -= RHO * (dFx_dx + dFy_dy)
+
+            b[i, j] = b_val
 
     return b
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, dp_target=1e-6, max_iter=500):
+def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, max_iter=10):
     """
     Solves the pressure Poisson equation iteratively until the change in 
     the pressure field is smaller than a target threshold or the max_iter count is reached.
@@ -325,31 +329,25 @@ def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, dp_target=1e-6, max_iter=500
         p (2d-array): updated pressure field
         niter (int): NUmber of iterations performed
     """
-    Ny, Nx = p.shape
+    Nx, Ny = p.shape
     b = np.zeros_like(p)
     b = pressure_equation_right_side(u, v, b, dt, Fx, Fy)
-
-    niter = 0
-    dp_max = 1.0
-
-    while dp_max > dp_target and niter < max_iter:
-        niter += 1
-        dp_max = 0.0
-
-        # Gauss Seidel Red-Black sweep
-        for color in (0, 1):  # 0 = red, 1 = black
-            for i in prange(1, Ny-1):
-                for j in range(1, Nx-1):
-                    if (i + j) % 2 == color:
-                        temp = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - DELTA**2 * b[i, j])
-                        dp_max = max(dp_max, abs(temp - p[i, j]))
-                        p[i, j] = temp
-
+    
+    pn = p.copy()
+    
+    for it in range(max_iter):
+        for i in prange(1, Nx-1):
+            for j in range(1, Ny-1):
+                pn[i, j] = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - DELTA**2 * b[i, j])
+        
         # BCs
-        p = BC.apply_pressure_BC(p)
-        p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
+        pn = BC.apply_pressure_BC(pn)
+        pn = BC.obstacle_boundary_conditions_pressure(pn, obstacle_mask)
+        
+        # Swap references
+        p, pn = pn, p
 
-    return p, niter
+    return p
 
 # ===============================
 # Main
@@ -358,6 +356,12 @@ def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, dp_target=1e-6, max_iter=500
 def main():
     print("Initialise")
     print("Cell count: ",int(NX*NY))
+
+    if CPU_PARALLEL:
+        available_threads = os.cpu_count() or 1
+        solver_threads = max(1, available_threads - RESERVE_CPU_CORES_FOR_IO)
+        set_num_threads(solver_threads)
+        print(f"Numba solver threads: {get_num_threads()} / {available_threads} CPUs")
 
     # fields
     u = u_initial.copy()
@@ -395,7 +399,6 @@ def main():
     time_BC = 0.0
     time_obstacle = 0.0
     time_start_copy = 0.0
-    time_writing = 0.0
     time_compute_step = 0.0
 
     t = 0
@@ -406,23 +409,37 @@ def main():
     # =============================
     # ASYNC WRITER SETUP
     # =============================
-    dataset, u_var, v_var, p_var, T_var, time_var = Output_Functions.initialize_netcdf(OUTPATH, NX, NY, X, Y)
+    dataset, u_var, v_var, p_var, T_var, time_var = Output_Functions.initialize_netcdf(
+        OUTPATH, NX, NY, X, Y, comp_level=NETCDF_COMPRESSION_LEVEL
+    )
 
-    write_queue = queue.Queue(maxsize=5)
+    write_queue = queue.Queue(maxsize=WRITE_QUEUE_SIZE)
+    buffer_pool = queue.Queue(maxsize=WRITE_QUEUE_SIZE)
+    max_write_queue_fill = 0
+
+    for _ in range(WRITE_QUEUE_SIZE):
+        buffer_pool.put({
+            'u': np.empty_like(u),
+            'v': np.empty_like(v),
+            'p': np.empty_like(p),
+            'T': np.empty_like(T),
+        })
 
     def writer_thread_func():
         while True:
             item = write_queue.get()
             if item is None:
+                write_queue.task_done()
                 break
 
-            (output_index, t, u_c, v_c, p_c, T_c) = item
+            (output_index, t, fields) = item
 
             Output_Functions.write_to_netcdf(
                 u_var, v_var, p_var, T_var, time_var,
-                output_index, t, u_c, v_c, p_c, T_c, PRECISION
+                output_index, t, fields['u'], fields['v'], fields['p'], fields['T'], PRECISION
             )
 
+            buffer_pool.put(fields)
             write_queue.task_done()
 
     # Start writer thread
@@ -446,7 +463,7 @@ def main():
 
         # Pressure Poisson
         t0 = time.perf_counter()
-        p, niter = pressure_poisson(un, vn, pn, dt, Fx, Fy, TOLERANCE, MAX_ITER)
+        p = pressure_poisson(un, vn, pn, dt, Fx, Fy, MAX_ITER)
         t1 = time.perf_counter()
         time_pressure_update += (t1-t0)
 
@@ -487,22 +504,21 @@ def main():
         # ASYNC NETCDF WRITING
         # =============================
         while t >= next_output_time:
-            t0 = time.perf_counter()
-
-            print(f"Queueing frame {output_index} at t={t:.6f}, dt={dt:.6f}")
-
-            write_queue.put((output_index,t,u.copy(),v.copy(),p.copy(),T.copy()))
+            fields = buffer_pool.get()
+            np.copyto(fields['u'], u)
+            np.copyto(fields['v'], v)
+            np.copyto(fields['p'], p)
+            np.copyto(fields['T'], T)
+            write_queue.put((output_index, t, fields))
+            max_write_queue_fill = max(max_write_queue_fill, write_queue.qsize())
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
 
-            t1 = time.perf_counter()
-            time_writing += (t1 - t0)
             if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
                 print(f"CFL-Condition: {np.round(CFL,5)}")
-                print(f"Number of pressure iterations: {niter}")
                 sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
 
@@ -534,7 +550,9 @@ def main():
     # =============================
     # CLEAN SHUTDOWN
     # =============================
+    write_queue.join()
     write_queue.put(None)
+    write_queue.join()
     writer_thread.join()
 
     Output_Functions.close_netcdf(dataset)
@@ -550,7 +568,7 @@ def main():
     print(f"Time spend on general transport equation: {time_general_tranpsort:.4f} seconds")
     print(f"Time spend on boundary condtions: {time_BC:.4f} seconds")
     print(f"Time spend on obstacles: {time_obstacle:.4f} seconds")
-    print(f"Time spend on data writing: {time_writing:.4f} seconds")
     print(f"Time spend on computing next time step: {time_compute_step:.4f} seconds")
+    print(f"Max async write queue fill: {max_write_queue_fill}/{WRITE_QUEUE_SIZE}")
 
 main()
