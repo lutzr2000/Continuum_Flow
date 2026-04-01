@@ -8,6 +8,9 @@ Description:
     https://drzgan.github.io/Python_CFD/15.1.%20Cavity%20flow%20with%20upwind%20scheme.html
     Huge thanks to Dr. Zhengtao Gan.
 """
+# TODO Fix weird expansion fluctuation in rising temperature
+# TODO Maybe use HDF5 file format for faster writing to avoid bottleneck
+# TODO move inputs in seperate input file, build different test cases
 
 # ===============================
 # Import
@@ -31,19 +34,16 @@ import Helper_Functions
 # Parameters
 # ===============================
 
-# TODO Test tiling for better parallel
-# TODO In general solver only profits very little from parallel CPU why? 
-
 # fluid
 RHO = 1.225
 NU = 1.81e-5
 NU_TEMPERATURE = 0.001
 T_REFERENCE = 300
-EXPANSION_RATE = 1/T_REFERENCE
-COOLING_RATE = 0.05
+EXPANSION_RATE = 1/300
+COOLING_RATE = 0.5
 
 # time
-T_MAX = 40
+T_MAX = 30
 CFL_MAX = 0.8
 
 # solver 
@@ -71,19 +71,13 @@ WRITE_QUEUE_SIZE = 16
 NETCDF_COMPRESSION_LEVEL = 0 #important this can become a drag on performance if the writer is slower than the solver
 
 # initial conditions
-u_initial = np.ones_like(X).astype(PRECISION)*0.5
+u_initial = np.zeros_like(X).astype(PRECISION)
 v_initial = np.zeros_like(X).astype(PRECISION)
 p_initial = np.zeros_like(X).astype(PRECISION)
 T_initial = np.ones_like(X).astype(PRECISION)*T_REFERENCE
 
 # Geometry
-# circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.5*DELTA,0.5)
-# circle2_mask = Obstacles.circle(X,Y,NX*0.25*DELTA,NY*0.3*DELTA,0.6)
-# circle3_mask = Obstacles.circle(X,Y,NX*0.4*DELTA,NY*0.8*DELTA,0.3)
-
-# obstacle_mask = circle1_mask | circle2_mask | circle3_mask
-
-circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.0*DELTA,0.3)
+circle1_mask = Obstacles.circle(X,Y,NX*0.5*DELTA,NY*0.05*DELTA,0.6)
 obstacle_mask = circle1_mask
 
 # ===============================
@@ -92,7 +86,17 @@ obstacle_mask = circle1_mask
 
 @njit(parallel=CPU_PARALLEL)
 def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
+    """
+    Computes a forcing in the y-direction based on the Bousinesq approximation.
 
+    Args:
+        T (2d-array): temperature field
+        Fy (2d-array): y-force field
+        expansion_coefficent (float): how strongly the air rises
+        T_ref (float): reference temeprature, air hotter than this rises
+    Returns:
+        Fy (2d-array): y-force field
+    """
     Nx, Ny = T.shape
     g=9.81
     for i in prange(1, Nx-1):
@@ -102,14 +106,22 @@ def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
     return Fy
 
 @njit(parallel=CPU_PARALLEL)
-def field_dissipation(field,field_reference):
+def field_dissipation(phi,phi_reference):
+    """
+    Computes a Source term (sink) for a given field to be used in the general_scalar_transport_equation()
 
-    Nx, Ny = field.shape
-    Source = np.zeros_like(field)
+    Args:
+        phi (2d-array): scalar field
+        phi_reference (2d-array): reference value of scalar field to approach
+    Returns:
+        Source (2d-array): source term for general_scalar_transport_equation()
+    """
+    Nx, Ny = phi.shape
+    Source = np.zeros_like(phi)
 
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
-            Source[i,j]=-COOLING_RATE*(field[i,j]-field_reference)
+            Source[i,j]=-COOLING_RATE*(phi[i,j]-phi_reference)
 
     return Source
 
@@ -412,7 +424,7 @@ def main():
 
     u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
     p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-    T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,700)
+    T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,600)
 
     # values
     start_total_time = time.time() 
@@ -522,7 +534,7 @@ def main():
         t0 = time.perf_counter()
         u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-        T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,700)
+        T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,600)
         t1 = time.perf_counter()
         time_obstacle += (t1-t0)
 
@@ -544,9 +556,9 @@ def main():
             if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
-                CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
+                #CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
                 print(f"Current dt: {np.round(dt,5)}")
-                print(f"CFL-Condition: {np.round(CFL,5)}")
+                #print(f"CFL-Condition: {np.round(CFL,5)}")
                 sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
 

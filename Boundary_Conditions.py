@@ -137,8 +137,8 @@ def apply_velocity_BC(u,v):
     v = neumann_boundary_condition(v, "top")  
     u = neumann_boundary_condition(u, "top")  
 
-    u = dirichlet_boundary_condition(u, "left", 0.5)
-    v = dirichlet_boundary_condition(v, "left", 0.0)
+    u = neumann_boundary_condition(u, "left")
+    v = neumann_boundary_condition(v, "left")
 
     u = neumann_boundary_condition(u, "right")
     v = neumann_boundary_condition(v, "right")
@@ -175,6 +175,6 @@ def apply_temperature_BC(T):
     """
     T = neumann_boundary_condition(T, "bottom") 
     T = neumann_boundary_condition(T, "top") 
-    T = dirichlet_boundary_condition(T, "left", 300)  
+    T = neumann_boundary_condition(T, "left")  
     T = neumann_boundary_condition(T, "right") 
     return T
