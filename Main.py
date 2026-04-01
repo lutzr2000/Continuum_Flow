@@ -50,9 +50,10 @@ CPU_PARALLEL = True
 RESERVE_CPU_CORES_FOR_IO = 1
 
 # resolution
-DELTA = 0.04/2
-NX = 1024*2
-NY = 128*2
+scale_factor=1
+DELTA = 0.04/scale_factor
+NX = 1024*scale_factor
+NY = 128*scale_factor
 x = np.linspace(0,(NX-1)*DELTA,NX)
 y = np.linspace(0,(NY-1)*DELTA,NY)
 X, Y = np.meshgrid(x, y)
@@ -64,7 +65,7 @@ OUTPUT_TIME_STEP = 1/OUTPUT_FPS
 OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 OUTPUT_STATUS = True
 WRITE_QUEUE_SIZE = 16
-NETCDF_COMPRESSION_LEVEL = 1
+NETCDF_COMPRESSION_LEVEL = 1 #important this can become a drag on performance if the writer is slower than the solver
 
 # initial conditions
 u_initial = np.ones_like(X).astype(PRECISION)*5
@@ -495,11 +496,6 @@ def main():
         t1 = time.perf_counter()
         time_obstacle += (t1-t0)
 
-        CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
-
-        if CFL > 1:
-            print(rf"CFL condition violated in at time {t} seconds!")
-
         # =============================
         # ASYNC NETCDF WRITING
         # =============================
@@ -518,6 +514,7 @@ def main():
             if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
+                CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
                 print(f"CFL-Condition: {np.round(CFL,5)}")
                 sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
