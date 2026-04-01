@@ -134,10 +134,10 @@ def apply_velocity_BC(u,v):
     v = dirichlet_boundary_condition(v, "bottom", 0.0) 
     u = dirichlet_boundary_condition(u, "bottom", 0.0) 
 
-    v = dirichlet_boundary_condition(v, "top", 0.0)  
-    u = dirichlet_boundary_condition(u, "top", 0.0)  
+    v = neumann_boundary_condition(v, "top")  
+    u = neumann_boundary_condition(u, "top")  
 
-    u = dirichlet_boundary_condition(u, "left", 5.0)
+    u = dirichlet_boundary_condition(u, "left", 0.5)
     v = dirichlet_boundary_condition(v, "left", 0.0)
 
     u = neumann_boundary_condition(u, "right")

@@ -38,9 +38,12 @@ import Helper_Functions
 RHO = 1.225
 NU = 1.81e-5
 NU_TEMPERATURE = 0.001
+T_REFERENCE = 300
+EXPANSION_RATE = 1/T_REFERENCE
+COOLING_RATE = 0.05
 
 # time
-T_MAX = 20
+T_MAX = 40
 CFL_MAX = 0.8
 
 # solver 
@@ -52,8 +55,8 @@ RESERVE_CPU_CORES_FOR_IO = 1
 # resolution
 scale_factor=1
 DELTA = 0.04/scale_factor
-NX = 1024*scale_factor
-NY = 128*scale_factor
+NX = 512*scale_factor
+NY = 512*scale_factor
 x = np.linspace(0,(NX-1)*DELTA,NX)
 y = np.linspace(0,(NY-1)*DELTA,NY)
 X, Y = np.meshgrid(x, y)
@@ -65,24 +68,50 @@ OUTPUT_TIME_STEP = 1/OUTPUT_FPS
 OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 OUTPUT_STATUS = True
 WRITE_QUEUE_SIZE = 16
-NETCDF_COMPRESSION_LEVEL = 1 #important this can become a drag on performance if the writer is slower than the solver
+NETCDF_COMPRESSION_LEVEL = 0 #important this can become a drag on performance if the writer is slower than the solver
 
 # initial conditions
-u_initial = np.ones_like(X).astype(PRECISION)*5
+u_initial = np.ones_like(X).astype(PRECISION)*0.5
 v_initial = np.zeros_like(X).astype(PRECISION)
 p_initial = np.zeros_like(X).astype(PRECISION)
-T_initial = np.ones_like(X).astype(PRECISION)*300
+T_initial = np.ones_like(X).astype(PRECISION)*T_REFERENCE
 
 # Geometry
-circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.5*DELTA,0.5)
-circle2_mask = Obstacles.circle(X,Y,NX*0.25*DELTA,NY*0.3*DELTA,0.6)
-circle3_mask = Obstacles.circle(X,Y,NX*0.4*DELTA,NY*0.8*DELTA,0.3)
+# circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.5*DELTA,0.5)
+# circle2_mask = Obstacles.circle(X,Y,NX*0.25*DELTA,NY*0.3*DELTA,0.6)
+# circle3_mask = Obstacles.circle(X,Y,NX*0.4*DELTA,NY*0.8*DELTA,0.3)
 
-obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+# obstacle_mask = circle1_mask | circle2_mask | circle3_mask
+
+circle1_mask = Obstacles.circle(X,Y,NX*0.2*DELTA,NY*0.0*DELTA,0.3)
+obstacle_mask = circle1_mask
 
 # ===============================
 # Functions
 # ===============================
+
+@njit(parallel=CPU_PARALLEL)
+def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
+
+    Nx, Ny = T.shape
+    g=9.81
+    for i in prange(1, Nx-1):
+        for j in range(1, Ny-1):
+            Fy[i,j]=g*expansion_coefficent*(T[i,j]-T_ref)
+
+    return Fy
+
+@njit(parallel=CPU_PARALLEL)
+def field_dissipation(field,field_reference):
+
+    Nx, Ny = field.shape
+    Source = np.zeros_like(field)
+
+    for i in prange(1, Nx-1):
+        for j in range(1, Ny-1):
+            Source[i,j]=-COOLING_RATE*(field[i,j]-field_reference)
+
+    return Source
 
 @njit(parallel=CPU_PARALLEL)
 def general_scalar_transport_equation(phi,u,v,dt,nu,Source=None):
@@ -143,7 +172,7 @@ def general_scalar_transport_equation(phi,u,v,dt,nu,Source=None):
 
 
 @njit(parallel=CPU_PARALLEL)
-def update_x_velocity(u, v, p, dt, Fx=None):
+def update_x_velocity(u, v, p, dt, Fx):
     """
     Updates the velocity field in the x direction based on the momentum equation. Discretization with first order upwind
     for the convection term. Central differences for the Diffusion term. Forcing source term is optional
@@ -153,7 +182,7 @@ def update_x_velocity(u, v, p, dt, Fx=None):
         v (2d-array): v-velocity field
         p (2d-array): p-pressure field
         dt (float): time step
-        Fx (2d-array,optional): x-Forcing field
+        Fx (2d-array): x-Forcing field
     Returns:
         un (2d-array): new u-velocity field
     """
@@ -195,7 +224,7 @@ def update_x_velocity(u, v, p, dt, Fx=None):
             pressure_gradient = dt_over_2RHO_delta * (p[i, j+1] - p[i, j-1])
 
             # Force term
-            force_term_x = dt / RHO * Fx[i, j] if Fx is not None else 0.0
+            force_term_x = dt / RHO * Fx[i, j]
 
             # Update velocity
             un[i, j] = u[i, j] - convection - pressure_gradient + diffusion + force_term_x
@@ -203,7 +232,7 @@ def update_x_velocity(u, v, p, dt, Fx=None):
     return un
 
 @njit(parallel=CPU_PARALLEL)
-def update_y_velocity(u, v, p, dt, Fy=None):
+def update_y_velocity(u, v, p, dt, Fy):
     """
     Updates the velocity field in the y direction based on the momentum equation. Discretization with first order upwind
     for the convection term. Central differences for the Diffusion term. Forcing source term is optional
@@ -213,7 +242,7 @@ def update_y_velocity(u, v, p, dt, Fy=None):
         v (2d-array): v-velocity field
         p (2d-array): p-pressure field
         dt (float): time step
-        Fy (2d-array,optional): y-Forcing field
+        Fy (2d-array): y-Forcing field
     Returns:
         vn (2d-array): new v-velocity field
     """
@@ -259,7 +288,7 @@ def update_y_velocity(u, v, p, dt, Fy=None):
             pressure_gradient = dt_over_2RHO_delta * (p[i+1, j] - p[i-1, j])
 
             # Force term
-            force_term_y = dt / RHO * Fy[i, j] if Fy is not None else 0.0
+            force_term_y = dt / RHO * Fy[i, j]
 
             # Update velocity
             vn[i, j] = v[i, j] - convection - pressure_gradient + diffusion + force_term_y
@@ -267,7 +296,7 @@ def update_y_velocity(u, v, p, dt, Fy=None):
     return vn
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
+def pressure_equation_right_side(u, v, b, dt, Fx, Fy):
     """
     computes the right hand side of the pressure poisson equation
 
@@ -276,16 +305,13 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
         v (2d-array): v-velocity field
         b (2d-array): empty b field
         dt (float): time step
-        Fx (2d-array,optional): x-Forcing field
-        Fy (2d-array,optional): y-Forcing field
+        Fx (2d-array): x-Forcing field
+        Fy (2d-array): y-Forcing field
 
     Returns:
         b (2d-array): right hand side of pressure poisson euaqtion
     """
     Nx, Ny = u.shape
-
-    # Precompute if forcing is present
-    use_forcing = (Fx is not None) and (Fy is not None)
 
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
@@ -298,20 +324,17 @@ def pressure_equation_right_side(u, v, b, dt, Fx=None, Fy=None):
             divergence = du_dx + dv_dy
             nonlinear = du_dx**2 + 2.0 * du_dy * dv_dx + dv_dy**2
 
-            b_val = RHO * ((1.0/dt) * divergence - nonlinear)
+            dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * 0.5 / DELTA
+            dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * 0.5 / DELTA
 
-            # Add forcing if present
-            if use_forcing:
-                dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * 0.5 / DELTA
-                dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * 0.5 / DELTA
-                b_val -= RHO * (dFx_dx + dFy_dy)
+            b_val = RHO * ((1.0/dt) * divergence - nonlinear - (dFx_dx + dFy_dy))
 
             b[i, j] = b_val
 
     return b
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, max_iter=10):
+def pressure_poisson(u, v, p, dt, Fx, Fy, max_iter=10):
     """
     Solves the pressure Poisson equation iteratively until the change in 
     the pressure field is smaller than a target threshold or the max_iter count is reached.
@@ -321,8 +344,8 @@ def pressure_poisson(u, v, p, dt, Fx=None, Fy=None, max_iter=10):
         v (2d-array): v-velocity field
         p (2d-array): pressure field (initial guess)
         dt (float): time step
-        Fx (2d-array,optional): x-Forcing field
-        Fy (2d-array,optional): y-Forcing field
+        Fx (2d-array): x-Forcing field
+        Fy (2d-array): y-Forcing field
         dp_target (float): target max change in pressure for convergence
         max_iter (int): maximum NUmber of iterations
 
@@ -389,7 +412,7 @@ def main():
 
     u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
     p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-    T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,400)
+    T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,700)
 
     # values
     start_total_time = time.time() 
@@ -403,7 +426,11 @@ def main():
     time_compute_step = 0.0
 
     t = 0
-    dt = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
+    dt = Helper_Functions.compute_new_timestep(u,v,Fy,RHO,DELTA,NU,CFL_MAX)
+
+    if dt > 1/OUTPUT_FPS:
+        dt = 1/OUTPUT_FPS
+
     next_output_time = 0
     output_index = 0
 
@@ -453,6 +480,8 @@ def main():
 
     # main loop
     while t < T_MAX:
+        Fy = buoancy_approximation(T,Fy,EXPANSION_RATE,T_REFERENCE)
+
         loop_start_time = time.time()
         t0 = time.perf_counter()
         np.copyto(un, u)
@@ -470,14 +499,15 @@ def main():
 
         # Velocity updates
         t0 = time.perf_counter()
-        u = update_x_velocity(un, vn, p, dt)
-        v = update_y_velocity(un, vn, p, dt)
+        u = update_x_velocity(un, vn, p, dt, Fx)
+        v = update_y_velocity(un, vn, p, dt, Fy)
         t1 = time.perf_counter()
         time_velocity_update += (t1-t0)
 
         # Temperature update
         t0 = time.perf_counter()
-        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE)
+        Temperature_Source = field_dissipation(T,T_REFERENCE)
+        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE,Temperature_Source)
         t1 = time.perf_counter()
         time_general_tranpsort += (t1-t0)
 
@@ -492,7 +522,7 @@ def main():
         t0 = time.perf_counter()
         u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-        T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,400)
+        T = BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,700)
         t1 = time.perf_counter()
         time_obstacle += (t1-t0)
 
@@ -515,6 +545,7 @@ def main():
                 print("#################################################")
                 print(f"Simulation time {t} sec")
                 CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
+                print(f"Current dt: {np.round(dt,5)}")
                 print(f"CFL-Condition: {np.round(CFL,5)}")
                 sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
                 sys.stdout.flush()
@@ -524,7 +555,7 @@ def main():
         t += dt
 
         # dynamic time step
-        dt_new = Helper_Functions.compute_new_timestep(u,v,DELTA,NU,CFL_MAX)
+        dt_new = Helper_Functions.compute_new_timestep(u,v,Fy,RHO,DELTA,NU,CFL_MAX)
 
         # dt limiter
         dt_max_increase = dt * 1.5
@@ -536,6 +567,9 @@ def main():
             dt = dt_max_decrease
         else:
             dt = dt_new
+
+        if dt > 1/OUTPUT_FPS:
+            dt = 1/OUTPUT_FPS
 
         t1 = time.perf_counter()
         time_compute_step += (t1-t0)

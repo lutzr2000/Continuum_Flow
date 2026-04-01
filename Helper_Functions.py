@@ -31,7 +31,7 @@ def compute_CFL(u,v,dt,delta):
     return max(CFL_x, CFL_y)
 
 @njit
-def compute_new_timestep(u, v, delta, nu, CFL_max):
+def compute_new_timestep(u, v, F, RHO, delta, nu, CFL_max):
     """
     Computes a stable time step based on maximum CFL condition for convection and diffusion.
     
@@ -50,6 +50,7 @@ def compute_new_timestep(u, v, delta, nu, CFL_max):
     
     abs_u_max = 0.0
     abs_v_max = 0.0
+    abs_F_max = 0.0
     
     for i in range(nx):
         for j in range(ny):
@@ -57,13 +58,16 @@ def compute_new_timestep(u, v, delta, nu, CFL_max):
                 abs_u_max = abs(u[i,j])
             if abs(v[i,j]) > abs_v_max:
                 abs_v_max = abs(v[i,j])
+            if abs(F[i,j]) > abs_F_max:
+                abs_F_max = abs(F[i,j])
     
     dt_x = CFL_max * delta / max(abs_u_max, EPS)
     dt_y = CFL_max * delta / max(abs_v_max, EPS)
     
     dt_conv = min(dt_x, dt_y)
     dt_diff = 0.25 * delta**2 / nu
-    dt = min(dt_conv, dt_diff)
+    dt_forcing = CFL_max * delta / max(abs_F_max/RHO, EPS)
+    dt = min(dt_conv, dt_diff, dt_forcing)
     return dt
 
 @njit
