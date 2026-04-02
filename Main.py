@@ -66,7 +66,7 @@ OUTPUT_FPS = 24
 PRINT_FREQUENCY = 100
 OUTPUT_TIME_STEP = 1/OUTPUT_FPS
 OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
-OUTPUT_STATUS = True
+OUTPUT_STATUS = False
 WRITE_QUEUE_SIZE = 512
 NETCDF_COMPRESSION_LEVEL = 0 
 
@@ -406,6 +406,9 @@ def pressure_poisson(u, v, p, p_work, b, dt, Fx, Fy, max_iter=10):
 # ===============================
 
 def main():
+    # =============================
+    # Start
+    # =============================
     print("Initialise")
     print("Cell count: ",int(NX*NY))
 
@@ -413,35 +416,38 @@ def main():
         available_threads = os.cpu_count() or 1
         solver_threads = max(1, available_threads - RESERVE_CPU_CORES_FOR_IO)
         set_num_threads(solver_threads)
-        print(f"Numba solver threads: {get_num_threads()} / {available_threads} CPUs")
+        print(f"Numba solver threads: {get_num_threads()} / {available_threads} Cores")
 
-    # inital fields
+    # ----------Inialise fields----------------
     u = np.ones_like(X).astype(PRECISION)*U_INFLOW
     v = np.ones_like(X).astype(PRECISION)*V_INFLOW
-    p = np.zeros_like(X).astype(PRECISION)
-    T = np.ones_like(X).astype(PRECISION)*T_REFERENCE
-    smoke = np.zeros_like(X).astype(PRECISION)
-
-    Fx = np.zeros_like(p)
-    Fy = np.zeros_like(p)
     un = np.empty_like(u)
     vn = np.empty_like(v)
     u_work = np.empty_like(u)
     v_work = np.empty_like(v)
+    np.copyto(un, u)
+    np.copyto(vn, v)
+
+    p = np.zeros_like(X).astype(PRECISION)
     pressure_work = np.empty_like(p)
     pressure_rhs = np.empty_like(p)
-    scalar_work = np.empty_like(T)
-    smoke_work = np.empty_like(smoke)
+
+    T = np.ones_like(X).astype(PRECISION)*T_REFERENCE
+    temperature_work = np.empty_like(T)
     temperature_source = np.empty_like(T)
+
+    smoke = np.zeros_like(X).astype(PRECISION)
+    smoke_work = np.empty_like(smoke)
     smoke_source = np.empty_like(smoke)
+
+    Fx = np.zeros_like(p)
+    Fy = np.zeros_like(p)
+
     timestep_row_max_u = np.empty(NX, dtype=PRECISION)
     timestep_row_max_v = np.empty(NX, dtype=PRECISION)
     timestep_row_max_F = np.empty(NX, dtype=PRECISION)
-
-    np.copyto(un, u)
-    np.copyto(vn, v)
     
-    # Initial BCs
+    # ----------BCs----------------
     u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
     u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
     u,v,p,T = BC.no_slip_wall_BC(u,v,p,T,"y_low")
@@ -452,7 +458,7 @@ def main():
     T = Obstacle_BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,600)
     smoke = Obstacle_BC.obstacle_boundary_conditions_scalar(smoke,obstacle_mask,1)
 
-    # values
+    # ----------Timing----------------
     start_total_time = time.time() 
     total_loop_time = 0.0
     time_pressure_update = 0.0
@@ -464,6 +470,7 @@ def main():
     time_compute_step = 0.0
     time_smoke_update = 0.0
 
+    # ----------Compute time step----------------
     t = 0
     dt = Helper_Functions.compute_new_timestep(
         u, v, Fy, RHO, DELTA, NU, CFL_MAX,
@@ -517,14 +524,14 @@ def main():
     writer_thread = threading.Thread(target=writer_thread_func, daemon=True)
     writer_thread.start()
 
+    # =============================
+    # Main loop
+    # =============================
+
     print("Start time iteration")
-    if OUTPUT_STATUS:
-        sys.stdout.write(f"\rProgress: [0%]")
+    sys.stdout.write(f"\rProgress: [0%]")
 
-    # main loop
     while t < T_MAX:
-        Fy = buoancy_approximation(T,Fy,EXPANSION_RATE,T_REFERENCE)
-
         loop_start_time = time.time()
         t0 = time.perf_counter()
         np.copyto(un, u)
@@ -532,34 +539,37 @@ def main():
         t1 = time.perf_counter()
         time_start_copy += (t1-t0)
 
-        # Pressure Poisson
+        # ----------Compute buoancy----------------
+        Fy = buoancy_approximation(T,Fy,EXPANSION_RATE,T_REFERENCE)
+
+        # ----------Pressure poisson----------------
         t0 = time.perf_counter()
         p = pressure_poisson(un, vn, p, pressure_work, pressure_rhs, dt, Fx, Fy, MAX_ITER)
         t1 = time.perf_counter()
         time_pressure_update += (t1-t0)
 
-        # Velocity updates
+        # ----------Velocity----------------
         t0 = time.perf_counter()
         u = update_x_velocity(un, vn, p, dt, Fx, u_work)
         v = update_y_velocity(un, vn, p, dt, Fy, v_work)
         t1 = time.perf_counter()
         time_velocity_update += (t1-t0)
 
-        # Temperature update
+        # ----------Temperature----------------
         t0 = time.perf_counter()
         temperature_source = field_dissipation(T,T_REFERENCE,COOLING_RATE,temperature_source)
-        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE, scalar_work, temperature_source)
+        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE, temperature_work, temperature_source)
         t1 = time.perf_counter()
         time_general_tranpsort += (t1-t0)
 
-        # Smoke update
+        # ----------Smoke----------------
         t0 = time.perf_counter()
         smoke_source = field_dissipation(smoke,0,SMOKE_DISSIPATION_RATE,smoke_source)
         smoke = general_scalar_transport_equation(smoke,u,v,dt,NU_SMOKE, smoke_work, smoke_source)
         t1 = time.perf_counter()
         time_smoke_update += (t1-t0)
 
-        # Boundary Conditions & Obstacles
+        # ----------Enforce BCs----------------
         t0 = time.perf_counter()
         u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
         u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
@@ -568,6 +578,7 @@ def main():
         t1 = time.perf_counter()
         time_BC += (t1-t0)
 
+        # ----------Obstacles----------------
         t0 = time.perf_counter()
         u, v = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
@@ -591,21 +602,20 @@ def main():
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
+            sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
+            sys.stdout.flush()
 
             if OUTPUT_STATUS:
                 print("#################################################")
                 print(f"Simulation time {t} sec")
-                #CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
+                CFL = Helper_Functions.compute_CFL(u,v,dt,DELTA)
                 print(f"Current dt: {np.round(dt,5)}")
-                #print(f"CFL-Condition: {np.round(CFL,5)}")
-                sys.stdout.write(f"\rProgress: [{(t/T_MAX*100):.3f}%]")
-                sys.stdout.flush()
+                print(f"CFL-Condition: {np.round(CFL,5)}")
 
+        # ----------Dynamic time step----------------
         t0 = time.perf_counter()
-        # loop count
         t += dt
 
-        # dynamic time step
         dt_new = Helper_Functions.compute_new_timestep(
             u, v, Fy, RHO, DELTA, NU, CFL_MAX,
             timestep_row_max_u, timestep_row_max_v, timestep_row_max_F
@@ -643,7 +653,7 @@ def main():
     Output_Functions.close_netcdf(dataset)
     end_total_time = time.time()
 
-    # conclusion
+    # ----------Conclusion----------------
     print("Simulation finished!")
     print(f"Total runtime: {end_total_time - start_total_time:.4f} seconds")
     print(f"Total time spent in main loop: {total_loop_time:.4f} seconds")
