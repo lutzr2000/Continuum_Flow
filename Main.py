@@ -8,7 +8,7 @@ Description:
     https://drzgan.github.io/Python_CFD/15.1.%20Cavity%20flow%20with%20upwind%20scheme.html
     Huge thanks to Dr. Zhengtao Gan.
 """
-
+# TODO move all scalar updates into one method, also move the source terms there
 # ===============================
 # Import
 # ===============================
@@ -37,10 +37,15 @@ RHO = 1.225
 NU = 1.81e-5
 NU_TEMPERATURE = 0.001
 NU_SMOKE = 0.001
+NU_FUEL = 0.001
+TEMPERATURE_DISSIPATION_RATE = 0.1
+TEMPERATURE_PRODUCTION_RATE = 1
+SMOKE_DISSIPATION_RATE = 0.1
+SMOKE_PRODUCTION_RATE = 1
+FUEL_BURN_RATE = 0.1
+FUEL_IGNITION_TEMPERATURE = 500
 T_REFERENCE = 300
 EXPANSION_RATE = 1/300
-COOLING_RATE = 0.5
-SMOKE_DISSIPATION_RATE = 0.1
 
 # time
 T_MAX = 30
@@ -105,25 +110,64 @@ def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
     return Fy
 
 @njit(parallel=CPU_PARALLEL)
-def field_dissipation(phi,phi_reference,dissipation_rate,source):
+def compute_temperature_source(T,fuel_source,source):
     """
-    Computes a Source term (sink) for a given field to be used in the general_scalar_transport_equation()
+    computes the source term for the temperature
 
     Args:
-        phi (2d-array): scalar field
-        phi_reference (float): reference value of scalar field to approach
-        dissipation_rate (float): rate of dissipation
+        T (2d-array): temperature field
+        T_reference (float): reference tempearture to approach
         source (2d-array): preallocated output array
     Returns:
         Source (2d-array): source term for general_scalar_transport_equation()
     """
-    Nx, Ny = phi.shape
-    dissipation = -dissipation_rate
+    Nx, Ny = T.shape
 
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
-            source[i, j] = dissipation * (phi[i, j] - phi_reference)
+            source[i, j] = -TEMPERATURE_DISSIPATION_RATE * (T[i, j] - T_REFERENCE) + TEMPERATURE_PRODUCTION_RATE * -fuel_source[i, j]
 
+    return source
+
+@njit(parallel=CPU_PARALLEL)
+def compute_fuel_source(fuel,T,source):
+    """
+    computes the source term for the fuel
+
+    Args:
+        T (2d-array): temperature field
+        source (2d-array): preallocated output array
+    Returns:
+        Source (2d-array): source term for general_scalar_transport_equation()
+    """
+    Nx, Ny = T.shape
+
+    for i in prange(1, Nx-1):
+        for j in range(1, Ny-1):
+            if T[i, j] > FUEL_IGNITION_TEMPERATURE:
+                source[i, j] = -FUEL_BURN_RATE * fuel[i, j]
+            else:
+                source[i, j] = 0
+
+    return source
+
+@njit(parallel=CPU_PARALLEL)
+def compute_smoke_source(smoke,fuel_source,source):
+    """
+    computes the source term for the smoke
+
+    Args:
+        T (2d-array): scalar field
+        T_reference (float): reference value of scalar field to approach
+        source (2d-array): preallocated output array
+    Returns:
+        Source (2d-array): source term for general_scalar_transport_equation()
+    """
+    Nx, Ny = smoke.shape
+
+    for i in prange(1, Nx-1):
+        for j in range(1, Ny-1):
+            source[i, j] = SMOKE_PRODUCTION_RATE * -fuel_source[i, j] - SMOKE_DISSIPATION_RATE * smoke[i,j]
     return source
 
 @njit(parallel=CPU_PARALLEL)
@@ -440,6 +484,10 @@ def main():
     smoke_work = np.empty_like(smoke)
     smoke_source = np.empty_like(smoke)
 
+    fuel = np.zeros_like(X).astype(PRECISION)
+    fuel_work = np.empty_like(fuel)
+    fuel_source = np.empty_like(fuel)
+
     Fx = np.zeros_like(p)
     Fy = np.zeros_like(p)
 
@@ -456,19 +504,20 @@ def main():
     u, v = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
     p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
     T = Obstacle_BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,600)
-    smoke = Obstacle_BC.obstacle_boundary_conditions_scalar(smoke,obstacle_mask,1)
+    fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel,obstacle_mask,1)
 
     # ----------Timing----------------
     start_total_time = time.time() 
     total_loop_time = 0.0
     time_pressure_update = 0.0
     time_velocity_update = 0.0
-    time_general_tranpsort = 0.0
+    time_temperature_update = 0.0
     time_BC = 0.0
     time_obstacle = 0.0
     time_start_copy = 0.0
     time_compute_step = 0.0
     time_smoke_update = 0.0
+    time_fuel_update = 0.0
 
     # ----------Compute time step----------------
     t = 0
@@ -486,7 +535,7 @@ def main():
     # =============================
     # ASYNC WRITER SETUP
     # =============================
-    dataset, u_var, v_var, p_var, T_var, smoke_var, time_var = Output_Functions.initialize_netcdf(
+    dataset, u_var, v_var, p_var, T_var, smoke_var, fuel_var, time_var = Output_Functions.initialize_netcdf(
         OUTPATH, NX, NY, X, Y, comp_level=NETCDF_COMPRESSION_LEVEL
     )
 
@@ -501,6 +550,7 @@ def main():
             'p': np.empty_like(p),
             'T': np.empty_like(T),
             'smoke': np.empty_like(smoke),
+            'fuel': np.empty_like(fuel),
         })
 
     def writer_thread_func():
@@ -513,8 +563,8 @@ def main():
             (output_index, t, fields) = item
 
             Output_Functions.write_to_netcdf(
-                u_var, v_var, p_var, T_var, smoke_var, time_var,
-                output_index, t, fields['u'], fields['v'], fields['p'], fields['T'], fields['smoke'], PRECISION
+                u_var, v_var, p_var, T_var, smoke_var, fuel_var, time_var,
+                output_index, t, fields['u'], fields['v'], fields['p'], fields['T'], fields['smoke'], fields['fuel'], PRECISION
             )
 
             buffer_pool.put(fields)
@@ -555,16 +605,23 @@ def main():
         t1 = time.perf_counter()
         time_velocity_update += (t1-t0)
 
+        # ----------Fuel----------------
+        t0 = time.perf_counter()
+        fuel_source = compute_fuel_source(fuel,T,fuel_source)
+        fuel = general_scalar_transport_equation(fuel,u,v,dt,NU_FUEL, fuel_work, fuel_source)
+        t1 = time.perf_counter()
+        time_fuel_update += (t1-t0)
+
         # ----------Temperature----------------
         t0 = time.perf_counter()
-        temperature_source = field_dissipation(T,T_REFERENCE,COOLING_RATE,temperature_source)
+        temperature_source = compute_temperature_source(T,fuel_source,temperature_source)
         T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE, temperature_work, temperature_source)
         t1 = time.perf_counter()
-        time_general_tranpsort += (t1-t0)
+        time_temperature_update += (t1-t0)
 
         # ----------Smoke----------------
         t0 = time.perf_counter()
-        smoke_source = field_dissipation(smoke,0,SMOKE_DISSIPATION_RATE,smoke_source)
+        smoke_source = compute_smoke_source(smoke,fuel_source,smoke_source)
         smoke = general_scalar_transport_equation(smoke,u,v,dt,NU_SMOKE, smoke_work, smoke_source)
         t1 = time.perf_counter()
         time_smoke_update += (t1-t0)
@@ -583,7 +640,7 @@ def main():
         u, v = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
         p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
         T = Obstacle_BC.obstacle_boundary_conditions_scalar(T,obstacle_mask,600)
-        smoke = Obstacle_BC.obstacle_boundary_conditions_scalar(smoke,obstacle_mask,1)
+        fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel,obstacle_mask,1)
         t1 = time.perf_counter()
         time_obstacle += (t1-t0)
 
@@ -597,6 +654,7 @@ def main():
             np.copyto(fields['p'], p)
             np.copyto(fields['T'], T)
             np.copyto(fields['smoke'], smoke)
+            np.copyto(fields['fuel'], fuel)
             write_queue.put((output_index, t, fields))
             max_write_queue_fill = max(max_write_queue_fill, write_queue.qsize())
 
@@ -660,8 +718,9 @@ def main():
     print(f"Time spend on array copying: {time_start_copy:.4f} seconds")
     print(f"Time spend on pressure: {time_pressure_update:.4f} seconds")
     print(f"Time spend on velocity solve: {time_velocity_update:.4f} seconds")
-    print(f"Time spend on general transport equation: {time_general_tranpsort:.4f} seconds")
+    print(f"Time spend on temperature_update: {time_temperature_update:.4f} seconds")
     print(f"Time spend on smoke update: {time_smoke_update:.4f} seconds")
+    print(f"Time spend on fuel update: {time_fuel_update:.4f} seconds")
     print(f"Time spend on boundary condtions: {time_BC:.4f} seconds")
     print(f"Time spend on obstacles: {time_obstacle:.4f} seconds")
     print(f"Time spend on computing next time step: {time_compute_step:.4f} seconds")

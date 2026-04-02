@@ -20,6 +20,7 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=0):
         p_var (netcdf.variable): p-velocity variable in netcdf file
         T_var (netcdf.variable): temperature variable in netcdf file
         smoke_var (netcdf.variable): smoke variable in netcdf file
+        fuel_var (netcdf.variable): fuel variable in netcdf file
     """
     dataset = nc.Dataset(filepath, 'w', format='NETCDF4')
 
@@ -48,6 +49,7 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=0):
     p_var = dataset.createVariable('p', 'f4', ('time', 'y', 'x'), **variable_kwargs)
     T_var = dataset.createVariable('T', 'f4', ('time', 'y', 'x'), **variable_kwargs)
     smoke_var = dataset.createVariable('smoke', 'f4', ('time', 'y', 'x'), **variable_kwargs)
+    fuel_var = dataset.createVariable('fuel', 'f4', ('time', 'y', 'x'), **variable_kwargs)
 
     # time for paraview
     time_var = dataset.createVariable('time', 'f8', ('time',))
@@ -61,10 +63,11 @@ def initialize_netcdf(filepath, nx, ny, X, Y, comp_level=0):
     T_var.units = '°K'
 
     smoke_var.units = '1'
+    fuel_var.units = '1'
 
-    return dataset, u_var, v_var, p_var, T_var, smoke_var, time_var
+    return dataset, u_var, v_var, p_var, T_var, smoke_var, fuel_var, time_var
 
-def write_to_netcdf(u_var, v_var, p_var, T_var, smoke_var, time_var, timestep, time_value, u, v, p, T, smoke, precision):
+def write_to_netcdf(u_var, v_var, p_var, T_var, smoke_var, fuel_var, time_var, timestep, time_value, u, v, p, T, smoke, fuel, precision):
     """
     Writes the current timestep into the datefile created by initialize_netcdf()
 
@@ -78,6 +81,7 @@ def write_to_netcdf(u_var, v_var, p_var, T_var, smoke_var, time_var, timestep, t
         p (2d-array): pressure field
         T (2d-array): temperature field
         smoke (2d-array): smoke field
+        fuel (2d-array): fuel field
         precision (dtype): precision used for writing
 
     Returns:
@@ -89,6 +93,7 @@ def write_to_netcdf(u_var, v_var, p_var, T_var, smoke_var, time_var, timestep, t
     p_var[timestep, :, :] = p
     T_var[timestep, :, :] = T
     smoke_var[timestep, :, :] = smoke
+    fuel_var[timestep, :, :] = fuel
 
 def close_netcdf(dataset):
     """
