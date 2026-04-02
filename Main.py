@@ -8,8 +8,6 @@ Description:
     https://drzgan.github.io/Python_CFD/15.1.%20Cavity%20flow%20with%20upwind%20scheme.html
     Huge thanks to Dr. Zhengtao Gan.
 """
-# TODO Fix weird expansion fluctuation in rising temperature
-# TODO move inputs in seperate input file, build different test cases
 
 # ===============================
 # Import
@@ -76,6 +74,7 @@ V_INFLOW = 0
 # Geometry
 circle1_mask = Obstacles.circle(X,Y,NX*0.5*DELTA,NY*0.05*DELTA,0.6)
 obstacle_mask = circle1_mask
+obstacle_i, obstacle_j = np.where(obstacle_mask)
 
 # ===============================
 # Functions
@@ -321,29 +320,29 @@ def pressure_equation_right_side(u, v, b, dt, Fx, Fy):
         b (2d-array): right hand side of pressure poisson euaqtion
     """
     Nx, Ny = u.shape
+    half_inv_delta = 0.5 / DELTA
+    rho_over_dt = RHO / dt
 
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
             # Central differences
-            du_dx = (u[i, j+1] - u[i, j-1]) * 0.5 / DELTA
-            dv_dy = (v[i+1, j] - v[i-1, j]) * 0.5 / DELTA
-            du_dy = (u[i+1, j] - u[i-1, j]) * 0.5 / DELTA
-            dv_dx = (v[i, j+1] - v[i, j-1]) * 0.5 / DELTA
+            du_dx = (u[i, j+1] - u[i, j-1]) * half_inv_delta
+            dv_dy = (v[i+1, j] - v[i-1, j]) * half_inv_delta
+            du_dy = (u[i+1, j] - u[i-1, j]) * half_inv_delta
+            dv_dx = (v[i, j+1] - v[i, j-1]) * half_inv_delta
 
             divergence = du_dx + dv_dy
-            nonlinear = du_dx**2 + 2.0 * du_dy * dv_dx + dv_dy**2
+            nonlinear = du_dx * du_dx + 2.0 * du_dy * dv_dx + dv_dy * dv_dy
 
-            dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * 0.5 / DELTA
-            dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * 0.5 / DELTA
+            dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * half_inv_delta
+            dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * half_inv_delta
 
-            b_val = RHO * ((1.0/dt) * divergence - nonlinear - (dFx_dx + dFy_dy))
-
-            b[i, j] = b_val
+            b[i, j] = rho_over_dt * divergence - RHO * (nonlinear + dFx_dx + dFy_dy)
 
     return b
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_poisson(u, v, p, dt, Fx, Fy, max_iter=10):
+def pressure_poisson(u, v, p, p_work, b, dt, Fx, Fy, max_iter=10):
     """
     Solves the pressure Poisson equation iteratively until the change in 
     the pressure field is smaller than a target threshold or the max_iter count is reached.
@@ -352,6 +351,8 @@ def pressure_poisson(u, v, p, dt, Fx, Fy, max_iter=10):
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         p (2d-array): pressure field (initial guess)
+        p_work (2d-array): work array for Jacobi iterations
+        b (2d-array): work array for the right hand side
         dt (float): time step
         Fx (2d-array): x-Forcing field
         Fy (2d-array): y-Forcing field
@@ -363,27 +364,34 @@ def pressure_poisson(u, v, p, dt, Fx, Fy, max_iter=10):
         niter (int): NUmber of iterations performed
     """
     Nx, Ny = p.shape
-    b = np.zeros_like(p)
+    delta2 = DELTA * DELTA
     b = pressure_equation_right_side(u, v, b, dt, Fx, Fy)
-    
-    pn = p.copy()
+    p_old = p
+    p_new = p_work
     
     for it in range(max_iter):
         for i in prange(1, Nx-1):
             for j in range(1, Ny-1):
-                pn[i, j] = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - DELTA**2 * b[i, j])
+                p_new[i, j] = 0.25 * (
+                    p_old[i+1, j] + p_old[i-1, j] +
+                    p_old[i, j+1] + p_old[i, j-1] -
+                    delta2 * b[i, j]
+                )
         
-        # BCs
-        p = BC.neumann_boundary_condition(p, "x_low")
-        p = BC.neumann_boundary_condition(p, "x_high")
-        p = BC.neumann_boundary_condition(p, "y_low")
-        p = BC.neumann_boundary_condition(p, "y_high")
-        pn = BC.obstacle_boundary_conditions_pressure(pn, obstacle_mask)
+        for j in range(Ny):
+            p[0, j] = p[1, j]
+            p[Nx - 1, j] = p[Nx - 2, j]
+
+        for i in range(Nx):
+            p[i, 0] = p[i, 1]
+            p[i, Ny - 1] = p[i, Ny - 2]
+
+        p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
         
         # Swap references
-        p, pn = pn, p
+        p_old, p_new = p_new, p_old
 
-    return p
+    return p_old
 
 # ===============================
 # Main
@@ -400,8 +408,8 @@ def main():
         print(f"Numba solver threads: {get_num_threads()} / {available_threads} CPUs")
 
     # inital fields
-    u = np.zeros_like(X).astype(PRECISION)*U_INFLOW
-    v = np.zeros_like(X).astype(PRECISION)*V_INFLOW
+    u = np.ones_like(X).astype(PRECISION)*U_INFLOW
+    v = np.ones_like(X).astype(PRECISION)*V_INFLOW
     p = np.zeros_like(X).astype(PRECISION)
     T = np.ones_like(X).astype(PRECISION)*T_REFERENCE
 
@@ -409,12 +417,12 @@ def main():
     Fy = np.zeros_like(p)
     un = np.empty_like(u)
     vn = np.empty_like(v)
-    pn = np.empty_like(p)
+    pressure_work = np.empty_like(p)
+    pressure_rhs = np.empty_like(p)
     Tn = np.empty_like(T)
 
     np.copyto(un, u)
     np.copyto(vn, v)
-    np.copyto(pn, p)
     np.copyto(Tn, T)
     
     # Initial BCs
@@ -499,14 +507,13 @@ def main():
         t0 = time.perf_counter()
         np.copyto(un, u)
         np.copyto(vn, v)
-        np.copyto(pn, p)
         np.copyto(Tn, T)
         t1 = time.perf_counter()
         time_start_copy += (t1-t0)
 
         # Pressure Poisson
         t0 = time.perf_counter()
-        p = pressure_poisson(un, vn, pn, dt, Fx, Fy, MAX_ITER)
+        p = pressure_poisson(un, vn, p, pressure_work, pressure_rhs, dt, Fx, Fy, MAX_ITER)
         t1 = time.perf_counter()
         time_pressure_update += (t1-t0)
 

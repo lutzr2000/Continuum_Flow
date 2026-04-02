@@ -1,4 +1,4 @@
-from numba import njit
+from numba import njit, prange
 
 @njit
 def neumann_boundary_condition(field, side):
@@ -79,7 +79,7 @@ def obstacle_boundary_conditions_velocity(u,v,mask):
                 v[i, j] = 0.0
     return u, v
 
-@njit
+@njit(parallel=True)
 def obstacle_boundary_conditions_pressure(p,mask):
     """
     Applies zero pressure to a given mask
@@ -91,10 +91,33 @@ def obstacle_boundary_conditions_pressure(p,mask):
     Returns:
         p (2d-array): pressure field
     """
-    for i in range(p.shape[0]):
+    for i in prange(p.shape[0]):
         for j in range(p.shape[1]):
             if mask[i, j]:
                 p[i, j] = 0.0
+
+    return p
+
+@njit
+def pressure_poisson_boundary_conditions(p, obstacle_i, obstacle_j):
+    """
+    Applies the pressure BCs used inside the Poisson solve.
+
+    Obstacle cells are passed as index arrays so sparse obstacles do not force
+    a full-domain mask scan on every Jacobi iteration.
+    """
+    nx, ny = p.shape
+
+    for j in range(ny):
+        p[0, j] = p[1, j]
+        p[nx - 1, j] = p[nx - 2, j]
+
+    for i in range(nx):
+        p[i, 0] = p[i, 1]
+        p[i, ny - 1] = p[i, ny - 2]
+
+    for k in range(obstacle_i.shape[0]):
+        p[obstacle_i[k], obstacle_j[k]] = 0.0
 
     return p
 

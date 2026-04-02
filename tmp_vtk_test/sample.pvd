@@ -1,6 +1,0 @@
-<?xml version="1.0"?>
-<VTKFile type="Collection" version="1.0" byte_order="LittleEndian">
-  <Collection>
-    <DataSet timestep="0.000000000" group="" part="0" file="sample_vtk\step_000000.vtr"/>
-  </Collection>
-</VTKFile>
