@@ -43,7 +43,7 @@ TEMPERATURE_PRODUCTION_RATE = 1
 SMOKE_DISSIPATION_RATE = 0.1
 SMOKE_PRODUCTION_RATE = 1
 FUEL_BURN_RATE = 0.1
-FUEL_IGNITION_TEMPERATURE = 500
+FUEL_IGNITION_TEMPERATURE = 100
 T_REFERENCE = 300
 EXPANSION_RATE = 1/300
 
@@ -110,121 +110,111 @@ def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
     return Fy
 
 @njit(parallel=CPU_PARALLEL)
-def compute_temperature_source(T,fuel_source,source):
+def update_scalar_fields(T, smoke, fuel, u, v, dt, T_out, smoke_out, fuel_out):
     """
-    computes the source term for the temperature
+    Updates temperature, smoke and fuel in a single coupled transport sweep. Fuel starts burning if the temperature is higher
+    than the ignition temperature. If the fuel burns heat and smoke are produced.
 
     Args:
         T (2d-array): temperature field
-        T_reference (float): reference tempearture to approach
-        source (2d-array): preallocated output array
-    Returns:
-        Source (2d-array): source term for general_scalar_transport_equation()
-    """
-    Nx, Ny = T.shape
-
-    for i in prange(1, Nx-1):
-        for j in range(1, Ny-1):
-            source[i, j] = -TEMPERATURE_DISSIPATION_RATE * (T[i, j] - T_REFERENCE) + TEMPERATURE_PRODUCTION_RATE * -fuel_source[i, j]
-
-    return source
-
-@njit(parallel=CPU_PARALLEL)
-def compute_fuel_source(fuel,T,source):
-    """
-    computes the source term for the fuel
-
-    Args:
-        T (2d-array): temperature field
-        source (2d-array): preallocated output array
-    Returns:
-        Source (2d-array): source term for general_scalar_transport_equation()
-    """
-    Nx, Ny = T.shape
-
-    for i in prange(1, Nx-1):
-        for j in range(1, Ny-1):
-            if T[i, j] > FUEL_IGNITION_TEMPERATURE:
-                source[i, j] = -FUEL_BURN_RATE * fuel[i, j]
-            else:
-                source[i, j] = 0
-
-    return source
-
-@njit(parallel=CPU_PARALLEL)
-def compute_smoke_source(smoke,fuel_source,source):
-    """
-    computes the source term for the smoke
-
-    Args:
-        T (2d-array): scalar field
-        T_reference (float): reference value of scalar field to approach
-        source (2d-array): preallocated output array
-    Returns:
-        Source (2d-array): source term for general_scalar_transport_equation()
-    """
-    Nx, Ny = smoke.shape
-
-    for i in prange(1, Nx-1):
-        for j in range(1, Ny-1):
-            source[i, j] = SMOKE_PRODUCTION_RATE * -fuel_source[i, j] - SMOKE_DISSIPATION_RATE * smoke[i,j]
-    return source
-
-@njit(parallel=CPU_PARALLEL)
-def general_scalar_transport_equation(phi,u,v,dt,nu,phin,Source=None):
-    """
-    Updates a scalar field phi based on a general transport equation. Discretization with first order upwind
-    for the convection term. Central differences for the Diffusion term. Source term is optional
-
-    Args:
-        phi (2d-array): scalar field
+        smoke (2d-array): smoke field
+        fuel (2d-array): fuel field
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
         dt (float): time step
-        nu (float): viscosity of phi
-        Source (2d-array,optional): phi source field
+        T_out (2d-array): preallocated output temperature field
+        smoke_out (2d-array): preallocated output smoke field
+        fuel_out (2d-array): preallocated output fuel field
     Returns:
-        phin (2d-array): new phi field
+        T_out, smoke_out, fuel_out (2d-array): updated scalar fields
     """
     Nx, Ny = u.shape
 
-    dt_over_DELTA = dt / DELTA
-    dt_over_DELTA2 = dt / (DELTA**2)
+    dt_over_delta = dt / DELTA
+    dt_over_delta2 = dt / (DELTA * DELTA)
+    temp_diffusion_coeff = NU_TEMPERATURE * dt_over_delta2
+    smoke_diffusion_coeff = NU_SMOKE * dt_over_delta2
+    fuel_diffusion_coeff = NU_FUEL * dt_over_delta2
 
-    # Loop over interior points, parallel over rows
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
-            # Convection in x-direction (first-order upwind)
-            if u[i, j] >= 0:
-                phi_east = phi[i, j]
-                phi_west = phi[i, j-1]
+            uij = u[i, j]
+            vij = v[i, j]
+            # ----------Upwinding----------------
+            if uij >= 0:
+                t_east = T[i, j]
+                t_west = T[i, j-1]
+                smoke_east = smoke[i, j]
+                smoke_west = smoke[i, j-1]
+                fuel_east = fuel[i, j]
+                fuel_west = fuel[i, j-1]
             else:
-                phi_east = phi[i, j+1]
-                phi_west = phi[i, j]
+                t_east = T[i, j+1]
+                t_west = T[i, j]
+                smoke_east = smoke[i, j+1]
+                smoke_west = smoke[i, j]
+                fuel_east = fuel[i, j+1]
+                fuel_west = fuel[i, j]
 
-            # Convection in y-direction (first-order upwind)
-            if v[i, j] >= 0:
-                phi_north = phi[i, j]
-                phi_south = phi[i-1, j]
+            if vij >= 0:
+                t_north = T[i, j]
+                t_south = T[i-1, j]
+                smoke_north = smoke[i, j]
+                smoke_south = smoke[i-1, j]
+                fuel_north = fuel[i, j]
+                fuel_south = fuel[i-1, j]
             else:
-                phi_north = phi[i+1, j]
-                phi_south = phi[i, j]
+                t_north = T[i+1, j]
+                t_south = T[i, j]
+                smoke_north = smoke[i+1, j]
+                smoke_south = smoke[i, j]
+                fuel_north = fuel[i+1, j]
+                fuel_south = fuel[i, j]
 
-            convection = dt_over_DELTA * (u[i, j] * (phi_east - phi_west) + v[i, j] * (phi_north - phi_south))
+            T_center = T[i, j]
+            smoke_center = smoke[i, j]
+            fuel_center = fuel[i, j]
 
-            # Diffusion (central difference)
-            diffusion = nu * dt_over_DELTA2 * (
-                (phi[i, j+1] - 2*phi[i, j] + phi[i, j-1]) +
-                (phi[i+1, j] - 2*phi[i, j] + phi[i-1, j])
+            # ----------Convecting----------------
+            temp_convection = dt_over_delta * (uij * (t_east - t_west) + vij * (t_north - t_south))
+            smoke_convection = dt_over_delta * (uij * (smoke_east - smoke_west) + vij * (smoke_north - smoke_south))
+            fuel_convection = dt_over_delta * (uij * (fuel_east - fuel_west) + vij * (fuel_north - fuel_south))
+
+            # ----------Diffusion----------------
+            temp_diffusion = temp_diffusion_coeff * (
+                (T[i, j+1] - 2.0 * T_center + T[i, j-1]) +
+                (T[i+1, j] - 2.0 * T_center + T[i-1, j])
+            )
+            smoke_diffusion = smoke_diffusion_coeff * (
+                (smoke[i, j+1] - 2.0 * smoke_center + smoke[i, j-1]) +
+                (smoke[i+1, j] - 2.0 * smoke_center + smoke[i-1, j])
+            )
+            fuel_diffusion = fuel_diffusion_coeff * (
+                (fuel[i, j+1] - 2.0 * fuel_center + fuel[i, j-1]) +
+                (fuel[i+1, j] - 2.0 * fuel_center + fuel[i-1, j])
             )
 
-            # Source term
-            source = dt* Source[i, j] if Source is not None else 0.0
+            # ----------Source terms----------------
+            # if the temperature is higher than the ignition temperature fuel burns
+            if T_center > FUEL_IGNITION_TEMPERATURE:
+                fuel_source = -FUEL_BURN_RATE * fuel_center
+            else:
+                fuel_source = 0.0
 
-            # Update velocity
-            phin[i, j] = phi[i, j] - convection + diffusion + source
+            # the temperature increases if there is a fuel source e.g. burning
+            temperature_source = (
+                -TEMPERATURE_DISSIPATION_RATE * (T_center - T_REFERENCE) +
+                TEMPERATURE_PRODUCTION_RATE * (-fuel_source)
+            )
+            # smoke is also produced if there is a fuel source
+            smoke_source = SMOKE_PRODUCTION_RATE * (-fuel_source) - SMOKE_DISSIPATION_RATE * smoke_center
 
-    return phin
+            # ----------Updating----------------
+            T_out[i, j] = T_center - temp_convection + temp_diffusion + dt * temperature_source
+            smoke_out[i, j] = smoke_center - smoke_convection + smoke_diffusion + dt * smoke_source
+            fuel_out[i, j] = fuel_center - fuel_convection + fuel_diffusion + dt * fuel_source
+
+    return T_out, smoke_out, fuel_out
 
 
 @njit(parallel=CPU_PARALLEL)
@@ -478,15 +468,12 @@ def main():
 
     T = np.ones_like(X).astype(PRECISION)*T_REFERENCE
     temperature_work = np.empty_like(T)
-    temperature_source = np.empty_like(T)
 
     smoke = np.zeros_like(X).astype(PRECISION)
     smoke_work = np.empty_like(smoke)
-    smoke_source = np.empty_like(smoke)
 
     fuel = np.zeros_like(X).astype(PRECISION)
     fuel_work = np.empty_like(fuel)
-    fuel_source = np.empty_like(fuel)
 
     Fx = np.zeros_like(p)
     Fy = np.zeros_like(p)
@@ -511,13 +498,11 @@ def main():
     total_loop_time = 0.0
     time_pressure_update = 0.0
     time_velocity_update = 0.0
-    time_temperature_update = 0.0
+    time_scalar_update = 0.0
     time_BC = 0.0
     time_obstacle = 0.0
     time_start_copy = 0.0
     time_compute_step = 0.0
-    time_smoke_update = 0.0
-    time_fuel_update = 0.0
 
     # ----------Compute time step----------------
     t = 0
@@ -605,26 +590,11 @@ def main():
         t1 = time.perf_counter()
         time_velocity_update += (t1-t0)
 
-        # ----------Fuel----------------
+        # ----------Scalars----------------
         t0 = time.perf_counter()
-        fuel_source = compute_fuel_source(fuel,T,fuel_source)
-        fuel = general_scalar_transport_equation(fuel,u,v,dt,NU_FUEL, fuel_work, fuel_source)
+        T, smoke, fuel = update_scalar_fields(T, smoke, fuel, u, v, dt, temperature_work, smoke_work, fuel_work)
         t1 = time.perf_counter()
-        time_fuel_update += (t1-t0)
-
-        # ----------Temperature----------------
-        t0 = time.perf_counter()
-        temperature_source = compute_temperature_source(T,fuel_source,temperature_source)
-        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE, temperature_work, temperature_source)
-        t1 = time.perf_counter()
-        time_temperature_update += (t1-t0)
-
-        # ----------Smoke----------------
-        t0 = time.perf_counter()
-        smoke_source = compute_smoke_source(smoke,fuel_source,smoke_source)
-        smoke = general_scalar_transport_equation(smoke,u,v,dt,NU_SMOKE, smoke_work, smoke_source)
-        t1 = time.perf_counter()
-        time_smoke_update += (t1-t0)
+        time_scalar_update += (t1-t0)
 
         # ----------Enforce BCs----------------
         t0 = time.perf_counter()
@@ -718,9 +688,7 @@ def main():
     print(f"Time spend on array copying: {time_start_copy:.4f} seconds")
     print(f"Time spend on pressure: {time_pressure_update:.4f} seconds")
     print(f"Time spend on velocity solve: {time_velocity_update:.4f} seconds")
-    print(f"Time spend on temperature_update: {time_temperature_update:.4f} seconds")
-    print(f"Time spend on smoke update: {time_smoke_update:.4f} seconds")
-    print(f"Time spend on fuel update: {time_fuel_update:.4f} seconds")
+    print(f"Time spend on scalar update: {time_scalar_update:.4f} seconds")
     print(f"Time spend on boundary condtions: {time_BC:.4f} seconds")
     print(f"Time spend on obstacles: {time_obstacle:.4f} seconds")
     print(f"Time spend on computing next time step: {time_compute_step:.4f} seconds")
