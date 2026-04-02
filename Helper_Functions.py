@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-@njit
+@njit(parallel=True)
 def compute_CFL(u,v,dt,delta):
     """
     computes the CFL condition
