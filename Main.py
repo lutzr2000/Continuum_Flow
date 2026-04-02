@@ -427,6 +427,9 @@ def main():
     pressure_rhs = np.empty_like(p)
     scalar_work = np.empty_like(T)
     temperature_source = np.empty_like(T)
+    timestep_row_max_u = np.empty(NX, dtype=PRECISION)
+    timestep_row_max_v = np.empty(NX, dtype=PRECISION)
+    timestep_row_max_F = np.empty(NX, dtype=PRECISION)
 
     np.copyto(un, u)
     np.copyto(vn, v)
@@ -453,7 +456,10 @@ def main():
     time_compute_step = 0.0
 
     t = 0
-    dt = Helper_Functions.compute_new_timestep(u,v,Fy,RHO,DELTA,NU,CFL_MAX)
+    dt = Helper_Functions.compute_new_timestep(
+        u, v, Fy, RHO, DELTA, NU, CFL_MAX,
+        timestep_row_max_u, timestep_row_max_v, timestep_row_max_F
+    )
 
     if dt > 1/OUTPUT_FPS:
         dt = 1/OUTPUT_FPS
@@ -581,7 +587,10 @@ def main():
         t += dt
 
         # dynamic time step
-        dt_new = Helper_Functions.compute_new_timestep(u,v,Fy,RHO,DELTA,NU,CFL_MAX)
+        dt_new = Helper_Functions.compute_new_timestep(
+            u, v, Fy, RHO, DELTA, NU, CFL_MAX,
+            timestep_row_max_u, timestep_row_max_v, timestep_row_max_F
+        )
 
         # dt limiter
         dt_max_increase = dt * 1.5

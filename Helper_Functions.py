@@ -1,5 +1,5 @@
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 @njit
 def compute_CFL(u,v,dt,delta):
@@ -30,43 +30,72 @@ def compute_CFL(u,v,dt,delta):
     CFL_y = max_v * dt / delta
     return max(CFL_x, CFL_y)
 
-@njit
-def compute_new_timestep(u, v, F, RHO, delta, nu, CFL_max):
+@njit(parallel=True)
+def compute_new_timestep(u, v, F, RHO, delta, nu, CFL_max, row_max_u, row_max_v, row_max_F):
     """
     Computes a stable time step based on maximum CFL condition for convection and diffusion.
     
     Args:
         u (2d-array): u-velocity field
         v (2d-array): v-velocity field
+        F (2d-array): force field used in the timestep limiter
         delta (float): space resolution
         nu (float): viscosity
         CFL_max (float): maximum CFL number
+        row_max_u (1d-array): preallocated row maxima workspace for u
+        row_max_v (1d-array): preallocated row maxima workspace for v
+        row_max_F (1d-array): preallocated row maxima workspace for F
 
     Returns:
         dt (float): stable time step
     """
     EPS = 1e-12
     nx, ny = u.shape
-    
+
+    for i in prange(nx):
+        max_u_row = 0.0
+        max_v_row = 0.0
+        max_F_row = 0.0
+
+        for j in range(ny):
+            uij = u[i, j]
+            vij = v[i, j]
+            Fij = F[i, j]
+
+            abs_u = uij if uij >= 0.0 else -uij
+            abs_v = vij if vij >= 0.0 else -vij
+            abs_F = Fij if Fij >= 0.0 else -Fij
+
+            if abs_u > max_u_row:
+                max_u_row = abs_u
+            if abs_v > max_v_row:
+                max_v_row = abs_v
+            if abs_F > max_F_row:
+                max_F_row = abs_F
+
+        row_max_u[i] = max_u_row
+        row_max_v[i] = max_v_row
+        row_max_F[i] = max_F_row
+
     abs_u_max = 0.0
     abs_v_max = 0.0
     abs_F_max = 0.0
-    
+
     for i in range(nx):
-        for j in range(ny):
-            if abs(u[i,j]) > abs_u_max:
-                abs_u_max = abs(u[i,j])
-            if abs(v[i,j]) > abs_v_max:
-                abs_v_max = abs(v[i,j])
-            if abs(F[i,j]) > abs_F_max:
-                abs_F_max = abs(F[i,j])
-    
+        if row_max_u[i] > abs_u_max:
+            abs_u_max = row_max_u[i]
+        if row_max_v[i] > abs_v_max:
+            abs_v_max = row_max_v[i]
+        if row_max_F[i] > abs_F_max:
+            abs_F_max = row_max_F[i]
+
+    cfl_delta = CFL_max * delta
     dt_x = CFL_max * delta / max(abs_u_max, EPS)
     dt_y = CFL_max * delta / max(abs_v_max, EPS)
     
     dt_conv = min(dt_x, dt_y)
-    dt_diff = 0.25 * delta**2 / nu
-    dt_forcing = CFL_max * delta / max(abs_F_max/RHO, EPS)
+    dt_diff = 0.25 * delta * delta / nu
+    dt_forcing = cfl_delta * RHO / max(abs_F_max, EPS)
     dt = min(dt_conv, dt_diff, dt_forcing)
     return dt
 
