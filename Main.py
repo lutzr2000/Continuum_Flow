@@ -102,27 +102,28 @@ def buoancy_approximation(T,Fy,expansion_coefficent,T_ref):
     return Fy
 
 @njit(parallel=CPU_PARALLEL)
-def field_dissipation(phi,phi_reference):
+def field_dissipation(phi,phi_reference,source):
     """
     Computes a Source term (sink) for a given field to be used in the general_scalar_transport_equation()
 
     Args:
         phi (2d-array): scalar field
         phi_reference (2d-array): reference value of scalar field to approach
+        source (2d-array): preallocated output array
     Returns:
         Source (2d-array): source term for general_scalar_transport_equation()
     """
     Nx, Ny = phi.shape
-    Source = np.zeros_like(phi)
+    cooling_rate = -COOLING_RATE
 
     for i in prange(1, Nx-1):
         for j in range(1, Ny-1):
-            Source[i,j]=-COOLING_RATE*(phi[i,j]-phi_reference)
+            source[i, j] = cooling_rate * (phi[i, j] - phi_reference)
 
-    return Source
+    return source
 
 @njit(parallel=CPU_PARALLEL)
-def general_scalar_transport_equation(phi,u,v,dt,nu,Source=None):
+def general_scalar_transport_equation(phi,u,v,dt,nu,phin,Source=None):
     """
     Updates a scalar field phi based on a general transport equation. Discretization with first order upwind
     for the convection term. Central differences for the Diffusion term. Source term is optional
@@ -138,7 +139,6 @@ def general_scalar_transport_equation(phi,u,v,dt,nu,Source=None):
         phin (2d-array): new phi field
     """
     Nx, Ny = u.shape
-    phin = phi.copy()
 
     dt_over_DELTA = dt / DELTA
     dt_over_DELTA2 = dt / (DELTA**2)
@@ -419,11 +419,11 @@ def main():
     vn = np.empty_like(v)
     pressure_work = np.empty_like(p)
     pressure_rhs = np.empty_like(p)
-    Tn = np.empty_like(T)
+    scalar_work = np.empty_like(T)
+    temperature_source = np.empty_like(T)
 
     np.copyto(un, u)
     np.copyto(vn, v)
-    np.copyto(Tn, T)
     
     # Initial BCs
     u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
@@ -507,7 +507,6 @@ def main():
         t0 = time.perf_counter()
         np.copyto(un, u)
         np.copyto(vn, v)
-        np.copyto(Tn, T)
         t1 = time.perf_counter()
         time_start_copy += (t1-t0)
 
@@ -526,8 +525,8 @@ def main():
 
         # Temperature update
         t0 = time.perf_counter()
-        Temperature_Source = field_dissipation(T,T_REFERENCE)
-        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE,Temperature_Source)
+        temperature_source = field_dissipation(T,T_REFERENCE,temperature_source)
+        T = general_scalar_transport_equation(T,u,v,dt,NU_TEMPERATURE, scalar_work,temperature_source)
         t1 = time.perf_counter()
         time_general_tranpsort += (t1-t0)
 
