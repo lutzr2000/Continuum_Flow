@@ -9,7 +9,6 @@ Description:
     Huge thanks to Dr. Zhengtao Gan.
 """
 # TODO Fix weird expansion fluctuation in rising temperature
-# TODO Maybe use HDF5 file format for faster writing to avoid bottleneck
 # TODO move inputs in seperate input file, build different test cases
 
 # ===============================
@@ -67,14 +66,12 @@ PRINT_FREQUENCY = 100
 OUTPUT_TIME_STEP = 1/OUTPUT_FPS
 OUTPATH = rf"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 OUTPUT_STATUS = True
-WRITE_QUEUE_SIZE = 16
-NETCDF_COMPRESSION_LEVEL = 0 #important this can become a drag on performance if the writer is slower than the solver
+WRITE_QUEUE_SIZE = 512
+NETCDF_COMPRESSION_LEVEL = 0 
 
-# initial conditions
-u_initial = np.zeros_like(X).astype(PRECISION)
-v_initial = np.zeros_like(X).astype(PRECISION)
-p_initial = np.zeros_like(X).astype(PRECISION)
-T_initial = np.ones_like(X).astype(PRECISION)*T_REFERENCE
+# Boundary_conditons
+U_INFLOW = 0
+V_INFLOW = 0
 
 # Geometry
 circle1_mask = Obstacles.circle(X,Y,NX*0.5*DELTA,NY*0.05*DELTA,0.6)
@@ -377,7 +374,10 @@ def pressure_poisson(u, v, p, dt, Fx, Fy, max_iter=10):
                 pn[i, j] = 0.25 * (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1] - DELTA**2 * b[i, j])
         
         # BCs
-        pn = BC.apply_pressure_BC(pn)
+        p = BC.neumann_boundary_condition(p, "x_low")
+        p = BC.neumann_boundary_condition(p, "x_high")
+        p = BC.neumann_boundary_condition(p, "y_low")
+        p = BC.neumann_boundary_condition(p, "y_high")
         pn = BC.obstacle_boundary_conditions_pressure(pn, obstacle_mask)
         
         # Swap references
@@ -399,11 +399,11 @@ def main():
         set_num_threads(solver_threads)
         print(f"Numba solver threads: {get_num_threads()} / {available_threads} CPUs")
 
-    # fields
-    u = u_initial.copy()
-    v = v_initial.copy()
-    p = p_initial.copy()
-    T = T_initial.copy()
+    # inital fields
+    u = np.zeros_like(X).astype(PRECISION)*U_INFLOW
+    v = np.zeros_like(X).astype(PRECISION)*V_INFLOW
+    p = np.zeros_like(X).astype(PRECISION)
+    T = np.ones_like(X).astype(PRECISION)*T_REFERENCE
 
     Fx = np.zeros_like(p)
     Fy = np.zeros_like(p)
@@ -418,9 +418,10 @@ def main():
     np.copyto(Tn, T)
     
     # Initial BCs
-    u, v = BC.apply_velocity_BC(u, v)
-    p = BC.apply_pressure_BC(p)
-    T = BC.apply_temperature_BC(T)
+    u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
+    u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
+    u,v,p,T = BC.no_slip_wall_BC(u,v,p,T,"y_low")
+    u,v,p,T = BC.slip_wall_BC(u,v,p,T,"y_high")
 
     u, v = BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
     p = BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
@@ -525,9 +526,10 @@ def main():
 
         # Boundary Conditions & Obstacles
         t0 = time.perf_counter()
-        u, v = BC.apply_velocity_BC(u, v)
-        p = BC.apply_pressure_BC(p)
-        T = BC.apply_temperature_BC(T)
+        u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
+        u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
+        u,v,p,T = BC.no_slip_wall_BC(u,v,p,T,"y_low")
+        u,v,p,T = BC.slip_wall_BC(u,v,p,T,"y_high")
         t1 = time.perf_counter()
         time_BC += (t1-t0)
 
