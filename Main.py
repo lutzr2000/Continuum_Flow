@@ -180,7 +180,7 @@ def general_scalar_transport_equation(phi,u,v,dt,nu,phin,Source=None):
 
 
 @njit(parallel=CPU_PARALLEL)
-def update_x_velocity(u, v, p, dt, Fx):
+def update_x_velocity(u, v, p, dt, Fx, un):
     """
     Updates the velocity field in the x direction based on the momentum equation. Discretization with first order upwind
     for the convection term. Central differences for the Diffusion term. Forcing source term is optional
@@ -191,15 +191,16 @@ def update_x_velocity(u, v, p, dt, Fx):
         p (2d-array): p-pressure field
         dt (float): time step
         Fx (2d-array): x-Forcing field
+        un (2d-array): preallocated output array
     Returns:
         un (2d-array): new u-velocity field
     """
     Nx, Ny = u.shape
-    un = u.copy()
 
-    dt_over_DELTA = dt / DELTA
-    dt_over_2RHO_delta = dt / (2 * RHO * DELTA)
-    dt_over_DELTA2 = dt / (DELTA**2)
+    dt_over_delta = dt / DELTA
+    pressure_coeff = dt / (2 * RHO * DELTA)
+    diffusion_coeff = NU * dt / (DELTA * DELTA)
+    force_coeff = dt / RHO
 
     # Loop over interior points, parallel over rows
     for i in prange(1, Nx-1):
@@ -220,27 +221,28 @@ def update_x_velocity(u, v, p, dt, Fx):
                 u_north = u[i+1, j]
                 u_south = u[i, j]
 
-            convection = dt_over_DELTA * (u[i, j] * (u_east - u_west) + v[i, j] * (u_north - u_south))
+            u_center = u[i, j]
+            convection = dt_over_delta * (u_center * (u_east - u_west) + v[i, j] * (u_north - u_south))
 
             # Diffusion (central difference)
-            diffusion = NU * dt_over_DELTA2 * (
-                (u[i, j+1] - 2*u[i, j] + u[i, j-1]) +
-                (u[i+1, j] - 2*u[i, j] + u[i-1, j])
+            diffusion = diffusion_coeff * (
+                (u[i, j+1] - 2.0 * u_center + u[i, j-1]) +
+                (u[i+1, j] - 2.0 * u_center + u[i-1, j])
             )
 
             # Pressure gradient
-            pressure_gradient = dt_over_2RHO_delta * (p[i, j+1] - p[i, j-1])
+            pressure_gradient = pressure_coeff * (p[i, j+1] - p[i, j-1])
 
             # Force term
-            force_term_x = dt / RHO * Fx[i, j]
+            force_term_x = force_coeff * Fx[i, j]
 
             # Update velocity
-            un[i, j] = u[i, j] - convection - pressure_gradient + diffusion + force_term_x
+            un[i, j] = u_center - convection - pressure_gradient + diffusion + force_term_x
 
     return un
 
 @njit(parallel=CPU_PARALLEL)
-def update_y_velocity(u, v, p, dt, Fy):
+def update_y_velocity(u, v, p, dt, Fy, vn):
     """
     Updates the velocity field in the y direction based on the momentum equation. Discretization with first order upwind
     for the convection term. Central differences for the Diffusion term. Forcing source term is optional
@@ -251,15 +253,16 @@ def update_y_velocity(u, v, p, dt, Fy):
         p (2d-array): p-pressure field
         dt (float): time step
         Fy (2d-array): y-Forcing field
+        vn (2d-array): preallocated output array
     Returns:
         vn (2d-array): new v-velocity field
     """
     Nx, Ny = v.shape
-    vn = v.copy()
 
-    dt_over_DELTA = dt / DELTA
-    dt_over_2RHO_delta = dt / (2 * RHO * DELTA)
-    dt_over_DELTA2 = dt / (DELTA**2)
+    dt_over_delta = dt / DELTA
+    pressure_coeff = dt / (2 * RHO * DELTA)
+    diffusion_coeff = NU * dt / (DELTA * DELTA)
+    force_coeff = dt / RHO
 
     # Loop over interior points, parallel over rows
     for i in prange(1, Nx-1):   
@@ -281,25 +284,26 @@ def update_y_velocity(u, v, p, dt, Fy):
                 v_north = v[i+1, j]
                 v_south = v[i, j]
 
-            convection = dt_over_DELTA * (
+            v_center = v[i, j]
+            convection = dt_over_delta * (
                 u[i, j] * (v_east - v_west) +
-                v[i, j] * (v_north - v_south)
+                v_center * (v_north - v_south)
             )
 
             # Diffusion (central difference)
-            diffusion = NU * dt_over_DELTA2 * (
-                (v[i, j+1] - 2*v[i, j] + v[i, j-1]) +
-                (v[i+1, j] - 2*v[i, j] + v[i-1, j])
+            diffusion = diffusion_coeff * (
+                (v[i, j+1] - 2.0 * v_center + v[i, j-1]) +
+                (v[i+1, j] - 2.0 * v_center + v[i-1, j])
             )
 
             # Pressure gradient
-            pressure_gradient = dt_over_2RHO_delta * (p[i+1, j] - p[i-1, j])
+            pressure_gradient = pressure_coeff * (p[i+1, j] - p[i-1, j])
 
             # Force term
-            force_term_y = dt / RHO * Fy[i, j]
+            force_term_y = force_coeff * Fy[i, j]
 
             # Update velocity
-            vn[i, j] = v[i, j] - convection - pressure_gradient + diffusion + force_term_y
+            vn[i, j] = v_center - convection - pressure_gradient + diffusion + force_term_y
 
     return vn
 
@@ -417,6 +421,8 @@ def main():
     Fy = np.zeros_like(p)
     un = np.empty_like(u)
     vn = np.empty_like(v)
+    u_work = np.empty_like(u)
+    v_work = np.empty_like(v)
     pressure_work = np.empty_like(p)
     pressure_rhs = np.empty_like(p)
     scalar_work = np.empty_like(T)
@@ -518,8 +524,8 @@ def main():
 
         # Velocity updates
         t0 = time.perf_counter()
-        u = update_x_velocity(un, vn, p, dt, Fx)
-        v = update_y_velocity(un, vn, p, dt, Fy)
+        u = update_x_velocity(un, vn, p, dt, Fx, u_work)
+        v = update_y_velocity(un, vn, p, dt, Fy, v_work)
         t1 = time.perf_counter()
         time_velocity_update += (t1-t0)
 
