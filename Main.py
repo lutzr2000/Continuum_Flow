@@ -44,8 +44,10 @@ SMOKE_DISSIPATION_RATE = 0.1
 SMOKE_PRODUCTION_RATE = 1
 FUEL_BURN_RATE = 0.1
 FUEL_IGNITION_TEMPERATURE = 100
+R_GAS = 287
 T_REFERENCE = 300
-EXPANSION_RATE = 1/300
+BUOANCY_FACTOR = 1/300
+EXPANSION_RATE = 0.003
 
 # time
 T_MAX = 30
@@ -346,7 +348,7 @@ def update_y_velocity(u, v, p, dt, Fy, vn):
     return vn
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_equation_right_side(u, v, b, dt, Fx, Fy):
+def pressure_equation_right_side(u, v, T, b, dt, Fx, Fy):
     """
     computes the right hand side of the pressure poisson equation
 
@@ -379,12 +381,14 @@ def pressure_equation_right_side(u, v, b, dt, Fx, Fy):
             dFx_dx = (Fx[i, j+1] - Fx[i, j-1]) * half_inv_delta
             dFy_dy = (Fy[i+1, j] - Fy[i-1, j]) * half_inv_delta
 
-            b[i, j] = rho_over_dt * divergence - RHO * (nonlinear + dFx_dx + dFy_dy)
+            thermal_divergence = EXPANSION_RATE * (T[i,j] - T_REFERENCE)
+
+            b[i, j] = rho_over_dt * (divergence - thermal_divergence) - RHO * (nonlinear + dFx_dx + dFy_dy)
 
     return b
 
 @njit(parallel=CPU_PARALLEL)
-def pressure_poisson(u, v, p, p_work, b, dt, Fx, Fy, max_iter=10):
+def pressure_poisson(u, v, p, T, p_work, b, dt, Fx, Fy, max_iter=10):
     """
     Solves the pressure Poisson equation iteratively until the change in 
     the pressure field is smaller than a target threshold or the max_iter count is reached.
@@ -407,7 +411,7 @@ def pressure_poisson(u, v, p, p_work, b, dt, Fx, Fy, max_iter=10):
     """
     Nx, Ny = p.shape
     delta2 = DELTA * DELTA
-    b = pressure_equation_right_side(u, v, b, dt, Fx, Fy)
+    b = pressure_equation_right_side(u, v, T, b, dt, Fx, Fy)
     p_old = p
     p_new = p_work
     
@@ -486,7 +490,7 @@ def main():
     u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
     u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
     u,v,p,T = BC.no_slip_wall_BC(u,v,p,T,"y_low")
-    u,v,p,T = BC.slip_wall_BC(u,v,p,T,"y_high")
+    u,v,p,T = BC.outflow_BC(u,v,p,T,"y_high")
 
     u, v = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, obstacle_mask)
     p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
@@ -575,11 +579,11 @@ def main():
         time_start_copy += (t1-t0)
 
         # ----------Compute buoancy----------------
-        Fy = buoancy_approximation(T,Fy,EXPANSION_RATE,T_REFERENCE)
+        Fy = buoancy_approximation(T,Fy,BUOANCY_FACTOR,T_REFERENCE)
 
         # ----------Pressure poisson----------------
         t0 = time.perf_counter()
-        p = pressure_poisson(un, vn, p, pressure_work, pressure_rhs, dt, Fx, Fy, MAX_ITER)
+        p = pressure_poisson(un, vn, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, MAX_ITER)
         t1 = time.perf_counter()
         time_pressure_update += (t1-t0)
 
@@ -601,7 +605,7 @@ def main():
         u,v,p,T = BC.outflow_BC(u,v,p,T,"x_low")
         u,v,p,T = BC.outflow_BC(u,v,p,T,"x_high")
         u,v,p,T = BC.no_slip_wall_BC(u,v,p,T,"y_low")
-        u,v,p,T = BC.slip_wall_BC(u,v,p,T,"y_high")
+        u,v,p,T = BC.outflow_BC(u,v,p,T,"y_high")
         t1 = time.perf_counter()
         time_BC += (t1-t0)
 
