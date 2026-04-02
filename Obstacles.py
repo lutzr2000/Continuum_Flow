@@ -1,13 +1,16 @@
-def circle(X,Y,x_center,y_center,R):
+def sphere(X, Y, Z, x_center, y_center, z_center, radius):
     """
-    Creates a boolean mask for a circular obstacle
-    
-    Args:
-        X, Y: meshgrid arrays
-        x_center, y_center: center of circle
-        R: radius
-        
-    Returns:
-        mask (2D boolean array)
+    Creates a boolean mask for a spherical obstacle.
     """
-    return (X - x_center)**2 + (Y - y_center)**2 <= R**2
+    return (
+        (X - x_center) ** 2 +
+        (Y - y_center) ** 2 +
+        (Z - z_center) ** 2
+    ) <= radius ** 2
+
+
+def cylinder_z(X, Y, x_center, y_center, radius):
+    """
+    Creates a boolean mask for a cylinder aligned with the z-axis.
+    """
+    return (X - x_center) ** 2 + (Y - y_center) ** 2 <= radius ** 2

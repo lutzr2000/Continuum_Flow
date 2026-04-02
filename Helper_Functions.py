@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit, prange
 
 @njit(parallel=True)
-def compute_CFL(u,v,dt,delta):
+def compute_CFL(u, v, w, dt, delta):
     """
     computes the CFL condition
 
@@ -17,21 +17,27 @@ def compute_CFL(u,v,dt,delta):
     """
     max_u = 0.0
     max_v = 0.0
-    nx, ny = u.shape
+    max_w = 0.0
+    nx, ny, nz = u.shape
 
-    for i in range(nx):
+    for i in prange(nx):
         for j in range(ny):
-            if abs(u[i,j]) > max_u:
-                max_u = abs(u[i,j])
-            if abs(v[i,j]) > max_v:
-                max_v = abs(v[i,j])
+            for k in range(nz):
+                if abs(u[i, j, k]) > max_u:
+                    max_u = abs(u[i, j, k])
+                if abs(v[i, j, k]) > max_v:
+                    max_v = abs(v[i, j, k])
+                if abs(w[i, j, k]) > max_w:
+                    max_w = abs(w[i, j, k])
 
     CFL_x = max_u * dt / delta
     CFL_y = max_v * dt / delta
-    return max(CFL_x, CFL_y)
+    CFL_z = max_w * dt / delta
+    return max(CFL_x, CFL_y, CFL_z)
 
 @njit(parallel=True)
-def compute_new_timestep(u, v, F, RHO, delta, nu, CFL_max, row_max_u, row_max_v, row_max_F):
+def compute_new_timestep(u, v, w, F, RHO, delta, nu, CFL_max,
+                         plane_max_u, plane_max_v, plane_max_w, plane_max_F):
     """
     Computes a stable time step based on maximum CFL condition for convection and diffusion.
     
@@ -50,57 +56,67 @@ def compute_new_timestep(u, v, F, RHO, delta, nu, CFL_max, row_max_u, row_max_v,
         dt (float): stable time step
     """
     EPS = 1e-12
-    nx, ny = u.shape
+    nx, ny, nz = u.shape
 
     for i in prange(nx):
-        max_u_row = 0.0
-        max_v_row = 0.0
-        max_F_row = 0.0
+        max_u_plane = 0.0
+        max_v_plane = 0.0
+        max_w_plane = 0.0
+        max_F_plane = 0.0
 
         for j in range(ny):
-            uij = u[i, j]
-            vij = v[i, j]
-            Fij = F[i, j]
+            for k in range(nz):
+                uij = u[i, j, k]
+                vij = v[i, j, k]
+                wij = w[i, j, k]
+                Fij = F[i, j, k]
 
-            abs_u = uij if uij >= 0.0 else -uij
-            abs_v = vij if vij >= 0.0 else -vij
-            abs_F = Fij if Fij >= 0.0 else -Fij
+                abs_u = uij if uij >= 0.0 else -uij
+                abs_v = vij if vij >= 0.0 else -vij
+                abs_w = wij if wij >= 0.0 else -wij
+                abs_F = Fij if Fij >= 0.0 else -Fij
 
-            if abs_u > max_u_row:
-                max_u_row = abs_u
-            if abs_v > max_v_row:
-                max_v_row = abs_v
-            if abs_F > max_F_row:
-                max_F_row = abs_F
+                if abs_u > max_u_plane:
+                    max_u_plane = abs_u
+                if abs_v > max_v_plane:
+                    max_v_plane = abs_v
+                if abs_w > max_w_plane:
+                    max_w_plane = abs_w
+                if abs_F > max_F_plane:
+                    max_F_plane = abs_F
 
-        row_max_u[i] = max_u_row
-        row_max_v[i] = max_v_row
-        row_max_F[i] = max_F_row
+        plane_max_u[i] = max_u_plane
+        plane_max_v[i] = max_v_plane
+        plane_max_w[i] = max_w_plane
+        plane_max_F[i] = max_F_plane
 
     abs_u_max = 0.0
     abs_v_max = 0.0
+    abs_w_max = 0.0
     abs_F_max = 0.0
 
     for i in range(nx):
-        if row_max_u[i] > abs_u_max:
-            abs_u_max = row_max_u[i]
-        if row_max_v[i] > abs_v_max:
-            abs_v_max = row_max_v[i]
-        if row_max_F[i] > abs_F_max:
-            abs_F_max = row_max_F[i]
+        if plane_max_u[i] > abs_u_max:
+            abs_u_max = plane_max_u[i]
+        if plane_max_v[i] > abs_v_max:
+            abs_v_max = plane_max_v[i]
+        if plane_max_w[i] > abs_w_max:
+            abs_w_max = plane_max_w[i]
+        if plane_max_F[i] > abs_F_max:
+            abs_F_max = plane_max_F[i]
 
     cfl_delta = CFL_max * delta
-    dt_x = CFL_max * delta / max(abs_u_max, EPS)
-    dt_y = CFL_max * delta / max(abs_v_max, EPS)
+    dt_x = cfl_delta / max(abs_u_max, EPS)
+    dt_y = cfl_delta / max(abs_v_max, EPS)
+    dt_z = cfl_delta / max(abs_w_max, EPS)
     
-    dt_conv = min(dt_x, dt_y)
-    dt_diff = 0.25 * delta * delta / nu
+    dt_conv = min(dt_x, dt_y, dt_z)
+    dt_diff = delta * delta / (6.0 * nu)
     dt_forcing = cfl_delta * RHO / max(abs_F_max, EPS)
-    dt = min(dt_conv, dt_diff, dt_forcing)
-    return dt
+    return min(dt_conv, dt_diff, dt_forcing)
 
 @njit
-def compute_divergence(u, v, delta):
+def compute_divergence(u, v, w, delta):
     """
     computes divergence of a 2-d velocity field without the boundary
 
@@ -113,16 +129,18 @@ def compute_divergence(u, v, delta):
         div (2d-array): divergence
         div_l1 (2d-array): L1 norm of divergence
     """
-    nx, ny = u.shape
-    div = np.zeros((nx, ny))
+    nx, ny, nz = u.shape
+    div = np.zeros((nx, ny, nz))
     sum_div = 0.0
 
-    for i in range(1, nx-1):
-        for j in range(1, ny-1):
-            dudx = (u[i, j+1] - u[i, j-1]) / (2*delta)
-            dvdy = (v[i+1, j] - v[i-1, j]) / (2*delta)
-            div[i, j] = dudx + dvdy
-            sum_div += abs(div[i,j])
+    for i in range(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                dudx = (u[i + 1, j, k] - u[i - 1, j, k]) / (2 * delta)
+                dvdy = (v[i, j + 1, k] - v[i, j - 1, k]) / (2 * delta)
+                dwdz = (w[i, j, k + 1] - w[i, j, k - 1]) / (2 * delta)
+                div[i, j, k] = dudx + dvdy + dwdz
+                sum_div += abs(div[i, j, k])
 
-    div_l1 = sum_div / ((nx-2)*(ny-2))
+    div_l1 = sum_div / ((nx - 2) * (ny - 2) * (nz - 2))
     return div, div_l1
