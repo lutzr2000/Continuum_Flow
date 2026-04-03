@@ -39,13 +39,13 @@ TEMPERATURE_PRODUCTION_RATE = 1.0
 SMOKE_DISSIPATION_RATE = 0.1
 SMOKE_PRODUCTION_RATE = 1.0
 FUEL_BURN_RATE = 0.1
-FUEL_IGNITION_TEMPERATURE = 100.0
+FUEL_IGNITION_TEMPERATURE = 500.0
 T_REFERENCE = 300.0
 BUOANCY_FACTOR = 1/T_REFERENCE
 EXPANSION_RATE = 0.003
 
 # time
-T_MAX = 30.0
+T_MAX = 10.0
 CFL_MAX = 0.8
 
 # solver
@@ -55,10 +55,10 @@ CPU_PARALLEL = True
 RESERVE_CPU_CORES_FOR_IO = 1
 
 # resolution
-DELTA = 0.2 
-NX = 64 
-NY = 64 
-NZ = 64 
+DELTA = 0.1
+NX = 128 
+NY = 128
+NZ = 128 
 x = np.linspace(0.0, (NX - 1) * DELTA, NX, dtype=PRECISION)
 y = np.linspace(0.0, (NY - 1) * DELTA, NY, dtype=PRECISION)
 z = np.linspace(0.0, (NZ - 1) * DELTA, NZ, dtype=PRECISION)
@@ -109,7 +109,7 @@ def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
 
 
 @njit(parallel=CPU_PARALLEL)
-def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out):
+def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out):
     """
     Updates temperature, smoke and fuel with convection, diffusion and source terms in one transport sweep.
     Convection is done by first order upwind, diffusion with central differences.
@@ -125,10 +125,12 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
         T_out (3d-array): output array for updated temperature
         smoke_out (3d-array): output array for updated smoke
         fuel_out (3d-array): output array for updated fuel
+        flame_out (3d-array): output array for flame indicator
     Returns:
         T_out (3d-array): updated temperature field
         smoke_out (3d-array): updated smoke field
         fuel_out (3d-array): updated fuel field
+        flame_out (3d-array): updated flame field
     """
     nx, ny, nz = u.shape
 
@@ -137,6 +139,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     temp_diffusion_coeff = NU_TEMPERATURE * dt_over_delta2
     smoke_diffusion_coeff = NU_SMOKE * dt_over_delta2
     fuel_diffusion_coeff = NU_FUEL * dt_over_delta2
+    flame_out.fill(0.0)
 
     for i in prange(1, nx - 1):
         for j in range(1, ny - 1):
@@ -246,8 +249,9 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
                 T_out[i, j, k] = T_center - temp_convection + temp_diffusion + dt * temperature_source
                 smoke_out[i, j, k] = smoke_center - smoke_convection + smoke_diffusion + dt * smoke_source
                 fuel_out[i, j, k] = fuel_center - fuel_convection + fuel_diffusion + dt * fuel_source
+                flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
 
-    return T_out, smoke_out, fuel_out
+    return T_out, smoke_out, fuel_out, flame_out
 
 
 @njit(parallel=CPU_PARALLEL)
@@ -623,6 +627,9 @@ def main():
     fuel = np.zeros((NX, NY, NZ), dtype=PRECISION)
     fuel_work = np.empty_like(fuel)
 
+    flame = np.zeros((NX, NY, NZ), dtype=PRECISION)
+    flame_work = np.empty_like(flame)
+
     Fx = np.zeros_like(p)
     Fy = np.zeros_like(p)
     Fz = np.zeros_like(p)
@@ -669,7 +676,7 @@ def main():
     next_output_time = 0.0
     output_index = 0
 
-    dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, time_var = Output_Functions.initialize_netcdf(
+    dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var = Output_Functions.initialize_netcdf(
         OUTPATH, NX, NY, NZ, x, y, z, comp_level=NETCDF_COMPRESSION_LEVEL
     )
 
@@ -686,6 +693,7 @@ def main():
             'T': np.empty_like(T),
             'smoke': np.empty_like(smoke),
             'fuel': np.empty_like(fuel),
+            'flame': np.empty_like(fuel),
         })
 
     def writer_thread_func():
@@ -697,9 +705,9 @@ def main():
 
             output_idx, time_value, fields = item
             Output_Functions.write_to_netcdf(
-                u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, time_var,
+                u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var,
                 output_idx, time_value,
-                fields['u'], fields['v'], fields['w'], fields['p'], fields['T'], fields['smoke'], fields['fuel']
+                fields['u'], fields['v'], fields['w'], fields['p'], fields['T'], fields['smoke'], fields['fuel'], fields['flame']
             )
             buffer_pool.put(fields)
             write_queue.task_done()
@@ -741,7 +749,9 @@ def main():
 
         #------------Smoke, Fuel and Temperature-------------------
         t0 = time.perf_counter()
-        T, smoke, fuel = update_scalar_fields(T, smoke, fuel, u, v, w, dt, temperature_work, smoke_work, fuel_work)
+        T, smoke, fuel, flame = update_scalar_fields(
+            T, smoke, fuel, u, v, w, dt, temperature_work, smoke_work, fuel_work, flame_work
+        )
         t1 = time.perf_counter()
         time_scalar_update += (t1 - t0)
 
@@ -762,6 +772,7 @@ def main():
         p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
         T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, 600.0)
         fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
+        flame = Obstacle_BC.obstacle_boundary_conditions_scalar(flame, obstacle_mask, 0.0)
         t1 = time.perf_counter()
         time_obstacle += (t1 - t0)
 
@@ -775,6 +786,7 @@ def main():
             np.copyto(fields['T'], T)
             np.copyto(fields['smoke'], smoke)
             np.copyto(fields['fuel'], fuel)
+            np.copyto(fields['flame'], flame)
             write_queue.put((output_index, t, fields))
             max_write_queue_fill = max(max_write_queue_fill, write_queue.qsize())
 

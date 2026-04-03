@@ -23,6 +23,7 @@ def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
         T_var (netcdf-variable): output variable for temperature
         smoke_var (netcdf-variable): output variable for smoke
         fuel_var (netcdf-variable): output variable for fuel
+        flame_var (netcdf-variable): output variable for burning fuel indicator
         time_var (netcdf-variable): output variable for time
     """
     dataset = nc.Dataset(filepath, 'w', format='NETCDF4')
@@ -54,6 +55,7 @@ def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
     T_var = dataset.createVariable('T', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
     smoke_var = dataset.createVariable('smoke', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
     fuel_var = dataset.createVariable('fuel', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
+    flame_var = dataset.createVariable('flame', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
 
     time_var = dataset.createVariable('time', 'f8', ('time',))
     time_var.units = 'seconds since 2026-04-01 00:00:00'
@@ -66,12 +68,13 @@ def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
     T_var.units = 'K'
     smoke_var.units = '1'
     fuel_var.units = '1'
+    flame_var.units = '1'
 
-    return dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, time_var
+    return dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var
 
 
-def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
-                    time_var, timestep, time_value, u, v, w, p, T, smoke, fuel):
+def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var,
+                    time_var, timestep, time_value, u, v, w, p, T, smoke, fuel, flame):
     """
     writes the current timestep data into the netcdf file.
 
@@ -83,6 +86,7 @@ def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
         T_var (netcdf-variable): output variable for temperature
         smoke_var (netcdf-variable): output variable for smoke
         fuel_var (netcdf-variable): output variable for fuel
+        flame_var (netcdf-variable): output variable for burning fuel indicator
         time_var (netcdf-variable): output variable for time
         timestep (int): output timestep index
         time_value (float): physical simulation time
@@ -93,6 +97,7 @@ def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
         T (3d-array): temperature field
         smoke (3d-array): smoke field
         fuel (3d-array): fuel field
+        flame (3d-array): flame field
     Returns:
         None
     """
@@ -104,6 +109,7 @@ def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
     T_var[timestep, :, :, :] = T.transpose(2, 1, 0)
     smoke_var[timestep, :, :, :] = smoke.transpose(2, 1, 0)
     fuel_var[timestep, :, :, :] = fuel.transpose(2, 1, 0)
+    flame_var[timestep, :, :, :] = flame.transpose(2, 1, 0)
 
 
 def close_netcdf(dataset):
