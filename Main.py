@@ -79,16 +79,16 @@ V_INFLOW = 0.0
 W_INFLOW = 0.0
 
 # Geometry
-obstacle_mask = Obstacles.sphere(X, Y, Z, NX * 0.5 * DELTA, NY * 0.05 * DELTA, NX * 0.5 * DELTA, 0.6)
+obstacle_mask = Obstacles.sphere(X, Y, Z, NX * 0.5 * DELTA, NY * 0.5 * DELTA, NX * 0.05 * DELTA, 0.6)
 
 # ===============================
 # Methods
 # ===============================
 
 @njit(parallel=CPU_PARALLEL)
-def buoyancy_approximation(T, Fy, expansion_coefficient, T_ref):
+def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
     """
-    computes the buoyancy force in y-direction with the Boussinesq approximation.
+    computes the buoyancy force in z-direction with the Boussinesq approximation.
 
     Args:
         T (3d-array): temperature field
@@ -103,9 +103,9 @@ def buoyancy_approximation(T, Fy, expansion_coefficient, T_ref):
     for i in prange(1, nx - 1):
         for j in range(1, ny - 1):
             for k in range(1, nz - 1):
-                Fy[i, j, k] = g * expansion_coefficient * (T[i, j, k] - T_ref)
+                Fz[i, j, k] = g * expansion_coefficient * (T[i, j, k] - T_ref)
 
-    return Fy
+    return Fz
 
 
 @njit(parallel=CPU_PARALLEL)
@@ -635,10 +635,10 @@ def main():
     #------------BCs-------------------
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
-    u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'y_low')
+    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_low')
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_high')
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'z_low')
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'z_high')
+    u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_low')
+    u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_high')
 
     #------------Obstacle-------------------
     u, v, w = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
@@ -659,7 +659,7 @@ def main():
     #------------Dynamic time step-------------------
     t = 0.0
     dt = Helper_Functions.compute_new_timestep(
-        u, v, w, Fy, RHO, DELTA, NU, CFL_MAX,
+        u, v, w, Fz, RHO, DELTA, NU, CFL_MAX,
         timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w, timestep_plane_max_F
     )
     if dt > 1.0 / OUTPUT_FPS:
@@ -723,7 +723,7 @@ def main():
         time_start_copy += (t1 - t0)
 
         #------------Buoancy-------------------
-        Fy = buoyancy_approximation(T, Fy, BUOANCY_FACTOR, T_REFERENCE)
+        Fz = buoyancy_approximation(T, Fz, BUOANCY_FACTOR, T_REFERENCE)
 
         #------------Pressure-------------------
         t0 = time.perf_counter()
@@ -749,10 +749,10 @@ def main():
         t0 = time.perf_counter()
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
-        u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'y_low')
+        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_low')
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_high')
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'z_low')
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'z_high')
+        u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_low')
+        u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_high')
         t1 = time.perf_counter()
         time_BC += (t1 - t0)
 
@@ -795,7 +795,7 @@ def main():
         t += dt
 
         dt_new = Helper_Functions.compute_new_timestep(
-            u, v, w, Fy, RHO, DELTA, NU, CFL_MAX,
+            u, v, w, Fz, RHO, DELTA, NU, CFL_MAX,
             timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w, timestep_plane_max_F
         )
 
