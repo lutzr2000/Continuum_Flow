@@ -3,7 +3,27 @@ import netCDF4 as nc
 
 def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
     """
-    Create an empty 3D netcdf file.
+    creates an empty 3D netcdf file and initializes the output variables.
+
+    Args:
+        filepath (str): path to the netcdf output file
+        nx (int): number of cells in x-direction
+        ny (int): number of cells in y-direction
+        nz (int): number of cells in z-direction
+        x (1d-array): x-coordinate values
+        y (1d-array): y-coordinate values
+        z (1d-array): z-coordinate values
+        comp_level (int): netcdf compression level
+    Returns:
+        dataset (netcdf-dataset): opened netcdf dataset
+        u_var (netcdf-variable): output variable for x-velocity
+        v_var (netcdf-variable): output variable for y-velocity
+        w_var (netcdf-variable): output variable for z-velocity
+        p_var (netcdf-variable): output variable for pressure
+        T_var (netcdf-variable): output variable for temperature
+        smoke_var (netcdf-variable): output variable for smoke
+        fuel_var (netcdf-variable): output variable for fuel
+        time_var (netcdf-variable): output variable for time
     """
     dataset = nc.Dataset(filepath, 'w', format='NETCDF4')
 
@@ -53,7 +73,28 @@ def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
 def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
                     time_var, timestep, time_value, u, v, w, p, T, smoke, fuel):
     """
-    Writes the current timestep into the netcdf file.
+    writes the current timestep data into the netcdf file.
+
+    Args:
+        u_var (netcdf-variable): output variable for x-velocity
+        v_var (netcdf-variable): output variable for y-velocity
+        w_var (netcdf-variable): output variable for z-velocity
+        p_var (netcdf-variable): output variable for pressure
+        T_var (netcdf-variable): output variable for temperature
+        smoke_var (netcdf-variable): output variable for smoke
+        fuel_var (netcdf-variable): output variable for fuel
+        time_var (netcdf-variable): output variable for time
+        timestep (int): output timestep index
+        time_value (float): physical simulation time
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        p (3d-array): pressure field
+        T (3d-array): temperature field
+        smoke (3d-array): smoke field
+        fuel (3d-array): fuel field
+    Returns:
+        None
     """
     time_var[timestep] = time_value
     u_var[timestep, :, :, :] = u.transpose(2, 1, 0)
@@ -67,6 +108,11 @@ def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var,
 
 def close_netcdf(dataset):
     """
-    Closes the netcdf dataset.
+    closes the netcdf dataset.
+
+    Args:
+        dataset (netcdf-dataset): opened netcdf dataset
+    Returns:
+        None
     """
     dataset.close()

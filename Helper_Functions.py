@@ -4,16 +4,17 @@ from numba import njit, prange
 @njit(parallel=True)
 def compute_CFL(u, v, w, dt, delta):
     """
-    computes the CFL condition
+    computes the CFL number of the 3D velocity field.
 
     Args:
-        u (2d-array): u-velocity field
-        v (2d-array): v-velocity field
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
         dt (float): time step size
         delta (float): space resolution
 
     Returns:
-        CFL (flaot): CFL number
+        CFL (float): CFL number
     """
     max_u = 0.0
     max_v = 0.0
@@ -39,19 +40,21 @@ def compute_CFL(u, v, w, dt, delta):
 def compute_new_timestep(u, v, w, F, RHO, delta, nu, CFL_max,
                          plane_max_u, plane_max_v, plane_max_w, plane_max_F):
     """
-    Computes a stable time step based on maximum CFL condition for convection and diffusion.
-    
+    computes a stable timestep based on convection, diffusion and forcing limits.
+
     Args:
-        u (2d-array): u-velocity field
-        v (2d-array): v-velocity field
-        F (2d-array): force field used in the timestep limiter
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        F (3d-array): force field used in the timestep limiter
+        RHO (float): fluid density
         delta (float): space resolution
         nu (float): viscosity
         CFL_max (float): maximum CFL number
-        row_max_u (1d-array): preallocated row maxima workspace for u
-        row_max_v (1d-array): preallocated row maxima workspace for v
-        row_max_F (1d-array): preallocated row maxima workspace for F
-
+        plane_max_u (1d-array): preallocated plane maxima workspace for u
+        plane_max_v (1d-array): preallocated plane maxima workspace for v
+        plane_max_w (1d-array): preallocated plane maxima workspace for w
+        plane_max_F (1d-array): preallocated plane maxima workspace for F
     Returns:
         dt (float): stable time step
     """
@@ -118,16 +121,17 @@ def compute_new_timestep(u, v, w, F, RHO, delta, nu, CFL_max,
 @njit
 def compute_divergence(u, v, w, delta):
     """
-    computes divergence of a 2-d velocity field without the boundary
+    computes the divergence of a 3D velocity field excluding the boundary cells.
 
     Args:
-        u (2d-array): u-velocity field
-        v (2d-array): v-velocity field
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
         delta (float): space resolution
 
     Returns:
-        div (2d-array): divergence
-        div_l1 (2d-array): L1 norm of divergence
+        div (3d-array): divergence field
+        div_l1 (float): L1 norm of the divergence field
     """
     nx, ny, nz = u.shape
     div = np.zeros((nx, ny, nz))

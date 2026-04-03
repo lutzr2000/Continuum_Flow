@@ -4,7 +4,13 @@ from numba import njit
 @njit
 def neumann_boundary_condition(field, side):
     """
-    Applies a zero-gradient boundary condition to one side of a 3D field.
+    applies a zero-gradient boundary condition to one side of a 3D field.
+
+    Args:
+        field (3d-array): field to update
+        side (str): boundary side identifier
+    Returns:
+        field (3d-array): field with applied boundary condition
     """
     nx, ny, nz = field.shape
 
@@ -39,7 +45,14 @@ def neumann_boundary_condition(field, side):
 @njit
 def dirichlet_boundary_condition(field, side, value):
     """
-    Applies a fixed-value boundary condition to one side of a 3D field.
+    applies a fixed-value boundary condition to one side of a 3D field.
+
+    Args:
+        field (3d-array): field to update
+        side (str): boundary side identifier
+        value (float): prescribed boundary value
+    Returns:
+        field (3d-array): field with applied boundary condition
     """
     nx, ny, nz = field.shape
 
@@ -74,7 +87,25 @@ def dirichlet_boundary_condition(field, side, value):
 @njit
 def inflow_BC(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, T_inflow=None):
     """
-    Applies inflow boundary conditions to a given side.
+    applies inflow boundary conditions to a given side of the domain.
+
+    Args:
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        p (3d-array): pressure field
+        T (3d-array): temperature field
+        side (str): boundary side identifier
+        u_inflow (float): inflow velocity in x-direction
+        v_inflow (float): inflow velocity in y-direction
+        w_inflow (float): inflow velocity in z-direction
+        T_inflow (float, optional): prescribed inflow temperature
+    Returns:
+        u (3d-array): updated x-velocity field
+        v (3d-array): updated y-velocity field
+        w (3d-array): updated z-velocity field
+        p (3d-array): updated pressure field
+        T (3d-array): updated temperature field
     """
     u = dirichlet_boundary_condition(u, side, u_inflow)
     v = dirichlet_boundary_condition(v, side, v_inflow)
@@ -92,7 +123,21 @@ def inflow_BC(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, T_inflow=None):
 @njit
 def outflow_BC(u, v, w, p, T, side):
     """
-    Applies outflow boundary conditions to a given side.
+    applies outflow boundary conditions to a given side of the domain.
+
+    Args:
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        p (3d-array): pressure field
+        T (3d-array): temperature field
+        side (str): boundary side identifier
+    Returns:
+        u (3d-array): updated x-velocity field
+        v (3d-array): updated y-velocity field
+        w (3d-array): updated z-velocity field
+        p (3d-array): updated pressure field
+        T (3d-array): updated temperature field
     """
     u = neumann_boundary_condition(u, side)
     v = neumann_boundary_condition(v, side)
@@ -106,7 +151,22 @@ def outflow_BC(u, v, w, p, T, side):
 @njit
 def slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
     """
-    Applies slip wall boundary conditions to a given side of a 3D domain.
+    applies slip wall boundary conditions to a given side of the 3D domain.
+
+    Args:
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        p (3d-array): pressure field
+        T (3d-array): temperature field
+        side (str): boundary side identifier
+        T_Wall (float, optional): prescribed wall temperature
+    Returns:
+        u (3d-array): updated x-velocity field
+        v (3d-array): updated y-velocity field
+        w (3d-array): updated z-velocity field
+        p (3d-array): updated pressure field
+        T (3d-array): updated temperature field
     """
     if side == "x_low" or side == "x_high":
         u = dirichlet_boundary_condition(u, side, 0.0)
@@ -133,7 +193,22 @@ def slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
 @njit
 def no_slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
     """
-    Applies no-slip wall boundary conditions to a given side of a 3D domain.
+    applies no-slip wall boundary conditions to a given side of the 3D domain.
+
+    Args:
+        u (3d-array): x-velocity field
+        v (3d-array): y-velocity field
+        w (3d-array): z-velocity field
+        p (3d-array): pressure field
+        T (3d-array): temperature field
+        side (str): boundary side identifier
+        T_Wall (float, optional): prescribed wall temperature
+    Returns:
+        u (3d-array): updated x-velocity field
+        v (3d-array): updated y-velocity field
+        w (3d-array): updated z-velocity field
+        p (3d-array): updated pressure field
+        T (3d-array): updated temperature field
     """
     u = dirichlet_boundary_condition(u, side, 0.0)
     v = dirichlet_boundary_condition(v, side, 0.0)
