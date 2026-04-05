@@ -1,7 +1,7 @@
 from numba import njit
 
 
-@njit
+@njit(parallel=False, cache=True)
 def neumann_boundary_condition(field, side):
     """
     applies a zero-gradient boundary condition to one side of a 3D field.
@@ -42,7 +42,7 @@ def neumann_boundary_condition(field, side):
     return field
 
 
-@njit
+@njit(parallel=False, cache=True)
 def dirichlet_boundary_condition(field, side, value):
     """
     applies a fixed-value boundary condition to one side of a 3D field.
@@ -84,7 +84,7 @@ def dirichlet_boundary_condition(field, side, value):
     return field
 
 
-@njit
+@njit(parallel=False, cache=True)
 def inflow_BC(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, T_inflow=None):
     """
     applies inflow boundary conditions to a given side of the domain.
@@ -120,7 +120,7 @@ def inflow_BC(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, T_inflow=None):
     return u, v, w, p, T
 
 
-@njit
+@njit(parallel=False, cache=True)
 def outflow_BC(u, v, w, p, T, side):
     """
     applies outflow boundary conditions to a given side of the domain.
@@ -148,7 +148,7 @@ def outflow_BC(u, v, w, p, T, side):
     return u, v, w, p, T
 
 
-@njit
+@njit(parallel=False, cache=True)
 def slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
     """
     applies slip wall boundary conditions to a given side of the 3D domain.
@@ -190,7 +190,7 @@ def slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
     return u, v, w, p, T
 
 
-@njit
+@njit(parallel=False, cache=True)
 def no_slip_wall_BC(u, v, w, p, T, side, T_Wall=None):
     """
     applies no-slip wall boundary conditions to a given side of the 3D domain.

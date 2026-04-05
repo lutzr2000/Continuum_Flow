@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-@njit(parallel=True)
+@njit(parallel=False, cache=True)
 def compute_CFL(u, v, w, dt, delta):
     """
     computes the CFL number of the 3D velocity field.
@@ -36,7 +36,7 @@ def compute_CFL(u, v, w, dt, delta):
     CFL_z = max_w * dt / delta
     return max(CFL_x, CFL_y, CFL_z)
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def compute_new_timestep(u, v, w, F, RHO, delta, nu, CFL_max,
                          plane_max_u, plane_max_v, plane_max_w, plane_max_F):
     """
@@ -118,7 +118,7 @@ def compute_new_timestep(u, v, w, F, RHO, delta, nu, CFL_max,
     dt_forcing = cfl_delta * RHO / max(abs_F_max, EPS)
     return min(dt_conv, dt_diff, dt_forcing)
 
-@njit
+@njit(parallel=False, cache=True)
 def compute_divergence(u, v, w, delta):
     """
     computes the divergence of a 3D velocity field excluding the boundary cells.

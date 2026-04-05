@@ -6,17 +6,16 @@ Description:
 
     This version extends the original 2D solver to a 3D Cartesian grid.
 """
-# TODO Export to VDB
+# TODO Export to VDB via Blenders python
 # TODO add forces, especially a random one
+# TODO faster start
 
 import numpy as np
-import time
 import sys
 import os
 import threading
 import queue
 import cProfile
-import pstats
 
 from numba import njit, prange, set_num_threads, get_num_threads
 
@@ -33,7 +32,7 @@ import Helper_Functions
 # fluid
 RHO = 1.225
 NU = 1.81e-5
-NU_TEMPERATURE = 0.001
+NU_TEMPERATURE = 0.1 # a higher value here seems to help
 NU_SMOKE = 0.001
 NU_FUEL = 0.001
 TEMPERATURE_DISSIPATION_RATE = 0.1
@@ -54,7 +53,7 @@ CFL_MAX = 0.8
 MAX_ITER = 4
 PRECISION = np.float32
 CPU_PARALLEL = True
-RESERVE_CPU_CORES_FOR_IO = 1
+RESERVE_CPU_CORES_FOR_IO = 2
 
 # resolution
 DELTA = 0.1
@@ -87,7 +86,7 @@ obstacle_mask = Obstacles.sphere(X, Y, Z, NX * 0.5 * DELTA, NY * 0.5 * DELTA, NX
 # Methods
 # ===============================
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation.
@@ -110,7 +109,7 @@ def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
     return Fz
 
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out):
     """
     Updates temperature, smoke and fuel with convection, diffusion and source terms in one transport sweep.
@@ -256,7 +255,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     return T_out, smoke_out, fuel_out, flame_out
 
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def update_x_velocity(u, v, w, p, dt, Fx, un):
     """
     Updates the velocity field in x-direction based on the momentum equation. 
@@ -325,7 +324,7 @@ def update_x_velocity(u, v, w, p, dt, Fx, un):
     return un
 
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def update_y_velocity(u, v, w, p, dt, Fy, vn):
     """
     Updates the velocity field in y-direction based on the momentum equation.
@@ -394,7 +393,7 @@ def update_y_velocity(u, v, w, p, dt, Fy, vn):
     return vn
 
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def update_z_velocity(u, v, w, p, dt, Fz, wn):
     """
     Updates the velocity field in z-direction based on the momentum equation. 
@@ -462,7 +461,7 @@ def update_z_velocity(u, v, w, p, dt, Fz, wn):
 
     return wn
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz):
     """
     computes the right hand side of the pressure Poisson equation.
@@ -524,7 +523,7 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz):
     return b
 
 
-@njit(parallel=CPU_PARALLEL)
+@njit(parallel=CPU_PARALLEL, cache=True)
 def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, max_iter=10):
     """
     solves the 3D pressure Poisson equation with Jacobi iterations.
@@ -580,8 +579,6 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, max_iter=10):
                 p_new[i, j, 0] = p_new[i, j, 1]
                 p_new[i, j, nz - 1] = p_new[i, j, nz - 2]
 
-        #------------Obstacle-------------------
-        p_new = Obstacle_BC.obstacle_boundary_conditions_pressure(p_new, obstacle_mask)
         #------------Swap-------------------
         p_old, p_new = p_new, p_old
 
@@ -813,6 +810,6 @@ if __name__ == '__main__':
     main()
     profiler.disable()
     
-    # # Save profile to file
     profile_file = 'Performance.prof'
+    profiler.dump_stats(profile_file)
 

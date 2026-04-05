@@ -1,7 +1,7 @@
 from numba import njit, prange
 
 
-@njit
+@njit(parallel=False, cache=True)
 def obstacle_boundary_conditions_velocity(u, v, w, mask):
     """
     applies no-slip velocity conditions inside a 3D obstacle mask.
@@ -27,7 +27,7 @@ def obstacle_boundary_conditions_velocity(u, v, w, mask):
     return u, v, w
 
 
-@njit
+@njit(parallel=False, cache=True)
 def obstacle_boundary_conditions_pressure(p, mask):
     """
     applies zero pressure inside a 3D obstacle mask.
@@ -47,7 +47,7 @@ def obstacle_boundary_conditions_pressure(p, mask):
     return p
 
 
-@njit
+@njit(parallel=False, cache=True)
 def obstacle_boundary_conditions_scalar(phi, mask, value):
     """
     applies a fixed scalar value inside a 3D obstacle mask.
