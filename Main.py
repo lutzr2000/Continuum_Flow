@@ -15,6 +15,8 @@ import sys
 import os
 import threading
 import queue
+import cProfile
+import pstats
 
 from numba import njit, prange, set_num_threads, get_num_threads
 
@@ -653,16 +655,6 @@ def main():
     T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, 600.0)
     fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
 
-    start_total_time = time.time()
-    total_loop_time = 0.0
-    time_pressure_update = 0.0
-    time_velocity_update = 0.0
-    time_scalar_update = 0.0
-    time_BC = 0.0
-    time_obstacle = 0.0
-    time_start_copy = 0.0
-    time_compute_step = 0.0
-
     #------------Dynamic time step-------------------
     t = 0.0
     dt = Helper_Functions.compute_new_timestep(
@@ -721,60 +713,40 @@ def main():
 
     while t < T_MAX:
         #------------Start-------------------
-        loop_start_time = time.time()
-
-        t0 = time.perf_counter()
         np.copyto(un, u)
         np.copyto(vn, v)
         np.copyto(wn, w)
-        t1 = time.perf_counter()
-        time_start_copy += (t1 - t0)
 
         #------------Buoancy-------------------
         Fz = buoyancy_approximation(T, Fz, BUOANCY_FACTOR, T_REFERENCE)
 
         #------------Pressure-------------------
-        t0 = time.perf_counter()
         p = pressure_poisson(un, vn, wn, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz, MAX_ITER)
-        t1 = time.perf_counter()
-        time_pressure_update += (t1 - t0)
 
         #------------Velocity-------------------
-        t0 = time.perf_counter()
         u = update_x_velocity(un, vn, wn, p, dt, Fx, u_work)
         v = update_y_velocity(un, vn, wn, p, dt, Fy, v_work)
         w = update_z_velocity(un, vn, wn, p, dt, Fz, w_work)
-        t1 = time.perf_counter()
-        time_velocity_update += (t1 - t0)
 
         #------------Smoke, Fuel and Temperature-------------------
-        t0 = time.perf_counter()
         T, smoke, fuel, flame = update_scalar_fields(
             T, smoke, fuel, u, v, w, dt, temperature_work, smoke_work, fuel_work, flame_work
         )
-        t1 = time.perf_counter()
-        time_scalar_update += (t1 - t0)
 
         #------------BCs-------------------
-        t0 = time.perf_counter()
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_low')
         u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_high')
         u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_low')
         u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_high')
-        t1 = time.perf_counter()
-        time_BC += (t1 - t0)
 
         #------------Obstacle-------------------
-        t0 = time.perf_counter()
         u, v, w = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
         p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
         T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, 600.0)
         fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
         flame = Obstacle_BC.obstacle_boundary_conditions_scalar(flame, obstacle_mask, 0.0)
-        t1 = time.perf_counter()
-        time_obstacle += (t1 - t0)
 
         #------------Output-------------------
         while t >= next_output_time:
@@ -803,7 +775,6 @@ def main():
                 print(f'CFL-Condition: {np.round(CFL, 5)}')
 
         #------------Dynamic time step-------------------
-        t0 = time.perf_counter()
         t += dt
 
         dt_new = Helper_Functions.compute_new_timestep(
@@ -824,13 +795,6 @@ def main():
         if dt > 1.0 / OUTPUT_FPS:
             dt = 1.0 / OUTPUT_FPS
 
-        t1 = time.perf_counter()
-        time_compute_step += (t1 - t0)
-
-        #------------End-------------------
-        loop_end_time = time.time()
-        total_loop_time += loop_end_time - loop_start_time
-
     #------------Empty write queue-------------------
     write_queue.join()
     write_queue.put(None)
@@ -838,20 +802,17 @@ def main():
     writer_thread.join()
 
     Output_Functions.close_netcdf(dataset)
-    end_total_time = time.time()
 
     #------------Conclusion-------------------
     print('Simulation finished!')
-    print(f'Total runtime: {end_total_time - start_total_time:.4f} seconds')
-    print(f'Total time spent in main loop: {total_loop_time:.4f} seconds')
-    print(f'Time spend on array copying: {time_start_copy:.4f} seconds')
-    print(f'Time spend on pressure: {time_pressure_update:.4f} seconds')
-    print(f'Time spend on velocity solve: {time_velocity_update:.4f} seconds')
-    print(f'Time spend on scalar update: {time_scalar_update:.4f} seconds')
-    print(f'Time spend on boundary conditions: {time_BC:.4f} seconds')
-    print(f'Time spend on obstacles: {time_obstacle:.4f} seconds')
-    print(f'Time spend on computing next time step: {time_compute_step:.4f} seconds')
-    print(f'Max async write queue fill: {max_write_queue_fill}/{WRITE_QUEUE_SIZE}')
 
 
-main()
+if __name__ == '__main__':
+    profiler = cProfile.Profile()
+    profiler.enable()
+    main()
+    profiler.disable()
+    
+    # # Save profile to file
+    profile_file = 'Performance.prof'
+
