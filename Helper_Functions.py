@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def compute_CFL(u, v, w, dt, delta):
     """
     computes the CFL number of the 3D velocity field.

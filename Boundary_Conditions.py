@@ -1,7 +1,7 @@
 from numba import njit, prange
 
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def neumann_boundary_condition(field, side):
     """
     applies a zero-gradient boundary condition to one side of a 3D field.
@@ -42,7 +42,7 @@ def neumann_boundary_condition(field, side):
     return field
 
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def dirichlet_boundary_condition(field, side, value):
     """
     applies a fixed-value boundary condition to one side of a 3D field.

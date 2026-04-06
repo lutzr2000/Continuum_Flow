@@ -20,6 +20,7 @@ import Obstacle_Boundary_Conditions as Obstacle_BC
 import Obstacles
 import Helper_Functions
 import Output_Functions
+import Forcing
 
 # ===============================
 # Parameters
@@ -49,7 +50,7 @@ CFL_MAX = 0.8
 MAX_ITER = 4
 PRECISION = np.float32
 CPU_PARALLEL = True
-RESERVE_CPU_CORES_FOR_IO = 2
+CPU_COUNT = 28
 
 # resolution
 DELTA = 0.1
@@ -74,22 +75,27 @@ U_INFLOW = 0.0
 V_INFLOW = 0.0
 W_INFLOW = 0.0
 
+# forcing
+TURBULENCE_AMPLITUDE = 2.0
+TURBULENCE_FREQUENCY = 0.5
+TURBULENCE_SCALE = 1.0
+
 # ===============================
 # Methods
 # ===============================
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation.
 
     Args:
         T (3d-array): temperature field
-        Fy (3d-array): y-direction force field
+        Fz (3d-array): z-direction force field
         expansion_coefficient (float): thermal expansion coefficient
         T_ref (float): reference temperature
     Returns:
-        Fy (3d-array): updated y-direction force field
+        Fz (3d-array): updated z-direction force field
     """
     nx, ny, nz = T.shape
     g = 9.81
@@ -132,7 +138,6 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     temp_diffusion_coeff = NU_TEMPERATURE * dt_over_delta2
     smoke_diffusion_coeff = NU_SMOKE * dt_over_delta2
     fuel_diffusion_coeff = NU_FUEL * dt_over_delta2
-    flame_out.fill(0.0)
 
     for i in prange(1, nx - 1):
         for j in range(1, ny - 1):
@@ -250,7 +255,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     return T_out, smoke_out, fuel_out, flame_out
 
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def update_x_velocity(u, v, w, p, dt, Fx, un):
     """
     Updates the velocity field in x-direction based on the momentum equation. 
@@ -319,7 +324,7 @@ def update_x_velocity(u, v, w, p, dt, Fx, un):
     return un
 
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def update_y_velocity(u, v, w, p, dt, Fy, vn):
     """
     Updates the velocity field in y-direction based on the momentum equation.
@@ -388,7 +393,7 @@ def update_y_velocity(u, v, w, p, dt, Fy, vn):
     return vn
 
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def update_z_velocity(u, v, w, p, dt, Fz, wn):
     """
     Updates the velocity field in z-direction based on the momentum equation. 
@@ -456,7 +461,7 @@ def update_z_velocity(u, v, w, p, dt, Fz, wn):
 
     return wn
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz):
     """
     computes the right hand side of the pressure Poisson equation.
@@ -518,7 +523,7 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz):
     return b
 
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, max_iter=10):
     """
     solves the 3D pressure Poisson equation with Jacobi iterations.
@@ -590,8 +595,7 @@ def main():
 
     if CPU_PARALLEL:
         available_threads = os.cpu_count() or 1
-        solver_threads = max(1, available_threads - RESERVE_CPU_CORES_FOR_IO)
-        set_num_threads(solver_threads)
+        set_num_threads(CPU_COUNT)
         print(f'Numba solver threads: {get_num_threads()} / {available_threads} Cores')
 
     obstacle_mask = Obstacles.sphere_mask_from_grid(
@@ -704,8 +708,9 @@ def main():
         fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
         flame = Obstacle_BC.obstacle_boundary_conditions_scalar(flame, obstacle_mask, 0.0)
 
-        #------------Output-------------------
+        #------------Output and Forcing-------------------
         while t >= next_output_time:
+            #------------Output-------------------
             current_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
             Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, current_fields, output_index, t)
 
@@ -720,6 +725,11 @@ def main():
                 CFL = Helper_Functions.compute_CFL(u, v, w, dt, DELTA)
                 print(f'Current dt: {np.round(dt, 5)}')
                 print(f'CFL-Condition: {np.round(CFL, 5)}')
+
+            #------------Forcing-------------------
+            Fx, Fy, Fz = Forcing.forcing_turbulence(
+                Fx, Fy, Fz, t, TURBULENCE_FREQUENCY, TURBULENCE_SCALE, TURBULENCE_AMPLITUDE, DELTA
+            )
 
         #------------Dynamic time step-------------------
         t += dt

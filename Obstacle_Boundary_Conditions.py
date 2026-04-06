@@ -1,7 +1,7 @@
 from numba import njit, prange
 
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def obstacle_boundary_conditions_velocity(u, v, w, mask):
     """
     applies no-slip velocity conditions inside a 3D obstacle mask.
@@ -17,7 +17,7 @@ def obstacle_boundary_conditions_velocity(u, v, w, mask):
         w (3d-array): updated z-velocity field
     """
     nx, ny, nz = mask.shape
-    for i in range(nx):
+    for i in prange(nx):
         for j in range(ny):
             for k in range(nz):
                 if mask[i, j, k]:
@@ -27,7 +27,7 @@ def obstacle_boundary_conditions_velocity(u, v, w, mask):
     return u, v, w
 
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def obstacle_boundary_conditions_pressure(p, mask):
     """
     applies zero pressure inside a 3D obstacle mask.
@@ -47,7 +47,7 @@ def obstacle_boundary_conditions_pressure(p, mask):
     return p
 
 
-@njit(parallel=False, cache=True)
+@njit(parallel=True, cache=True)
 def obstacle_boundary_conditions_scalar(phi, mask, value):
     """
     applies a fixed scalar value inside a 3D obstacle mask.
@@ -59,7 +59,7 @@ def obstacle_boundary_conditions_scalar(phi, mask, value):
     Returns:
         phi (3d-array): updated scalar field
     """
-    for i in range(phi.shape[0]):
+    for i in prange(phi.shape[0]):
         for j in range(phi.shape[1]):
             for k in range(phi.shape[2]):
                 if mask[i, j, k]:
