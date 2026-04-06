@@ -1,95 +1,16 @@
-import netCDF4 as nc
+import json
+import os
+import queue
+import subprocess
+from multiprocessing import shared_memory
 
+import numpy as np
 
-def initialize_netcdf(filepath, nx, ny, nz, x, y, z, comp_level=0):
+def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
     """
-    creates an empty 3D netcdf file and initializes the output variables.
+    collects all simulation fields in one dictionary for simpler output handling.
 
     Args:
-        filepath (str): path to the netcdf output file
-        nx (int): number of cells in x-direction
-        ny (int): number of cells in y-direction
-        nz (int): number of cells in z-direction
-        x (1d-array): x-coordinate values
-        y (1d-array): y-coordinate values
-        z (1d-array): z-coordinate values
-        comp_level (int): netcdf compression level
-    Returns:
-        dataset (netcdf-dataset): opened netcdf dataset
-        u_var (netcdf-variable): output variable for x-velocity
-        v_var (netcdf-variable): output variable for y-velocity
-        w_var (netcdf-variable): output variable for z-velocity
-        p_var (netcdf-variable): output variable for pressure
-        T_var (netcdf-variable): output variable for temperature
-        smoke_var (netcdf-variable): output variable for smoke
-        fuel_var (netcdf-variable): output variable for fuel
-        flame_var (netcdf-variable): output variable for burning fuel indicator
-        time_var (netcdf-variable): output variable for time
-    """
-    dataset = nc.Dataset(filepath, 'w', format='NETCDF4')
-
-    dataset.createDimension('x', nx)
-    dataset.createDimension('y', ny)
-    dataset.createDimension('z', nz)
-    dataset.createDimension('time', None)
-
-    x_var = dataset.createVariable('x', 'f4', ('x',))
-    y_var = dataset.createVariable('y', 'f4', ('y',))
-    z_var = dataset.createVariable('z', 'f4', ('z',))
-    x_var[:] = x
-    y_var[:] = y
-    z_var[:] = z
-
-    compression_enabled = comp_level > 0
-    variable_kwargs = {
-        'zlib': compression_enabled,
-        'chunksizes': (1, nz, ny, nx),
-    }
-    if compression_enabled:
-        variable_kwargs['complevel'] = comp_level
-
-    u_var = dataset.createVariable('u', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    v_var = dataset.createVariable('v', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    w_var = dataset.createVariable('w', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    p_var = dataset.createVariable('p', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    T_var = dataset.createVariable('T', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    smoke_var = dataset.createVariable('smoke', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    fuel_var = dataset.createVariable('fuel', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-    flame_var = dataset.createVariable('flame', 'f4', ('time', 'z', 'y', 'x'), **variable_kwargs)
-
-    time_var = dataset.createVariable('time', 'f8', ('time',))
-    time_var.units = 'seconds since 2026-04-01 00:00:00'
-    time_var.calendar = 'standard'
-
-    u_var.units = 'm/s'
-    v_var.units = 'm/s'
-    w_var.units = 'm/s'
-    p_var.units = 'Pa'
-    T_var.units = 'K'
-    smoke_var.units = '1'
-    fuel_var.units = '1'
-    flame_var.units = '1'
-
-    return dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var
-
-
-def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var,
-                    time_var, timestep, time_value, u, v, w, p, T, smoke, fuel, flame):
-    """
-    writes the current timestep data into the netcdf file.
-
-    Args:
-        u_var (netcdf-variable): output variable for x-velocity
-        v_var (netcdf-variable): output variable for y-velocity
-        w_var (netcdf-variable): output variable for z-velocity
-        p_var (netcdf-variable): output variable for pressure
-        T_var (netcdf-variable): output variable for temperature
-        smoke_var (netcdf-variable): output variable for smoke
-        fuel_var (netcdf-variable): output variable for fuel
-        flame_var (netcdf-variable): output variable for burning fuel indicator
-        time_var (netcdf-variable): output variable for time
-        timestep (int): output timestep index
-        time_value (float): physical simulation time
         u (3d-array): x-velocity field
         v (3d-array): y-velocity field
         w (3d-array): z-velocity field
@@ -99,26 +20,163 @@ def write_to_netcdf(u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flam
         fuel (3d-array): fuel field
         flame (3d-array): flame field
     Returns:
-        None
+        dict: field names mapped to numpy arrays
     """
-    time_var[timestep] = time_value
-    u_var[timestep, :, :, :] = u.transpose(2, 1, 0)
-    v_var[timestep, :, :, :] = v.transpose(2, 1, 0)
-    w_var[timestep, :, :, :] = w.transpose(2, 1, 0)
-    p_var[timestep, :, :, :] = p.transpose(2, 1, 0)
-    T_var[timestep, :, :, :] = T.transpose(2, 1, 0)
-    smoke_var[timestep, :, :, :] = smoke.transpose(2, 1, 0)
-    fuel_var[timestep, :, :, :] = fuel.transpose(2, 1, 0)
-    flame_var[timestep, :, :, :] = flame.transpose(2, 1, 0)
+    return {
+        'u': u,
+        'v': v,
+        'w': w,
+        'p': p,
+        'T': T,
+        'smoke': smoke,
+        'fuel': fuel,
+        'flame': flame,
+    }
 
 
-def close_netcdf(dataset):
+def create_output_buffers(output_variables, template_fields, queue_size):
     """
-    closes the netcdf dataset.
+    allocates shared-memory output buffers once and reuses them for all frames.
 
     Args:
-        dataset (netcdf-dataset): opened netcdf dataset
+        output_variables (list[str]): names of the fields that should be written
+        template_fields (dict): field names mapped to template arrays
+        queue_size (int): number of reusable buffer sets
+    Returns:
+        tuple: buffer queue and list of shared memory blocks
+    """
+    buffer_pool = queue.Queue(maxsize=queue_size)
+    shared_memory_blocks = []
+
+    for _ in range(queue_size):
+        fields = {}
+        for variable_name in output_variables:
+            template_array = template_fields[variable_name]
+            shm = shared_memory.SharedMemory(create=True, size=template_array.nbytes)
+            shared_memory_blocks.append(shm)
+            fields[variable_name] = {
+                'array': np.ndarray(template_array.shape, dtype=template_array.dtype, buffer=shm.buf),
+                'shape': template_array.shape,
+                'dtype': str(template_array.dtype),
+                'shm_name': shm.name,
+            }
+        buffer_pool.put(fields)
+
+    return buffer_pool, shared_memory_blocks
+
+
+def copy_fields_to_output_buffer(fields, source_fields, output_variables):
+    """
+    copies the selected simulation fields into one reusable shared-memory buffer.
+
+    Args:
+        fields (dict): output buffer with shared-memory numpy views
+        source_fields (dict): field names mapped to current simulation arrays
+        output_variables (list[str]): names of the fields that should be written
     Returns:
         None
     """
-    dataset.close()
+    for variable_name in output_variables:
+        np.copyto(fields[variable_name]['array'], source_fields[variable_name])
+
+
+def create_writer_payload(fields, output_variables, output_path, time_value, delta):
+    """
+    builds the metadata package that is sent to the persistent VDB writer.
+
+    Args:
+        fields (dict): output buffer with shared-memory numpy views
+        output_variables (list[str]): names of the fields that should be written
+        output_path (str): full path of the target vdb file
+        time_value (float): physical simulation time
+        delta (float): grid spacing
+    Returns:
+        dict: serializable writer payload
+    """
+    return {
+        'output_path': output_path,
+        'time': time_value,
+        'delta': float(delta),
+        'fields': {
+            variable_name: {
+                'shape': fields[variable_name]['shape'],
+                'dtype': fields[variable_name]['dtype'],
+                'shm_name': fields[variable_name]['shm_name'],
+            }
+            for variable_name in output_variables
+        },
+    }
+
+
+def writer_thread_func(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script):
+    """
+    runs a persistent Blender Python process and forwards queued output jobs to it.
+
+    Args:
+        write_queue (queue.Queue): queue with pending output jobs
+        buffer_pool (queue.Queue): queue with reusable shared-memory buffers
+        outpath (str): output directory for vdb files
+        delta (float): grid spacing
+        output_variables (list[str]): names of the fields that should be written
+        blender_python_exe (str): path to Blender's Python executable
+        vdb_writer_script (str): path to the VDB writer script
+    Returns:
+        None
+    """
+    writer_process = None
+    try:
+        writer_process = subprocess.Popen(
+            [blender_python_exe, vdb_writer_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        while True:
+            item = write_queue.get()
+            if item is None:
+                if writer_process.stdin is not None:
+                    writer_process.stdin.write('__QUIT__\n')
+                    writer_process.stdin.flush()
+                    writer_process.stdin.close()
+                write_queue.task_done()
+                break
+
+            output_idx, time_value, fields = item
+            vdb_output_path = os.path.join(outpath, f'frame_{output_idx:06d}.vdb')
+            writer_payload = create_writer_payload(fields, output_variables, vdb_output_path, time_value, delta)
+
+            try:
+                writer_process.stdin.write(json.dumps(writer_payload) + '\n')
+                writer_process.stdin.flush()
+                response_line = writer_process.stdout.readline()
+                if not response_line:
+                    raise RuntimeError(writer_process.stderr.read().strip())
+
+                response = json.loads(response_line)
+                if response.get('status') != 'ok':
+                    raise RuntimeError(response.get('message', 'unknown VDB writer error'))
+            except Exception as exc:
+                print(f'VDB write failed for output {output_idx}: {exc}')
+
+            buffer_pool.put(fields)
+            write_queue.task_done()
+    finally:
+        if writer_process is not None:
+            writer_process.wait()
+
+
+def cleanup_output_buffers(shared_memory_blocks):
+    """
+    closes and releases all shared-memory output buffers.
+
+    Args:
+        shared_memory_blocks (list): shared memory objects used for output buffering
+    Returns:
+        None
+    """
+    for shm in shared_memory_blocks:
+        shm.close()
+        shm.unlink()

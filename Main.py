@@ -22,8 +22,8 @@ from numba import njit, prange, set_num_threads, get_num_threads
 import Boundary_Conditions as BC
 import Obstacle_Boundary_Conditions as Obstacle_BC
 import Obstacles
-import Output_Functions
 import Helper_Functions
+import Output_Functions
 
 # ===============================
 # Parameters
@@ -69,10 +69,13 @@ X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
 OUTPUT_FPS = 24
 PRINT_FREQUENCY = 100
 OUTPUT_TIME_STEP = 1.0 / OUTPUT_FPS
-OUTPATH = r"C:\Blenderzeug\BlenderCFD\Test\Test.nc"
 OUTPUT_STATUS = False
 WRITE_QUEUE_SIZE = 512
-NETCDF_COMPRESSION_LEVEL = 0
+OUTPATH = r"C:\Blenderzeug\BlenderCFD\Test"
+#OUTPUT_VARIABLES = ['u', 'v', 'w', 'p', 'T', 'smoke', 'flame']
+OUTPUT_VARIABLES = ["smoke", "flame"]
+BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"
+VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 
 # Boundary conditions
 U_INFLOW = 0.0
@@ -664,44 +667,16 @@ def main():
     #------------Prepare Output-------------------
     next_output_time = 0.0
     output_index = 0
-
-    dataset, u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var = Output_Functions.initialize_netcdf(
-        OUTPATH, NX, NY, NZ, x, y, z, comp_level=NETCDF_COMPRESSION_LEVEL
-    )
-
+    
+    os.makedirs(OUTPATH, exist_ok=True)
+    template_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
     write_queue = queue.Queue(maxsize=WRITE_QUEUE_SIZE)
-    buffer_pool = queue.Queue(maxsize=WRITE_QUEUE_SIZE)
-    max_write_queue_fill = 0
-
-    for _ in range(WRITE_QUEUE_SIZE):
-        buffer_pool.put({
-            'u': np.empty_like(u),
-            'v': np.empty_like(v),
-            'w': np.empty_like(w),
-            'p': np.empty_like(p),
-            'T': np.empty_like(T),
-            'smoke': np.empty_like(smoke),
-            'fuel': np.empty_like(fuel),
-            'flame': np.empty_like(fuel),
-        })
-
-    def writer_thread_func():
-        while True:
-            item = write_queue.get()
-            if item is None:
-                write_queue.task_done()
-                break
-
-            output_idx, time_value, fields = item
-            Output_Functions.write_to_netcdf(
-                u_var, v_var, w_var, p_var, T_var, smoke_var, fuel_var, flame_var, time_var,
-                output_idx, time_value,
-                fields['u'], fields['v'], fields['w'], fields['p'], fields['T'], fields['smoke'], fields['fuel'], fields['flame']
-            )
-            buffer_pool.put(fields)
-            write_queue.task_done()
-
-    writer_thread = threading.Thread(target=writer_thread_func, daemon=True)
+    buffer_pool, shared_memory_blocks = Output_Functions.create_output_buffers(OUTPUT_VARIABLES, template_fields, WRITE_QUEUE_SIZE)
+    writer_thread = threading.Thread(
+        target=Output_Functions.writer_thread_func,
+        args=(write_queue, buffer_pool, OUTPATH, DELTA, OUTPUT_VARIABLES, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT),
+        daemon=True
+    )
     writer_thread.start()
 
     #------------Main time loop-------------------
@@ -748,16 +723,9 @@ def main():
         #------------Output-------------------
         while t >= next_output_time:
             fields = buffer_pool.get()
-            np.copyto(fields['u'], u)
-            np.copyto(fields['v'], v)
-            np.copyto(fields['w'], w)
-            np.copyto(fields['p'], p)
-            np.copyto(fields['T'], T)
-            np.copyto(fields['smoke'], smoke)
-            np.copyto(fields['fuel'], fuel)
-            np.copyto(fields['flame'], flame)
+            current_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
+            Output_Functions.copy_fields_to_output_buffer(fields, current_fields, OUTPUT_VARIABLES)
             write_queue.put((output_index, t, fields))
-            max_write_queue_fill = max(max_write_queue_fill, write_queue.qsize())
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
@@ -797,8 +765,7 @@ def main():
     write_queue.put(None)
     write_queue.join()
     writer_thread.join()
-
-    Output_Functions.close_netcdf(dataset)
+    Output_Functions.cleanup_output_buffers(shared_memory_blocks)
 
     #------------Conclusion-------------------
     print('Simulation finished!')
