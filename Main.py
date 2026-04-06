@@ -7,7 +7,6 @@ Description:
     This version extends the original 2D solver to a 3D Cartesian grid.
 """
 # TODO add forces, especially a random one
-# TODO faster start
 
 import numpy as np
 import sys
@@ -57,10 +56,6 @@ DELTA = 0.1
 NX = 128 
 NY = 128
 NZ = 128 
-x = np.linspace(0.0, (NX - 1) * DELTA, NX, dtype=PRECISION)
-y = np.linspace(0.0, (NY - 1) * DELTA, NY, dtype=PRECISION)
-z = np.linspace(0.0, (NZ - 1) * DELTA, NZ, dtype=PRECISION)
-X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
 
 # output
 OUTPUT_FPS = 24
@@ -78,9 +73,6 @@ VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 U_INFLOW = 0.0
 V_INFLOW = 0.0
 W_INFLOW = 0.0
-
-# Geometry
-obstacle_mask = Obstacles.sphere(X, Y, Z, NX * 0.5 * DELTA, NY * 0.5 * DELTA, NX * 0.05 * DELTA, 0.6)
 
 # ===============================
 # Methods
@@ -599,6 +591,14 @@ def main():
         set_num_threads(solver_threads)
         print(f'Numba solver threads: {get_num_threads()} / {available_threads} Cores')
 
+    obstacle_mask = Obstacles.sphere_mask_from_grid(
+        NX, NY, NZ, DELTA,
+        NX * 0.5 * DELTA,
+        NY * 0.5 * DELTA,
+        NX * 0.05 * DELTA,
+        0.6
+    )
+
     #------------Fields-------------------
     u = np.full((NX, NY, NZ), U_INFLOW, dtype=PRECISION)
     v = np.full((NX, NY, NZ), V_INFLOW, dtype=PRECISION)
@@ -609,9 +609,6 @@ def main():
     u_work = np.empty_like(u)
     v_work = np.empty_like(v)
     w_work = np.empty_like(w)
-    np.copyto(un, u)
-    np.copyto(vn, v)
-    np.copyto(wn, w)
 
     p = np.zeros((NX, NY, NZ), dtype=PRECISION)
     pressure_work = np.empty_like(p)
@@ -633,13 +630,6 @@ def main():
     Fy = np.zeros_like(p)
     Fz = np.zeros_like(p)
 
-    timestep_plane_max_u = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_v = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_w = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_Fx = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_Fy = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_Fz = np.empty(NX, dtype=PRECISION)
-
     #------------BCs-------------------
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
@@ -657,10 +647,7 @@ def main():
     #------------Dynamic time step-------------------
     t = 0.0
     dt = Helper_Functions.compute_new_timestep(
-        u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX,
-        timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w,
-        timestep_plane_max_Fx, timestep_plane_max_Fy, timestep_plane_max_Fz
-    )
+        u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX)
     if dt > 1.0 / OUTPUT_FPS:
         dt = 1.0 / OUTPUT_FPS
 
@@ -735,10 +722,7 @@ def main():
         t += dt
 
         dt_new = Helper_Functions.compute_new_timestep(
-            u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX,
-            timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w,
-            timestep_plane_max_Fx, timestep_plane_max_Fy, timestep_plane_max_Fz
-        )
+            u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX)
 
         dt_max_increase = dt * 1.5
         dt_max_decrease = dt * 0.5
