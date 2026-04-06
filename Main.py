@@ -7,7 +7,7 @@ Description:
     This version extends the original 2D solver to a 3D Cartesian grid.
 """
 # TODO add forces, especially a random one
-
+# TODO test threat scaling
 import numpy as np
 import sys
 import os
@@ -28,7 +28,7 @@ import Output_Functions
 # fluid
 RHO = 1.225
 NU = 1.81e-5
-NU_TEMPERATURE = 0.1 # a higher value here seems to help
+NU_TEMPERATURE = 0.01
 NU_SMOKE = 0.001
 NU_FUEL = 0.001
 TEMPERATURE_DISSIPATION_RATE = 0.1
@@ -42,7 +42,7 @@ BUOANCY_FACTOR = 1/T_REFERENCE
 EXPANSION_RATE = 0.003
 
 # time
-T_MAX = 10.0
+T_MAX = 30.0
 CFL_MAX = 0.8
 
 # solver
@@ -101,7 +101,7 @@ def buoyancy_approximation(T, Fz, expansion_coefficient, T_ref):
     return Fz
 
 
-@njit(parallel=CPU_PARALLEL, cache=True)
+@njit(parallel=CPU_PARALLEL, cache=True, fastmath=True)
 def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out):
     """
     Updates temperature, smoke and fuel with convection, diffusion and source terms in one transport sweep.
@@ -140,88 +140,91 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
                 uijk = u[i, j, k]
                 vijk = v[i, j, k]
                 wijk = w[i, j, k]
+
+                #------------Stencil loads-------------------
+                T_center = T[i, j, k]
+                T_xm = T[i - 1, j, k]
+                T_xp = T[i + 1, j, k]
+                T_ym = T[i, j - 1, k]
+                T_yp = T[i, j + 1, k]
+                T_zm = T[i, j, k - 1]
+                T_zp = T[i, j, k + 1]
+
+                smoke_center = smoke[i, j, k]
+                smoke_xm = smoke[i - 1, j, k]
+                smoke_xp = smoke[i + 1, j, k]
+                smoke_ym = smoke[i, j - 1, k]
+                smoke_yp = smoke[i, j + 1, k]
+                smoke_zm = smoke[i, j, k - 1]
+                smoke_zp = smoke[i, j, k + 1]
+
+                fuel_center = fuel[i, j, k]
+                fuel_xm = fuel[i - 1, j, k]
+                fuel_xp = fuel[i + 1, j, k]
+                fuel_ym = fuel[i, j - 1, k]
+                fuel_yp = fuel[i, j + 1, k]
+                fuel_zm = fuel[i, j, k - 1]
+                fuel_zp = fuel[i, j, k + 1]
+
                 #------------Upwinding-------------------
                 if uijk >= 0.0:
-                    t_x_high = T[i, j, k]
-                    t_x_low = T[i - 1, j, k]
-                    smoke_x_high = smoke[i, j, k]
-                    smoke_x_low = smoke[i - 1, j, k]
-                    fuel_x_high = fuel[i, j, k]
-                    fuel_x_low = fuel[i - 1, j, k]
+                    temp_dx = T_center - T_xm
+                    smoke_dx = smoke_center - smoke_xm
+                    fuel_dx = fuel_center - fuel_xm
                 else:
-                    t_x_high = T[i + 1, j, k]
-                    t_x_low = T[i, j, k]
-                    smoke_x_high = smoke[i + 1, j, k]
-                    smoke_x_low = smoke[i, j, k]
-                    fuel_x_high = fuel[i + 1, j, k]
-                    fuel_x_low = fuel[i, j, k]
+                    temp_dx = T_xp - T_center
+                    smoke_dx = smoke_xp - smoke_center
+                    fuel_dx = fuel_xp - fuel_center
 
                 if vijk >= 0.0:
-                    t_y_high = T[i, j, k]
-                    t_y_low = T[i, j - 1, k]
-                    smoke_y_high = smoke[i, j, k]
-                    smoke_y_low = smoke[i, j - 1, k]
-                    fuel_y_high = fuel[i, j, k]
-                    fuel_y_low = fuel[i, j - 1, k]
+                    temp_dy = T_center - T_ym
+                    smoke_dy = smoke_center - smoke_ym
+                    fuel_dy = fuel_center - fuel_ym
                 else:
-                    t_y_high = T[i, j + 1, k]
-                    t_y_low = T[i, j, k]
-                    smoke_y_high = smoke[i, j + 1, k]
-                    smoke_y_low = smoke[i, j, k]
-                    fuel_y_high = fuel[i, j + 1, k]
-                    fuel_y_low = fuel[i, j, k]
+                    temp_dy = T_yp - T_center
+                    smoke_dy = smoke_yp - smoke_center
+                    fuel_dy = fuel_yp - fuel_center
 
                 if wijk >= 0.0:
-                    t_z_high = T[i, j, k]
-                    t_z_low = T[i, j, k - 1]
-                    smoke_z_high = smoke[i, j, k]
-                    smoke_z_low = smoke[i, j, k - 1]
-                    fuel_z_high = fuel[i, j, k]
-                    fuel_z_low = fuel[i, j, k - 1]
+                    temp_dz = T_center - T_zm
+                    smoke_dz = smoke_center - smoke_zm
+                    fuel_dz = fuel_center - fuel_zm
                 else:
-                    t_z_high = T[i, j, k + 1]
-                    t_z_low = T[i, j, k]
-                    smoke_z_high = smoke[i, j, k + 1]
-                    smoke_z_low = smoke[i, j, k]
-                    fuel_z_high = fuel[i, j, k + 1]
-                    fuel_z_low = fuel[i, j, k]
-
-                #------------Convection-------------------
-                T_center = T[i, j, k]
-                smoke_center = smoke[i, j, k]
-                fuel_center = fuel[i, j, k]
+                    temp_dz = T_zp - T_center
+                    smoke_dz = smoke_zp - smoke_center
+                    fuel_dz = fuel_zp - fuel_center
 
                 temp_convection = dt_over_delta * (
-                    uijk * (t_x_high - t_x_low) +
-                    vijk * (t_y_high - t_y_low) +
-                    wijk * (t_z_high - t_z_low)
+                    uijk * temp_dx +
+                    vijk * temp_dy +
+                    wijk * temp_dz
                 )
                 smoke_convection = dt_over_delta * (
-                    uijk * (smoke_x_high - smoke_x_low) +
-                    vijk * (smoke_y_high - smoke_y_low) +
-                    wijk * (smoke_z_high - smoke_z_low)
+                    uijk * smoke_dx +
+                    vijk * smoke_dy +
+                    wijk * smoke_dz
                 )
                 fuel_convection = dt_over_delta * (
-                    uijk * (fuel_x_high - fuel_x_low) +
-                    vijk * (fuel_y_high - fuel_y_low) +
-                    wijk * (fuel_z_high - fuel_z_low)
+                    uijk * fuel_dx +
+                    vijk * fuel_dy +
+                    wijk * fuel_dz
                 )
 
                 #------------Diffusion-------------------
                 temp_diffusion = temp_diffusion_coeff * (
-                    (T[i + 1, j, k] - 2.0 * T_center + T[i - 1, j, k]) +
-                    (T[i, j + 1, k] - 2.0 * T_center + T[i, j - 1, k]) +
-                    (T[i, j, k + 1] - 2.0 * T_center + T[i, j, k - 1])
+                    (T_xp - 2.0 * T_center + T_xm) +
+                    (T_yp - 2.0 * T_center + T_ym) +
+                    (T_zp - 2.0 * T_center + T_zm)
                 )
                 smoke_diffusion = smoke_diffusion_coeff * (
-                    (smoke[i + 1, j, k] - 2.0 * smoke_center + smoke[i - 1, j, k]) +
-                    (smoke[i, j + 1, k] - 2.0 * smoke_center + smoke[i, j - 1, k]) +
-                    (smoke[i, j, k + 1] - 2.0 * smoke_center + smoke[i, j, k - 1])
+                    (smoke_xp - 2.0 * smoke_center + smoke_xm) +
+                    (smoke_yp - 2.0 * smoke_center + smoke_ym) +
+                    (smoke_zp - 2.0 * smoke_center + smoke_zm)
                 )
                 fuel_diffusion = fuel_diffusion_coeff * (
-                    (fuel[i + 1, j, k] - 2.0 * fuel_center + fuel[i - 1, j, k]) +
-                    (fuel[i, j + 1, k] - 2.0 * fuel_center + fuel[i, j - 1, k]) +
-                    (fuel[i, j, k + 1] - 2.0 * fuel_center + fuel[i, j, k - 1])
+                    (fuel_xp - 2.0 * fuel_center + fuel_xm) +
+                    (fuel_yp - 2.0 * fuel_center + fuel_ym) +
+                    (fuel_zp - 2.0 * fuel_center + fuel_zm)
                 )
 
                 #------------Ignition of fuel-------------------
