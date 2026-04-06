@@ -636,7 +636,9 @@ def main():
     timestep_plane_max_u = np.empty(NX, dtype=PRECISION)
     timestep_plane_max_v = np.empty(NX, dtype=PRECISION)
     timestep_plane_max_w = np.empty(NX, dtype=PRECISION)
-    timestep_plane_max_F = np.empty(NX, dtype=PRECISION)
+    timestep_plane_max_Fx = np.empty(NX, dtype=PRECISION)
+    timestep_plane_max_Fy = np.empty(NX, dtype=PRECISION)
+    timestep_plane_max_Fz = np.empty(NX, dtype=PRECISION)
 
     #------------BCs-------------------
     u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
@@ -655,8 +657,9 @@ def main():
     #------------Dynamic time step-------------------
     t = 0.0
     dt = Helper_Functions.compute_new_timestep(
-        u, v, w, Fz, RHO, DELTA, NU, CFL_MAX,
-        timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w, timestep_plane_max_F
+        u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX,
+        timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w,
+        timestep_plane_max_Fx, timestep_plane_max_Fy, timestep_plane_max_Fz
     )
     if dt > 1.0 / OUTPUT_FPS:
         dt = 1.0 / OUTPUT_FPS
@@ -732,8 +735,9 @@ def main():
         t += dt
 
         dt_new = Helper_Functions.compute_new_timestep(
-            u, v, w, Fz, RHO, DELTA, NU, CFL_MAX,
-            timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w, timestep_plane_max_F
+            u, v, w, Fx, Fy, Fz, RHO, DELTA, NU, CFL_MAX,
+            timestep_plane_max_u, timestep_plane_max_v, timestep_plane_max_w,
+            timestep_plane_max_Fx, timestep_plane_max_Fy, timestep_plane_max_Fz
         )
 
         dt_max_increase = dt * 1.5

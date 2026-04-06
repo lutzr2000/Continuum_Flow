@@ -1,4 +1,4 @@
-from numba import njit
+from numba import njit, prange
 
 
 @njit(parallel=False, cache=True)
@@ -15,27 +15,27 @@ def neumann_boundary_condition(field, side):
     nx, ny, nz = field.shape
 
     if side == "x_low":
-        for j in range(ny):
+        for j in prange(ny):
             for k in range(nz):
                 field[0, j, k] = field[1, j, k]
     elif side == "x_high":
-        for j in range(ny):
+        for j in prange(ny):
             for k in range(nz):
                 field[nx - 1, j, k] = field[nx - 2, j, k]
     elif side == "y_low":
-        for i in range(nx):
+        for i in prange(nx):
             for k in range(nz):
                 field[i, 0, k] = field[i, 1, k]
     elif side == "y_high":
-        for i in range(nx):
+        for i in prange(nx):
             for k in range(nz):
                 field[i, ny - 1, k] = field[i, ny - 2, k]
     elif side == "z_low":
-        for i in range(nx):
+        for i in prange(nx):
             for j in range(ny):
                 field[i, j, 0] = field[i, j, 1]
     elif side == "z_high":
-        for i in range(nx):
+        for i in prange(nx):
             for j in range(ny):
                 field[i, j, nz - 1] = field[i, j, nz - 2]
 
@@ -57,27 +57,27 @@ def dirichlet_boundary_condition(field, side, value):
     nx, ny, nz = field.shape
 
     if side == "x_low":
-        for j in range(ny):
+        for j in prange(ny):
             for k in range(nz):
                 field[0, j, k] = value
     elif side == "x_high":
-        for j in range(ny):
+        for j in prange(ny):
             for k in range(nz):
                 field[nx - 1, j, k] = value
     elif side == "y_low":
-        for i in range(nx):
+        for i in prange(nx):
             for k in range(nz):
                 field[i, 0, k] = value
     elif side == "y_high":
-        for i in range(nx):
+        for i in prange(nx):
             for k in range(nz):
                 field[i, ny - 1, k] = value
     elif side == "z_low":
-        for i in range(nx):
+        for i in prange(nx):
             for j in range(ny):
                 field[i, j, 0] = value
     elif side == "z_high":
-        for i in range(nx):
+        for i in prange(nx):
             for j in range(ny):
                 field[i, j, nz - 1] = value
 
