@@ -6,15 +6,12 @@ Description:
 
     This version extends the original 2D solver to a 3D Cartesian grid.
 """
-# TODO Export to VDB via Blenders python
 # TODO add forces, especially a random one
 # TODO faster start
 
 import numpy as np
 import sys
 import os
-import threading
-import queue
 import cProfile
 
 from numba import njit, prange, set_num_threads, get_num_threads
@@ -668,16 +665,10 @@ def main():
     next_output_time = 0.0
     output_index = 0
     
-    os.makedirs(OUTPATH, exist_ok=True)
     template_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
-    write_queue = queue.Queue(maxsize=WRITE_QUEUE_SIZE)
-    buffer_pool, shared_memory_blocks = Output_Functions.create_output_buffers(OUTPUT_VARIABLES, template_fields, WRITE_QUEUE_SIZE)
-    writer_thread = threading.Thread(
-        target=Output_Functions.writer_thread_func,
-        args=(write_queue, buffer_pool, OUTPATH, DELTA, OUTPUT_VARIABLES, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT),
-        daemon=True
+    write_queue, buffer_pool, writer_thread, shared_memory_blocks = Output_Functions.setup_output(
+        OUTPATH, OUTPUT_VARIABLES, template_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
     )
-    writer_thread.start()
 
     #------------Main time loop-------------------
     print('Start time iteration')
@@ -722,10 +713,8 @@ def main():
 
         #------------Output-------------------
         while t >= next_output_time:
-            fields = buffer_pool.get()
             current_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
-            Output_Functions.copy_fields_to_output_buffer(fields, current_fields, OUTPUT_VARIABLES)
-            write_queue.put((output_index, t, fields))
+            Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, current_fields, output_index, t)
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
@@ -761,11 +750,7 @@ def main():
             dt = 1.0 / OUTPUT_FPS
 
     #------------Empty write queue-------------------
-    write_queue.join()
-    write_queue.put(None)
-    write_queue.join()
-    writer_thread.join()
-    Output_Functions.cleanup_output_buffers(shared_memory_blocks)
+    Output_Functions.shutdown_output(write_queue, writer_thread, shared_memory_blocks)
 
     #------------Conclusion-------------------
     print('Simulation finished!')

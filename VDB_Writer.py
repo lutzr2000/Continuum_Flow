@@ -32,7 +32,6 @@ def write_vdb(payload):
         grid.copyFromArray(np.asarray(array, dtype=np.float32))
         grids.append(grid)
 
-    output_dir = os.path.dirname(output_vdb_path)
     openvdb.write(output_vdb_path, grids=grids)
     for shm in open_shared_memory:
         shm.close()

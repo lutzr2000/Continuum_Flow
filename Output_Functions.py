@@ -2,9 +2,13 @@ import json
 import os
 import queue
 import subprocess
+import threading
 from multiprocessing import shared_memory
 
 import numpy as np
+
+FIELD_NAMES = ('u', 'v', 'w', 'p', 'T', 'smoke', 'fuel', 'flame')
+
 
 def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
     """
@@ -22,29 +26,27 @@ def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
     Returns:
         dict: field names mapped to numpy arrays
     """
-    return {
-        'u': u,
-        'v': v,
-        'w': w,
-        'p': p,
-        'T': T,
-        'smoke': smoke,
-        'fuel': fuel,
-        'flame': flame,
-    }
+    return dict(zip(FIELD_NAMES, (u, v, w, p, T, smoke, fuel, flame)))
 
 
-def create_output_buffers(output_variables, template_fields, queue_size):
+def setup_output(outpath, output_variables, template_fields, queue_size, blender_python_exe, vdb_writer_script, delta):
     """
-    allocates shared-memory output buffers once and reuses them for all frames.
+    prepares the shared-memory buffers and starts the persistent writer thread.
 
     Args:
+        outpath (str): output directory for vdb files
         output_variables (list[str]): names of the fields that should be written
         template_fields (dict): field names mapped to template arrays
         queue_size (int): number of reusable buffer sets
+        blender_python_exe (str): path to Blender's Python executable
+        vdb_writer_script (str): path to the VDB writer script
+        delta (float): grid spacing
     Returns:
-        tuple: buffer queue and list of shared memory blocks
+        tuple: write queue, buffer queue, writer thread and list of shared memory blocks
     """
+    os.makedirs(outpath, exist_ok=True)
+
+    write_queue = queue.Queue(maxsize=queue_size)
     buffer_pool = queue.Queue(maxsize=queue_size)
     shared_memory_blocks = []
 
@@ -62,22 +64,52 @@ def create_output_buffers(output_variables, template_fields, queue_size):
             }
         buffer_pool.put(fields)
 
-    return buffer_pool, shared_memory_blocks
+    writer_thread = threading.Thread(
+        target=writer_thread_func,
+        args=(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script),
+        daemon=True,
+    )
+    writer_thread.start()
+
+    return write_queue, buffer_pool, writer_thread, shared_memory_blocks
 
 
-def copy_fields_to_output_buffer(fields, source_fields, output_variables):
+def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, output_index, time_value):
     """
-    copies the selected simulation fields into one reusable shared-memory buffer.
+    copies one output frame into shared memory and queues it for writing.
 
     Args:
-        fields (dict): output buffer with shared-memory numpy views
-        source_fields (dict): field names mapped to current simulation arrays
+        write_queue (queue.Queue): queue with pending output jobs
+        buffer_pool (queue.Queue): queue with reusable shared-memory buffers
         output_variables (list[str]): names of the fields that should be written
+        source_fields (dict): field names mapped to current simulation arrays
+        output_index (int): output frame index
+        time_value (float): physical simulation time
     Returns:
         None
     """
+    fields = buffer_pool.get()
     for variable_name in output_variables:
         np.copyto(fields[variable_name]['array'], source_fields[variable_name])
+    write_queue.put((output_index, time_value, fields))
+
+
+def shutdown_output(write_queue, writer_thread, shared_memory_blocks):
+    """
+    waits for all output work to finish and releases the shared-memory buffers.
+
+    Args:
+        write_queue (queue.Queue): queue with pending output jobs
+        writer_thread (threading.Thread): background writer thread
+        shared_memory_blocks (list): shared memory objects used for output buffering
+    Returns:
+        None
+    """
+    write_queue.join()
+    write_queue.put(None)
+    write_queue.join()
+    writer_thread.join()
+    cleanup_output_buffers(shared_memory_blocks)
 
 
 def create_writer_payload(fields, output_variables, output_path, time_value, delta):
