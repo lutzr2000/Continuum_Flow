@@ -6,8 +6,7 @@ Description:
 
     This version extends the original 2D solver to a 3D Cartesian grid.
 """
-# TODO add forces, especially a random one
-# TODO test threat scaling
+
 import numpy as np
 import sys
 import os
@@ -598,7 +597,7 @@ def main():
         set_num_threads(CPU_COUNT)
         print(f'Numba solver threads: {get_num_threads()} / {available_threads} Cores')
 
-    obstacle_mask = Obstacles.sphere_mask_from_grid(
+    obstacle_mask = Obstacles.sphere(
         NX, NY, NZ, DELTA,
         NX * 0.5 * DELTA,
         NY * 0.5 * DELTA,
@@ -755,14 +754,3 @@ def main():
 
     #------------Conclusion-------------------
     print('Simulation finished!')
-
-
-if __name__ == '__main__':
-    profiler = cProfile.Profile()
-    profiler.enable()
-    main()
-    profiler.disable()
-    
-    profile_file = 'Performance.prof'
-    profiler.dump_stats(profile_file)
-
