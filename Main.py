@@ -70,9 +70,31 @@ BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\pytho
 VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 
 # Boundary conditions
+BC_CONFIG = {
+    "x_low":  {"type": "outflow"},
+    "x_high": {"type": "outflow"},
+    "y_low":  {"type": "outflow"},
+    "y_high": {"type": "outflow"},
+    "z_low":  {"type": "no_slip_wall"},
+    "z_high": {"type": "slip_wall"},
+}
 U_INFLOW = 0.0
 V_INFLOW = 0.0
 W_INFLOW = 0.0
+
+# Obstacles
+obstacle_mask = Obstacles.sphere(
+    NX, NY, NZ, DELTA,
+    NX * 0.5 * DELTA,
+    NY * 0.5 * DELTA,
+    NX * 0.05 * DELTA,
+    0.6
+)
+
+OBSTACLE_SOLID = False
+OBSTACLE_INTIAL_TEMPERATURE = 600.0
+OBSTACLE_INTIAL_SMOKE = 100.0
+OBSTACLE_INTIAL_FUEL = 0.0
 
 # forcing
 TURBULENCE_AMPLITUDE = 2.0
@@ -583,6 +605,50 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, max_iter=10):
 
     return p_old
 
+def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask):
+    """
+    Applies obstacle boundary conditions to all fields. If OBSTACLE_SOLID is True, the velocity and pressure BCs will be applied.
+    """
+    if OBSTACLE_SOLID:
+        u, v, w = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
+        p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
+
+    T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, OBSTACLE_INTIAL_TEMPERATURE)
+    smoke = Obstacle_BC.obstacle_boundary_conditions_scalar(smoke, obstacle_mask, OBSTACLE_INTIAL_SMOKE)
+    fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, OBSTACLE_INTIAL_FUEL)
+
+    return u, v, w, p, T, smoke, fuel
+
+def apply_all_BC(u, v, w, p, T):
+    """
+    Applies all boundary conditions to the velocity, pressure and temperature fields.
+    """
+    for side, bc in BC_CONFIG.items():
+        bc_type = bc["type"]
+
+        if bc_type == "outflow":
+            u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, side)
+
+        elif bc_type == "inflow":
+            u, v, w, p, T = BC.inflow_BC(
+                u, v, w, p, T,
+                side,
+                bc.get("u", U_INFLOW),
+                bc.get("v", V_INFLOW),
+                bc.get("w", W_INFLOW),
+            )
+
+        elif bc_type == "no_slip_wall":
+            u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, side)
+
+        elif bc_type == "slip_wall":
+            u, v, w, p, T = BC.slip_wall_BC(u, v, w, p, T, side)
+
+        else:
+            raise ValueError(f"Unknown boundary condition '{bc_type}' for side '{side}'")
+
+    return u, v, w, p, T
+
 # ===============================
 # Main
 # ===============================
@@ -596,14 +662,6 @@ def main():
         available_threads = os.cpu_count() or 1
         set_num_threads(CPU_COUNT)
         print(f'Numba solver threads: {get_num_threads()} / {available_threads} Cores')
-
-    obstacle_mask = Obstacles.sphere(
-        NX, NY, NZ, DELTA,
-        NX * 0.5 * DELTA,
-        NY * 0.5 * DELTA,
-        NX * 0.05 * DELTA,
-        0.6
-    )
 
     #------------Fields-------------------
     u = np.full((NX, NY, NZ), U_INFLOW, dtype=PRECISION)
@@ -637,18 +695,10 @@ def main():
     Fz = np.zeros_like(p)
 
     #------------BCs-------------------
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_low')
-    u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_high')
-    u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_low')
-    u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_high')
+    u, v, w, p, T = apply_all_BC(u, v, w, p, T)
 
     #------------Obstacle-------------------
-    u, v, w = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
-    p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-    T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, 600.0)
-    fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
+    u, v, w, p, T, smoke, fuel = apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask)
 
     #------------Dynamic time step-------------------
     t = 0.0
@@ -693,19 +743,10 @@ def main():
         )
 
         #------------BCs-------------------
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_low')
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'x_high')
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_low')
-        u, v, w, p, T = BC.outflow_BC(u, v, w, p, T, 'y_high')
-        u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_low')
-        u, v, w, p, T = BC.no_slip_wall_BC(u, v, w, p, T, 'z_high')
+        u, v, w, p, T = apply_all_BC(u, v, w, p, T)
 
         #------------Obstacle-------------------
-        u, v, w = Obstacle_BC.obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
-        p = Obstacle_BC.obstacle_boundary_conditions_pressure(p, obstacle_mask)
-        T = Obstacle_BC.obstacle_boundary_conditions_scalar(T, obstacle_mask, 600.0)
-        fuel = Obstacle_BC.obstacle_boundary_conditions_scalar(fuel, obstacle_mask, 1.0)
-        flame = Obstacle_BC.obstacle_boundary_conditions_scalar(flame, obstacle_mask, 0.0)
+        u, v, w, p, T, smoke, fuel = apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask)
 
         #------------Output and Forcing-------------------
         while t >= next_output_time:
