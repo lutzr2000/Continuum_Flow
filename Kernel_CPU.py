@@ -1,16 +1,6 @@
-"""
-Description:
-    A finite difference based CFD solver for Blender. Convection is discretized by first order upwind,
-    diffusion and pressure by central differencing. The pressure velocity coupling is done by solving
-    a poisson equation.
-
-    This version extends the original 2D solver to a 3D Cartesian grid.
-"""
-
 import numpy as np
 import sys
 import os
-import cProfile
 
 from numba import njit, prange, set_num_threads, get_num_threads
 
@@ -19,87 +9,105 @@ import Obstacle_Boundary_Conditions as Obstacle_BC
 import Obstacles
 import Helper_Functions
 import Output_Functions
-import Forcing
 
 # ===============================
 # Parameters
 # ===============================
 
-# fluid
-RHO = 1.225
-NU = 1.81e-5
-NU_TEMPERATURE = 0.01
-NU_SMOKE = 0.001
-NU_FUEL = 0.001
-TEMPERATURE_DISSIPATION_RATE = 0.1
-TEMPERATURE_PRODUCTION_RATE = 1.0
-SMOKE_DISSIPATION_RATE = 0.1
-SMOKE_PRODUCTION_RATE = 1.0
-FUEL_BURN_RATE = 0.1
-FUEL_IGNITION_TEMPERATURE = 500.0
-T_REFERENCE = 300.0
-BUOANCY_FACTOR = 1/T_REFERENCE
-EXPANSION_RATE = 0.003
-
-# time
-T_MAX = 30.0
-CFL_MAX = 0.8
-
-# solver
-MAX_ITER = 4
-PRECISION = np.float32
-CPU_PARALLEL = True
-CPU_COUNT = 28
-
-# resolution
-DELTA = 0.1
-NX = 128 
-NY = 128
-NZ = 128 
-
-# output
-OUTPUT_FPS = 24
-PRINT_FREQUENCY = 100
-OUTPUT_TIME_STEP = 1.0 / OUTPUT_FPS
-OUTPUT_STATUS = False
-WRITE_QUEUE_SIZE = 512
-OUTPATH = r"C:\Blenderzeug\BlenderCFD\Test"
-#OUTPUT_VARIABLES = ['u', 'v', 'w', 'p', 'T', 'smoke', 'flame']
-OUTPUT_VARIABLES = ["smoke", "flame"]
 BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"
 VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
+CPU_PARALLEL = True
 
-# Boundary conditions
-BC_CONFIG = {
-    "x_low":  {"type": "outflow"},
-    "x_high": {"type": "outflow"},
-    "y_low":  {"type": "outflow"},
-    "y_high": {"type": "outflow"},
-    "z_low":  {"type": "no_slip_wall"},
-    "z_high": {"type": "slip_wall"},
-}
-U_INFLOW = 0.0
-V_INFLOW = 0.0
-W_INFLOW = 0.0
+def _build_obstacle_mask(config):
+    obstacle_cfg = config["obstacle"]
+    resolution_cfg = config["resolution"]
 
-# Obstacles
-obstacle_mask = Obstacles.sphere(
-    NX, NY, NZ, DELTA,
-    NX * 0.5 * DELTA,
-    NY * 0.5 * DELTA,
-    NX * 0.05 * DELTA,
-    0.6
-)
+    if obstacle_cfg["shape"] != "sphere":
+        raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
 
-OBSTACLE_SOLID = False
-OBSTACLE_INTIAL_TEMPERATURE = 600.0
-OBSTACLE_INTIAL_SMOKE = 100.0
-OBSTACLE_INTIAL_FUEL = 0.0
+    sphere_cfg = obstacle_cfg["sphere"]
+    return Obstacles.sphere(
+        resolution_cfg["NX"],
+        resolution_cfg["NY"],
+        resolution_cfg["NZ"],
+        resolution_cfg["DELTA"],
+        resolution_cfg["NX"] * sphere_cfg["x_factor"] * resolution_cfg["DELTA"],
+        resolution_cfg["NY"] * sphere_cfg["y_factor"] * resolution_cfg["DELTA"],
+        resolution_cfg["NZ"] * sphere_cfg["z_factor"] * resolution_cfg["DELTA"],
+        sphere_cfg["radius"],
+    )
 
-# forcing
-TURBULENCE_AMPLITUDE = 2.0
-TURBULENCE_FREQUENCY = 0.5
-TURBULENCE_SCALE = 1.0
+
+def apply_config(config):
+    global RHO, NU, NU_TEMPERATURE, NU_SMOKE, NU_FUEL
+    global TEMPERATURE_DISSIPATION_RATE, TEMPERATURE_PRODUCTION_RATE
+    global SMOKE_DISSIPATION_RATE, SMOKE_PRODUCTION_RATE
+    global FUEL_BURN_RATE, FUEL_IGNITION_TEMPERATURE, T_REFERENCE
+    global BUOANCY_FACTOR, EXPANSION_RATE
+    global T_MAX, CFL_MAX
+    global MAX_ITER, PRECISION, CPU_PARALLEL, CPU_COUNT
+    global DELTA, NX, NY, NZ
+    global OUTPUT_FPS, PRINT_FREQUENCY, OUTPUT_TIME_STEP, OUTPUT_STATUS
+    global WRITE_QUEUE_SIZE, OUTPATH, OUTPUT_VARIABLES
+    global BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT
+    global BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
+    global obstacle_mask, OBSTACLE_SOLID
+    global OBSTACLE_INTIAL_TEMPERATURE, OBSTACLE_INTIAL_SMOKE, OBSTACLE_INTIAL_FUEL
+    global TURBULENCE_AMPLITUDE, TURBULENCE_FREQUENCY, TURBULENCE_SCALE
+
+    fluid = config["fluid"]
+    time_cfg = config["time"]
+    solver = config["solver"]
+    resolution = config["resolution"]
+    output = config["output"]
+    boundary = config["boundary_conditions"]
+    obstacle = config["obstacle"]
+
+    RHO = fluid["RHO"]
+    NU = fluid["NU"]
+    NU_TEMPERATURE = fluid["NU_TEMPERATURE"]
+    NU_SMOKE = fluid["NU_SMOKE"]
+    NU_FUEL = fluid["NU_FUEL"]
+    TEMPERATURE_DISSIPATION_RATE = fluid["TEMPERATURE_DISSIPATION_RATE"]
+    TEMPERATURE_PRODUCTION_RATE = fluid["TEMPERATURE_PRODUCTION_RATE"]
+    SMOKE_DISSIPATION_RATE = fluid["SMOKE_DISSIPATION_RATE"]
+    SMOKE_PRODUCTION_RATE = fluid["SMOKE_PRODUCTION_RATE"]
+    FUEL_BURN_RATE = fluid["FUEL_BURN_RATE"]
+    FUEL_IGNITION_TEMPERATURE = fluid["FUEL_IGNITION_TEMPERATURE"]
+    T_REFERENCE = fluid["T_REFERENCE"]
+    BUOANCY_FACTOR = fluid["BUOANCY_FACTOR"]
+    EXPANSION_RATE = fluid["EXPANSION_RATE"]
+
+    T_MAX = time_cfg["T_MAX"]
+    CFL_MAX = time_cfg["CFL_MAX"]
+
+    MAX_ITER = solver["MAX_ITER"]
+    PRECISION = solver["PRECISION"]
+    CPU_COUNT = solver["CPU_COUNT"]
+
+    DELTA = resolution["DELTA"]
+    NX = resolution["NX"]
+    NY = resolution["NY"]
+    NZ = resolution["NZ"]
+
+    OUTPUT_FPS = output["OUTPUT_FPS"]
+    PRINT_FREQUENCY = output["PRINT_FREQUENCY"]
+    OUTPUT_TIME_STEP = 1.0 / OUTPUT_FPS
+    OUTPUT_STATUS = output["OUTPUT_STATUS"]
+    WRITE_QUEUE_SIZE = output["WRITE_QUEUE_SIZE"]
+    OUTPATH = output["OUTPATH"]
+    OUTPUT_VARIABLES = output["OUTPUT_VARIABLES"]
+
+    BC_CONFIG = boundary["BC_CONFIG"]
+    U_INFLOW = boundary["U_INFLOW"]
+    V_INFLOW = boundary["V_INFLOW"]
+    W_INFLOW = boundary["W_INFLOW"]
+
+    OBSTACLE_SOLID = obstacle["solid"]
+    OBSTACLE_INTIAL_TEMPERATURE = obstacle["initial_temperature"]
+    OBSTACLE_INTIAL_SMOKE = obstacle["initial_smoke"]
+    OBSTACLE_INTIAL_FUEL = obstacle["initial_fuel"]
+    obstacle_mask = _build_obstacle_mask(config)
 
 # ===============================
 # Methods
@@ -653,7 +661,9 @@ def apply_all_BC(u, v, w, p, T):
 # Main
 # ===============================
 
-def main():
+def main(config=None):
+    apply_config(config)
+
     #------------Initialise-------------------
     print('Initialise')
     print('Cell count: ', int(NX * NY * NZ))
@@ -748,9 +758,8 @@ def main():
         #------------Obstacle-------------------
         u, v, w, p, T, smoke, fuel = apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask)
 
-        #------------Output and Forcing-------------------
+        #------------Output-------------------
         while t >= next_output_time:
-            #------------Output-------------------
             current_fields = Output_Functions.create_output_field_map(u, v, w, p, T, smoke, fuel, flame)
             Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, current_fields, output_index, t)
 
@@ -765,11 +774,6 @@ def main():
                 CFL = Helper_Functions.compute_CFL(u, v, w, dt, DELTA)
                 print(f'Current dt: {np.round(dt, 5)}')
                 print(f'CFL-Condition: {np.round(CFL, 5)}')
-
-            #------------Forcing-------------------
-            Fx, Fy, Fz = Forcing.forcing_turbulence(
-                Fx, Fy, Fz, t, TURBULENCE_FREQUENCY, TURBULENCE_SCALE, TURBULENCE_AMPLITUDE, DELTA
-            )
 
         #------------Dynamic time step-------------------
         t += dt
