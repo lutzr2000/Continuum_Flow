@@ -345,25 +345,6 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     vn[i, j, k] = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
     wn[i, j, k] = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
 
-
-def launch_update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn,
-                           delta, rho, nu, threadsperblock=None):
-    """
-    Launch helper for the CUDA velocity update kernel.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (u.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (u.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    update_velocity[blockspergrid, threadsperblock](
-        u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu
-    )
-    return un, vn, wn
-
-
 @cuda.jit
 def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expansion_rate, t_reference):
     """
@@ -548,6 +529,173 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
     return p_old
 
 
+@cuda.jit
+def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
+    """
+    computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
+
+    Each thread updates one interior cell of the z-direction body-force field.
+    The force is derived from the local temperature difference to the reference
+    temperature and scaled by gravity and the configured buoyancy factor.
+
+    Args:
+        T (device array): temperature field
+        Fz (device array): z-direction force field that will be updated in-place
+        buoyancy_factor (float): thermal expansion coefficient used by the model
+        t_reference (float): reference temperature
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = T.shape
+
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
+    g = 9.81
+    Fz[i, j, k] = g * buoyancy_factor * (T[i, j, k] - t_reference)
+
+
+@cuda.jit
+def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
+                         delta, nu_temperature, nu_smoke, nu_fuel,
+                         temperature_dissipation_rate, temperature_production_rate,
+                         smoke_dissipation_rate, smoke_production_rate,
+                         fuel_burn_rate, fuel_ignition_temperature, t_reference):
+    """
+    updates temperature, smoke and fuel in one GPU transport sweep.
+
+    Convection is evaluated with first-order upwinding, diffusion with central
+    differences and the source terms model fuel ignition, temperature release
+    and smoke production. A flame indicator is written alongside the updated
+    scalar fields.
+
+    Args:
+        T (device array): temperature field
+        smoke (device array): smoke density field
+        fuel (device array): fuel density field
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
+        dt (float): timestep size
+        T_out (device array): output array for updated temperature
+        smoke_out (device array): output array for updated smoke density
+        fuel_out (device array): output array for updated fuel density
+        flame_out (device array): output array for the flame indicator
+        delta (float): grid spacing
+        nu_temperature (float): diffusion coefficient for temperature
+        nu_smoke (float): diffusion coefficient for smoke
+        nu_fuel (float): diffusion coefficient for fuel
+        temperature_dissipation_rate (float): temperature dissipation coefficient
+        temperature_production_rate (float): temperature production coefficient
+        smoke_dissipation_rate (float): smoke dissipation coefficient
+        smoke_production_rate (float): smoke production coefficient
+        fuel_burn_rate (float): burning rate for ignited fuel
+        fuel_ignition_temperature (float): ignition threshold for fuel burning
+        t_reference (float): reference temperature
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = u.shape
+
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
+    dt_over_delta = dt / delta
+    dt_over_delta2 = dt / (delta * delta)
+    temp_diffusion_coeff = nu_temperature * dt_over_delta2
+    smoke_diffusion_coeff = nu_smoke * dt_over_delta2
+    fuel_diffusion_coeff = nu_fuel * dt_over_delta2
+
+    uijk = u[i, j, k]
+    vijk = v[i, j, k]
+    wijk = w[i, j, k]
+
+    T_center = T[i, j, k]
+    T_xm = T[i - 1, j, k]
+    T_xp = T[i + 1, j, k]
+    T_ym = T[i, j - 1, k]
+    T_yp = T[i, j + 1, k]
+    T_zm = T[i, j, k - 1]
+    T_zp = T[i, j, k + 1]
+
+    smoke_center = smoke[i, j, k]
+    smoke_xm = smoke[i - 1, j, k]
+    smoke_xp = smoke[i + 1, j, k]
+    smoke_ym = smoke[i, j - 1, k]
+    smoke_yp = smoke[i, j + 1, k]
+    smoke_zm = smoke[i, j, k - 1]
+    smoke_zp = smoke[i, j, k + 1]
+
+    fuel_center = fuel[i, j, k]
+    fuel_xm = fuel[i - 1, j, k]
+    fuel_xp = fuel[i + 1, j, k]
+    fuel_ym = fuel[i, j - 1, k]
+    fuel_yp = fuel[i, j + 1, k]
+    fuel_zm = fuel[i, j, k - 1]
+    fuel_zp = fuel[i, j, k + 1]
+
+    if uijk >= 0.0:
+        temp_dx = T_center - T_xm
+        smoke_dx = smoke_center - smoke_xm
+        fuel_dx = fuel_center - fuel_xm
+    else:
+        temp_dx = T_xp - T_center
+        smoke_dx = smoke_xp - smoke_center
+        fuel_dx = fuel_xp - fuel_center
+
+    if vijk >= 0.0:
+        temp_dy = T_center - T_ym
+        smoke_dy = smoke_center - smoke_ym
+        fuel_dy = fuel_center - fuel_ym
+    else:
+        temp_dy = T_yp - T_center
+        smoke_dy = smoke_yp - smoke_center
+        fuel_dy = fuel_yp - fuel_center
+
+    if wijk >= 0.0:
+        temp_dz = T_center - T_zm
+        smoke_dz = smoke_center - smoke_zm
+        fuel_dz = fuel_center - fuel_zm
+    else:
+        temp_dz = T_zp - T_center
+        smoke_dz = smoke_zp - smoke_center
+        fuel_dz = fuel_zp - fuel_center
+
+    temp_convection = dt_over_delta * (uijk * temp_dx + vijk * temp_dy + wijk * temp_dz)
+    smoke_convection = dt_over_delta * (uijk * smoke_dx + vijk * smoke_dy + wijk * smoke_dz)
+    fuel_convection = dt_over_delta * (uijk * fuel_dx + vijk * fuel_dy + wijk * fuel_dz)
+
+    temp_diffusion = temp_diffusion_coeff * (
+        (T_xp - 2.0 * T_center + T_xm) +
+        (T_yp - 2.0 * T_center + T_ym) +
+        (T_zp - 2.0 * T_center + T_zm)
+    )
+    smoke_diffusion = smoke_diffusion_coeff * (
+        (smoke_xp - 2.0 * smoke_center + smoke_xm) +
+        (smoke_yp - 2.0 * smoke_center + smoke_ym) +
+        (smoke_zp - 2.0 * smoke_center + smoke_zm)
+    )
+    fuel_diffusion = fuel_diffusion_coeff * (
+        (fuel_xp - 2.0 * fuel_center + fuel_xm) +
+        (fuel_yp - 2.0 * fuel_center + fuel_ym) +
+        (fuel_zp - 2.0 * fuel_center + fuel_zm)
+    )
+
+    if T_center > fuel_ignition_temperature:
+        fuel_source = -fuel_burn_rate * fuel_center
+    else:
+        fuel_source = 0.0
+
+    temperature_source = (
+        -temperature_dissipation_rate * (T_center - t_reference) +
+        temperature_production_rate * (-fuel_source)
+    )
+    smoke_source = smoke_production_rate * (-fuel_source) - smoke_dissipation_rate * smoke_center
+
+    T_out[i, j, k] = T_center - temp_convection + temp_diffusion + dt * temperature_source
+    smoke_out[i, j, k] = smoke_center - smoke_convection + smoke_diffusion + dt * smoke_source
+    fuel_out[i, j, k] = fuel_center - fuel_convection + fuel_diffusion + dt * fuel_source
+    flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
+
+
 def copy_device_fields_to_host(field_map):
     """
     Copies a dictionary of device arrays to host NumPy arrays.
@@ -589,9 +737,13 @@ def main(config=None):
     pressure_work = device_state["pressure_work"]
     pressure_rhs = device_state["pressure_rhs"]
     T = device_state["T"]
+    temperature_work = device_state["temperature_work"]
     smoke = device_state["smoke"]
+    smoke_work = device_state["smoke_work"]
     fuel = device_state["fuel"]
+    fuel_work = device_state["fuel_work"]
     flame = device_state["flame"]
+    flame_work = device_state["flame_work"]
     Fx = device_state["Fx"]
     Fy = device_state["Fy"]
     Fz = device_state["Fz"]
@@ -644,10 +796,21 @@ def main(config=None):
     sys.stdout.write('\rProgress: [0%]')
 
     while t < T_MAX:
+        blockspergrid_3d = (
+            (u.shape[0] + THREADS_PER_BLOCK_3D[0] - 1) // THREADS_PER_BLOCK_3D[0],
+            (u.shape[1] + THREADS_PER_BLOCK_3D[1] - 1) // THREADS_PER_BLOCK_3D[1],
+            (u.shape[2] + THREADS_PER_BLOCK_3D[2] - 1) // THREADS_PER_BLOCK_3D[2],
+        )
+
         #------------Start-------------------
         un.copy_to_device(u)
         vn.copy_to_device(v)
         wn.copy_to_device(w)
+
+        #------------Buoyancy-------------------
+        buoyancy_approximation[blockspergrid_3d, THREADS_PER_BLOCK_3D](
+            T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
+        )
 
         #------------Pressure-------------------
         p = pressure_poisson(
@@ -657,7 +820,7 @@ def main(config=None):
         )
 
         #------------Velocity-------------------
-        u_work, v_work, w_work = launch_update_velocity(
+        update_velocity[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             un, vn, wn, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
         )
@@ -665,6 +828,28 @@ def main(config=None):
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
+
+        #------------Scalars-------------------
+        update_scalar_fields[blockspergrid_3d, THREADS_PER_BLOCK_3D](
+            T, smoke, fuel, u, v, w, dt,
+            temperature_work, smoke_work, fuel_work, flame_work,
+            gpu_constants["DELTA"],
+            gpu_constants["NU_TEMPERATURE"],
+            gpu_constants["NU_SMOKE"],
+            gpu_constants["NU_FUEL"],
+            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
+            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
+            gpu_constants["SMOKE_DISSIPATION_RATE"],
+            gpu_constants["SMOKE_PRODUCTION_RATE"],
+            gpu_constants["FUEL_BURN_RATE"],
+            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
+            gpu_constants["T_REFERENCE"],
+        )
+
+        T, temperature_work = temperature_work, T
+        smoke, smoke_work = smoke_work, smoke
+        fuel, fuel_work = fuel_work, fuel
+        flame, flame_work = flame_work, flame
 
         #------------BCs-------------------
         u, v, w, p, T = BC.apply_all_BC(
@@ -686,6 +871,7 @@ def main(config=None):
         device_fields["T"] = T
         device_fields["smoke"] = smoke
         device_fields["fuel"] = fuel
+        device_fields["flame"] = flame
 
         #------------Output-------------------
         while t >= next_output_time:
