@@ -6,6 +6,7 @@ from numba import cuda, njit, prange, set_num_threads, get_num_threads
 
 import Boundary_Conditions as BC
 import Helper_Functions
+import Obstacle_Boundary_Conditions as Obstacle_BC
 import Obstacles
 import Output_Functions
 
@@ -21,6 +22,7 @@ THREADS_PER_BLOCK_2D = (16, 16)
 REDUCTION_THREADS_PER_BLOCK = 256
 BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
+Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 
 def _build_obstacle_mask(config):
@@ -115,6 +117,7 @@ def apply_config(config):
     obstacle_mask = _build_obstacle_mask(config)
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
+    Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 
 
@@ -551,6 +554,13 @@ def copy_device_fields_to_host(field_map):
     return {name: device_array.copy_to_host() for name, device_array in field_map.items()}
 
 
+def select_fields(field_map, field_names):
+    """
+    Builds a dictionary view containing only the requested field names.
+    """
+    return {name: field_map[name] for name in field_names}
+
+
 # ===============================
 # Main
 # ===============================
@@ -561,11 +571,6 @@ def main(config=None):
     #------------Initialise-------------------
     print('Initialise')
     print('Cell count: ', int(NX * NY * NZ))
-
-    if CPU_PARALLEL:
-        available_threads = os.cpu_count() or 1
-        set_num_threads(CPU_COUNT)
-        print(f'Numba solver threads: {get_num_threads()} / {available_threads} Cores')
 
     #------------Fields-------------------
     device_state, gpu_constants = upload_simulation_state_to_gpu()
@@ -590,20 +595,7 @@ def main(config=None):
     Fy = device_state["Fy"]
     Fz = device_state["Fz"]
     obstacle_mask = device_state["obstacle_mask"]
-
-    #------------BCs-------------------
-    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
-
-    #------------Obstacle-------------------
-    u, v, w, p, T, smoke, fuel = BC.apply_all_obstacle_BCs(
-        u, v, w, p, T, smoke, fuel, obstacle_mask,
-        OBSTACLE_SOLID,
-        OBSTACLE_INTIAL_TEMPERATURE,
-        OBSTACLE_INTIAL_SMOKE,
-        OBSTACLE_INTIAL_FUEL,
-    )
-
-    host_fields = copy_device_fields_to_host({
+    device_fields = {
         "u": u,
         "v": v,
         "w": w,
@@ -612,7 +604,21 @@ def main(config=None):
         "smoke": smoke,
         "fuel": fuel,
         "flame": flame,
-    })
+    }
+
+    #------------BCs-------------------
+    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
+
+    #------------Obstacle-------------------
+    u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
+        u, v, w, p, T, smoke, fuel, obstacle_mask,
+        OBSTACLE_SOLID,
+        OBSTACLE_INTIAL_TEMPERATURE,
+        OBSTACLE_INTIAL_SMOKE,
+        OBSTACLE_INTIAL_FUEL,
+    )
+
+    host_output_fields = copy_device_fields_to_host(select_fields(device_fields, OUTPUT_VARIABLES))
 
     #------------Dynamic time step-------------------
     t = 0.0
@@ -627,18 +633,8 @@ def main(config=None):
     next_output_time = 0.0
     output_index = 0
     
-    template_fields = Output_Functions.create_output_field_map(
-        host_fields["u"],
-        host_fields["v"],
-        host_fields["w"],
-        host_fields["p"],
-        host_fields["T"],
-        host_fields["smoke"],
-        host_fields["fuel"],
-        host_fields["flame"],
-    )
     write_queue, buffer_pool, writer_thread, shared_memory_blocks = Output_Functions.setup_output(
-        OUTPATH, OUTPUT_VARIABLES, template_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
+        OUTPATH, OUTPUT_VARIABLES, host_output_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
     )
 
     #------------Main time loop-------------------
@@ -674,37 +670,25 @@ def main(config=None):
         )
 
         #------------Obstacle-------------------
-        u, v, w, p, T, smoke, fuel = BC.apply_all_obstacle_BCs(
+        u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
             u, v, w, p, T, smoke, fuel, obstacle_mask,
             OBSTACLE_SOLID,
             OBSTACLE_INTIAL_TEMPERATURE,
             OBSTACLE_INTIAL_SMOKE,
             OBSTACLE_INTIAL_FUEL,
         )
+        device_fields["u"] = u
+        device_fields["v"] = v
+        device_fields["w"] = w
+        device_fields["p"] = p
+        device_fields["T"] = T
+        device_fields["smoke"] = smoke
+        device_fields["fuel"] = fuel
 
         #------------Output-------------------
         while t >= next_output_time:
-            host_fields = copy_device_fields_to_host({
-                "u": u,
-                "v": v,
-                "w": w,
-                "p": p,
-                "T": T,
-                "smoke": smoke,
-                "fuel": fuel,
-                "flame": flame,
-            })
-            current_fields = Output_Functions.create_output_field_map(
-                host_fields["u"],
-                host_fields["v"],
-                host_fields["w"],
-                host_fields["p"],
-                host_fields["T"],
-                host_fields["smoke"],
-                host_fields["fuel"],
-                host_fields["flame"],
-            )
-            Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, current_fields, output_index, t)
+            host_output_fields = copy_device_fields_to_host(select_fields(device_fields, OUTPUT_VARIABLES))
+            Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, host_output_fields, output_index, t)
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP

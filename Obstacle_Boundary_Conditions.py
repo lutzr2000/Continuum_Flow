@@ -1,68 +1,180 @@
-from numba import njit, prange
+from numba import cuda
+
+THREADS_PER_BLOCK_3D = (8, 8, 8)
 
 
-@njit(parallel=True, cache=True)
+@cuda.jit
 def obstacle_boundary_conditions_velocity(u, v, w, mask):
     """
-    applies no-slip velocity conditions inside a 3D obstacle mask.
+    applies no-slip velocity conditions inside a 3D obstacle mask on the GPU.
+
+    Each thread checks one obstacle cell and sets all three velocity components
+    to zero when the mask marks that cell as solid.
 
     Args:
-        u (3d-array): x-velocity field
-        v (3d-array): y-velocity field
-        w (3d-array): z-velocity field
-        mask (3d-array): boolean obstacle mask
-    Returns:
-        u (3d-array): updated x-velocity field
-        v (3d-array): updated y-velocity field
-        w (3d-array): updated z-velocity field
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
+        mask (device array): boolean obstacle mask
     """
+    i, j, k = cuda.grid(3)
     nx, ny, nz = mask.shape
-    for i in prange(nx):
-        for j in range(ny):
-            for k in range(nz):
-                if mask[i, j, k]:
-                    u[i, j, k] = 0.0
-                    v[i, j, k] = 0.0
-                    w[i, j, k] = 0.0
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if mask[i, j, k]:
+        u[i, j, k] = 0.0
+        v[i, j, k] = 0.0
+        w[i, j, k] = 0.0
+
+
+@cuda.jit
+def obstacle_boundary_conditions_pressure(p, mask):
+    """
+    applies zero pressure inside a 3D obstacle mask on the GPU.
+
+    Each thread checks one obstacle cell and sets the pressure to zero when the
+    mask marks that cell as part of the obstacle region.
+
+    Args:
+        p (device array): pressure field
+        mask (device array): boolean obstacle mask
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = mask.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if mask[i, j, k]:
+        p[i, j, k] = 0.0
+
+
+@cuda.jit
+def obstacle_boundary_conditions_scalar(phi, mask, value):
+    """
+    applies a fixed scalar value inside a 3D obstacle mask on the GPU.
+
+    Each thread checks one obstacle cell and writes the prescribed scalar value
+    when the cell belongs to the obstacle region.
+
+    Args:
+        phi (device array): scalar field that will be clamped inside the obstacle
+        mask (device array): boolean obstacle mask
+        value (float): scalar value prescribed inside the obstacle
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = mask.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if mask[i, j, k]:
+        phi[i, j, k] = value
+
+
+def launch_obstacle_boundary_conditions_velocity(u, v, w, mask, threadsperblock=None):
+    """
+    launches the obstacle no-slip velocity kernel on the GPU.
+
+    Args:
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
+        mask (device array): boolean obstacle mask
+        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
+    Returns:
+        tuple: updated velocity fields
+    """
+    if threadsperblock is None:
+        threadsperblock = THREADS_PER_BLOCK_3D
+    blockspergrid = (
+        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+    obstacle_boundary_conditions_velocity[blockspergrid, threadsperblock](u, v, w, mask)
     return u, v, w
 
 
-@njit(parallel=True, cache=True)
-def obstacle_boundary_conditions_pressure(p, mask):
+def launch_obstacle_boundary_conditions_pressure(p, mask, threadsperblock=None):
     """
-    applies zero pressure inside a 3D obstacle mask.
+    launches the obstacle pressure boundary kernel on the GPU.
 
     Args:
-        p (3d-array): pressure field
-        mask (3d-array): boolean obstacle mask
+        p (device array): pressure field
+        mask (device array): boolean obstacle mask
+        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
-        p (3d-array): updated pressure field
+        device array: the updated pressure field
     """
-    for i in prange(p.shape[0]):
-        for j in range(p.shape[1]):
-            for k in range(p.shape[2]):
-                if mask[i, j, k]:
-                    p[i, j, k] = 0.0
-
+    if threadsperblock is None:
+        threadsperblock = THREADS_PER_BLOCK_3D
+    blockspergrid = (
+        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+    obstacle_boundary_conditions_pressure[blockspergrid, threadsperblock](p, mask)
     return p
 
 
-@njit(parallel=True, cache=True)
-def obstacle_boundary_conditions_scalar(phi, mask, value):
+def launch_obstacle_boundary_conditions_scalar(phi, mask, value, threadsperblock=None):
     """
-    applies a fixed scalar value inside a 3D obstacle mask.
+    launches the obstacle scalar boundary kernel on the GPU.
 
     Args:
-        phi (3d-array): scalar field
-        mask (3d-array): boolean obstacle mask
-        value (float): scalar value inside the obstacle
+        phi (device array): scalar field that will be clamped inside the obstacle
+        mask (device array): boolean obstacle mask
+        value (float): scalar value prescribed inside the obstacle
+        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
-        phi (3d-array): updated scalar field
+        device array: the updated scalar field
     """
-    for i in prange(phi.shape[0]):
-        for j in range(phi.shape[1]):
-            for k in range(phi.shape[2]):
-                if mask[i, j, k]:
-                    phi[i, j, k] = value
-
+    if threadsperblock is None:
+        threadsperblock = THREADS_PER_BLOCK_3D
+    blockspergrid = (
+        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+    obstacle_boundary_conditions_scalar[blockspergrid, threadsperblock](phi, mask, value)
     return phi
+
+
+def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask, obstacle_solid,
+                           obstacle_initial_temperature, obstacle_initial_smoke,
+                           obstacle_initial_fuel):
+    """
+    applies all obstacle boundary conditions to the GPU field state.
+
+    Velocity components are forced to zero inside solid obstacles, pressure is
+    set to zero there as well and scalar fields are clamped to their configured
+    obstacle values.
+
+    Args:
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
+        p (device array): pressure field
+        T (device array): temperature field
+        smoke (device array): smoke field
+        fuel (device array): fuel field
+        obstacle_mask (device array): boolean obstacle mask
+        obstacle_solid (bool): whether obstacle velocity conditions should be applied
+        obstacle_initial_temperature (float): temperature prescribed inside the obstacle
+        obstacle_initial_smoke (float): smoke value prescribed inside the obstacle
+        obstacle_initial_fuel (float): fuel value prescribed inside the obstacle
+    Returns:
+        tuple: updated velocity, pressure and scalar fields
+    """
+    if obstacle_solid:
+        u, v, w = launch_obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
+        p = launch_obstacle_boundary_conditions_pressure(p, obstacle_mask)
+
+    T = launch_obstacle_boundary_conditions_scalar(T, obstacle_mask, obstacle_initial_temperature)
+    smoke = launch_obstacle_boundary_conditions_scalar(smoke, obstacle_mask, obstacle_initial_smoke)
+    fuel = launch_obstacle_boundary_conditions_scalar(fuel, obstacle_mask, obstacle_initial_fuel)
+
+    return u, v, w, p, T, smoke, fuel
