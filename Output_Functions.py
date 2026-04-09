@@ -91,7 +91,7 @@ def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, ou
     fields = buffer_pool.get()
     for variable_name in output_variables:
         np.copyto(fields[variable_name]['array'], source_fields[variable_name])
-    write_queue.put((output_index, time_value, fields))
+    write_queue.put((int(output_index), float(time_value), fields))
 
 
 def shutdown_output(write_queue, writer_thread, shared_memory_blocks):
@@ -127,7 +127,7 @@ def create_writer_payload(fields, output_variables, output_path, time_value, del
     """
     return {
         'output_path': output_path,
-        'time': time_value,
+        'time': float(time_value),
         'delta': float(delta),
         'fields': {
             variable_name: {

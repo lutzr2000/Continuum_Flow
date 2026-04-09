@@ -40,7 +40,7 @@ CONFIG = {
         "OUTPUT_STATUS": False,
         "WRITE_QUEUE_SIZE": 512,
         "OUTPATH": r"C:\Blenderzeug\BlenderCFD\Test",
-        "OUTPUT_VARIABLES": ["smoke"],
+        "OUTPUT_VARIABLES": ["u", "v", "w","smoke"],
     },
     "boundary_conditions": {
         "BC_CONFIG": {
