@@ -18,8 +18,9 @@ BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\pytho
 VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
-THREADS_PER_BLOCK_2D = (16, 16)
-REDUCTION_THREADS_PER_BLOCK = 256
+THREADS_PER_BLOCK_2D = (4, 4)
+REDUCTION_THREADS_PER_BLOCK = 512
+TIMESTEP_UPDATE_INTERVAL = 10
 BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
 Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
@@ -622,6 +623,7 @@ def main(config=None):
 
     #------------Dynamic time step-------------------
     t = 0.0
+    step_index = 0
     dt = Helper_Functions.compute_new_timestep_gpu(
         u, v, w, Fx, Fy, Fz,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
@@ -702,21 +704,23 @@ def main(config=None):
 
         #------------Dynamic time step-------------------
         t += dt
+        step_index += 1
 
-        dt_new = Helper_Functions.compute_new_timestep_gpu(
-            u, v, w, Fx, Fy, Fz,
-            gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
-        )
+        if step_index % TIMESTEP_UPDATE_INTERVAL == 0:
+            dt_new = Helper_Functions.compute_new_timestep_gpu(
+                u, v, w, Fx, Fy, Fz,
+                gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
+            )
 
-        dt_max_increase = dt * 1.5
-        dt_max_decrease = dt * 0.5
+            dt_max_increase = dt * 1.5
+            dt_max_decrease = dt * 0.5
 
-        if dt_new > dt_max_increase:
-            dt = dt_max_increase
-        elif dt_new < dt_max_decrease:
-            dt = dt_max_decrease
-        else:
-            dt = dt_new
+            if dt_new > dt_max_increase:
+                dt = dt_max_increase
+            elif dt_new < dt_max_decrease:
+                dt = dt_max_decrease
+            else:
+                dt = dt_new
 
         if dt > 1.0 / OUTPUT_FPS:
             dt = 1.0 / OUTPUT_FPS
