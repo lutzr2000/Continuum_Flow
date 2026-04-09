@@ -787,7 +787,7 @@ def main(config=None):
     next_output_time = 0.0
     output_index = 0
     
-    write_queue, buffer_pool, writer_thread, shared_memory_blocks = Output_Functions.setup_output(
+    write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
         OUTPATH, OUTPUT_VARIABLES, host_output_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
     )
 
@@ -912,7 +912,7 @@ def main(config=None):
             dt = 1.0 / OUTPUT_FPS
 
     #------------Empty write queue-------------------
-    Output_Functions.shutdown_output(write_queue, writer_thread, shared_memory_blocks)
+    Output_Functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
 
     #------------Conclusion-------------------
     print('Simulation finished!')

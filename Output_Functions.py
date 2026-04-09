@@ -8,6 +8,7 @@ from multiprocessing import shared_memory
 import numpy as np
 
 FIELD_NAMES = ('u', 'v', 'w', 'p', 'T', 'smoke', 'fuel', 'flame')
+WRITER_COUNT = 4
 
 
 def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
@@ -31,7 +32,7 @@ def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
 
 def setup_output(outpath, output_variables, template_fields, queue_size, blender_python_exe, vdb_writer_script, delta):
     """
-    prepares the shared-memory buffers and starts the persistent writer thread.
+    prepares the shared-memory buffers and starts persistent writer workers.
 
     Args:
         outpath (str): output directory for vdb files
@@ -42,7 +43,7 @@ def setup_output(outpath, output_variables, template_fields, queue_size, blender
         vdb_writer_script (str): path to the VDB writer script
         delta (float): grid spacing
     Returns:
-        tuple: write queue, buffer queue, writer thread and list of shared memory blocks
+        tuple: write queue, buffer queue, writer threads and list of shared memory blocks
     """
     os.makedirs(outpath, exist_ok=True)
 
@@ -64,14 +65,17 @@ def setup_output(outpath, output_variables, template_fields, queue_size, blender
             }
         buffer_pool.put(fields)
 
-    writer_thread = threading.Thread(
-        target=writer_thread_func,
-        args=(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script),
-        daemon=True,
-    )
-    writer_thread.start()
+    writer_threads = []
+    for _ in range(WRITER_COUNT):
+        writer_thread = threading.Thread(
+            target=writer_thread_func,
+            args=(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script),
+            daemon=True,
+        )
+        writer_thread.start()
+        writer_threads.append(writer_thread)
 
-    return write_queue, buffer_pool, writer_thread, shared_memory_blocks
+    return write_queue, buffer_pool, writer_threads, shared_memory_blocks
 
 
 def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, output_index, time_value):
@@ -94,21 +98,24 @@ def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, ou
     write_queue.put((int(output_index), float(time_value), fields))
 
 
-def shutdown_output(write_queue, writer_thread, shared_memory_blocks):
+def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
     """
     waits for all output work to finish and releases the shared-memory buffers.
 
     Args:
         write_queue (queue.Queue): queue with pending output jobs
-        writer_thread (threading.Thread): background writer thread
+        writer_threads (list[threading.Thread]): background writer threads
         shared_memory_blocks (list): shared memory objects used for output buffering
     Returns:
         None
     """
     write_queue.join()
-    write_queue.put(None)
     write_queue.join()
-    writer_thread.join()
+    for _ in writer_threads:
+        write_queue.put(None)
+    write_queue.join()
+    for writer_thread in writer_threads:
+        writer_thread.join()
     cleanup_output_buffers(shared_memory_blocks)
 
 
