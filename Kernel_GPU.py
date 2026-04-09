@@ -4,6 +4,7 @@ import os
 
 from numba import cuda, njit, prange, set_num_threads, get_num_threads
 
+import Boundary_Conditions as BC
 import Obstacles
 import Output_Functions
 
@@ -16,6 +17,8 @@ VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (16, 16)
+BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
+BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
 
 def _build_obstacle_mask(config):
     obstacle_cfg = config["obstacle"]
@@ -107,6 +110,8 @@ def apply_config(config):
     OBSTACLE_INTIAL_SMOKE = obstacle["initial_smoke"]
     OBSTACLE_INTIAL_FUEL = obstacle["initial_fuel"]
     obstacle_mask = _build_obstacle_mask(config)
+    BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
+    BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
 
 
 def upload_simulation_state_to_gpu():
@@ -419,7 +424,18 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expa
 @cuda.jit
 def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
     """
-    CUDA kernel for one Jacobi iteration of the pressure Poisson solve.
+    performs one Jacobi iteration of the 3D pressure Poisson equation on the GPU.
+
+    Each interior cell is updated from the previous pressure iterate `p_old`
+    using the 7-point stencil of the Laplace operator and the already computed
+    right hand side `b`. Boundary cells are skipped here because their values
+    are imposed separately by `_pressure_poisson_apply_neumann_bcs`.
+
+    Args:
+        p_old (device array): pressure field from the previous Jacobi iteration
+        p_new (device array): output array for the updated pressure field
+        b (device array): right hand side of the pressure Poisson equation
+        delta (float): grid spacing
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = p_old.shape
@@ -440,7 +456,16 @@ def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
 @cuda.jit
 def _pressure_poisson_apply_neumann_bcs(p):
     """
-    CUDA kernel that applies all hard-coded Neumann pressure boundaries.
+    applies the hard-coded zero-gradient pressure boundary conditions on all
+    six domain faces on the GPU.
+
+    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
+    meaning the pressure at the boundary is copied from the adjacent interior
+    cell. This kernel writes the boundary values after each Jacobi iteration so
+    the next iteration starts from a pressure field with valid boundary values.
+
+    Args:
+        p (device array): pressure field whose domain boundaries will be updated
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = p.shape
@@ -513,280 +538,6 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
         p_old, p_new = p_new, p_old
 
     return p_old
-
-
-@cuda.jit
-def apply_neumann_boundary_condition(field, axis, side_index):
-    """
-    CUDA kernel that applies a zero-gradient boundary condition to one side of a 3D field.
-    """
-    a, b = cuda.grid(2)
-    nx, ny, nz = field.shape
-
-    if axis == 0:
-        if a >= ny or b >= nz:
-            return
-        i = 0 if side_index == 0 else nx - 1
-        src_i = 1 if side_index == 0 else nx - 2
-        field[i, a, b] = field[src_i, a, b]
-    elif axis == 1:
-        if a >= nx or b >= nz:
-            return
-        j = 0 if side_index == 0 else ny - 1
-        src_j = 1 if side_index == 0 else ny - 2
-        field[a, j, b] = field[a, src_j, b]
-    else:
-        if a >= nx or b >= ny:
-            return
-        k = 0 if side_index == 0 else nz - 1
-        src_k = 1 if side_index == 0 else nz - 2
-        field[a, b, k] = field[a, b, src_k]
-
-
-@cuda.jit
-def apply_dirichlet_boundary_condition(field, axis, side_index, value):
-    """
-    CUDA kernel that applies a fixed-value boundary condition to one side of a 3D field.
-    """
-    a, b = cuda.grid(2)
-    nx, ny, nz = field.shape
-
-    if axis == 0:
-        if a >= ny or b >= nz:
-            return
-        i = 0 if side_index == 0 else nx - 1
-        field[i, a, b] = value
-    elif axis == 1:
-        if a >= nx or b >= nz:
-            return
-        j = 0 if side_index == 0 else ny - 1
-        field[a, j, b] = value
-    else:
-        if a >= nx or b >= ny:
-            return
-        k = 0 if side_index == 0 else nz - 1
-        field[a, b, k] = value
-
-
-@cuda.jit
-def obstacle_boundary_conditions_velocity(u, v, w, mask):
-    """
-    CUDA kernel that applies no-slip velocity conditions inside a 3D obstacle mask.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if mask[i, j, k]:
-        u[i, j, k] = 0.0
-        v[i, j, k] = 0.0
-        w[i, j, k] = 0.0
-
-
-@cuda.jit
-def obstacle_boundary_conditions_pressure(p, mask):
-    """
-    CUDA kernel that applies zero pressure inside a 3D obstacle mask.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if mask[i, j, k]:
-        p[i, j, k] = 0.0
-
-
-@cuda.jit
-def obstacle_boundary_conditions_scalar(phi, mask, value):
-    """
-    CUDA kernel that applies a fixed scalar value inside a 3D obstacle mask.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if mask[i, j, k]:
-        phi[i, j, k] = value
-
-
-def _side_to_axis_and_index(side):
-    if side == "x_low":
-        return 0, 0
-    if side == "x_high":
-        return 0, 1
-    if side == "y_low":
-        return 1, 0
-    if side == "y_high":
-        return 1, 1
-    if side == "z_low":
-        return 2, 0
-    if side == "z_high":
-        return 2, 1
-    raise ValueError(f"Unknown boundary side '{side}'")
-
-
-def _boundary_blockspergrid(field_shape, axis, threadsperblock):
-    if axis == 0:
-        return (
-            (field_shape[1] + threadsperblock[0] - 1) // threadsperblock[0],
-            (field_shape[2] + threadsperblock[1] - 1) // threadsperblock[1],
-        )
-    if axis == 1:
-        return (
-            (field_shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-            (field_shape[2] + threadsperblock[1] - 1) // threadsperblock[1],
-        )
-    return (
-        (field_shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (field_shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-    )
-
-
-def launch_neumann_boundary_condition(field, side, threadsperblock=None):
-    """
-    Launch helper for a zero-gradient boundary condition on one domain side.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_2D
-    axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(field.shape, axis, threadsperblock)
-    apply_neumann_boundary_condition[blockspergrid, threadsperblock](field, axis, side_index)
-    return field
-
-
-def launch_dirichlet_boundary_condition(field, side, value, threadsperblock=None):
-    """
-    Launch helper for a fixed-value boundary condition on one domain side.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_2D
-    axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(field.shape, axis, threadsperblock)
-    apply_dirichlet_boundary_condition[blockspergrid, threadsperblock](field, axis, side_index, value)
-    return field
-
-
-def launch_inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None, threadsperblock=None):
-    """
-    Launch helper for inflow boundary conditions on GPU arrays.
-    """
-    launch_dirichlet_boundary_condition(u, side, u_inflow, threadsperblock)
-    launch_dirichlet_boundary_condition(v, side, v_inflow, threadsperblock)
-    launch_dirichlet_boundary_condition(w, side, w_inflow, threadsperblock)
-    launch_neumann_boundary_condition(p, side, threadsperblock)
-
-    if t_inflow is None:
-        launch_neumann_boundary_condition(T, side, threadsperblock)
-    else:
-        launch_dirichlet_boundary_condition(T, side, t_inflow, threadsperblock)
-
-    return u, v, w, p, T
-
-
-def launch_outflow_bc(u, v, w, p, T, side, threadsperblock=None):
-    """
-    Launch helper for outflow boundary conditions on GPU arrays.
-    """
-    launch_neumann_boundary_condition(u, side, threadsperblock)
-    launch_neumann_boundary_condition(v, side, threadsperblock)
-    launch_neumann_boundary_condition(w, side, threadsperblock)
-    launch_neumann_boundary_condition(p, side, threadsperblock)
-    launch_neumann_boundary_condition(T, side, threadsperblock)
-    return u, v, w, p, T
-
-
-def launch_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
-    """
-    Launch helper for slip-wall boundary conditions on GPU arrays.
-    """
-    if side == "x_low" or side == "x_high":
-        launch_dirichlet_boundary_condition(u, side, 0.0, threadsperblock)
-        launch_neumann_boundary_condition(v, side, threadsperblock)
-        launch_neumann_boundary_condition(w, side, threadsperblock)
-    elif side == "y_low" or side == "y_high":
-        launch_neumann_boundary_condition(u, side, threadsperblock)
-        launch_dirichlet_boundary_condition(v, side, 0.0, threadsperblock)
-        launch_neumann_boundary_condition(w, side, threadsperblock)
-    else:
-        launch_neumann_boundary_condition(u, side, threadsperblock)
-        launch_neumann_boundary_condition(v, side, threadsperblock)
-        launch_dirichlet_boundary_condition(w, side, 0.0, threadsperblock)
-
-    launch_neumann_boundary_condition(p, side, threadsperblock)
-    if t_wall is None:
-        launch_neumann_boundary_condition(T, side, threadsperblock)
-    else:
-        launch_dirichlet_boundary_condition(T, side, t_wall, threadsperblock)
-
-    return u, v, w, p, T
-
-
-def launch_no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
-    """
-    Launch helper for no-slip-wall boundary conditions on GPU arrays.
-    """
-    launch_dirichlet_boundary_condition(u, side, 0.0, threadsperblock)
-    launch_dirichlet_boundary_condition(v, side, 0.0, threadsperblock)
-    launch_dirichlet_boundary_condition(w, side, 0.0, threadsperblock)
-    launch_neumann_boundary_condition(p, side, threadsperblock)
-
-    if t_wall is None:
-        launch_neumann_boundary_condition(T, side, threadsperblock)
-    else:
-        launch_dirichlet_boundary_condition(T, side, t_wall, threadsperblock)
-
-    return u, v, w, p, T
-
-
-def launch_obstacle_boundary_conditions_velocity(u, v, w, mask, threadsperblock=None):
-    """
-    Launch helper for obstacle no-slip velocity conditions on GPU arrays.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_velocity[blockspergrid, threadsperblock](u, v, w, mask)
-    return u, v, w
-
-
-def launch_obstacle_boundary_conditions_pressure(p, mask, threadsperblock=None):
-    """
-    Launch helper for obstacle pressure conditions on GPU arrays.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_pressure[blockspergrid, threadsperblock](p, mask)
-    return p
-
-
-def launch_obstacle_boundary_conditions_scalar(phi, mask, value, threadsperblock=None):
-    """
-    Launch helper for obstacle scalar conditions on GPU arrays.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_scalar[blockspergrid, threadsperblock](phi, mask, value)
-    return phi
 
 
 @cuda.jit
@@ -884,51 +635,6 @@ def compute_new_timestep_gpu(u, v, w, Fx, Fy, Fz, rho, delta, nu, cfl_max):
 
     return min(dt_conv, dt_diff, dt_forcing)
 
-def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask):
-    """
-    Applies obstacle boundary conditions to all fields. If OBSTACLE_SOLID is True, the velocity and pressure BCs will be applied.
-    """
-    if OBSTACLE_SOLID:
-        u, v, w = launch_obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
-        p = launch_obstacle_boundary_conditions_pressure(p, obstacle_mask)
-
-    T = launch_obstacle_boundary_conditions_scalar(T, obstacle_mask, OBSTACLE_INTIAL_TEMPERATURE)
-    smoke = launch_obstacle_boundary_conditions_scalar(smoke, obstacle_mask, OBSTACLE_INTIAL_SMOKE)
-    fuel = launch_obstacle_boundary_conditions_scalar(fuel, obstacle_mask, OBSTACLE_INTIAL_FUEL)
-
-    return u, v, w, p, T, smoke, fuel
-
-def apply_all_BC(u, v, w, p, T):
-    """
-    Applies all boundary conditions to the velocity, pressure and temperature fields.
-    """
-    for side, bc in BC_CONFIG.items():
-        bc_type = bc["type"]
-
-        if bc_type == "outflow":
-            u, v, w, p, T = launch_outflow_bc(u, v, w, p, T, side)
-
-        elif bc_type == "inflow":
-            u, v, w, p, T = launch_inflow_bc(
-                u, v, w, p, T,
-                side,
-                bc.get("u", U_INFLOW),
-                bc.get("v", V_INFLOW),
-                bc.get("w", W_INFLOW),
-                bc.get("T", bc.get("temperature")),
-            )
-
-        elif bc_type == "no_slip_wall":
-            u, v, w, p, T = launch_no_slip_wall_bc(u, v, w, p, T, side, bc.get("T", bc.get("temperature")))
-
-        elif bc_type == "slip_wall":
-            u, v, w, p, T = launch_slip_wall_bc(u, v, w, p, T, side, bc.get("T", bc.get("temperature")))
-
-        else:
-            raise ValueError(f"Unknown boundary condition '{bc_type}' for side '{side}'")
-
-    return u, v, w, p, T
-
 # ===============================
 # Main
 # ===============================
@@ -970,11 +676,15 @@ def main(config=None):
     d_obstacle_mask = device_state["obstacle_mask"]
 
     #------------BCs-------------------
-    d_u, d_v, d_w, d_p, d_T = apply_all_BC(d_u, d_v, d_w, d_p, d_T)
+    d_u, d_v, d_w, d_p, d_T = BC.apply_all_BC(d_u, d_v, d_w, d_p, d_T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
 
     #------------Obstacle-------------------
-    d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = apply_all_obstacle_BCs(
-        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask
+    d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = BC.apply_all_obstacle_BCs(
+        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask,
+        OBSTACLE_SOLID,
+        OBSTACLE_INTIAL_TEMPERATURE,
+        OBSTACLE_INTIAL_SMOKE,
+        OBSTACLE_INTIAL_FUEL,
     )
 
     host_fields = copy_device_fields_to_host({
@@ -1043,11 +753,17 @@ def main(config=None):
         d_w, d_w_work = d_w_work, d_w
 
         #------------BCs-------------------
-        d_u, d_v, d_w, d_p, d_T = apply_all_BC(d_u, d_v, d_w, d_p, d_T)
+        d_u, d_v, d_w, d_p, d_T = BC.apply_all_BC(
+            d_u, d_v, d_w, d_p, d_T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
+        )
 
         #------------Obstacle-------------------
-        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = apply_all_obstacle_BCs(
-            d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask
+        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = BC.apply_all_obstacle_BCs(
+            d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask,
+            OBSTACLE_SOLID,
+            OBSTACLE_INTIAL_TEMPERATURE,
+            OBSTACLE_INTIAL_SMOKE,
+            OBSTACLE_INTIAL_FUEL,
         )
 
         #------------Output-------------------
