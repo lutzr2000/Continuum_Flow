@@ -5,6 +5,7 @@ import os
 from numba import cuda, njit, prange, set_num_threads, get_num_threads
 
 import Boundary_Conditions as BC
+import Helper_Functions
 import Obstacles
 import Output_Functions
 
@@ -17,8 +18,10 @@ VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
 CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (16, 16)
+REDUCTION_THREADS_PER_BLOCK = 256
 BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
+Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 
 def _build_obstacle_mask(config):
     obstacle_cfg = config["obstacle"]
@@ -112,6 +115,7 @@ def apply_config(config):
     obstacle_mask = _build_obstacle_mask(config)
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
+    Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 
 
 def upload_simulation_state_to_gpu():
@@ -540,100 +544,12 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
     return p_old
 
 
-@cuda.jit
-def copy_field_3d(src, dst):
-    """
-    CUDA kernel that copies one 3D field into another equally shaped 3D field.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = src.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    dst[i, j, k] = src[i, j, k]
-
-
-def launch_copy_field_3d(src, dst, threadsperblock=None):
-    """
-    Launch helper for copying a 3D field on the GPU.
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (src.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (src.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (src.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    copy_field_3d[blockspergrid, threadsperblock](src, dst)
-    return dst
-
-
 def copy_device_fields_to_host(field_map):
     """
     Copies a dictionary of device arrays to host NumPy arrays.
     """
     return {name: device_array.copy_to_host() for name, device_array in field_map.items()}
 
-
-@cuda.reduce
-def max_abs_reduce(a, b):
-    """
-    Reduction that returns the maximum absolute value over an array.
-    """
-    abs_a = abs(a)
-    abs_b = abs(b)
-    return abs_a if abs_a > abs_b else abs_b
-
-
-def max_abs_device_array(device_array):
-    """
-    Applies the CUDA max-abs reduction to a flattened 1D view of a device array.
-    """
-    return max_abs_reduce(device_array.reshape(device_array.size))
-
-
-def compute_cfl_gpu(u, v, w, dt, delta):
-    """
-    Computes the CFL number on the GPU and returns a host scalar.
-    """
-    max_u = max_abs_device_array(u)
-    max_v = max_abs_device_array(v)
-    max_w = max_abs_device_array(w)
-
-    cfl_x = max_u * dt / delta
-    cfl_y = max_v * dt / delta
-    cfl_z = max_w * dt / delta
-    return max(cfl_x, cfl_y, cfl_z)
-
-
-def compute_new_timestep_gpu(u, v, w, Fx, Fy, Fz, rho, delta, nu, cfl_max):
-    """
-    Computes a stable timestep using GPU reductions and returns a host scalar.
-    """
-    eps = 1e-12
-
-    abs_u_max = max_abs_device_array(u)
-    abs_v_max = max_abs_device_array(v)
-    abs_w_max = max_abs_device_array(w)
-    abs_Fx_max = max_abs_device_array(Fx)
-    abs_Fy_max = max_abs_device_array(Fy)
-    abs_Fz_max = max_abs_device_array(Fz)
-
-    cfl_delta = cfl_max * delta
-    dt_conv = min(
-        cfl_delta / max(abs_u_max, eps),
-        cfl_delta / max(abs_v_max, eps),
-        cfl_delta / max(abs_w_max, eps),
-    )
-    dt_diff = delta * delta / (6.0 * nu)
-    dt_forcing = min(
-        cfl_delta * rho / max(abs_Fx_max, eps),
-        cfl_delta * rho / max(abs_Fy_max, eps),
-        cfl_delta * rho / max(abs_Fz_max, eps),
-    )
-
-    return min(dt_conv, dt_diff, dt_forcing)
 
 # ===============================
 # Main
@@ -654,33 +570,33 @@ def main(config=None):
     #------------Fields-------------------
     device_state, gpu_constants = upload_simulation_state_to_gpu()
 
-    d_u = device_state["u"]
-    d_v = device_state["v"]
-    d_w = device_state["w"]
-    d_un = device_state["un"]
-    d_vn = device_state["vn"]
-    d_wn = device_state["wn"]
-    d_u_work = device_state["u_work"]
-    d_v_work = device_state["v_work"]
-    d_w_work = device_state["w_work"]
-    d_p = device_state["p"]
-    d_pressure_work = device_state["pressure_work"]
-    d_pressure_rhs = device_state["pressure_rhs"]
-    d_T = device_state["T"]
-    d_smoke = device_state["smoke"]
-    d_fuel = device_state["fuel"]
-    d_flame = device_state["flame"]
-    d_Fx = device_state["Fx"]
-    d_Fy = device_state["Fy"]
-    d_Fz = device_state["Fz"]
-    d_obstacle_mask = device_state["obstacle_mask"]
+    u = device_state["u"]
+    v = device_state["v"]
+    w = device_state["w"]
+    un = device_state["un"]
+    vn = device_state["vn"]
+    wn = device_state["wn"]
+    u_work = device_state["u_work"]
+    v_work = device_state["v_work"]
+    w_work = device_state["w_work"]
+    p = device_state["p"]
+    pressure_work = device_state["pressure_work"]
+    pressure_rhs = device_state["pressure_rhs"]
+    T = device_state["T"]
+    smoke = device_state["smoke"]
+    fuel = device_state["fuel"]
+    flame = device_state["flame"]
+    Fx = device_state["Fx"]
+    Fy = device_state["Fy"]
+    Fz = device_state["Fz"]
+    obstacle_mask = device_state["obstacle_mask"]
 
     #------------BCs-------------------
-    d_u, d_v, d_w, d_p, d_T = BC.apply_all_BC(d_u, d_v, d_w, d_p, d_T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
+    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
 
     #------------Obstacle-------------------
-    d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = BC.apply_all_obstacle_BCs(
-        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask,
+    u, v, w, p, T, smoke, fuel = BC.apply_all_obstacle_BCs(
+        u, v, w, p, T, smoke, fuel, obstacle_mask,
         OBSTACLE_SOLID,
         OBSTACLE_INTIAL_TEMPERATURE,
         OBSTACLE_INTIAL_SMOKE,
@@ -688,20 +604,20 @@ def main(config=None):
     )
 
     host_fields = copy_device_fields_to_host({
-        "u": d_u,
-        "v": d_v,
-        "w": d_w,
-        "p": d_p,
-        "T": d_T,
-        "smoke": d_smoke,
-        "fuel": d_fuel,
-        "flame": d_flame,
+        "u": u,
+        "v": v,
+        "w": w,
+        "p": p,
+        "T": T,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
     })
 
     #------------Dynamic time step-------------------
     t = 0.0
-    dt = compute_new_timestep_gpu(
-        d_u, d_v, d_w, d_Fx, d_Fy, d_Fz,
+    dt = Helper_Functions.compute_new_timestep_gpu(
+        u, v, w, Fx, Fy, Fz,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
     if dt > 1.0 / OUTPUT_FPS:
@@ -731,35 +647,35 @@ def main(config=None):
 
     while t < T_MAX:
         #------------Start-------------------
-        launch_copy_field_3d(d_u, d_un)
-        launch_copy_field_3d(d_v, d_vn)
-        launch_copy_field_3d(d_w, d_wn)
+        un.copy_to_device(u)
+        vn.copy_to_device(v)
+        wn.copy_to_device(w)
 
         #------------Pressure-------------------
-        d_p = pressure_poisson(
-            d_un, d_vn, d_wn, d_p, d_T, d_pressure_work, d_pressure_rhs, dt, d_Fx, d_Fy, d_Fz,
+        p = pressure_poisson(
+            un, vn, wn, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
             gpu_constants["T_REFERENCE"], MAX_ITER
         )
 
         #------------Velocity-------------------
-        d_u_work, d_v_work, d_w_work = launch_update_velocity(
-            d_un, d_vn, d_wn, d_p, dt, d_Fx, d_Fy, d_Fz, d_u_work, d_v_work, d_w_work,
+        u_work, v_work, w_work = launch_update_velocity(
+            un, vn, wn, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
         )
 
-        d_u, d_u_work = d_u_work, d_u
-        d_v, d_v_work = d_v_work, d_v
-        d_w, d_w_work = d_w_work, d_w
+        u, u_work = u_work, u
+        v, v_work = v_work, v
+        w, w_work = w_work, w
 
         #------------BCs-------------------
-        d_u, d_v, d_w, d_p, d_T = BC.apply_all_BC(
-            d_u, d_v, d_w, d_p, d_T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
+        u, v, w, p, T = BC.apply_all_BC(
+            u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
         )
 
         #------------Obstacle-------------------
-        d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel = BC.apply_all_obstacle_BCs(
-            d_u, d_v, d_w, d_p, d_T, d_smoke, d_fuel, d_obstacle_mask,
+        u, v, w, p, T, smoke, fuel = BC.apply_all_obstacle_BCs(
+            u, v, w, p, T, smoke, fuel, obstacle_mask,
             OBSTACLE_SOLID,
             OBSTACLE_INTIAL_TEMPERATURE,
             OBSTACLE_INTIAL_SMOKE,
@@ -769,14 +685,14 @@ def main(config=None):
         #------------Output-------------------
         while t >= next_output_time:
             host_fields = copy_device_fields_to_host({
-                "u": d_u,
-                "v": d_v,
-                "w": d_w,
-                "p": d_p,
-                "T": d_T,
-                "smoke": d_smoke,
-                "fuel": d_fuel,
-                "flame": d_flame,
+                "u": u,
+                "v": v,
+                "w": w,
+                "p": p,
+                "T": T,
+                "smoke": smoke,
+                "fuel": fuel,
+                "flame": flame,
             })
             current_fields = Output_Functions.create_output_field_map(
                 host_fields["u"],
@@ -798,15 +714,13 @@ def main(config=None):
             if OUTPUT_STATUS:
                 print('#################################################')
                 print(f'Simulation time {t} sec')
-                CFL = compute_cfl_gpu(d_u, d_v, d_w, dt, gpu_constants["DELTA"])
                 print(f'Current dt: {np.round(dt, 5)}')
-                print(f'CFL-Condition: {np.round(CFL, 5)}')
 
         #------------Dynamic time step-------------------
         t += dt
 
-        dt_new = compute_new_timestep_gpu(
-            d_u, d_v, d_w, d_Fx, d_Fy, d_Fz,
+        dt_new = Helper_Functions.compute_new_timestep_gpu(
+            u, v, w, Fx, Fy, Fz,
             gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
         )
 
