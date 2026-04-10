@@ -29,10 +29,10 @@ CONFIG = {
         "CPU_COUNT": 28,
     },
     "resolution": {
-        "DELTA": 0.05,
-        "NX": 256,
-        "NY": 256,
-        "NZ": 256,
+        "DELTA": 0.1,
+        "NX": 128,
+        "NY": 128,
+        "NZ": 128,
     },
     "output": {
         "OUTPUT_FPS": 24,

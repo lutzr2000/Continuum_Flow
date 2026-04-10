@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import os
+from time import perf_counter
 
 from numba import cuda, njit, prange, set_num_threads, get_num_threads
 
@@ -715,6 +716,23 @@ def select_fields(field_map, field_names):
 def main(config=None):
     apply_config(config)
 
+    section_timings = {
+        "initial_bcs": 0.0,
+        "initial_obstacle": 0.0,
+        "initial_dt": 0.0,
+        "setup_output": 0.0,
+        "copy_state": 0.0,
+        "buoyancy": 0.0,
+        "pressure": 0.0,
+        "velocity": 0.0,
+        "scalars": 0.0,
+        "bcs": 0.0,
+        "obstacle": 0.0,
+        "output": 0.0,
+        "dt_update": 0.0,
+    }
+    total_start_time = perf_counter()
+
     #------------Initialise-------------------
     print('Initialise')
     print('Cell count: ', int(NX * NY * NZ))
@@ -758,9 +776,13 @@ def main(config=None):
     }
 
     #------------BCs-------------------
+    section_start = perf_counter()
     u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
+    cuda.synchronize()
+    section_timings["initial_bcs"] += perf_counter() - section_start
 
     #------------Obstacle-------------------
+    section_start = perf_counter()
     u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
         u, v, w, p, T, smoke, fuel, obstacle_mask,
         OBSTACLE_SOLID,
@@ -768,6 +790,8 @@ def main(config=None):
         OBSTACLE_INTIAL_SMOKE,
         OBSTACLE_INTIAL_FUEL,
     )
+    cuda.synchronize()
+    section_timings["initial_obstacle"] += perf_counter() - section_start
 
     host_output_fields = copy_device_fields_to_host(select_fields(device_fields, OUTPUT_VARIABLES))
 
@@ -781,10 +805,12 @@ def main(config=None):
     t = 0.0
     step_index = 0
 
+    section_start = perf_counter()
     dt = Helper_Functions.compute_new_timestep_gpu(
         u, v, w, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
+    section_timings["initial_dt"] += perf_counter() - section_start
     if dt > 1.0 / OUTPUT_FPS:
         dt = 1.0 / OUTPUT_FPS
 
@@ -792,9 +818,11 @@ def main(config=None):
     next_output_time = 0.0
     output_index = 0
     
+    section_start = perf_counter()
     write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
         OUTPATH, OUTPUT_VARIABLES, host_output_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
     )
+    section_timings["setup_output"] += perf_counter() - section_start
 
     #------------Main time loop-------------------
     print('Start time iteration')
@@ -808,33 +836,46 @@ def main(config=None):
         )
 
         #------------Start-------------------
+        section_start = perf_counter()
         un.copy_to_device(u)
         vn.copy_to_device(v)
         wn.copy_to_device(w)
+        cuda.synchronize()
+        section_timings["copy_state"] += perf_counter() - section_start
 
         #------------Buoyancy-------------------
+        section_start = perf_counter()
         buoyancy_approximation[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
         )
+        cuda.synchronize()
+        section_timings["buoyancy"] += perf_counter() - section_start
 
         #------------Pressure-------------------
+        section_start = perf_counter()
         p = pressure_poisson(
             un, vn, wn, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
             gpu_constants["T_REFERENCE"], MAX_ITER
         )
+        cuda.synchronize()
+        section_timings["pressure"] += perf_counter() - section_start
 
         #------------Velocity-------------------
+        section_start = perf_counter()
         update_velocity[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             un, vn, wn, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
         )
+        cuda.synchronize()
+        section_timings["velocity"] += perf_counter() - section_start
 
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
 
         #------------Scalars-------------------
+        section_start = perf_counter()
         update_scalar_fields[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             T, smoke, fuel, u, v, w, dt,
             temperature_work, smoke_work, fuel_work, flame_work,
@@ -850,6 +891,8 @@ def main(config=None):
             gpu_constants["FUEL_IGNITION_TEMPERATURE"],
             gpu_constants["T_REFERENCE"],
         )
+        cuda.synchronize()
+        section_timings["scalars"] += perf_counter() - section_start
 
         T, temperature_work = temperature_work, T
         smoke, smoke_work = smoke_work, smoke
@@ -857,11 +900,15 @@ def main(config=None):
         flame, flame_work = flame_work, flame
 
         #------------BCs-------------------
+        section_start = perf_counter()
         u, v, w, p, T = BC.apply_all_BC(
             u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
         )
+        cuda.synchronize()
+        section_timings["bcs"] += perf_counter() - section_start
 
         #------------Obstacle-------------------
+        section_start = perf_counter()
         u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
             u, v, w, p, T, smoke, fuel, obstacle_mask,
             OBSTACLE_SOLID,
@@ -869,6 +916,8 @@ def main(config=None):
             OBSTACLE_INTIAL_SMOKE,
             OBSTACLE_INTIAL_FUEL,
         )
+        cuda.synchronize()
+        section_timings["obstacle"] += perf_counter() - section_start
         device_fields["u"] = u
         device_fields["v"] = v
         device_fields["w"] = w
@@ -880,8 +929,10 @@ def main(config=None):
 
         #------------Output-------------------
         while t >= next_output_time:
+            section_start = perf_counter()
             host_output_fields = copy_device_fields_to_host(select_fields(device_fields, OUTPUT_VARIABLES))
             Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, host_output_fields, output_index, t)
+            section_timings["output"] += perf_counter() - section_start
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
@@ -897,10 +948,12 @@ def main(config=None):
         t += dt
         step_index += 1
 
+        section_start = perf_counter()
         dt_new = Helper_Functions.compute_new_timestep_gpu(
             u, v, w, fx_max, fy_max, fz_max,
             gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
         )
+        section_timings["dt_update"] += perf_counter() - section_start
 
         dt_max_increase = dt * 1.5
         dt_max_decrease = dt * 0.5
@@ -920,3 +973,9 @@ def main(config=None):
 
     #------------Conclusion-------------------
     print('Simulation finished!')
+    total_runtime = perf_counter() - total_start_time
+    print('Timing summary:')
+    for name, elapsed in section_timings.items():
+        share = 100.0 * elapsed / total_runtime if total_runtime > 0.0 else 0.0
+        print(f'  {name}: {elapsed:.3f} s ({share:.1f}%)')
+    print(f'  total: {total_runtime:.3f} s')
