@@ -156,9 +156,6 @@ def upload_simulation_state_to_gpu():
         "u": cuda.to_device(u),
         "v": cuda.to_device(v),
         "w": cuda.to_device(w),
-        "un": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
-        "vn": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
-        "wn": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
         "u_work": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
         "v_work": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
         "w_work": cuda.device_array((NX, NY, NZ), dtype=precision_dtype),
@@ -721,7 +718,6 @@ def main(config=None):
         "initial_obstacle": 0.0,
         "initial_dt": 0.0,
         "setup_output": 0.0,
-        "copy_state": 0.0,
         "buoyancy": 0.0,
         "pressure": 0.0,
         "velocity": 0.0,
@@ -743,9 +739,6 @@ def main(config=None):
     u = device_state["u"]
     v = device_state["v"]
     w = device_state["w"]
-    un = device_state["un"]
-    vn = device_state["vn"]
-    wn = device_state["wn"]
     u_work = device_state["u_work"]
     v_work = device_state["v_work"]
     w_work = device_state["w_work"]
@@ -835,14 +828,6 @@ def main(config=None):
             (u.shape[2] + THREADS_PER_BLOCK_3D[2] - 1) // THREADS_PER_BLOCK_3D[2],
         )
 
-        #------------Start-------------------
-        section_start = perf_counter()
-        un.copy_to_device(u)
-        vn.copy_to_device(v)
-        wn.copy_to_device(w)
-        cuda.synchronize()
-        section_timings["copy_state"] += perf_counter() - section_start
-
         #------------Buoyancy-------------------
         section_start = perf_counter()
         buoyancy_approximation[blockspergrid_3d, THREADS_PER_BLOCK_3D](
@@ -854,7 +839,7 @@ def main(config=None):
         #------------Pressure-------------------
         section_start = perf_counter()
         p = pressure_poisson(
-            un, vn, wn, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz,
+            u, v, w, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
             gpu_constants["T_REFERENCE"], MAX_ITER
         )
@@ -864,7 +849,7 @@ def main(config=None):
         #------------Velocity-------------------
         section_start = perf_counter()
         update_velocity[blockspergrid_3d, THREADS_PER_BLOCK_3D](
-            un, vn, wn, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
+            u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
         )
         cuda.synchronize()
@@ -894,6 +879,7 @@ def main(config=None):
         cuda.synchronize()
         section_timings["scalars"] += perf_counter() - section_start
 
+        #------------Swap-------------------
         T, temperature_work = temperature_work, T
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
