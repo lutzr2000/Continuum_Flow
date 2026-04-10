@@ -74,7 +74,7 @@ def obstacle_boundary_conditions_scalar(phi, mask, value):
         phi[i, j, k] = value
 
 
-def launch_obstacle_boundary_conditions_velocity(u, v, w, mask, threadsperblock=None):
+def obstacle_velocity_bc(u, v, w, mask, threadsperblock=None):
     """
     launches the obstacle no-slip velocity kernel on the GPU.
 
@@ -98,7 +98,7 @@ def launch_obstacle_boundary_conditions_velocity(u, v, w, mask, threadsperblock=
     return u, v, w
 
 
-def launch_obstacle_boundary_conditions_pressure(p, mask, threadsperblock=None):
+def obstacle_pressure_bc(p, mask, threadsperblock=None):
     """
     launches the obstacle pressure boundary kernel on the GPU.
 
@@ -120,7 +120,7 @@ def launch_obstacle_boundary_conditions_pressure(p, mask, threadsperblock=None):
     return p
 
 
-def launch_obstacle_boundary_conditions_scalar(phi, mask, value, threadsperblock=None):
+def obstacle_scalar_bc(phi, mask, value, threadsperblock=None):
     """
     launches the obstacle scalar boundary kernel on the GPU.
 
@@ -170,11 +170,11 @@ def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, obstacle_mask, obstacle_s
         tuple: updated velocity, pressure and scalar fields
     """
     if obstacle_solid:
-        u, v, w = launch_obstacle_boundary_conditions_velocity(u, v, w, obstacle_mask)
-        p = launch_obstacle_boundary_conditions_pressure(p, obstacle_mask)
+        u, v, w = obstacle_velocity_bc(u, v, w, obstacle_mask)
+        p = obstacle_pressure_bc(p, obstacle_mask)
 
-    T = launch_obstacle_boundary_conditions_scalar(T, obstacle_mask, obstacle_initial_temperature)
-    smoke = launch_obstacle_boundary_conditions_scalar(smoke, obstacle_mask, obstacle_initial_smoke)
-    fuel = launch_obstacle_boundary_conditions_scalar(fuel, obstacle_mask, obstacle_initial_fuel)
+    T = obstacle_scalar_bc(T, obstacle_mask, obstacle_initial_temperature)
+    smoke = obstacle_scalar_bc(smoke, obstacle_mask, obstacle_initial_smoke)
+    fuel = obstacle_scalar_bc(fuel, obstacle_mask, obstacle_initial_fuel)
 
     return u, v, w, p, T, smoke, fuel

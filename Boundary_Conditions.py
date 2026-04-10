@@ -280,7 +280,7 @@ def _boundary_blockspergrid(field_shape, axis, threadsperblock):
     )
 
 
-def launch_inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None, threadsperblock=None):
+def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None, threadsperblock=None):
     """
     applies inflow boundary conditions to one side of the domain on the GPU.
 
@@ -308,7 +308,9 @@ def launch_inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow
     axis, side_index = _side_to_axis_and_index(side)
     blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
     _inflow_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, p, T, axis, side_index, u_inflow, v_inflow, w_inflow,
+        u, v, w, p, T,
+        axis, side_index,
+        u_inflow, v_inflow, w_inflow,
         0.0 if t_inflow is None else t_inflow,
         t_inflow is not None,
     )
@@ -316,7 +318,7 @@ def launch_inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow
     return u, v, w, p, T
 
 
-def launch_outflow_bc(u, v, w, p, T, side, threadsperblock=None):
+def outflow_bc(u, v, w, p, T, side, threadsperblock=None):
     """
     applies outflow boundary conditions to one side of the domain on the GPU.
 
@@ -342,7 +344,7 @@ def launch_outflow_bc(u, v, w, p, T, side, threadsperblock=None):
     return u, v, w, p, T
 
 
-def launch_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
+def slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     """
     applies slip-wall boundary conditions to one side of the domain on the GPU.
 
@@ -368,7 +370,8 @@ def launch_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     axis, side_index = _side_to_axis_and_index(side)
     blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
     _slip_wall_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, p, T, axis, side_index,
+        u, v, w, p, T,
+        axis, side_index,
         0.0 if t_wall is None else t_wall,
         t_wall is not None,
     )
@@ -376,7 +379,7 @@ def launch_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     return u, v, w, p, T
 
 
-def launch_no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
+def no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     """
     applies no-slip wall boundary conditions to one side of the domain on the GPU.
 
@@ -401,7 +404,8 @@ def launch_no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=Non
     axis, side_index = _side_to_axis_and_index(side)
     blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
     _no_slip_wall_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, p, T, axis, side_index,
+        u, v, w, p, T,
+        axis, side_index,
         0.0 if t_wall is None else t_wall,
         t_wall is not None,
     )
@@ -434,9 +438,9 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
         bc_type = bc["type"]
 
         if bc_type == "outflow":
-            u, v, w, p, T = launch_outflow_bc(u, v, w, p, T, side)
+            u, v, w, p, T = outflow_bc(u, v, w, p, T, side)
         elif bc_type == "inflow":
-            u, v, w, p, T = launch_inflow_bc(
+            u, v, w, p, T = inflow_bc(
                 u, v, w, p, T,
                 side,
                 bc.get("u", u_inflow),
@@ -445,11 +449,11 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
                 bc.get("T", bc.get("temperature")),
             )
         elif bc_type == "no_slip_wall":
-            u, v, w, p, T = launch_no_slip_wall_bc(
+            u, v, w, p, T = no_slip_wall_bc(
                 u, v, w, p, T, side, bc.get("T", bc.get("temperature"))
             )
         elif bc_type == "slip_wall":
-            u, v, w, p, T = launch_slip_wall_bc(
+            u, v, w, p, T = slip_wall_bc(
                 u, v, w, p, T, side, bc.get("T", bc.get("temperature"))
             )
         else:
