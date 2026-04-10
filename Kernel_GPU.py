@@ -20,7 +20,6 @@ CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (4, 4)
 REDUCTION_THREADS_PER_BLOCK = 512
-TIMESTEP_UPDATE_INTERVAL = 10
 BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
 Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
@@ -238,7 +237,6 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
-
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
@@ -773,11 +771,18 @@ def main(config=None):
 
     host_output_fields = copy_device_fields_to_host(select_fields(device_fields, OUTPUT_VARIABLES))
 
+    #------------Estimate force maxima-------------------
+    g = 9.81
+    fx_max = 0.0
+    fy_max = 0.0
+    fz_max = abs(g * gpu_constants["BUOANCY_FACTOR"] * (OBSTACLE_INTIAL_TEMPERATURE - gpu_constants["T_REFERENCE"]))
+
     #------------Dynamic time step-------------------
     t = 0.0
     step_index = 0
+
     dt = Helper_Functions.compute_new_timestep_gpu(
-        u, v, w, Fx, Fy, Fz,
+        u, v, w, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
     if dt > 1.0 / OUTPUT_FPS:
@@ -892,21 +897,20 @@ def main(config=None):
         t += dt
         step_index += 1
 
-        if step_index % TIMESTEP_UPDATE_INTERVAL == 0:
-            dt_new = Helper_Functions.compute_new_timestep_gpu(
-                u, v, w, Fx, Fy, Fz,
-                gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
-            )
+        dt_new = Helper_Functions.compute_new_timestep_gpu(
+            u, v, w, fx_max, fy_max, fz_max,
+            gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
+        )
 
-            dt_max_increase = dt * 1.5
-            dt_max_decrease = dt * 0.5
+        dt_max_increase = dt * 1.5
+        dt_max_decrease = dt * 0.5
 
-            if dt_new > dt_max_increase:
-                dt = dt_max_increase
-            elif dt_new < dt_max_decrease:
-                dt = dt_max_decrease
-            else:
-                dt = dt_new
+        if dt_new > dt_max_increase:
+            dt = dt_max_increase
+        elif dt_new < dt_max_decrease:
+            dt = dt_max_decrease
+        else:
+            dt = dt_new
 
         if dt > 1.0 / OUTPUT_FPS:
             dt = 1.0 / OUTPUT_FPS
