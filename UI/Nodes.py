@@ -2,7 +2,7 @@ import bpy
 import importlib.util
 import sys
 from pathlib import Path
-from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
 
 try:
     from .NodeTree import BlenderCFDNodeTree
@@ -49,7 +49,58 @@ class BlenderCFDIntSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        return (0.90, 0.55, 0.20, 1.0)
+
+
+class BlenderCFDLinkSocket(bpy.types.NodeSocket):
+    """
+    Generic link socket used to connect logical BlenderCFD node outputs.
+    """
+
+    bl_idname = "BLENDERCFD_LINK_SOCKET"
+    bl_label = "BlenderCFD Link"
+
+    def draw(self, context, layout, node, text):
+        """Draw the socket label in the node editor."""
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        """Return the display color of the socket."""
+        return (0.90, 0.55, 0.20, 1.0)
+
+
+class BlenderCFDForceSocket(bpy.types.NodeSocket):
+    """
+    Dedicated socket used for force-related links in the BlenderCFD graph.
+    """
+
+    bl_idname = "BLENDERCFD_FORCE_SOCKET"
+    bl_label = "BlenderCFD Force"
+
+    def draw(self, context, layout, node, text):
+        """Draw the socket label in the node editor."""
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        """Return the display color of the socket."""
         return (0.45, 0.65, 0.95, 1.0)
+
+
+class BlenderCFDResultSocket(bpy.types.NodeSocket):
+    """
+    Result socket used by the simulation node to expose the final output link.
+    """
+
+    bl_idname = "BLENDERCFD_RESULT_SOCKET"
+    bl_label = "BlenderCFD Result"
+
+    def draw(self, context, layout, node, text):
+        """Draw the socket label in the node editor."""
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        """Return the display color of the socket."""
+        return (0.65, 0.35, 0.85, 1.0)
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -82,6 +133,14 @@ class BlenderCFDDomainNode(bpy.types.Node):
         max=4096,
         soft_min=32,
         soft_max=4096,
+    )
+
+    resolution: FloatProperty(  # type: ignore
+        name="Resolution",
+        default=0.1,
+        min=0.000001,
+        soft_min=0.01,
+        unit="LENGTH",
     )
 
     ny: IntProperty(  # type: ignore
@@ -143,6 +202,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     x_high_velocity: FloatVectorProperty(  # type: ignore
@@ -150,6 +210,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     y_low_velocity: FloatVectorProperty(  # type: ignore
@@ -157,6 +218,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     y_high_velocity: FloatVectorProperty(  # type: ignore
@@ -164,6 +226,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     z_low_velocity: FloatVectorProperty(  # type: ignore
@@ -171,6 +234,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     z_high_velocity: FloatVectorProperty(  # type: ignore
@@ -178,6 +242,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="VELOCITY",
     )
 
     @classmethod
@@ -220,6 +285,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
     def draw_buttons(self, context, layout):
         """Draw the editable controls shown inside the node body."""
         col = layout.column(align=True)
+        col.prop(self, "resolution")
         col.prop(self, "nx")
         col.prop(self, "ny")
         col.prop(self, "nz")
@@ -275,6 +341,7 @@ class BlenderCFDSourceNode(bpy.types.Node):
         max=10000.0,
         soft_min=0.0,
         soft_max=10000.0,
+        unit="TEMPERATURE",
     )
 
     @classmethod
@@ -396,21 +463,24 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         name="Fluid Density",
         default=1.225,
         min=0.001,
-        max=2000
+        max=2000,
+        precision=3,
     )
 
     fluid_viscosity: FloatProperty(  # type: ignore
         name="Fluid Viscosity",
         default=1.81e-5,
         min=0.0,
-        max=1
+        max=1,
+        precision=6,
     )
 
     temperature_diffusion: FloatProperty(  # type: ignore
         name="Temperature Diffusion",
         default=0.1,
         min=0.0,
-        max=1
+        max=1,
+        precision=4,
     )
 
     temperature_dissipation: FloatProperty(  # type: ignore
@@ -424,28 +494,32 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         name="Reference Temperature",
         default=300.0,
         min=0.0,
-        max=10000.0
+        max=10000.0,
+        unit="TEMPERATURE",
     )
 
     buoyancy: FloatProperty(  # type: ignore
         name="Buoyancy",
         default=0.005,
         min=0.0,
-        max=1.0
+        max=1.0,
+        precision=4,
     )
 
     expansion_rate: FloatProperty(  # type: ignore
         name="Expansion Rate",
         default=0.001,
         min=0.0,
-        max=1.0
+        max=1.0,
+        precision=4,
     )
 
     smoke_diffusion: FloatProperty(  # type: ignore
         name="Smoke Diffusion",
         default=0.1,
         min=0.0,
-        max=1.0
+        max=1.0,
+        precision=4,
     )
 
     smoke_dissipation: FloatProperty(  # type: ignore
@@ -459,7 +533,8 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         name="Fuel Diffusion",
         default=0.1,
         min=0.0,
-        max=1.0
+        max=1.0,
+        precision=4,
     )
 
     fuel_dissipation: FloatProperty(  # type: ignore
@@ -480,7 +555,8 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         name="Fuel Ignition Temperature",
         default=500.0,
         min=0.0, 
-        max=10000.0
+        max=10000.0,
+        unit="TEMPERATURE",
     )
 
     @classmethod
@@ -554,6 +630,274 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         )
 
 
+class BlenderCFDSimulationNode(bpy.types.Node):
+    """
+    Node used to collect all simulation-wide settings and input dependencies.
+
+    The node stores time and solver parameters, accepts the upstream CFD setup
+    nodes as logical inputs, and exposes a purple result socket for future
+    execution output.
+    """
+
+    bl_idname = "BLENDERCFD_SIMULATION_NODE"
+    bl_label = "Simulation"
+    bl_icon = "TIME"
+    bl_width_default = 260.0
+    bl_width_min = 240.0
+    bl_width_max = 420.0
+
+    simulation_length: FloatProperty(  # type: ignore
+        name="Simulation Length",
+        default=10.0,
+        min=0.0,
+        unit="TIME",
+    )
+
+    cfl: FloatProperty(  # type: ignore
+        name="CFL",
+        default=0.8,
+        min=0.000001,
+        max=1.0
+    )
+
+    iterations: IntProperty(  # type: ignore
+        name="Iterations",
+        default=4,
+        min=0,
+        max=500,
+        soft_min=0,
+        soft_max=500,
+    )
+
+    @classmethod
+    def poll(cls, ntree):
+        """Return whether the node can be added to the given node tree."""
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _ensure_input_socket(self, name, *, multi_input=False):
+        """Ensure that a logical input socket exists."""
+        socket = self.inputs.get(name)
+        if socket is None:
+            socket = self.inputs.new(
+                BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname,
+                name,
+                use_multi_input=multi_input,
+            )
+        if multi_input and hasattr(socket, "link_limit"):
+            socket.link_limit = 0
+        return socket
+
+    def _ensure_output_socket(self):
+        """Ensure that the result output socket exists."""
+        socket = self.outputs.get("Result")
+        if socket is None:
+            socket = self.outputs.new(BlenderCFDResultSocket.bl_idname, "Result")
+        return socket
+
+    def _sync_sockets(self):
+        """Refresh the node socket layout."""
+        self._ensure_input_socket("Domain")
+        self._ensure_input_socket("Physics")
+        self._ensure_input_socket("Obstacles")
+        self._ensure_input_socket("Source", multi_input=True)
+        self._ensure_input_socket("Forces", multi_input=True)
+        self._ensure_output_socket()
+
+    def init(self, context):
+        """Initialize sockets when the node is created."""
+        self._sync_sockets()
+
+    def copy(self, node):
+        """Restore sockets after the node has been copied."""
+        self._sync_sockets()
+
+    def update(self):
+        """Keep the node socket layout in sync."""
+        self._sync_sockets()
+
+    def _draw_group(self, layout, title, property_names):
+        """Draw one grouped section of simulation properties."""
+        box = layout.box()
+        box.label(text=title)
+        col = box.column(align=True)
+        for property_name in property_names:
+            col.prop(self, property_name)
+
+    def draw_buttons(self, context, layout):
+        """Draw the editable controls shown inside the node body."""
+        self._draw_group(
+            layout,
+            "Time",
+            ("simulation_length", "cfl"),
+        )
+        self._draw_group(
+            layout,
+            "Solver",
+            ("iterations",),
+        )
+
+
+class BlenderCFDOutputNode(bpy.types.Node):
+    """
+    Node used to configure which simulation results should be written to disk.
+
+    The node accepts the simulation result link, stores output timing and field
+    selection settings, and keeps the export path in one place for later use.
+    """
+
+    bl_idname = "BLENDERCFD_OUTPUT_NODE"
+    bl_label = "Output"
+    bl_icon = "OUTPUT"
+    bl_width_default = 260.0
+    bl_width_min = 240.0
+    bl_width_max = 420.0
+
+    fps: IntProperty(  # type: ignore
+        name="FPS",
+        default=24,
+        min=1,
+        max=240,
+        soft_min=1,
+        soft_max=120,
+    )
+
+    export_u: BoolProperty(  # type: ignore
+        name="Velocity x",
+        default=True,
+    )
+
+    export_v: BoolProperty(  # type: ignore
+        name="Velocity y",
+        default=True,
+    )
+
+    export_w: BoolProperty(  # type: ignore
+        name="Velocity z",
+        default=True,
+    )
+
+    export_p: BoolProperty(  # type: ignore
+        name="Pressure",
+        default=True,
+    )
+
+    export_t: BoolProperty(  # type: ignore
+        name="Temperature",
+        default=True,
+    )
+
+    export_smoke: BoolProperty(  # type: ignore
+        name="Smoke",
+        default=True,
+    )
+
+    export_fuel: BoolProperty(  # type: ignore
+        name="Fuel",
+        default=True,
+    )
+
+    export_flame: BoolProperty(  # type: ignore
+        name="Flame",
+        default=True,
+    )
+
+    output_path: StringProperty(  # type: ignore
+        name="Path",
+        default="",
+        subtype="DIR_PATH",
+    )
+
+    @classmethod
+    def poll(cls, ntree):
+        """Return whether the node can be added to the given node tree."""
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _ensure_input_socket(self):
+        """Ensure that the result input socket exists."""
+        socket = self.inputs.get("Result")
+        if socket is None:
+            socket = self.inputs.new(BlenderCFDResultSocket.bl_idname, "Result")
+        return socket
+
+    def _sync_input_socket(self):
+        """Refresh the node socket layout."""
+        self._ensure_input_socket()
+
+    def init(self, context):
+        """Initialize sockets when the node is created."""
+        self._sync_input_socket()
+
+    def copy(self, node):
+        """Restore sockets after the node has been copied."""
+        self._sync_input_socket()
+
+    def update(self):
+        """Keep the node socket layout in sync."""
+        self._sync_input_socket()
+
+    def draw_buttons(self, context, layout):
+        """Draw the editable controls shown inside the node body."""
+        layout.prop(self, "fps")
+
+        fields_box = layout.box()
+        fields_box.label(text="Fields")
+        fields_col = fields_box.column(align=True)
+        fields_col.prop(self, "export_u")
+        fields_col.prop(self, "export_v")
+        fields_col.prop(self, "export_w")
+        fields_col.prop(self, "export_p")
+        fields_col.prop(self, "export_t")
+        fields_col.prop(self, "export_smoke")
+        fields_col.prop(self, "export_fuel")
+        fields_col.prop(self, "export_flame")
+
+        layout.prop(self, "output_path")
+
+
+class BlenderCFDViewerNode(bpy.types.Node):
+    """
+    Node used as a lightweight endpoint for inspecting simulation results.
+
+    The node accepts a result link and currently has no additional controls or
+    outputs.
+    """
+
+    bl_idname = "BLENDERCFD_VIEWER_NODE"
+    bl_label = "Viewer"
+    bl_icon = "HIDE_OFF"
+    bl_width_default = 180.0
+    bl_width_min = 160.0
+    bl_width_max = 260.0
+
+    @classmethod
+    def poll(cls, ntree):
+        """Return whether the node can be added to the given node tree."""
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _ensure_input_socket(self):
+        """Ensure that the result input socket exists."""
+        socket = self.inputs.get("Result")
+        if socket is None:
+            socket = self.inputs.new(BlenderCFDResultSocket.bl_idname, "Result")
+        return socket
+
+    def _sync_input_socket(self):
+        """Refresh the node socket layout."""
+        self._ensure_input_socket()
+
+    def init(self, context):
+        """Initialize sockets when the node is created."""
+        self._sync_input_socket()
+
+    def copy(self, node):
+        """Restore sockets after the node has been copied."""
+        self._sync_input_socket()
+
+    def update(self):
+        """Keep the node socket layout in sync."""
+        self._sync_input_socket()
+
+
 class BlenderCFDForceConstantNode(bpy.types.Node):
     """
     Node used to define a constant force vector for the CFD simulation.
@@ -605,7 +949,7 @@ class BlenderCFDForceConstantNode(bpy.types.Node):
         """Ensure that the placeholder output socket exists."""
         socket = self.outputs.get("Force")
         if socket is None:
-            socket = self.outputs.new(BlenderCFDIntSocket.bl_idname, "Force")
+            socket = self.outputs.new(BlenderCFDForceSocket.bl_idname, "Force")
         return socket
 
     def _sync_output_socket(self):
@@ -661,6 +1005,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
+        unit="LENGTH",
     )
 
     @classmethod
@@ -672,7 +1017,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
         """Ensure that the placeholder output socket exists."""
         socket = self.outputs.get("Force")
         if socket is None:
-            socket = self.outputs.new(BlenderCFDIntSocket.bl_idname, "Force")
+            socket = self.outputs.new(BlenderCFDForceSocket.bl_idname, "Force")
         return socket
 
     def _sync_output_socket(self):
@@ -740,7 +1085,7 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
         """Ensure that the placeholder output socket exists."""
         socket = self.outputs.get("Force")
         if socket is None:
-            socket = self.outputs.new(BlenderCFDIntSocket.bl_idname, "Force")
+            socket = self.outputs.new(BlenderCFDForceSocket.bl_idname, "Force")
         return socket
 
     def _sync_output_socket(self):
@@ -823,12 +1168,18 @@ class BlenderCFDObstacleNode(bpy.types.Node):
 
 classes = (
     BlenderCFDIntSocket,
+    BlenderCFDLinkSocket,
+    BlenderCFDForceSocket,
+    BlenderCFDResultSocket,
     BlenderCFDDomainNode,
     BlenderCFDGeometryNode,
     BlenderCFDForceConstantNode,
     BlenderCFDForcePointNode,
     BlenderCFDForceTurbulenceNode,
+    BlenderCFDOutputNode,
     BlenderCFDPhysicsNode,
+    BlenderCFDSimulationNode,
     BlenderCFDSourceNode,
     BlenderCFDObstacleNode,
+    BlenderCFDViewerNode,
 )
