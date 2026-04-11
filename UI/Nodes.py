@@ -22,85 +22,39 @@ except ImportError:
         spec.loader.exec_module(module)
         BlenderCFDNodeTree = module.BlenderCFDNodeTree
 
-
-class BlenderCFDIntSocket(bpy.types.NodeSocket):
-    """
-    Integer socket used by BlenderCFD nodes to expose bounded scalar values.
-    """
-
-    bl_idname = "BLENDERCFD_INT_SOCKET"
-    bl_label = "BlenderCFD Integer"
-
-    value: IntProperty(  # type: ignore
-        name="Value",
-        default=128,
-        min=32,
-        max=4096,
-        soft_min=32,
-        soft_max=4096,
+try:
+    from .Sockets import (
+        BlenderCFDForceSocket,
+        BlenderCFDIntSocket,
+        BlenderCFDLinkSocket,
+        BlenderCFDReferenceFrameSocket,
+        BlenderCFDResultSocket,
     )
-
-    def draw(self, context, layout, node, text):
-        """Draw the socket UI in the node editor."""
-        if self.is_output or self.is_linked:
-            layout.label(text=text)
+except ImportError:
+    try:
+        from Sockets import (
+            BlenderCFDForceSocket,
+            BlenderCFDIntSocket,
+            BlenderCFDLinkSocket,
+            BlenderCFDReferenceFrameSocket,
+            BlenderCFDResultSocket,
+        )
+    except ImportError:
+        # Fallback for direct execution in Blender's text editor without package context.
+        if "__file__" in globals():
+            sockets_path = Path(__file__).resolve().with_name("Sockets.py")
         else:
-            layout.prop(self, "value", text=text)
+            sockets_path = (Path.cwd() / "UI" / "Sockets.py").resolve()
 
-    def draw_color(self, context, node):
-        """Return the display color of the socket."""
-        return (0.90, 0.55, 0.20, 1.0)
-
-
-class BlenderCFDLinkSocket(bpy.types.NodeSocket):
-    """
-    Generic link socket used to connect logical BlenderCFD node outputs.
-    """
-
-    bl_idname = "BLENDERCFD_LINK_SOCKET"
-    bl_label = "BlenderCFD Link"
-
-    def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
-        layout.label(text=text)
-
-    def draw_color(self, context, node):
-        """Return the display color of the socket."""
-        return (0.90, 0.55, 0.20, 1.0)
-
-
-class BlenderCFDForceSocket(bpy.types.NodeSocket):
-    """
-    Dedicated socket used for force-related links in the BlenderCFD graph.
-    """
-
-    bl_idname = "BLENDERCFD_FORCE_SOCKET"
-    bl_label = "BlenderCFD Force"
-
-    def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
-        layout.label(text=text)
-
-    def draw_color(self, context, node):
-        """Return the display color of the socket."""
-        return (0.45, 0.65, 0.95, 1.0)
-
-
-class BlenderCFDResultSocket(bpy.types.NodeSocket):
-    """
-    Result socket used by the simulation node to expose the final output link.
-    """
-
-    bl_idname = "BLENDERCFD_RESULT_SOCKET"
-    bl_label = "BlenderCFD Result"
-
-    def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
-        layout.label(text=text)
-
-    def draw_color(self, context, node):
-        """Return the display color of the socket."""
-        return (0.65, 0.35, 0.85, 1.0)
+        spec = importlib.util.spec_from_file_location("blendercfd_sockets", sockets_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["blendercfd_sockets"] = module
+        spec.loader.exec_module(module)
+        BlenderCFDForceSocket = module.BlenderCFDForceSocket
+        BlenderCFDIntSocket = module.BlenderCFDIntSocket
+        BlenderCFDLinkSocket = module.BlenderCFDLinkSocket
+        BlenderCFDReferenceFrameSocket = module.BlenderCFDReferenceFrameSocket
+        BlenderCFDResultSocket = module.BlenderCFDResultSocket
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -630,6 +584,59 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         )
 
 
+class BlenderCFDReferenceFrameNode(bpy.types.Node):
+    """
+    Node used to define an object-based reference frame for the simulation.
+
+    The node stores a Blender object reference and exposes a dedicated output
+    socket so the simulation node can consume the chosen frame source.
+    """
+
+    bl_idname = "BLENDERCFD_REFERENCE_FRAME_NODE"
+    bl_label = "Reference Frame"
+    bl_icon = "EMPTY_AXIS"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 360.0
+
+    source_object: PointerProperty(  # type: ignore
+        name="Object",
+        type=bpy.types.Object,
+    )
+
+    @classmethod
+    def poll(cls, ntree):
+        """Return whether the node can be added to the given node tree."""
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _ensure_output_socket(self):
+        """Ensure that the reference-frame output socket exists."""
+        socket = self.outputs.get("Reference Frame")
+        if socket is None:
+            socket = self.outputs.new(BlenderCFDReferenceFrameSocket.bl_idname, "Reference Frame")
+        return socket
+
+    def _sync_sockets(self):
+        """Refresh the node socket layout."""
+        self._ensure_output_socket()
+
+    def init(self, context):
+        """Initialize sockets when the node is created."""
+        self._sync_sockets()
+
+    def copy(self, node):
+        """Restore sockets after the node has been copied."""
+        self._sync_sockets()
+
+    def update(self):
+        """Keep the node socket layout in sync."""
+        self._sync_sockets()
+
+    def draw_buttons(self, context, layout):
+        """Draw the editable controls shown inside the node body."""
+        layout.prop(self, "source_object", text="Object")
+
+
 class BlenderCFDSimulationNode(bpy.types.Node):
     """
     Node used to collect all simulation-wide settings and input dependencies.
@@ -649,7 +656,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     simulation_length: FloatProperty(  # type: ignore
         name="Simulation Length",
         default=10.0,
-        min=0.0,
+        min=0.001,
         unit="TIME",
     )
 
@@ -679,7 +686,11 @@ class BlenderCFDSimulationNode(bpy.types.Node):
         socket = self.inputs.get(name)
         if socket is None:
             socket = self.inputs.new(
-                BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname,
+                BlenderCFDReferenceFrameSocket.bl_idname
+                if name == "Reference Frame"
+                else BlenderCFDForceSocket.bl_idname
+                if name == "Forces"
+                else BlenderCFDLinkSocket.bl_idname,
                 name,
                 use_multi_input=multi_input,
             )
@@ -696,6 +707,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
 
     def _sync_sockets(self):
         """Refresh the node socket layout."""
+        self._ensure_input_socket("Reference Frame")
         self._ensure_input_socket("Domain")
         self._ensure_input_socket("Physics")
         self._ensure_input_socket("Obstacles")
@@ -823,9 +835,26 @@ class BlenderCFDOutputNode(bpy.types.Node):
         """Refresh the node socket layout."""
         self._ensure_input_socket()
 
+    def _sync_defaults_from_scene(self, context):
+        """Initialize node defaults from the active Blender scene."""
+        scene = getattr(context, "scene", None)
+        if scene is None:
+            scene = getattr(bpy.context, "scene", None)
+        if scene is None:
+            return
+
+        render = getattr(scene, "render", None)
+        if render is None:
+            return
+
+        fps = getattr(render, "fps", None)
+        if fps is not None and self.fps == 24:
+            self.fps = fps
+
     def init(self, context):
         """Initialize sockets when the node is created."""
         self._sync_input_socket()
+        self._sync_defaults_from_scene(context)
 
     def copy(self, node):
         """Restore sockets after the node has been copied."""
@@ -852,6 +881,23 @@ class BlenderCFDOutputNode(bpy.types.Node):
         fields_col.prop(self, "export_flame")
 
         layout.prop(self, "output_path")
+        layout.separator()
+        layout.operator("blendercfd.bake", text="Bake", icon="RENDER_STILL")
+
+
+class BlenderCFD_OT_bake(bpy.types.Operator):
+    """
+    Placeholder operator for starting the BlenderCFD bake process.
+    """
+
+    bl_idname = "blendercfd.bake"
+    bl_label = "Bake BlenderCFD"
+    bl_description = "Start the BlenderCFD bake process"
+
+    def execute(self, context):
+        """Run the placeholder bake action."""
+        self.report({"INFO"}, "Bake is not implemented yet.")
+        return {"FINISHED"}
 
 
 class BlenderCFDViewerNode(bpy.types.Node):
@@ -1170,7 +1216,9 @@ classes = (
     BlenderCFDIntSocket,
     BlenderCFDLinkSocket,
     BlenderCFDForceSocket,
+    BlenderCFDReferenceFrameSocket,
     BlenderCFDResultSocket,
+    BlenderCFD_OT_bake,
     BlenderCFDDomainNode,
     BlenderCFDGeometryNode,
     BlenderCFDForceConstantNode,
@@ -1178,6 +1226,7 @@ classes = (
     BlenderCFDForceTurbulenceNode,
     BlenderCFDOutputNode,
     BlenderCFDPhysicsNode,
+    BlenderCFDReferenceFrameNode,
     BlenderCFDSimulationNode,
     BlenderCFDSourceNode,
     BlenderCFDObstacleNode,

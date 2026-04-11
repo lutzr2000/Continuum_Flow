@@ -43,12 +43,20 @@ def _load_module(file_name, module_name):
 
 
 node_tree_module = _load_module("NodeTree.py", "blendercfd_nodetree")
+socket_module = _load_module("Sockets.py", "blendercfd_sockets")
 nodes_module = _load_module("Nodes.py", "blendercfd_nodes")
 
 
 def register():
     """Register node tree classes, node classes, and add-menu categories."""
     for cls in node_tree_module.classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+        bpy.utils.register_class(cls)
+
+    for cls in socket_module.classes:
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -76,6 +84,12 @@ def unregister():
         pass
 
     for cls in reversed(nodes_module.classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+
+    for cls in reversed(socket_module.classes):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
