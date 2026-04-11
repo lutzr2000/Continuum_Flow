@@ -36,6 +36,13 @@ def build_node_categories():
             "Blender CFD",
             items=[
                 NodeItem("BLENDERCFD_DOMAIN_NODE"),
+                NodeItem("BLENDERCFD_GEOMETRY_NODE"),
+                NodeItem("BLENDERCFD_FORCE_CONSTANT_NODE"),
+                NodeItem("BLENDERCFD_FORCE_POINT_NODE"),
+                NodeItem("BLENDERCFD_FORCE_TURBULENCE_NODE"),
+                NodeItem("BLENDERCFD_PHYSICS_NODE"),
+                NodeItem("BLENDERCFD_SOURCE_NODE"),
+                NodeItem("BLENDERCFD_OBSTACLE_NODE"),
             ],
         ),
     ]
