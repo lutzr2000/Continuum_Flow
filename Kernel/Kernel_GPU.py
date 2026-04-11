@@ -6,10 +6,10 @@ from time import perf_counter
 from numba import cuda, njit, prange, set_num_threads, get_num_threads
 
 import Boundary_Conditions as BC
-import Helper_Functions
+import Helper_Functions as Helper_Functions
 import Obstacle_Boundary_Conditions as Obstacle_BC
-import Obstacles
-import Output_Functions
+import Obstacles as Obstacles
+import Output_Functions as Output_Functions
 
 # ===============================
 # Parameters

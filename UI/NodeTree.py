@@ -1,0 +1,46 @@
+import bpy
+from nodeitems_utils import NodeCategory, NodeItem
+
+
+# Unique IDs for the custom node tree and its menu categories.
+NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
+NODE_CATEGORIES_ID = "BLENDERCFD_NODE_CATEGORIES"
+
+class BlenderCFDNodeTree(bpy.types.NodeTree):
+    """
+    Custom node tree used as the main editor space for BlenderCFD nodes.
+    """
+
+    bl_idname = NODE_TREE_ID
+    bl_label = "BlenderCFD Nodes"
+    bl_icon = "NODETREE"
+
+
+class BlenderCFDNodeCategory(NodeCategory):
+    """
+    Node category shown in the add menu of the BlenderCFD node tree.
+    """
+
+    @classmethod
+    def poll(cls, context):
+        """Return whether the category should be visible in the current editor."""
+        space_data = getattr(context, "space_data", None)
+        return space_data is not None and space_data.tree_type == NODE_TREE_ID
+
+
+def build_node_categories():
+    """Build the add menu categories for all registered BlenderCFD nodes."""
+    return [
+        BlenderCFDNodeCategory(
+            "BLENDERCFD_NODES",
+            "Blender CFD",
+            items=[
+                NodeItem("BLENDERCFD_DOMAIN_NODE"),
+            ],
+        ),
+    ]
+
+
+classes = (
+    BlenderCFDNodeTree,
+)
