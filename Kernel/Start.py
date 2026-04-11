@@ -13,3 +13,4 @@ if __name__ == '__main__':
     kernel_dir = Path(__file__).resolve().parent
     profile_file = kernel_dir / 'Performance_Rising_Smoke_GPU.prof'
     profiler.dump_stats(profile_file)
+ 

@@ -45,6 +45,8 @@ def _load_module(file_name, module_name):
 node_tree_module = _load_module("NodeTree.py", "blendercfd_nodetree")
 socket_module = _load_module("Sockets.py", "blendercfd_sockets")
 nodes_module = _load_module("Nodes.py", "blendercfd_nodes")
+viewer_module = _load_module("Viewer.py", "blendercfd_viewer")
+config_module = _load_module("Create_Config_Dict.py", "blendercfd_create_config_dict")
 
 
 def register():
@@ -69,6 +71,20 @@ def register():
         except Exception:
             pass
         bpy.utils.register_class(cls)
+
+    for cls in viewer_module.classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+        bpy.utils.register_class(cls)
+
+    for cls in config_module.classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+        bpy.utils.register_class(cls)
     try:
         unregister_node_categories(node_tree_module.NODE_CATEGORIES_ID)
     except Exception:
@@ -82,6 +98,23 @@ def unregister():
         unregister_node_categories(node_tree_module.NODE_CATEGORIES_ID)
     except Exception:
         pass
+
+    try:
+        viewer_module.disable_domain_preview()
+    except Exception:
+        pass
+
+    for cls in reversed(viewer_module.classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+
+    for cls in reversed(config_module.classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
 
     for cls in reversed(nodes_module.classes):
         try:

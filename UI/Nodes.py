@@ -56,6 +56,23 @@ except ImportError:
         BlenderCFDReferenceFrameSocket = module.BlenderCFDReferenceFrameSocket
         BlenderCFDResultSocket = module.BlenderCFDResultSocket
 
+try:
+    from . import Viewer as BlenderCFDViewerModule
+except ImportError:
+    try:
+        import Viewer as BlenderCFDViewerModule
+    except ImportError:
+        if "__file__" in globals():
+            viewer_path = Path(__file__).resolve().with_name("Viewer.py")
+        else:
+            viewer_path = (Path.cwd() / "UI" / "Viewer.py").resolve()
+
+        spec = importlib.util.spec_from_file_location("blendercfd_viewer", viewer_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["blendercfd_viewer"] = module
+        spec.loader.exec_module(module)
+        BlenderCFDViewerModule = module
+
 
 class BlenderCFDDomainNode(bpy.types.Node):
     """
@@ -904,8 +921,8 @@ class BlenderCFDViewerNode(bpy.types.Node):
     """
     Node used as a lightweight endpoint for inspecting simulation results.
 
-    The node accepts a result link and currently has no additional controls or
-    outputs.
+    The node accepts a simulation result link and can trigger a simple viewport
+    preview of the upstream domain bounds.
     """
 
     bl_idname = "BLENDERCFD_VIEWER_NODE"
@@ -920,7 +937,7 @@ class BlenderCFDViewerNode(bpy.types.Node):
         """Return whether the node can be added to the given node tree."""
         return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
 
-    def _ensure_input_socket(self):
+    def _ensure_result_input_socket(self):
         """Ensure that the result input socket exists."""
         socket = self.inputs.get("Result")
         if socket is None:
@@ -929,7 +946,7 @@ class BlenderCFDViewerNode(bpy.types.Node):
 
     def _sync_input_socket(self):
         """Refresh the node socket layout."""
-        self._ensure_input_socket()
+        self._ensure_result_input_socket()
 
     def init(self, context):
         """Initialize sockets when the node is created."""
@@ -942,6 +959,16 @@ class BlenderCFDViewerNode(bpy.types.Node):
     def update(self):
         """Keep the node socket layout in sync."""
         self._sync_input_socket()
+
+    def free(self):
+        """Hide the preview if this viewer node is removed."""
+        BlenderCFDViewerModule.disable_domain_preview()
+
+    def draw_buttons(self, context, layout):
+        """Draw simple viewport preview controls."""
+        col = layout.column(align=True)
+        col.operator("blendercfd.viewer_show_domain", text="Show Domain", icon="HIDE_OFF")
+        col.operator("blendercfd.viewer_hide_domain", text="Hide Domain", icon="HIDE_ON")
 
 
 class BlenderCFDForceConstantNode(bpy.types.Node):
