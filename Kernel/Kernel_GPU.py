@@ -26,24 +26,229 @@ BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
 Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 
-def _build_obstacle_mask(config):
-    obstacle_cfg = config["obstacle"]
-    resolution_cfg = config["resolution"]
+def _first_or_none(entries):
+    """Return the first list entry or None."""
+    if not entries:
+        return None
+    return entries[0]
 
-    if obstacle_cfg["shape"] != "sphere":
-        raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
 
-    sphere_cfg = obstacle_cfg["sphere"]
-    return Obstacles.sphere(
-        resolution_cfg["NX"],
-        resolution_cfg["NY"],
-        resolution_cfg["NZ"],
-        resolution_cfg["DELTA"],
-        resolution_cfg["NX"] * sphere_cfg["x_factor"] * resolution_cfg["DELTA"],
-        resolution_cfg["NY"] * sphere_cfg["y_factor"] * resolution_cfg["DELTA"],
-        resolution_cfg["NZ"] * sphere_cfg["z_factor"] * resolution_cfg["DELTA"],
-        sphere_cfg["radius"],
+def _map_boundary_type(boundary_type):
+    """Translate exported UI boundary names to the kernel naming scheme."""
+    mapping = {
+        "WALL": "no_slip_wall",
+        "SLIP_WALL": "slip_wall",
+        "OUTFLOW": "outflow",
+        "INFLOW": "inflow",
+    }
+    return mapping.get(boundary_type, str(boundary_type).lower())
+
+
+def _extract_inflow_velocity(domain_cfg):
+    """Collect inflow velocity components from the first matching boundary face."""
+    zero_velocity = (0.0, 0.0, 0.0)
+    boundary_cfg = domain_cfg.get("boundary_conditions", {})
+
+    for face_name in ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high"):
+        face_cfg = boundary_cfg.get(face_name, {})
+        if _map_boundary_type(face_cfg.get("type", "")) != "inflow":
+            continue
+
+        velocity = face_cfg.get("velocity", zero_velocity)
+        if len(velocity) >= 3:
+            return float(velocity[0]), float(velocity[1]), float(velocity[2])
+
+    return zero_velocity
+
+
+def _collect_output_variables(output_cfg):
+    """Translate exported output field toggles to kernel field identifiers."""
+    field_mapping = {
+        "u": "u",
+        "v": "v",
+        "w": "w",
+        "p": "p",
+        "t": "T",
+        "smoke": "smoke",
+        "fuel": "fuel",
+        "flame": "flame",
+    }
+
+    enabled_fields = []
+    for field_name, is_enabled in output_cfg.get("fields", {}).items():
+        if is_enabled and field_name in field_mapping:
+            enabled_fields.append(field_mapping[field_name])
+    return enabled_fields
+
+
+def _combine_exported_obstacles(obstacle_entries):
+    """Merge exported obstacle nodes into one kernel obstacle configuration."""
+    mesh_objects = []
+    for obstacle_entry in obstacle_entries:
+        if obstacle_entry.get("shape") != "mesh":
+            continue
+        mesh_cfg = obstacle_entry.get("mesh", {})
+        mesh_objects.extend(mesh_cfg.get("objects", ()))
+
+    if mesh_objects:
+        return {
+            "shape": "mesh",
+            "solid": True,
+            "mesh": {
+                "objects": mesh_objects,
+            },
+        }
+
+    return {
+        "shape": "empty",
+        "solid": False,
+        "mesh": {
+            "objects": [],
+        },
+    }
+
+
+def _domain_origin(domain_cfg):
+    """
+    Return the world-space coordinate of grid index (0, 0, 0).
+
+    The domain is anchored so the center of the z_low face lies at (0, 0, 0).
+    """
+    nx = int(domain_cfg["grid"]["nx"])
+    ny = int(domain_cfg["grid"]["ny"])
+    delta = float(domain_cfg["resolution"])
+    return (
+        -0.5 * nx * delta,
+        -0.5 * ny * delta,
+        0.0,
     )
+
+
+def _build_source_field_data(domain_cfg, source_entries):
+    """
+    Build persistent source target fields from exported source nodes.
+
+    Multiple source nodes are merged with a max operation per scalar field.
+    """
+    nx = int(domain_cfg["grid"]["nx"])
+    ny = int(domain_cfg["grid"]["ny"])
+    nz = int(domain_cfg["grid"]["nz"])
+    delta = float(domain_cfg["resolution"])
+    origin_x, origin_y, origin_z = _domain_origin(domain_cfg)
+
+    temperature_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    smoke_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    fuel_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
+
+    for source_entry in source_entries:
+        if source_entry.get("shape") != "mesh":
+            continue
+
+        mesh_cfg = source_entry.get("mesh", {})
+        mesh_objects = mesh_cfg.get("objects", ())
+        if not mesh_objects:
+            continue
+
+        source_mask = Obstacles.mesh(
+            nx, ny, nz, delta, mesh_objects,
+            origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
+        )
+        if not np.any(source_mask):
+            continue
+
+        source_active_mask |= source_mask
+        temperature_field[source_mask] = np.maximum(
+            temperature_field[source_mask],
+            np.float32(source_entry.get("temperature", 0.0)),
+        )
+        smoke_field[source_mask] = np.maximum(
+            smoke_field[source_mask],
+            np.float32(source_entry.get("smoke", 0.0)),
+        )
+        fuel_field[source_mask] = np.maximum(
+            fuel_field[source_mask],
+            np.float32(source_entry.get("fuel", 0.0)),
+        )
+
+    return {
+        "mask": source_active_mask,
+        "temperature": temperature_field,
+        "smoke": smoke_field,
+        "fuel": fuel_field,
+    }
+
+
+def _build_obstacle_mask(domain_cfg, obstacle_entries):
+    obstacle_cfg = _combine_exported_obstacles(obstacle_entries)
+    nx = int(domain_cfg["grid"]["nx"])
+    ny = int(domain_cfg["grid"]["ny"])
+    nz = int(domain_cfg["grid"]["nz"])
+    delta = float(domain_cfg["resolution"])
+    origin_x, origin_y, origin_z = _domain_origin(domain_cfg)
+
+    if obstacle_cfg["shape"] == "mesh":
+        mesh_cfg = obstacle_cfg.get("mesh", {})
+        mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
+        return Obstacles.mesh(
+            nx,
+            ny,
+            nz,
+            delta,
+            mesh_objects,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            origin_z=origin_z,
+        )
+
+    if obstacle_cfg["shape"] == "empty":
+        return np.zeros(
+            (nx, ny, nz),
+            dtype=np.bool_,
+        )
+
+    raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
+
+
+@cuda.jit
+def apply_source_fields_maximum(T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel):
+    """Clamp source regions to persistent maximum source values."""
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = source_mask.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if not source_mask[i, j, k]:
+        return
+
+    source_temperature_value = source_temperature[i, j, k]
+    source_smoke_value = source_smoke[i, j, k]
+    source_fuel_value = source_fuel[i, j, k]
+
+    if T[i, j, k] < source_temperature_value:
+        T[i, j, k] = source_temperature_value
+    if smoke[i, j, k] < source_smoke_value:
+        smoke[i, j, k] = source_smoke_value
+    if fuel[i, j, k] < source_fuel_value:
+        fuel[i, j, k] = source_fuel_value
+
+
+def apply_all_source_BCs(T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel,
+                         threadsperblock=None):
+    """Apply all source clamps on the GPU using max compositing."""
+    if threadsperblock is None:
+        threadsperblock = THREADS_PER_BLOCK_3D
+
+    blockspergrid = (
+        (source_mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (source_mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (source_mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+    apply_source_fields_maximum[blockspergrid, threadsperblock](
+        T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+    )
+    return T, smoke, fuel
 
 
 def apply_config(config):
@@ -60,62 +265,76 @@ def apply_config(config):
     global BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT
     global BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
     global obstacle_mask, OBSTACLE_SOLID
-    global OBSTACLE_INTIAL_TEMPERATURE, OBSTACLE_INTIAL_SMOKE, OBSTACLE_INTIAL_FUEL
+    global source_field_data
     global TURBULENCE_AMPLITUDE, TURBULENCE_FREQUENCY, TURBULENCE_SCALE
 
-    fluid = config["fluid"]
-    time_cfg = config["time"]
-    solver = config["solver"]
-    resolution = config["resolution"]
-    output = config["output"]
-    boundary = config["boundary_conditions"]
-    obstacle = config["obstacle"]
+    simulations = config.get("simulations")
+    if not simulations:
+        raise ValueError("Config does not contain exported simulation entries.")
 
-    RHO = fluid["RHO"]
-    NU = fluid["NU"]
-    NU_TEMPERATURE = fluid["NU_TEMPERATURE"]
-    NU_SMOKE = fluid["NU_SMOKE"]
-    NU_FUEL = fluid["NU_FUEL"]
-    TEMPERATURE_DISSIPATION_RATE = fluid["TEMPERATURE_DISSIPATION_RATE"]
-    TEMPERATURE_PRODUCTION_RATE = fluid["TEMPERATURE_PRODUCTION_RATE"]
-    SMOKE_DISSIPATION_RATE = fluid["SMOKE_DISSIPATION_RATE"]
-    SMOKE_PRODUCTION_RATE = fluid["SMOKE_PRODUCTION_RATE"]
-    FUEL_BURN_RATE = fluid["FUEL_BURN_RATE"]
-    FUEL_IGNITION_TEMPERATURE = fluid["FUEL_IGNITION_TEMPERATURE"]
-    T_REFERENCE = fluid["T_REFERENCE"]
-    BUOANCY_FACTOR = fluid["BUOANCY_FACTOR"]
-    EXPANSION_RATE = fluid["EXPANSION_RATE"]
+    simulation_cfg = simulations[0]
+    domain_cfg = simulation_cfg.get("domain")
+    physics_cfg = simulation_cfg.get("physics")
+    output_cfg = _first_or_none(simulation_cfg.get("outputs", []))
+    obstacle_entries = simulation_cfg.get("obstacles", [])
+    source_entries = simulation_cfg.get("sources", [])
 
-    T_MAX = time_cfg["T_MAX"]
-    CFL_MAX = time_cfg["CFL_MAX"]
+    if domain_cfg is None:
+        raise ValueError("Exported config is missing a domain node.")
+    if physics_cfg is None:
+        raise ValueError("Exported config is missing a physics node.")
+    if output_cfg is None:
+        raise ValueError("Exported config is missing an output node.")
 
-    MAX_ITER = solver["MAX_ITER"]
-    PRECISION = solver["PRECISION"]
-    CPU_COUNT = solver["CPU_COUNT"]
+    RHO = float(physics_cfg["fluid"]["density"])
+    NU = float(physics_cfg["fluid"]["viscosity"])
+    NU_TEMPERATURE = float(physics_cfg["temperature"]["diffusion"])
+    NU_SMOKE = float(physics_cfg["smoke"]["diffusion"])
+    NU_FUEL = float(physics_cfg["fuel"]["diffusion"])
+    TEMPERATURE_DISSIPATION_RATE = float(physics_cfg["temperature"]["dissipation"])
+    TEMPERATURE_PRODUCTION_RATE = 1.0
+    SMOKE_DISSIPATION_RATE = float(physics_cfg["smoke"]["dissipation"])
+    SMOKE_PRODUCTION_RATE = 1.0
+    FUEL_BURN_RATE = float(physics_cfg["fuel"]["burn_rate"])
+    FUEL_IGNITION_TEMPERATURE = float(physics_cfg["fuel"]["ignition_temperature"])
+    T_REFERENCE = float(physics_cfg["temperature"]["reference_temperature"])
+    BUOANCY_FACTOR = float(physics_cfg["temperature"]["buoyancy"])
+    EXPANSION_RATE = float(physics_cfg["temperature"]["expansion_rate"])
 
-    DELTA = resolution["DELTA"]
-    NX = resolution["NX"]
-    NY = resolution["NY"]
-    NZ = resolution["NZ"]
+    T_MAX = float(simulation_cfg["settings"]["simulation_length"])
+    CFL_MAX = float(simulation_cfg["settings"]["cfl"])
 
-    OUTPUT_FPS = output["OUTPUT_FPS"]
-    PRINT_FREQUENCY = output["PRINT_FREQUENCY"]
+    MAX_ITER = int(simulation_cfg["settings"]["iterations"])
+    PRECISION = np.float32
+    CPU_COUNT = 1
+
+    DELTA = float(domain_cfg["resolution"])
+    NX = int(domain_cfg["grid"]["nx"])
+    NY = int(domain_cfg["grid"]["ny"])
+    NZ = int(domain_cfg["grid"]["nz"])
+
+    OUTPUT_FPS = int(output_cfg["fps"])
+    PRINT_FREQUENCY = 100
     OUTPUT_TIME_STEP = 1.0 / OUTPUT_FPS
-    OUTPUT_STATUS = output["OUTPUT_STATUS"]
-    WRITE_QUEUE_SIZE = output["WRITE_QUEUE_SIZE"]
-    OUTPATH = output["OUTPATH"]
-    OUTPUT_VARIABLES = output["OUTPUT_VARIABLES"]
+    OUTPUT_STATUS = False
+    WRITE_QUEUE_SIZE = 512
+    OUTPATH = output_cfg.get("output_path", "")
+    OUTPUT_VARIABLES = _collect_output_variables(output_cfg)
 
-    BC_CONFIG = boundary["BC_CONFIG"]
-    U_INFLOW = boundary["U_INFLOW"]
-    V_INFLOW = boundary["V_INFLOW"]
-    W_INFLOW = boundary["W_INFLOW"]
+    boundary_cfg = domain_cfg.get("boundary_conditions", {})
+    BC_CONFIG = {}
+    for face_name in ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high"):
+        face_cfg = boundary_cfg.get(face_name, {})
+        BC_CONFIG[face_name] = {
+            "type": _map_boundary_type(face_cfg.get("type", "OUTFLOW")),
+        }
 
-    OBSTACLE_SOLID = obstacle["solid"]
-    OBSTACLE_INTIAL_TEMPERATURE = obstacle["initial_temperature"]
-    OBSTACLE_INTIAL_SMOKE = obstacle["initial_smoke"]
-    OBSTACLE_INTIAL_FUEL = obstacle["initial_fuel"]
-    obstacle_mask = _build_obstacle_mask(config)
+    U_INFLOW, V_INFLOW, W_INFLOW = _extract_inflow_velocity(domain_cfg)
+
+    combined_obstacle_cfg = _combine_exported_obstacles(obstacle_entries)
+    OBSTACLE_SOLID = bool(combined_obstacle_cfg["solid"])
+    obstacle_mask = _build_obstacle_mask(domain_cfg, obstacle_entries)
+    source_field_data = _build_source_field_data(domain_cfg, source_entries)
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
     Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
@@ -150,6 +369,15 @@ def upload_simulation_state_to_gpu():
     Fz = np.zeros((NX, NY, NZ), dtype=precision_dtype)
 
     obstacle_mask_host = np.asarray(obstacle_mask)
+    source_mask_host = np.asarray(source_field_data["mask"])
+    source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
+    source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
+    source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
+
+    # Seed the initial state with the source maxima before uploading to the GPU.
+    T = np.maximum(T, source_temperature_host)
+    smoke = np.maximum(smoke, source_smoke_host)
+    fuel = np.maximum(fuel, source_fuel_host)
 
     #------------Device upload-------------------
     device_state = {
@@ -174,6 +402,10 @@ def upload_simulation_state_to_gpu():
         "Fy": cuda.to_device(Fy),
         "Fz": cuda.to_device(Fz),
         "obstacle_mask": cuda.to_device(obstacle_mask_host),
+        "source_mask": cuda.to_device(source_mask_host),
+        "source_temperature": cuda.to_device(source_temperature_host),
+        "source_smoke": cuda.to_device(source_smoke_host),
+        "source_fuel": cuda.to_device(source_fuel_host),
     }
 
     gpu_constants = {
@@ -196,9 +428,6 @@ def upload_simulation_state_to_gpu():
         "V_INFLOW": precision_dtype.type(V_INFLOW),
         "W_INFLOW": precision_dtype.type(W_INFLOW),
         "OBSTACLE_SOLID": OBSTACLE_SOLID,
-        "OBSTACLE_INTIAL_TEMPERATURE": precision_dtype.type(OBSTACLE_INTIAL_TEMPERATURE),
-        "OBSTACLE_INTIAL_SMOKE": precision_dtype.type(OBSTACLE_INTIAL_SMOKE),
-        "OBSTACLE_INTIAL_FUEL": precision_dtype.type(OBSTACLE_INTIAL_FUEL),
         "NX": NX,
         "NY": NY,
         "NZ": NZ,
@@ -757,6 +986,10 @@ def main(config=None):
     Fy = device_state["Fy"]
     Fz = device_state["Fz"]
     obstacle_mask = device_state["obstacle_mask"]
+    source_mask = device_state["source_mask"]
+    source_temperature = device_state["source_temperature"]
+    source_smoke = device_state["source_smoke"]
+    source_fuel = device_state["source_fuel"]
     device_fields = {
         "u": u,
         "v": v,
@@ -779,9 +1012,9 @@ def main(config=None):
     u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
         u, v, w, p, T, smoke, fuel, obstacle_mask,
         OBSTACLE_SOLID,
-        OBSTACLE_INTIAL_TEMPERATURE,
-        OBSTACLE_INTIAL_SMOKE,
-        OBSTACLE_INTIAL_FUEL,
+    )
+    T, smoke, fuel = apply_all_source_BCs(
+        T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
     )
     cuda.synchronize()
     section_timings["initial_obstacle"] += perf_counter() - section_start
@@ -792,7 +1025,7 @@ def main(config=None):
     g = 9.81
     fx_max = 0.0
     fy_max = 0.0
-    fz_max = abs(g * gpu_constants["BUOANCY_FACTOR"] * (OBSTACLE_INTIAL_TEMPERATURE - gpu_constants["T_REFERENCE"]))
+    fz_max = 0.0
 
     #------------Dynamic time step-------------------
     t = 0.0
@@ -898,9 +1131,9 @@ def main(config=None):
         u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
             u, v, w, p, T, smoke, fuel, obstacle_mask,
             OBSTACLE_SOLID,
-            OBSTACLE_INTIAL_TEMPERATURE,
-            OBSTACLE_INTIAL_SMOKE,
-            OBSTACLE_INTIAL_FUEL,
+        )
+        T, smoke, fuel = apply_all_source_BCs(
+            T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
         )
         cuda.synchronize()
         section_timings["obstacle"] += perf_counter() - section_start

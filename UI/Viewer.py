@@ -5,7 +5,6 @@ from gpu_extras.batch import batch_for_shader
 
 _DRAW_HANDLER = None
 _ACTIVE_DOMAIN = None
-_DOMAIN_FLOOR_CENTER = (0.0, 9.0, 9.0)
 
 
 def _tag_view3d_redraw():
@@ -29,6 +28,20 @@ def _domain_dimensions(domain_node):
         float(domain_node.nx) * float(domain_node.resolution),
         float(domain_node.ny) * float(domain_node.resolution),
         float(domain_node.nz) * float(domain_node.resolution),
+    )
+
+
+def _domain_origin(domain_node):
+    """
+    Return the world-space coordinate of grid index (0, 0, 0).
+
+    The center of the z_low face lies at the world origin.
+    """
+    width, depth, _height = _domain_dimensions(domain_node)
+    return (
+        -(width * 0.5),
+        -(depth * 0.5),
+        0.0,
     )
 
 
@@ -63,17 +76,17 @@ def _build_preview_segments(domain_node):
     """Build the preview line data for the full domain and one sample cell."""
     width, depth, height = _domain_dimensions(domain_node)
     resolution = float(domain_node.resolution)
-    center_x, center_y, floor_z = _DOMAIN_FLOOR_CENTER
+    origin_x, origin_y, origin_z = _domain_origin(domain_node)
 
     min_corner = (
-        center_x - (width * 0.5),
-        center_y - (depth * 0.5),
-        floor_z,
+        origin_x,
+        origin_y,
+        origin_z,
     )
     max_corner = (
-        center_x + (width * 0.5),
-        center_y + (depth * 0.5),
-        floor_z + height,
+        origin_x + width,
+        origin_y + depth,
+        origin_z + height,
     )
 
     domain_lines = _box_segments(min_corner, max_corner)

@@ -1,5 +1,7 @@
 import bpy
+import json
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
@@ -72,6 +74,43 @@ except ImportError:
         sys.modules["blendercfd_viewer"] = module
         spec.loader.exec_module(module)
         BlenderCFDViewerModule = module
+
+try:
+    from . import Create_Config_Dict as BlenderCFDConfigModule
+except ImportError:
+    try:
+        import Create_Config_Dict as BlenderCFDConfigModule
+    except ImportError:
+        if "__file__" in globals():
+            config_path = Path(__file__).resolve().with_name("Create_Config_Dict.py")
+        else:
+            config_path = (Path.cwd() / "UI" / "Create_Config_Dict.py").resolve()
+
+        spec = importlib.util.spec_from_file_location("blendercfd_create_config_dict", config_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["blendercfd_create_config_dict"] = module
+        spec.loader.exec_module(module)
+        BlenderCFDConfigModule = module
+
+
+def _kernel_directory():
+    """Return the local Kernel directory path."""
+    if "__file__" in globals():
+        return Path(__file__).resolve().parents[1] / "Kernel"
+    return (Path.cwd() / "Kernel").resolve()
+
+
+def _kernel_runner_script():
+    """Return the helper script path used to launch the kernel in a subprocess."""
+    return _kernel_directory() / "Run_From_Config.py"
+
+
+def _resolve_python_executable():
+    """Use the project-local virtual environment for baking."""
+    python_executable = Path(__file__).resolve().parents[1] / "BlenderCFD_env" / "Scripts" / "python.exe"
+    if not python_executable.exists():
+        raise FileNotFoundError(f"Python executable not found: {python_executable}")
+    return str(python_executable)
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -448,7 +487,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     temperature_diffusion: FloatProperty(  # type: ignore
         name="Temperature Diffusion",
-        default=0.1,
+        default=0.01,
         min=0.0,
         max=1,
         precision=4,
@@ -456,7 +495,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     temperature_dissipation: FloatProperty(  # type: ignore
         name="Temperature Dissipation",
-        default=1.0,
+        default=0.1,
         min=0.0,
         max=100
     )
@@ -471,7 +510,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     buoyancy: FloatProperty(  # type: ignore
         name="Buoyancy",
-        default=0.005,
+        default=0.0033,
         min=0.0,
         max=1.0,
         precision=4,
@@ -479,7 +518,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     expansion_rate: FloatProperty(  # type: ignore
         name="Expansion Rate",
-        default=0.001,
+        default=0.003,
         min=0.0,
         max=1.0,
         precision=4,
@@ -487,7 +526,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     smoke_diffusion: FloatProperty(  # type: ignore
         name="Smoke Diffusion",
-        default=0.1,
+        default=0.001,
         min=0.0,
         max=1.0,
         precision=4,
@@ -495,14 +534,14 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     smoke_dissipation: FloatProperty(  # type: ignore
         name="Smoke Dissipation",
-        default=1.0,
+        default=0.1,
         min=0.0,
         max=100.0
     )
 
     fuel_diffusion: FloatProperty(  # type: ignore
         name="Fuel Diffusion",
-        default=0.1,
+        default=0.001,
         min=0.0,
         max=1.0,
         precision=4,
@@ -510,7 +549,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     fuel_dissipation: FloatProperty(  # type: ignore
         name="Fuel Dissipation",
-        default=1.0,
+        default=0.001,
         min=0.0,
         max=100.0
     )
@@ -904,7 +943,7 @@ class BlenderCFDOutputNode(bpy.types.Node):
 
 class BlenderCFD_OT_bake(bpy.types.Operator):
     """
-    Placeholder operator for starting the BlenderCFD bake process.
+    Operator that exports the active node tree config and starts the kernel.
     """
 
     bl_idname = "blendercfd.bake"
@@ -912,8 +951,32 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     bl_description = "Start the BlenderCFD bake process"
 
     def execute(self, context):
-        """Run the placeholder bake action."""
-        self.report({"INFO"}, "Bake is not implemented yet.")
+        """Build the current config dict and run the CFD kernel."""
+        try:
+            config_dict = BlenderCFDConfigModule.build_config_dict(context)
+            python_executable = _resolve_python_executable()
+            runner_script = _kernel_runner_script()
+            process = subprocess.Popen(
+                [python_executable, str(runner_script)],
+                cwd=str(_kernel_directory()),
+                stdin=subprocess.PIPE,
+                text=True,
+            )
+            process.stdin.write(json.dumps(config_dict))
+            process.stdin.close()
+        except ModuleNotFoundError as exc:
+            missing_module = getattr(exc, "name", None) or str(exc)
+            self.report(
+                {"ERROR"},
+                f"Bake failed: missing Python module '{missing_module}' in {sys.executable}",
+            )
+            return {"CANCELLED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Bake failed: {exc}")
+            return {"CANCELLED"}
+
+        simulation_count = len(config_dict.get("simulations", ()))
+        self.report({"INFO"}, f"Started BlenderCFD bake for {simulation_count} simulation(s) via {python_executable}.")
         return {"FINISHED"}
 
 
