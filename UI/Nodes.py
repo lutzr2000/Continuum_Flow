@@ -1,103 +1,95 @@
 import bpy
 import json
+import importlib
 import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
 
-try:
-    from .NodeTree import BlenderCFDNodeTree
-except ImportError:
-    try:
-        from NodeTree import BlenderCFDNodeTree
-    except ImportError:
-        # Fallback for direct execution in Blender's text editor without package context.
+def _load_ui_module(module_name, file_names, package_names=()):
+    """Load a sibling UI module across package, absolute, and file-based contexts."""
+    if isinstance(file_names, str):
+        file_names = (file_names,)
+    if isinstance(package_names, str):
+        package_names = (package_names,)
+
+    package_context = globals().get("__package__")
+    for package_name in package_names:
+        if package_name.startswith(".") and not package_context:
+            continue
+        try:
+            if package_name.startswith("."):
+                return importlib.import_module(package_name, package=package_context)
+            return importlib.import_module(package_name)
+        except (ImportError, TypeError):
+            continue
+
+    for file_name in file_names:
         if "__file__" in globals():
-            node_tree_path = Path(__file__).resolve().with_name("NodeTree.py")
+            module_path = Path(__file__).resolve().with_name(file_name)
         else:
-            node_tree_path = (Path.cwd() / "UI" / "NodeTree.py").resolve()
+            module_path = (Path.cwd() / "UI" / file_name).resolve()
 
-        spec = importlib.util.spec_from_file_location("blendercfd_nodetree", node_tree_path)
+        if not module_path.exists():
+            continue
+
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            continue
+
         module = importlib.util.module_from_spec(spec)
-        sys.modules["blendercfd_nodetree"] = module
+        sys.modules[module_name] = module
         spec.loader.exec_module(module)
-        BlenderCFDNodeTree = module.BlenderCFDNodeTree
+        return module
 
-try:
-    from .Sockets import (
-        BlenderCFDForceSocket,
-        BlenderCFDIntSocket,
-        BlenderCFDLinkSocket,
-        BlenderCFDReferenceFrameSocket,
-        BlenderCFDResultSocket,
-    )
-except ImportError:
-    try:
-        from Sockets import (
-            BlenderCFDForceSocket,
-            BlenderCFDIntSocket,
-            BlenderCFDLinkSocket,
-            BlenderCFDReferenceFrameSocket,
-            BlenderCFDResultSocket,
-        )
-    except ImportError:
-        # Fallback for direct execution in Blender's text editor without package context.
-        if "__file__" in globals():
-            sockets_path = Path(__file__).resolve().with_name("Sockets.py")
-        else:
-            sockets_path = (Path.cwd() / "UI" / "Sockets.py").resolve()
+    readable_names = ", ".join(file_names)
+    raise ImportError(f"Could not load any of: {readable_names}")
 
-        spec = importlib.util.spec_from_file_location("blendercfd_sockets", sockets_path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["blendercfd_sockets"] = module
-        spec.loader.exec_module(module)
-        BlenderCFDForceSocket = module.BlenderCFDForceSocket
-        BlenderCFDIntSocket = module.BlenderCFDIntSocket
-        BlenderCFDLinkSocket = module.BlenderCFDLinkSocket
-        BlenderCFDReferenceFrameSocket = module.BlenderCFDReferenceFrameSocket
-        BlenderCFDResultSocket = module.BlenderCFDResultSocket
 
-try:
-    from . import Viewer as BlenderCFDViewerModule
-except ImportError:
-    try:
-        import Viewer as BlenderCFDViewerModule
-    except ImportError:
-        if "__file__" in globals():
-            viewer_path = Path(__file__).resolve().with_name("Viewer.py")
-        else:
-            viewer_path = (Path.cwd() / "UI" / "Viewer.py").resolve()
+_node_tree_module = _load_ui_module(
+    "blendercfd_nodetree",
+    ("Node_Tree.py", "NodeTree.py"),
+    (".Node_Tree", "UI.Node_Tree", "Node_Tree", "UI.NodeTree", "NodeTree"),
+)
+BlenderCFDNodeTree = _node_tree_module.BlenderCFDNodeTree
 
-        spec = importlib.util.spec_from_file_location("blendercfd_viewer", viewer_path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["blendercfd_viewer"] = module
-        spec.loader.exec_module(module)
-        BlenderCFDViewerModule = module
+_sockets_module = _load_ui_module(
+    "blendercfd_sockets",
+    "Sockets.py",
+    (".Sockets", "UI.Sockets", "Sockets"),
+)
 
-try:
-    from . import Create_Config_Dict as BlenderCFDConfigModule
-except ImportError:
-    try:
-        import Create_Config_Dict as BlenderCFDConfigModule
-    except ImportError:
-        if "__file__" in globals():
-            config_path = Path(__file__).resolve().with_name("Create_Config_Dict.py")
-        else:
-            config_path = (Path.cwd() / "UI" / "Create_Config_Dict.py").resolve()
+BlenderCFDViewerModule = _load_ui_module(
+    "blendercfd_viewer",
+    "Viewer.py",
+    (".Viewer", "UI.Viewer", "Viewer"),
+)
 
-        spec = importlib.util.spec_from_file_location("blendercfd_create_config_dict", config_path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["blendercfd_create_config_dict"] = module
-        spec.loader.exec_module(module)
-        BlenderCFDConfigModule = module
+BlenderCFDConfigModule = _load_ui_module(
+    "blendercfd_create_config_dict",
+    ("Config_Export.py", "Create_Config_Dict.py"),
+    (".Config_Export", "UI.Config_Export", "Config_Export", "UI.Create_Config_Dict", "Create_Config_Dict"),
+)
 
+BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket
+BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
+BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
+BlenderCFDReferenceFrameSocket = _sockets_module.BlenderCFDReferenceFrameSocket
+BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 
 def _kernel_directory():
     """Return the local Kernel directory path."""
     if "__file__" in globals():
         return Path(__file__).resolve().parents[1] / "Kernel"
     return (Path.cwd() / "Kernel").resolve()
+
+
+def _project_root_directory():
+    """Return the BlenderCFD project root directory."""
+    if "__file__" in globals():
+        return Path(__file__).resolve().parents[1]
+    return Path.cwd().resolve()
 
 
 def _resolve_python_executable():
@@ -112,14 +104,15 @@ def _run_kernel(config_dict):
     """Run the CFD kernel in the project venv and pass the config from memory via stdin."""
     python_executable = _resolve_python_executable()
     kernel_dir = _kernel_directory()
+    project_root = _project_root_directory()
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Kernel_GPU; "
+        "from Kernel import Kernel_GPU; "
         "Kernel_GPU.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
-        [python_executable, "-c", bootstrap_code, str(kernel_dir)],
+        [python_executable, "-c", bootstrap_code, str(project_root)],
         cwd=str(kernel_dir),
         stdin=subprocess.PIPE,
         text=True,

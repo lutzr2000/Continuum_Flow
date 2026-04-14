@@ -5,18 +5,22 @@ from pathlib import Path
 from nodeitems_utils import register_node_categories, unregister_node_categories
 
 
-def _load_module(file_name, module_name):
+def _load_module(file_names, module_name):
     """Load a UI module from disk or from an open Blender text block."""
+    if isinstance(file_names, str):
+        file_names = (file_names,)
+
     candidate_paths = []
 
-    if "__file__" in globals():
-        candidate_paths.append(Path(__file__).resolve().with_name(file_name))
+    for file_name in file_names:
+        if "__file__" in globals():
+            candidate_paths.append(Path(__file__).resolve().with_name(file_name))
 
-    current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
-    if current_text is not None and current_text.filepath:
-        candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().with_name(file_name))
+        current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
+        if current_text is not None and current_text.filepath:
+            candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().with_name(file_name))
 
-    candidate_paths.append((Path.cwd() / "UI" / file_name).resolve())
+        candidate_paths.append((Path.cwd() / "UI" / file_name).resolve())
 
     seen = set()
     for candidate in candidate_paths:
@@ -35,18 +39,20 @@ def _load_module(file_name, module_name):
             spec.loader.exec_module(module)
             return module
 
-    text_block = bpy.data.texts.get(file_name)
-    if text_block is not None:
-        return text_block.as_module()
+    for file_name in file_names:
+        text_block = bpy.data.texts.get(file_name)
+        if text_block is not None:
+            return text_block.as_module()
 
-    raise ImportError(f"{file_name} konnte nicht geladen werden.")
+    readable_names = ", ".join(file_names)
+    raise ImportError(f"Keines dieser Module konnte geladen werden: {readable_names}")
 
 
-node_tree_module = _load_module("NodeTree.py", "blendercfd_nodetree")
+node_tree_module = _load_module(("Node_Tree.py", "NodeTree.py"), "blendercfd_nodetree")
 socket_module = _load_module("Sockets.py", "blendercfd_sockets")
 nodes_module = _load_module("Nodes.py", "blendercfd_nodes")
 viewer_module = _load_module("Viewer.py", "blendercfd_viewer")
-config_module = _load_module("Create_Config_Dict.py", "blendercfd_create_config_dict")
+config_module = _load_module(("Config_Export.py", "Create_Config_Dict.py"), "blendercfd_create_config_dict")
 
 
 def register():

@@ -5,18 +5,19 @@ from time import perf_counter
 import numpy as np
 from numba import cuda
 
-import Boundary_Conditions as BC
-import Helper_Functions as Helper_Functions
-import Obstacle_Boundary_Conditions as Obstacle_BC
-import Output_Functions as Output_Functions
-import Source_Boundary_Conditions as Source_BC
+import Kernel.Boundary_Conditions.Domain_BC as BC
+import Kernel.Helper_Functions as Helper_Functions
+import Kernel.Boundary_Conditions.Obstacle_BC as Obstacle_BC
+import Kernel.Output.Output_Functions as Output_Functions
+import Kernel.Boundary_Conditions.Source_BC as Source_BC
+import Kernel.Time_Step as Time_Step
 
 # ===============================
 # Parameters
 # ===============================
 
 BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"
-VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), 'VDB_Writer.py')
+VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), "Output", "VDB_Writer.py")
 CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (4, 4)
@@ -633,7 +634,7 @@ def main(config=None):
     step_index = 0
 
     section_start = perf_counter()
-    dt = Helper_Functions.compute_new_timestep_gpu(
+    dt = Time_Step.compute_new_timestep_gpu(
         u, v, w, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
@@ -771,7 +772,7 @@ def main(config=None):
         step_index += 1
 
         section_start = perf_counter()
-        dt_new = Helper_Functions.compute_new_timestep_gpu(
+        dt_new = Time_Step.compute_new_timestep_gpu(
             u, v, w, fx_max, fy_max, fz_max,
             gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
         )

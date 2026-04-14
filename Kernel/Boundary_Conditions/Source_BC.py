@@ -1,7 +1,7 @@
 import numpy as np
 from numba import cuda
 
-import Obstacles as Obstacles
+import Kernel.Boundary_Conditions.Obstacles as Obstacles
 
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 
