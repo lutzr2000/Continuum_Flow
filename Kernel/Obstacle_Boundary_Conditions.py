@@ -1,20 +1,103 @@
+import numpy as np
 from numba import cuda
+
+import Obstacles as Obstacles
 
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 
 
-@cuda.jit
-def obstacle_boundary_conditions_velocity(u, v, w, mask):
-    """
-    applies no-slip velocity conditions inside a 3D obstacle mask on the GPU.
+def _combine_exported_obstacles(obstacle_entries):
+    """Merge exported obstacle nodes into one kernel obstacle configuration."""
+    mesh_objects = []
+    for obstacle_entry in obstacle_entries:
+        if obstacle_entry.get("shape") != "mesh":
+            continue
+        mesh_cfg = obstacle_entry.get("mesh", {})
+        mesh_objects.extend(mesh_cfg.get("objects", ()))
 
-    Each thread checks one obstacle cell and sets all three velocity components
-    to zero when the mask marks that cell as solid.
+    if mesh_objects:
+        return {
+            "shape": "mesh",
+            "solid": True,
+            "mesh": {
+                "objects": mesh_objects,
+            },
+        }
+
+    return {
+        "shape": "empty",
+        "solid": False,
+        "mesh": {
+            "objects": [],
+        },
+    }
+
+
+def build_obstacle_data(domain_cfg, obstacle_entries):
+    """
+    build the voxel obstacle mask from exported obstacle nodes.
+
+    Args:
+        domain_cfg (dict): exported domain configuration
+        obstacle_entries (list[dict]): exported obstacle node configurations
+    Returns:
+        dict: obstacle configuration and boolean obstacle mask
+    """
+    obstacle_cfg = _combine_exported_obstacles(obstacle_entries)
+    nx = int(domain_cfg["grid"]["nx"])
+    ny = int(domain_cfg["grid"]["ny"])
+    nz = int(domain_cfg["grid"]["nz"])
+    delta = float(domain_cfg["resolution"])
+    origin_x = -0.5 * nx * delta
+    origin_y = -0.5 * ny * delta
+    origin_z = 0.0
+
+    if obstacle_cfg["shape"] == "mesh":
+        mesh_cfg = obstacle_cfg.get("mesh", {})
+        mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
+        obstacle_mask = Obstacles.mesh(
+            nx,
+            ny,
+            nz,
+            delta,
+            mesh_objects,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            origin_z=origin_z,
+        )
+        return {
+            "config": obstacle_cfg,
+            "mask": obstacle_mask,
+        }
+
+    if obstacle_cfg["shape"] == "empty":
+        return {
+            "config": obstacle_cfg,
+            "mask": np.zeros(
+                (nx, ny, nz),
+                dtype=np.bool_,
+            ),
+        }
+
+    raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
+
+
+@cuda.jit
+def _obstacle_bc_kernel(u, v, w, p, smoke, fuel, flame, mask):
+    """
+    applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
+
+    Each thread checks one obstacle cell and clears velocity, pressure and
+    scalar values when the mask marks that cell as solid.
 
     Args:
         u (device array): x-velocity field
         v (device array): y-velocity field
         w (device array): z-velocity field
+        p (device array): pressure field
+        smoke (device array): smoke field
+        fuel (device array): fuel field
+        flame (device array): flame indicator field
         mask (device array): boolean obstacle mask
     """
     i, j, k = cuda.grid(3)
@@ -27,133 +110,18 @@ def obstacle_boundary_conditions_velocity(u, v, w, mask):
         u[i, j, k] = 0.0
         v[i, j, k] = 0.0
         w[i, j, k] = 0.0
-
-
-@cuda.jit
-def obstacle_boundary_conditions_pressure(p, mask):
-    """
-    applies zero pressure inside a 3D obstacle mask on the GPU.
-
-    Each thread checks one obstacle cell and sets the pressure to zero when the
-    mask marks that cell as part of the obstacle region.
-
-    Args:
-        p (device array): pressure field
-        mask (device array): boolean obstacle mask
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if mask[i, j, k]:
         p[i, j, k] = 0.0
-
-
-@cuda.jit
-def obstacle_boundary_conditions_scalars(smoke, fuel, flame, mask):
-    """
-    applies zero scalar conditions inside a 3D obstacle mask on the GPU.
-
-    Each thread checks one obstacle cell and clears smoke, fuel and flame when
-    the mask marks that cell as part of the obstacle region.
-
-    Args:
-        smoke (device array): smoke field
-        fuel (device array): fuel field
-        flame (device array): flame indicator field
-        mask (device array): boolean obstacle mask
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if mask[i, j, k]:
         smoke[i, j, k] = 0.0
         fuel[i, j, k] = 0.0
         flame[i, j, k] = 0.0
 
 
-def obstacle_velocity_bc(u, v, w, mask, threadsperblock=None):
-    """
-    launches the obstacle no-slip velocity kernel on the GPU.
-
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        mask (device array): boolean obstacle mask
-        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
-    Returns:
-        tuple: updated velocity fields
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_velocity[blockspergrid, threadsperblock](u, v, w, mask)
-    return u, v, w
-
-
-def obstacle_pressure_bc(p, mask, threadsperblock=None):
-    """
-    launches the obstacle pressure boundary kernel on the GPU.
-
-    Args:
-        p (device array): pressure field
-        mask (device array): boolean obstacle mask
-        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
-    Returns:
-        device array: the updated pressure field
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_pressure[blockspergrid, threadsperblock](p, mask)
-    return p
-
-
-def obstacle_scalar_bc(smoke, fuel, flame, mask, threadsperblock=None):
-    """
-    launches the obstacle scalar-clearing kernel on the GPU.
-
-    Args:
-        smoke (device array): smoke field
-        fuel (device array): fuel field
-        flame (device array): flame indicator field
-        mask (device array): boolean obstacle mask
-        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
-    Returns:
-        tuple: updated scalar fields
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-    blockspergrid = (
-        (mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
-    obstacle_boundary_conditions_scalars[blockspergrid, threadsperblock](smoke, fuel, flame, mask)
-    return smoke, fuel, flame
-
-
-def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, flame, obstacle_mask, obstacle_solid):
+def obstacle_bc(u, v, w, p, T, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
     """
     applies all obstacle boundary conditions to the GPU field state.
 
-    Velocity components are forced to zero inside solid obstacles and pressure
-    is set to zero there as well. Smoke, fuel and flame are always cleared
-    inside obstacle cells so obstacle regions stay empty.
+    Velocity, pressure and scalar fields are cleared inside obstacle cells so
+    obstacle regions stay empty and act as solid regions.
 
     Args:
         u (device array): x-velocity field
@@ -165,14 +133,19 @@ def apply_all_obstacle_BCs(u, v, w, p, T, smoke, fuel, flame, obstacle_mask, obs
         fuel (device array): fuel field
         flame (device array): flame indicator field
         obstacle_mask (device array): boolean obstacle mask
-        obstacle_solid (bool): whether obstacle velocity conditions should be applied
+        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
         tuple: updated velocity, pressure and scalar fields
     """
-    smoke, fuel, flame = obstacle_scalar_bc(smoke, fuel, flame, obstacle_mask)
+    if threadsperblock is None:
+        threadsperblock = THREADS_PER_BLOCK_3D
 
-    if obstacle_solid:
-        u, v, w = obstacle_velocity_bc(u, v, w, obstacle_mask)
-        p = obstacle_pressure_bc(p, obstacle_mask)
+    blockspergrid = (
+        (obstacle_mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (obstacle_mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (obstacle_mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+
+    _obstacle_bc_kernel[blockspergrid, threadsperblock](u, v, w, p, smoke, fuel, flame, obstacle_mask)
 
     return u, v, w, p, T, smoke, fuel, flame

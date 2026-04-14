@@ -418,8 +418,7 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
     applies all configured domain boundary conditions to the GPU field state.
 
     The function iterates over the configured faces and dispatches the matching
-    CUDA boundary kernels for inflow, outflow, slip-wall and no-slip-wall
-    conditions.
+    CUDA boundary kernels for INFLOW, OUTFLOW, SLIP_WALL and WALL conditions.
 
     Args:
         u (device array): x-velocity field
@@ -437,9 +436,9 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
     for side, bc in bc_config.items():
         bc_type = bc["type"]
 
-        if bc_type == "outflow":
+        if bc_type == "OUTFLOW":
             u, v, w, p, T = outflow_bc(u, v, w, p, T, side)
-        elif bc_type == "inflow":
+        elif bc_type == "INFLOW":
             u, v, w, p, T = inflow_bc(
                 u, v, w, p, T,
                 side,
@@ -448,11 +447,11 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
                 bc.get("w", w_inflow),
                 bc.get("T", bc.get("temperature")),
             )
-        elif bc_type == "no_slip_wall":
+        elif bc_type == "WALL":
             u, v, w, p, T = no_slip_wall_bc(
                 u, v, w, p, T, side, bc.get("T", bc.get("temperature"))
             )
-        elif bc_type == "slip_wall":
+        elif bc_type == "SLIP_WALL":
             u, v, w, p, T = slip_wall_bc(
                 u, v, w, p, T, side, bc.get("T", bc.get("temperature"))
             )

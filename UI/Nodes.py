@@ -100,17 +100,33 @@ def _kernel_directory():
     return (Path.cwd() / "Kernel").resolve()
 
 
-def _kernel_runner_script():
-    """Return the helper script path used to launch the kernel in a subprocess."""
-    return _kernel_directory() / "Run_From_Config.py"
-
-
 def _resolve_python_executable():
     """Use the project-local virtual environment for baking."""
     python_executable = Path(__file__).resolve().parents[1] / "BlenderCFD_env" / "Scripts" / "python.exe"
     if not python_executable.exists():
         raise FileNotFoundError(f"Python executable not found: {python_executable}")
     return str(python_executable)
+
+
+def _run_kernel(config_dict):
+    """Run the CFD kernel in the project venv and pass the config from memory via stdin."""
+    python_executable = _resolve_python_executable()
+    kernel_dir = _kernel_directory()
+    bootstrap_code = (
+        "import json, sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "import Kernel_GPU; "
+        "Kernel_GPU.main(json.load(sys.stdin))"
+    )
+    process = subprocess.Popen(
+        [python_executable, "-c", bootstrap_code, str(kernel_dir)],
+        cwd=str(kernel_dir),
+        stdin=subprocess.PIPE,
+        text=True,
+    )
+    process.stdin.write(json.dumps(config_dict))
+    process.stdin.close()
+    return python_executable
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -954,16 +970,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         """Build the current config dict and run the CFD kernel."""
         try:
             config_dict = BlenderCFDConfigModule.build_config_dict(context)
-            python_executable = _resolve_python_executable()
-            runner_script = _kernel_runner_script()
-            process = subprocess.Popen(
-                [python_executable, str(runner_script)],
-                cwd=str(_kernel_directory()),
-                stdin=subprocess.PIPE,
-                text=True,
-            )
-            process.stdin.write(json.dumps(config_dict))
-            process.stdin.close()
+            python_executable = _run_kernel(config_dict)
         except ModuleNotFoundError as exc:
             missing_module = getattr(exc, "name", None) or str(exc)
             self.report(
