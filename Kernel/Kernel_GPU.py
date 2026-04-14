@@ -1009,12 +1009,12 @@ def main(config=None):
 
     #------------Obstacle-------------------
     section_start = perf_counter()
-    u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
-        u, v, w, p, T, smoke, fuel, obstacle_mask,
-        OBSTACLE_SOLID,
-    )
     T, smoke, fuel = apply_all_source_BCs(
         T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+    )
+    u, v, w, p, T, smoke, fuel, flame = Obstacle_BC.apply_all_obstacle_BCs(
+        u, v, w, p, T, smoke, fuel, flame, obstacle_mask,
+        OBSTACLE_SOLID,
     )
     cuda.synchronize()
     section_timings["initial_obstacle"] += perf_counter() - section_start
@@ -1128,12 +1128,12 @@ def main(config=None):
 
         #------------Obstacle-------------------
         section_start = perf_counter()
-        u, v, w, p, T, smoke, fuel = Obstacle_BC.apply_all_obstacle_BCs(
-            u, v, w, p, T, smoke, fuel, obstacle_mask,
-            OBSTACLE_SOLID,
-        )
         T, smoke, fuel = apply_all_source_BCs(
             T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+        )
+        u, v, w, p, T, smoke, fuel, flame = Obstacle_BC.apply_all_obstacle_BCs(
+            u, v, w, p, T, smoke, fuel, flame, obstacle_mask,
+            OBSTACLE_SOLID,
         )
         cuda.synchronize()
         section_timings["obstacle"] += perf_counter() - section_start
