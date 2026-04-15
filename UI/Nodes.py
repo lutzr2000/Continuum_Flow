@@ -128,9 +128,25 @@ def _run_kernel(config_dict):
     return process, python_executable
 
 
+def _writer_process_count_from_config(config_dict):
+    """Return the configured VDB writer process count."""
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return 4
+
+    outputs = simulations[0].get("outputs") or ()
+    if not outputs:
+        return 4
+
+    performance_cfg = outputs[0].get("performance", {})
+    return max(1, int(performance_cfg.get("writer_processes", 4)))
+
+
 def _run_blocking_bake(config_dict):
     """Run the kernel while this Blender process serves VDB write requests."""
-    writer_server = BlenderCFDHostWriterModule.HostVDBWriterServer()
+    writer_server = BlenderCFDHostWriterModule.HostVDBWriterServer(
+        writer_process_count=_writer_process_count_from_config(config_dict)
+    )
     writer_server.start()
     config_dict["_host_vdb_writer"] = writer_server.endpoint()
 
@@ -861,6 +877,15 @@ class BlenderCFDOutputNode(bpy.types.Node):
         soft_max=120,
     )
 
+    writer_processes: IntProperty(  # type: ignore
+        name="Writers",
+        default=4,
+        min=1,
+        max=16,
+        soft_min=1,
+        soft_max=8,
+    )
+
     export_u: BoolProperty(  # type: ignore
         name="Velocity x",
         default=True,
@@ -955,6 +980,7 @@ class BlenderCFDOutputNode(bpy.types.Node):
     def draw_buttons(self, context, layout):
         """Draw the editable controls shown inside the node body."""
         layout.prop(self, "fps")
+        layout.prop(self, "writer_processes")
 
         fields_box = layout.box()
         fields_box.label(text="Fields")

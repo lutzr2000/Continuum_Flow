@@ -8,6 +8,7 @@ import Kernel.Boundary_Conditions.Source_BC as Source_BC
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (4, 4)
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
+OUTPUT_BUFFER_MULTIPLIER = 2
 
 
 def build_boundary_config(domain_cfg):
@@ -56,6 +57,17 @@ def collect_output_variables(output_cfg):
     return enabled_fields
 
 
+def build_output_performance_config(output_cfg):
+    """Build output pipeline performance settings from the exported output node."""
+    performance_cfg = output_cfg.get("performance", {})
+    writer_processes = max(1, int(performance_cfg.get("writer_processes", 4)))
+
+    return {
+        "writer_processes": writer_processes,
+        "buffer_count": writer_processes * OUTPUT_BUFFER_MULTIPLIER,
+    }
+
+
 def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
     simulations = config.get("simulations")
@@ -71,6 +83,7 @@ def apply_config(config):
     obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
     source_temperature_max = float(np.max(source_data["temperature"]))
+    output_performance = build_output_performance_config(output_cfg)
 
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
@@ -106,7 +119,8 @@ def apply_config(config):
         "PRINT_FREQUENCY": 100,
         "OUTPUT_TIME_STEP": 1.0 / int(output_cfg["fps"]),
         "OUTPUT_STATUS": False,
-        "WRITE_QUEUE_SIZE": 512,
+        "OUTPUT_FORWARDER_COUNT": output_performance["writer_processes"],
+        "WRITE_QUEUE_SIZE": output_performance["buffer_count"],
         "OUTPATH": output_cfg.get("output_path", ""),
         "OUTPUT_VARIABLES": collect_output_variables(output_cfg),
         "HOST_VDB_WRITER": host_vdb_writer,
@@ -207,11 +221,6 @@ def upload_simulation_state_to_gpu(simulation_params):
     }
 
     return device_state, gpu_constants
-
-
-def copy_device_fields_to_host(field_map):
-    """Copy a dictionary of device arrays to host NumPy arrays."""
-    return {name: device_array.copy_to_host() for name, device_array in field_map.items()}
 
 
 def select_fields(field_map, field_names):

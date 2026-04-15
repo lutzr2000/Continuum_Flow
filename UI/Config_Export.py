@@ -219,6 +219,9 @@ def _serialize_output_node(node):
             "fuel": bool(node.export_fuel),
             "flame": bool(node.export_flame),
         },
+        "performance": {
+            "writer_processes": int(getattr(node, "writer_processes", 4)),
+        },
         "output_path": output_path,
     }
 

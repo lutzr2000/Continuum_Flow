@@ -530,6 +530,7 @@ def main(config=None):
     OUTPUT_TIME_STEP = simulation_params["OUTPUT_TIME_STEP"]
     OUTPUT_STATUS = simulation_params["OUTPUT_STATUS"]
     WRITE_QUEUE_SIZE = simulation_params["WRITE_QUEUE_SIZE"]
+    OUTPUT_FORWARDER_COUNT = simulation_params["OUTPUT_FORWARDER_COUNT"]
     OUTPATH = simulation_params["OUTPATH"]
     OUTPUT_VARIABLES = simulation_params["OUTPUT_VARIABLES"]
     HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
@@ -537,7 +538,6 @@ def main(config=None):
     U_INFLOW = simulation_params["U_INFLOW"]
     V_INFLOW = simulation_params["V_INFLOW"]
     W_INFLOW = simulation_params["W_INFLOW"]
-    obstacle_mask = simulation_params["obstacle_mask"]
 
     section_timings = {
         "initial_bcs": 0.0,
@@ -616,9 +616,16 @@ def main(config=None):
     cuda.synchronize()
     section_timings["initial_obstacle"] += perf_counter() - section_start
 
-    host_output_fields = Helper_Functions.copy_device_fields_to_host(
-        Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES)
-    )
+    device_fields.update({
+        "u": u,
+        "v": v,
+        "w": w,
+        "p": p,
+        "T": T,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
+    })
 
     #------------Estimate force maxima-------------------
     g = 9.81
@@ -632,7 +639,6 @@ def main(config=None):
 
     #------------Dynamic time step-------------------
     t = 0.0
-    step_index = 0
 
     section_start = perf_counter()
     dt = Time_Step.compute_new_timestep_gpu(
@@ -651,8 +657,9 @@ def main(config=None):
     write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
         OUTPATH,
         OUTPUT_VARIABLES,
-        host_output_fields,
+        Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES),
         WRITE_QUEUE_SIZE,
+        OUTPUT_FORWARDER_COUNT,
         DELTA,
         HOST_VDB_WRITER,
     )
@@ -757,10 +764,14 @@ def main(config=None):
         #------------Output-------------------
         while t >= next_output_time:
             section_start = perf_counter()
-            host_output_fields = Helper_Functions.copy_device_fields_to_host(
-                Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES)
+            Output_Functions.enqueue_device_output(
+                write_queue,
+                buffer_pool,
+                OUTPUT_VARIABLES,
+                Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES),
+                output_index,
+                t,
             )
-            Output_Functions.enqueue_output(write_queue, buffer_pool, OUTPUT_VARIABLES, host_output_fields, output_index, t)
             section_timings["output"] += perf_counter() - section_start
 
             output_index += 1
@@ -775,7 +786,6 @@ def main(config=None):
 
         #------------Dynamic time step-------------------
         t += dt
-        step_index += 1
 
         section_start = perf_counter()
         dt_new = Time_Step.compute_new_timestep_gpu(

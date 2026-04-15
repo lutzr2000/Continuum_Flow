@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 
-VDB_WRITER_PROCESS_COUNT = 4
+DEFAULT_VDB_WRITER_PROCESS_COUNT = 4
 
 
 def _ui_directory():
@@ -80,7 +80,7 @@ class _VDBWriterProcess:
 class _VDBWriterProcessPool:
     """Round-robin pool of persistent UI-side VDB writer processes."""
 
-    def __init__(self, process_count=VDB_WRITER_PROCESS_COUNT):
+    def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT):
         writer_script = _ui_directory() / "VDB_Process_Writer.py"
         if not writer_script.exists():
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
@@ -135,9 +135,9 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
 class HostVDBWriterServer:
     """Host endpoint that dispatches VDB write jobs to a process pool."""
 
-    def __init__(self, host="127.0.0.1"):
+    def __init__(self, host="127.0.0.1", writer_process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT):
         self.host = host
-        self._writer_pool = _VDBWriterProcessPool()
+        self._writer_pool = _VDBWriterProcessPool(process_count=writer_process_count)
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
         self._server.write_vdb = self._writer_pool.write
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)

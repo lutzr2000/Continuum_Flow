@@ -7,14 +7,13 @@ from multiprocessing import shared_memory
 
 import numpy as np
 
-FIELD_NAMES = ('u', 'v', 'w', 'p', 'T', 'smoke', 'fuel', 'flame')
-WRITER_COUNT = 4
 
 def setup_output(
     outpath,
     output_variables,
     template_fields,
     queue_size,
+    forwarder_count,
     delta,
     host_writer_endpoint,
 ):
@@ -24,8 +23,9 @@ def setup_output(
     Args:
         outpath (str): output directory for vdb files
         output_variables (list[str]): names of the fields that should be written
-        template_fields (dict): field names mapped to template arrays
+        template_fields (dict): field names mapped to CUDA device arrays
         queue_size (int): number of reusable buffer sets
+        forwarder_count (int): number of host-writer forwarder threads
         delta (float): grid spacing
         host_writer_endpoint (dict): host/port for Blender's in-process writer
     Returns:
@@ -44,18 +44,21 @@ def setup_output(
         fields = {}
         for variable_name in output_variables:
             template_array = template_fields[variable_name]
-            shm = shared_memory.SharedMemory(create=True, size=template_array.nbytes)
+            shape = tuple(template_array.shape)
+            dtype = np.dtype(template_array.dtype)
+            nbytes = int(np.prod(shape)) * dtype.itemsize
+            shm = shared_memory.SharedMemory(create=True, size=nbytes)
             shared_memory_blocks.append(shm)
             fields[variable_name] = {
-                'array': np.ndarray(template_array.shape, dtype=template_array.dtype, buffer=shm.buf),
-                'shape': template_array.shape,
-                'dtype': str(template_array.dtype),
+                'array': np.ndarray(shape, dtype=dtype, buffer=shm.buf),
+                'shape': shape,
+                'dtype': str(dtype),
                 'shm_name': shm.name,
             }
         buffer_pool.put(fields)
 
     writer_threads = []
-    for _ in range(WRITER_COUNT):
+    for _ in range(forwarder_count):
         writer_thread = threading.Thread(
             target=writer_thread_func,
             args=(
@@ -74,15 +77,15 @@ def setup_output(
     return write_queue, buffer_pool, writer_threads, shared_memory_blocks
 
 
-def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, output_index, time_value):
+def enqueue_device_output(write_queue, buffer_pool, output_variables, source_device_fields, output_index, time_value):
     """
-    copies one output frame into shared memory and queues it for writing.
+    copies one output frame directly from CUDA device arrays into shared memory.
 
     Args:
         write_queue (queue.Queue): queue with pending output jobs
         buffer_pool (queue.Queue): queue with reusable shared-memory buffers
         output_variables (list[str]): names of the fields that should be written
-        source_fields (dict): field names mapped to current simulation arrays
+        source_device_fields (dict): field names mapped to CUDA device arrays
         output_index (int): output frame index
         time_value (float): physical simulation time
     Returns:
@@ -90,7 +93,7 @@ def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, ou
     """
     fields = buffer_pool.get()
     for variable_name in output_variables:
-        np.copyto(fields[variable_name]['array'], source_fields[variable_name])
+        source_device_fields[variable_name].copy_to_host(fields[variable_name]['array'])
     write_queue.put((int(output_index), float(time_value), fields))
 
 
