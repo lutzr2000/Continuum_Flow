@@ -345,6 +345,50 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
 
 
 @cuda.jit
+def update_force_fields(Fx_base, Fy_base, Fz_base,
+                        turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
+                        turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
+                        turbulence_cos_coeffs, turbulence_sin_coeffs,
+                        turbulence_count, Fx, Fy, Fz):
+    """
+    Update body-force fields from base fields and animated turbulence bases.
+
+    The expensive smooth turbulence fields are precomputed on the host. Per
+    timestep this kernel only mixes them with host-computed sine/cosine
+    coefficients, keeping the force update bandwidth-bound and predictable.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = Fx.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    fx = Fx_base[i, j, k]
+    fy = Fy_base[i, j, k]
+    fz = Fz_base[i, j, k]
+
+    for turbulence_index in range(turbulence_count):
+        cos_coeff = turbulence_cos_coeffs[turbulence_index]
+        sin_coeff = turbulence_sin_coeffs[turbulence_index]
+        fx += (
+            cos_coeff * turbulence_Fx_a[turbulence_index, i, j, k] +
+            sin_coeff * turbulence_Fx_b[turbulence_index, i, j, k]
+        )
+        fy += (
+            cos_coeff * turbulence_Fy_a[turbulence_index, i, j, k] +
+            sin_coeff * turbulence_Fy_b[turbulence_index, i, j, k]
+        )
+        fz += (
+            cos_coeff * turbulence_Fz_a[turbulence_index, i, j, k] +
+            sin_coeff * turbulence_Fz_b[turbulence_index, i, j, k]
+        )
+
+    Fx[i, j, k] = fx
+    Fy[i, j, k] = fy
+    Fz[i, j, k] = fz
+
+
+@cuda.jit
 def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
@@ -366,7 +410,7 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
         return
 
     g = 9.81
-    Fz[i, j, k] = g * buoyancy_factor * (T[i, j, k] - t_reference)
+    Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
 
 
 @cuda.jit
@@ -543,7 +587,7 @@ def main(config=None):
         "initial_obstacle": 0.0,
         "initial_dt": 0.0,
         "setup_output": 0.0,
-        "buoyancy": 0.0,
+        "forces": 0.0,
         "pressure": 0.0,
         "velocity": 0.0,
         "scalars": 0.0,
@@ -581,6 +625,22 @@ def main(config=None):
     Fx = device_state["Fx"]
     Fy = device_state["Fy"]
     Fz = device_state["Fz"]
+    Fx_base = device_state["Fx_base"]
+    Fy_base = device_state["Fy_base"]
+    Fz_base = device_state["Fz_base"]
+    turbulence_Fx_a = device_state["turbulence_Fx_a"]
+    turbulence_Fy_a = device_state["turbulence_Fy_a"]
+    turbulence_Fz_a = device_state["turbulence_Fz_a"]
+    turbulence_Fx_b = device_state["turbulence_Fx_b"]
+    turbulence_Fy_b = device_state["turbulence_Fy_b"]
+    turbulence_Fz_b = device_state["turbulence_Fz_b"]
+    turbulence_cos_coeffs = device_state["turbulence_cos_coeffs"]
+    turbulence_sin_coeffs = device_state["turbulence_sin_coeffs"]
+    turbulence_angular_frequencies = np.asarray(
+        simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
+        dtype=simulation_params["PRECISION"],
+    )
+    turbulence_count = int(turbulence_angular_frequencies.size)
     obstacle_mask = device_state["obstacle_mask"]
     source_mask = device_state["source_mask"]
     source_temperature = device_state["source_temperature"]
@@ -628,13 +688,14 @@ def main(config=None):
 
     #------------Estimate force maxima-------------------
     g = 9.81
-    fx_max = 0.0
-    fy_max = 0.0
+    fx_max = float(gpu_constants["FORCE_X_MAX"])
+    fy_max = float(gpu_constants["FORCE_Y_MAX"])
     source_temperature_delta = max(
         0.0,
         float(gpu_constants["SOURCE_TEMPERATURE_MAX"] - gpu_constants["T_REFERENCE"]),
     )
-    fz_max = g * gpu_constants["BUOANCY_FACTOR"] * source_temperature_delta * 1.5
+    fz_buoyancy_max = g * gpu_constants["BUOANCY_FACTOR"] * source_temperature_delta * 1.5
+    fz_max = float(gpu_constants["FORCE_Z_MAX"]) + float(fz_buoyancy_max)
 
     #------------Dynamic time step-------------------
     t = 0.0
@@ -675,13 +736,23 @@ def main(config=None):
             (u.shape[2] + THREADS_PER_BLOCK_3D[2] - 1) // THREADS_PER_BLOCK_3D[2],
         )
 
-        #------------Buoyancy-------------------
+        #------------Forces-------------------
         section_start = perf_counter()
+        if turbulence_count > 0:
+            turbulence_cos_coeffs.copy_to_device(np.cos(turbulence_angular_frequencies * t))
+            turbulence_sin_coeffs.copy_to_device(np.sin(turbulence_angular_frequencies * t))
+        update_force_fields[blockspergrid_3d, THREADS_PER_BLOCK_3D](
+            Fx_base, Fy_base, Fz_base,
+            turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
+            turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
+            turbulence_cos_coeffs, turbulence_sin_coeffs,
+            turbulence_count, Fx, Fy, Fz
+        )
         buoyancy_approximation[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
         )
         cuda.synchronize()
-        section_timings["buoyancy"] += perf_counter() - section_start
+        section_timings["forces"] += perf_counter() - section_start
 
         #------------Pressure-------------------
         section_start = perf_counter()

@@ -5,6 +5,7 @@ import numpy as np
 from numba import cuda
 
 import Kernel.Boundary_Conditions.Domain_BC as BC
+import Kernel.Forcing as Forcing
 import Kernel.Boundary_Conditions.Obstacle_BC as Obstacle_BC
 import Kernel.Boundary_Conditions.Source_BC as Source_BC
 
@@ -92,11 +93,13 @@ def apply_config(config):
     output_cfg = simulation_cfg.get("outputs", [None])[0]
     obstacle_entries = simulation_cfg.get("obstacles", [])
     source_entries = simulation_cfg.get("sources", [])
+    force_entries = simulation_cfg.get("forces", [])
     host_vdb_writer = config.get("_host_vdb_writer")
 
     bc_config, inflow_velocity = build_boundary_config(domain_cfg)
     obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
+    force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
     source_temperature_max = float(np.max(source_data["temperature"]))
     output_performance = build_output_performance_config(output_cfg)
 
@@ -145,6 +148,7 @@ def apply_config(config):
         "W_INFLOW": inflow_velocity[2],
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
+        "force_field_data": force_data,
     }
 
 
@@ -167,9 +171,14 @@ def upload_simulation_state_to_gpu(simulation_params):
     fuel = np.zeros((nx, ny, nz), dtype=precision_dtype)
     flame = np.zeros((nx, ny, nz), dtype=precision_dtype)
 
-    Fx = np.zeros((nx, ny, nz), dtype=precision_dtype)
-    Fy = np.zeros((nx, ny, nz), dtype=precision_dtype)
-    Fz = np.zeros((nx, ny, nz), dtype=precision_dtype)
+    force_field_data = simulation_params["force_field_data"]
+    Fx_base = np.asarray(force_field_data["Fx_base"], dtype=precision_dtype)
+    Fy_base = np.asarray(force_field_data["Fy_base"], dtype=precision_dtype)
+    Fz_base = np.asarray(force_field_data["Fz_base"], dtype=precision_dtype)
+    Fx = np.asarray(force_field_data["Fx"], dtype=precision_dtype)
+    Fy = np.asarray(force_field_data["Fy"], dtype=precision_dtype)
+    Fz = np.asarray(force_field_data["Fz"], dtype=precision_dtype)
+    turbulence_data = force_field_data["turbulence"]
 
     obstacle_mask_host = np.asarray(simulation_params["obstacle_mask"])
     source_field_data = simulation_params["source_field_data"]
@@ -203,6 +212,17 @@ def upload_simulation_state_to_gpu(simulation_params):
         "Fx": cuda.to_device(Fx),
         "Fy": cuda.to_device(Fy),
         "Fz": cuda.to_device(Fz),
+        "Fx_base": cuda.to_device(Fx_base),
+        "Fy_base": cuda.to_device(Fy_base),
+        "Fz_base": cuda.to_device(Fz_base),
+        "turbulence_Fx_a": cuda.to_device(np.asarray(turbulence_data["Fx_a"], dtype=precision_dtype)),
+        "turbulence_Fy_a": cuda.to_device(np.asarray(turbulence_data["Fy_a"], dtype=precision_dtype)),
+        "turbulence_Fz_a": cuda.to_device(np.asarray(turbulence_data["Fz_a"], dtype=precision_dtype)),
+        "turbulence_Fx_b": cuda.to_device(np.asarray(turbulence_data["Fx_b"], dtype=precision_dtype)),
+        "turbulence_Fy_b": cuda.to_device(np.asarray(turbulence_data["Fy_b"], dtype=precision_dtype)),
+        "turbulence_Fz_b": cuda.to_device(np.asarray(turbulence_data["Fz_b"], dtype=precision_dtype)),
+        "turbulence_cos_coeffs": cuda.to_device(np.ones(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype)),
+        "turbulence_sin_coeffs": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype)),
         "obstacle_mask": cuda.to_device(obstacle_mask_host),
         "source_mask": cuda.to_device(source_mask_host),
         "source_temperature": cuda.to_device(source_temperature_host),
@@ -233,6 +253,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "NX": simulation_params["NX"],
         "NY": simulation_params["NY"],
         "NZ": simulation_params["NZ"],
+        "FORCE_X_MAX": precision_dtype.type(force_field_data["max_abs"][0]),
+        "FORCE_Y_MAX": precision_dtype.type(force_field_data["max_abs"][1]),
+        "FORCE_Z_MAX": precision_dtype.type(force_field_data["max_abs"][2]),
     }
 
     return device_state, gpu_constants
