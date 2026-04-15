@@ -1,4 +1,3 @@
-import sys
 from time import perf_counter
 
 import numpy as np
@@ -667,7 +666,7 @@ def main(config=None):
 
     #------------Main time loop-------------------
     print('Start time iteration')
-    sys.stdout.write('\rProgress: [0%]')
+    Helper_Functions.emit_progress(0.0, t)
 
     while t < T_MAX:
         blockspergrid_3d = (
@@ -776,8 +775,7 @@ def main(config=None):
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
-            sys.stdout.write(f'\rProgress: [{(t / T_MAX * 100):.3f}%]')
-            sys.stdout.flush()
+            Helper_Functions.emit_progress(t / T_MAX * 100.0, t)
 
             if OUTPUT_STATUS:
                 print('#################################################')
@@ -811,6 +809,7 @@ def main(config=None):
     Output_Functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
 
     #------------Conclusion-------------------
+    Helper_Functions.emit_progress(100.0, T_MAX)
     print('Simulation finished!')
     total_runtime = perf_counter() - total_start_time
     print('Timing summary:')

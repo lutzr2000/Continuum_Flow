@@ -1,3 +1,6 @@
+import json
+import sys
+
 import numpy as np
 from numba import cuda
 
@@ -9,6 +12,18 @@ THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (4, 4)
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
+PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
+
+
+def emit_progress(percent, time_value=None):
+    """Emit a machine-readable progress event for Blender's bake progress bar."""
+    payload = {
+        "percent": max(0.0, min(100.0, float(percent))),
+    }
+    if time_value is not None:
+        payload["time"] = float(time_value)
+    sys.stdout.write(PROGRESS_EVENT_PREFIX + json.dumps(payload) + "\n")
+    sys.stdout.flush()
 
 
 def build_boundary_config(domain_cfg):

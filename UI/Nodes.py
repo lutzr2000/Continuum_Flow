@@ -2,8 +2,10 @@ import bpy
 import json
 import importlib
 import importlib.util
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
 
@@ -84,6 +86,31 @@ BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
 BlenderCFDReferenceFrameSocket = _sockets_module.BlenderCFDReferenceFrameSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 
+PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
+_STATUS_PROGRESS_PERCENT = 0.0
+_STATUS_PROGRESS_FACTOR = 0.0
+
+
+def _draw_blendercfd_status_progress(header, context):
+    """Draw BlenderCFD bake progress in Blender's bottom status bar."""
+    layout = header.layout
+    layout.separator_spacer()
+    row = layout.row()
+    row.ui_units_x = 10
+    row.progress(
+        factor=_STATUS_PROGRESS_FACTOR,
+        text=f"{_STATUS_PROGRESS_PERCENT:.1f}%",
+        type="BAR",
+    )
+    layout.separator_spacer()
+
+
+def _set_status_progress_values(percent):
+    """Update the module-level status bar progress values used by Blender's callback."""
+    global _STATUS_PROGRESS_PERCENT, _STATUS_PROGRESS_FACTOR
+    _STATUS_PROGRESS_PERCENT = max(0.0, min(100.0, float(percent)))
+    _STATUS_PROGRESS_FACTOR = _STATUS_PROGRESS_PERCENT / 100.0
+
 def _kernel_directory():
     """Return the local Kernel directory path."""
     if "__file__" in globals():
@@ -118,14 +145,36 @@ def _run_kernel(config_dict):
         "Kernel_GPU.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
-        [python_executable, "-c", bootstrap_code, str(project_root)],
+        [python_executable, "-u", "-c", bootstrap_code, str(project_root)],
         cwd=str(kernel_dir),
         stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
     process.stdin.write(json.dumps(config_dict))
     process.stdin.close()
     return process, python_executable
+
+
+def _handle_kernel_output_line(line, output_tail):
+    """Forward normal kernel output and return parsed progress percentages."""
+    output_tail.append(line.rstrip())
+    if len(output_tail) > 40:
+        del output_tail[0]
+
+    if line.startswith(PROGRESS_EVENT_PREFIX):
+        try:
+            payload = json.loads(line[len(PROGRESS_EVENT_PREFIX):])
+            return max(0.0, min(100.0, float(payload.get("percent", 0.0))))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return None
+
+    sys.stdout.write(line)
+    sys.stdout.flush()
+    return None
 
 
 def _writer_process_count_from_config(config_dict):
@@ -142,23 +191,45 @@ def _writer_process_count_from_config(config_dict):
     return max(1, int(performance_cfg.get("writer_processes", 4)))
 
 
-def _run_blocking_bake(config_dict):
-    """Run the kernel while this Blender process serves VDB write requests."""
+def _read_kernel_output(process, output_queue):
+    """Read kernel stdout on a worker thread so Blender's modal operator can redraw."""
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                output_queue.put(("line", line))
+    except Exception as exc:
+        output_queue.put(("error", str(exc)))
+
+
+def _start_bake_session(config_dict):
+    """Start the writer server, kernel process and stdout reader for a modal bake."""
     writer_server = BlenderCFDHostWriterModule.HostVDBWriterServer(
         writer_process_count=_writer_process_count_from_config(config_dict)
     )
     writer_server.start()
     config_dict["_host_vdb_writer"] = writer_server.endpoint()
 
-    process = None
+    output_queue = queue.Queue()
     try:
         process, python_executable = _run_kernel(config_dict)
-        return_code = process.wait()
-        if return_code != 0:
-            raise RuntimeError(f"Kernel process failed with exit code {return_code}")
-        return python_executable
-    finally:
+    except Exception:
         writer_server.stop()
+        raise
+
+    output_thread = threading.Thread(
+        target=_read_kernel_output,
+        args=(process, output_queue),
+        daemon=True,
+    )
+    output_thread.start()
+
+    return {
+        "writer_server": writer_server,
+        "process": process,
+        "python_executable": python_executable,
+        "output_queue": output_queue,
+        "output_thread": output_thread,
+    }
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -1008,11 +1079,137 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     bl_label = "Bake BlenderCFD"
     bl_description = "Start the BlenderCFD bake process"
 
+    _timer = None
+    _session = None
+    _config_dict = None
+    _output_tail = None
+    _progress_percent = 0.0
+    _progress_factor = 0.0
+    _reader_error = None
+    _window_manager = None
+    _workspace = None
+
+    def _drain_kernel_output(self):
+        """Process all kernel output currently waiting for Blender's main thread."""
+        output_queue = self._session["output_queue"]
+        while True:
+            try:
+                event_type, payload = output_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if event_type == "line":
+                percent = _handle_kernel_output_line(payload, self._output_tail)
+                if percent is not None:
+                    self._progress_percent = percent
+                    self._progress_factor = percent / 100.0
+                    _set_status_progress_values(percent)
+            elif event_type == "error":
+                self._reader_error = payload
+
+    def _set_status_progress(self, context):
+        """Install and refresh the status-bar progress callback."""
+        if self._workspace is None:
+            self._workspace = context.workspace
+        self._workspace.status_text_set(_draw_blendercfd_status_progress)
+        self._tag_status_bar_redraw(context)
+
+    def _clear_status_progress(self, context):
+        """Restore Blender's regular status-bar text."""
+        workspace = self._workspace or context.workspace
+        workspace.status_text_set(None)
+        self._workspace = None
+        self._tag_status_bar_redraw(context)
+
+    def _tag_status_bar_redraw(self, context):
+        """Request a redraw for visible status bar areas."""
+        for window in context.window_manager.windows:
+            screen = getattr(window, "screen", None)
+            if screen is None:
+                continue
+            for area in screen.areas:
+                if area.type == "STATUSBAR":
+                    area.tag_redraw()
+
+    def _recent_kernel_output_detail(self):
+        """Return recent kernel output for error reports."""
+        if not self._output_tail:
+            return ""
+        recent_output = "\n".join(self._output_tail[-10:])
+        return f"\nRecent kernel output:\n{recent_output}" if recent_output else ""
+
+    def _cleanup_bake(self, context):
+        """Release modal bake resources."""
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+
+        self._clear_status_progress(context)
+        self._window_manager = None
+
+        if self._session is not None:
+            self._session["writer_server"].stop()
+            self._session = None
+
+    def _cancel_running_process(self):
+        """Stop the kernel process when the modal bake is cancelled."""
+        if self._session is None:
+            return
+
+        process = self._session["process"]
+        if process.poll() is not None:
+            return
+
+        process.terminate()
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    def modal(self, context, event):
+        """Keep Blender responsive while the external kernel process is baking."""
+        if event.type == "ESC":
+            self._cancel_running_process()
+            self._cleanup_bake(context)
+            self.report({"WARNING"}, "BlenderCFD bake cancelled.")
+            return {"CANCELLED"}
+
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        self._drain_kernel_output()
+        self._set_status_progress(context)
+        process = self._session["process"]
+        return_code = process.poll()
+        if return_code is None:
+            return {"RUNNING_MODAL"}
+
+        self._drain_kernel_output()
+        python_executable = self._session["python_executable"]
+        simulation_count = len(self._config_dict.get("simulations", ()))
+        reader_error = self._reader_error
+
+        self._cleanup_bake(context)
+
+        if reader_error:
+            self.report({"ERROR"}, f"Bake failed while reading kernel output: {reader_error}")
+            return {"CANCELLED"}
+
+        if return_code != 0:
+            self.report(
+                {"ERROR"},
+                f"Bake failed: Kernel process failed with exit code {return_code}{self._recent_kernel_output_detail()}",
+            )
+            return {"CANCELLED"}
+        
+        return {"FINISHED"}
+
     def execute(self, context):
         """Build the current config dict and run the CFD kernel."""
         try:
-            config_dict = BlenderCFDConfigModule.build_config_dict(context)
-            python_executable = _run_blocking_bake(config_dict)
+            self._config_dict = BlenderCFDConfigModule.build_config_dict(context)
+            self._session = _start_bake_session(self._config_dict)
         except ModuleNotFoundError as exc:
             missing_module = getattr(exc, "name", None) or str(exc)
             self.report(
@@ -1024,9 +1221,17 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
 
-        simulation_count = len(config_dict.get("simulations", ()))
-        self.report({"INFO"}, f"Finished BlenderCFD bake for {simulation_count} simulation(s) via {python_executable}.")
-        return {"FINISHED"}
+        self._output_tail = []
+        self._progress_percent = 0.0
+        self._progress_factor = 0.0
+        _set_status_progress_values(0.0)
+        self._reader_error = None
+        self._window_manager = context.window_manager
+        self._workspace = context.workspace
+        self._set_status_progress(context)
+        self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
 
 
 class BlenderCFDViewerNode(bpy.types.Node):
