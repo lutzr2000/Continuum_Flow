@@ -1,50 +1,114 @@
 import json
+import queue
 import socketserver
+import subprocess
+import sys
 import threading
-from multiprocessing import shared_memory
-
-import numpy as np
-import openvdb
+from pathlib import Path
 
 
-def _as_vdb_input_array(array):
-    if array.dtype == np.float32 and array.flags["C_CONTIGUOUS"]:
-        return array
-    return np.asarray(array, dtype=np.float32, order="C")
+VDB_WRITER_PROCESS_COUNT = 4
 
 
-def write_vdb(payload):
-    output_vdb_path = payload["output_path"]
-    grids = []
-    open_shared_memory = []
+def _ui_directory():
+    """Return the local UI directory path."""
+    if "__file__" in globals():
+        return Path(__file__).resolve().parent
+    return (Path.cwd() / "UI").resolve()
 
-    try:
-        for variable_name, field_info in payload["fields"].items():
-            shm = shared_memory.SharedMemory(name=field_info["shm_name"])
-            open_shared_memory.append(shm)
 
-            array = np.ndarray(
-                tuple(field_info["shape"]),
-                dtype=np.dtype(field_info["dtype"]),
-                buffer=shm.buf,
-            )
+def _resolve_blender_python_executable():
+    """Return Blender's bundled python executable for VDB writer processes."""
+    candidates = [
+        Path(sys.executable),
+        Path(sys.prefix) / "bin" / "python.exe",
+        Path(sys.prefix) / "python" / "bin" / "python.exe",
+    ]
 
-            grid = openvdb.FloatGrid()
-            grid.name = variable_name
-            grid.copyFromArray(_as_vdb_input_array(array))
-            grids.append(grid)
+    for candidate in candidates:
+        if candidate.exists() and candidate.name.lower() == "python.exe":
+            return str(candidate)
 
-        openvdb.write(output_vdb_path, grids=grids)
+    raise FileNotFoundError(
+        "Could not resolve Blender's bundled python.exe for VDB writer processes."
+    )
 
-    finally:
-        for shm in open_shared_memory:
-            shm.close()
 
+class _VDBWriterProcess:
+    """One persistent UI-side VDB writer process."""
+
+    def __init__(self, python_executable, writer_script):
+        self._process = subprocess.Popen(
+            [python_executable, str(writer_script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+    def write(self, payload):
+        if self._process.stdin is None or self._process.stdout is None:
+            raise RuntimeError("VDB writer process is not connected.")
+        if self._process.poll() is not None:
+            stderr = self._process.stderr.read().strip() if self._process.stderr else ""
+            raise RuntimeError(f"VDB writer process exited early. {stderr}")
+
+        self._process.stdin.write(json.dumps(payload) + "\n")
+        self._process.stdin.flush()
+
+        response_line = self._process.stdout.readline()
+        if not response_line:
+            stderr = self._process.stderr.read().strip() if self._process.stderr else ""
+            raise RuntimeError(f"VDB writer process closed the response pipe. {stderr}")
+
+        response = json.loads(response_line)
+        if response.get("status") != "ok":
+            raise RuntimeError(response.get("message", "unknown VDB writer error"))
+
+    def close(self):
+        if self._process.poll() is None and self._process.stdin is not None:
+            try:
+                self._process.stdin.write("__QUIT__\n")
+                self._process.stdin.flush()
+                self._process.stdin.close()
+            except OSError:
+                pass
+        self._process.wait()
+
+
+class _VDBWriterProcessPool:
+    """Round-robin pool of persistent UI-side VDB writer processes."""
+
+    def __init__(self, process_count=VDB_WRITER_PROCESS_COUNT):
+        writer_script = _ui_directory() / "VDB_Process_Writer.py"
+        if not writer_script.exists():
+            raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
+
+        python_executable = _resolve_blender_python_executable()
+        self._processes = [
+            _VDBWriterProcess(python_executable, writer_script)
+            for _ in range(process_count)
+        ]
+        self._available_processes = queue.Queue(maxsize=process_count)
+        for writer_process in self._processes:
+            self._available_processes.put(writer_process)
+
+    def write(self, payload):
+        writer_process = self._available_processes.get()
+        try:
+            writer_process.write(payload)
+        finally:
+            self._available_processes.put(writer_process)
+
+    def close(self):
+        for writer_process in self._processes:
+            writer_process.close()
 
 
 class _ThreadingTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
-    daemon_threads = True
+    daemon_threads = False
 
 
 class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
@@ -69,12 +133,13 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
 
 
 class HostVDBWriterServer:
-    """Small in-process VDB writer endpoint for Blender-started bakes."""
+    """Host endpoint that dispatches VDB write jobs to a process pool."""
 
     def __init__(self, host="127.0.0.1"):
         self.host = host
+        self._writer_pool = _VDBWriterProcessPool()
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
-        self._server.write_vdb = write_vdb
+        self._server.write_vdb = self._writer_pool.write
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -91,3 +156,4 @@ class HostVDBWriterServer:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
+        self._writer_pool.close()
