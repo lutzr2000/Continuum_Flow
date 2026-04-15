@@ -13,6 +13,25 @@ def _as_vdb_input_array(array):
     return np.asarray(array, dtype=np.float32, order="C")
 
 
+def _grid_transform_from_payload(payload, shape):
+    """Build the OpenVDB transform that maps grid indices into Blender world space."""
+    transform_info = payload.get("transform", {})
+    voxel_size = float(transform_info.get("voxel_size", payload.get("delta", 1.0)))
+    origin = transform_info.get("origin")
+    if origin is None:
+        nx, ny, _nz = shape
+        origin = (
+            -0.5 * float(nx) * voxel_size,
+            -0.5 * float(ny) * voxel_size,
+            0.0,
+        )
+
+    transform = openvdb.Transform()
+    transform.postScale(voxel_size)
+    transform.postTranslate(tuple(float(component) for component in origin[:3]))
+    return transform
+
+
 def write_vdb(payload):
     """Create one VDB file from field data stored in shared memory."""
     output_vdb_path = payload["output_path"]
@@ -33,6 +52,7 @@ def write_vdb(payload):
             grid = openvdb.FloatGrid()
             grid.name = variable_name
             grid.copyFromArray(_as_vdb_input_array(array))
+            grid.transform = _grid_transform_from_payload(payload, array.shape)
             grids.append(grid)
 
         openvdb.write(output_vdb_path, grids=grids)

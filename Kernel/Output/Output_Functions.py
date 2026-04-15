@@ -118,6 +118,16 @@ def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
     cleanup_output_buffers(shared_memory_blocks)
 
 
+def _domain_origin_from_shape(shape, delta):
+    """Return the world-space origin used by the BlenderCFD domain preview."""
+    nx, ny, _nz = shape
+    return (
+        -0.5 * float(nx) * float(delta),
+        -0.5 * float(ny) * float(delta),
+        0.0,
+    )
+
+
 def create_writer_payload(fields, output_variables, output_path, time_value, delta):
     """
     builds the metadata package that is sent to Blender's host VDB writer.
@@ -131,10 +141,16 @@ def create_writer_payload(fields, output_variables, output_path, time_value, del
     Returns:
         dict: serializable writer payload
     """
+    first_field_shape = fields[output_variables[0]]['shape'] if output_variables else (0, 0, 0)
+
     return {
         'output_path': output_path,
         'time': float(time_value),
         'delta': float(delta),
+        'transform': {
+            'voxel_size': float(delta),
+            'origin': _domain_origin_from_shape(first_field_shape, delta),
+        },
         'fields': {
             variable_name: {
                 'shape': fields[variable_name]['shape'],

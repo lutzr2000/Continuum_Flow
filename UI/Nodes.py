@@ -232,6 +232,96 @@ def _start_bake_session(config_dict):
     }
 
 
+def _output_directories_from_config(config_dict):
+    """Return unique output directories configured for all simulation outputs."""
+    output_directories = []
+    seen_paths = set()
+
+    for simulation_cfg in config_dict.get("simulations", ()):
+        for output_cfg in simulation_cfg.get("outputs", ()):
+            output_path = output_cfg.get("output_path", "")
+            if not output_path:
+                continue
+
+            resolved_path = str(Path(output_path).resolve())
+            if resolved_path in seen_paths:
+                continue
+
+            seen_paths.add(resolved_path)
+            output_directories.append(Path(resolved_path))
+
+    return output_directories
+
+
+def _baked_vdb_files(output_directory):
+    """Return baked VDB files in deterministic frame order."""
+    frame_files = sorted(output_directory.glob("frame_*.vdb"))
+    if frame_files:
+        return frame_files
+    return sorted(output_directory.glob("*.vdb"))
+
+
+def _remove_previous_baked_volume(output_directory):
+    """Remove an older auto-imported BlenderCFD volume for this output directory."""
+    output_path = str(output_directory)
+    for volume_object in list(bpy.data.objects):
+        if not volume_object.get("blendercfd_auto_import"):
+            continue
+        if volume_object.get("blendercfd_output_path") != output_path:
+            continue
+
+        volume_data = volume_object.data if volume_object.type == "VOLUME" else None
+        bpy.data.objects.remove(volume_object, do_unlink=True)
+        if volume_data is not None and volume_data.users == 0:
+            bpy.data.volumes.remove(volume_data)
+
+
+def _import_baked_vdb_sequence(output_directory, vdb_files):
+    """Import one baked VDB sequence into the current Blender scene."""
+    _remove_previous_baked_volume(output_directory)
+
+    existing_objects = set(bpy.data.objects)
+    first_file = vdb_files[0]
+    bpy.ops.object.volume_import(
+        filepath=str(first_file),
+        directory=str(output_directory),
+        files=[{"name": vdb_file.name} for vdb_file in vdb_files],
+        use_sequence_detection=True,
+    )
+
+    imported_objects = [obj for obj in bpy.data.objects if obj not in existing_objects]
+    if not imported_objects and bpy.context.object is not None:
+        imported_objects = [bpy.context.object]
+
+    for imported_object in imported_objects:
+        if imported_object.type != "VOLUME":
+            continue
+        imported_object.name = f"BlenderCFD {output_directory.name}"
+        imported_object["blendercfd_auto_import"] = True
+        imported_object["blendercfd_output_path"] = str(output_directory)
+
+    return len([obj for obj in imported_objects if obj.type == "VOLUME"])
+
+
+def _import_baked_vdbs(config_dict):
+    """Import all VDB sequences produced by the completed bake."""
+    imported_count = 0
+    missing_directories = []
+
+    for output_directory in _output_directories_from_config(config_dict):
+        if not output_directory.exists():
+            missing_directories.append(str(output_directory))
+            continue
+
+        vdb_files = _baked_vdb_files(output_directory)
+        if not vdb_files:
+            continue
+
+        imported_count += _import_baked_vdb_sequence(output_directory, vdb_files)
+
+    return imported_count, missing_directories
+
+
 class BlenderCFDDomainNode(bpy.types.Node):
     """
     Node used to define the CFD domain resolution and boundary conditions.
@@ -1186,8 +1276,6 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         self._drain_kernel_output()
-        python_executable = self._session["python_executable"]
-        simulation_count = len(self._config_dict.get("simulations", ()))
         reader_error = self._reader_error
 
         self._cleanup_bake(context)
@@ -1202,6 +1290,19 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                 f"Bake failed: Kernel process failed with exit code {return_code}{self._recent_kernel_output_detail()}",
             )
             return {"CANCELLED"}
+
+        try:
+            imported_count, missing_directories = _import_baked_vdbs(self._config_dict)
+        except Exception as exc:
+            self.report({"WARNING"}, f"Bake finished, but VDB import failed: {exc}")
+            return {"FINISHED"}
+
+        if imported_count > 0:
+            self.report({"INFO"}, f"Bake finished. Imported {imported_count} VDB volume(s).")
+        elif missing_directories:
+            self.report({"WARNING"}, "Bake finished, but no VDB output directory was found.")
+        else:
+            self.report({"WARNING"}, "Bake finished, but no VDB files were found to import.")
         
         return {"FINISHED"}
 
