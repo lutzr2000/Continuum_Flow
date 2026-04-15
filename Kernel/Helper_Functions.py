@@ -56,7 +56,7 @@ def collect_output_variables(output_cfg):
     return enabled_fields
 
 
-def apply_config(config, blender_python_exe, vdb_writer_script):
+def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
     simulations = config.get("simulations")
     simulation_cfg = simulations[0]
@@ -65,10 +65,12 @@ def apply_config(config, blender_python_exe, vdb_writer_script):
     output_cfg = simulation_cfg.get("outputs", [None])[0]
     obstacle_entries = simulation_cfg.get("obstacles", [])
     source_entries = simulation_cfg.get("sources", [])
+    host_vdb_writer = config.get("_host_vdb_writer")
 
     bc_config, inflow_velocity = build_boundary_config(domain_cfg)
     obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
+    source_temperature_max = float(np.max(source_data["temperature"]))
 
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
@@ -88,6 +90,7 @@ def apply_config(config, blender_python_exe, vdb_writer_script):
         "FUEL_BURN_RATE": float(physics_cfg["fuel"]["burn_rate"]),
         "FUEL_IGNITION_TEMPERATURE": float(physics_cfg["fuel"]["ignition_temperature"]),
         "T_REFERENCE": float(physics_cfg["temperature"]["reference_temperature"]),
+        "SOURCE_TEMPERATURE_MAX": source_temperature_max,
         "BUOANCY_FACTOR": float(physics_cfg["temperature"]["buoyancy"]),
         "EXPANSION_RATE": float(physics_cfg["temperature"]["expansion_rate"]),
         "T_MAX": float(simulation_cfg["settings"]["simulation_length"]),
@@ -106,8 +109,7 @@ def apply_config(config, blender_python_exe, vdb_writer_script):
         "WRITE_QUEUE_SIZE": 512,
         "OUTPATH": output_cfg.get("output_path", ""),
         "OUTPUT_VARIABLES": collect_output_variables(output_cfg),
-        "BLENDER_PYTHON_EXE": blender_python_exe,
-        "VDB_WRITER_SCRIPT": vdb_writer_script,
+        "HOST_VDB_WRITER": host_vdb_writer,
         "BC_CONFIG": bc_config,
         "U_INFLOW": inflow_velocity[0],
         "V_INFLOW": inflow_velocity[1],
@@ -192,6 +194,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "FUEL_BURN_RATE": precision_dtype.type(simulation_params["FUEL_BURN_RATE"]),
         "FUEL_IGNITION_TEMPERATURE": precision_dtype.type(simulation_params["FUEL_IGNITION_TEMPERATURE"]),
         "T_REFERENCE": precision_dtype.type(simulation_params["T_REFERENCE"]),
+        "SOURCE_TEMPERATURE_MAX": precision_dtype.type(simulation_params["SOURCE_TEMPERATURE_MAX"]),
         "BUOANCY_FACTOR": precision_dtype.type(simulation_params["BUOANCY_FACTOR"]),
         "EXPANSION_RATE": precision_dtype.type(simulation_params["EXPANSION_RATE"]),
         "DELTA": precision_dtype.type(simulation_params["DELTA"]),

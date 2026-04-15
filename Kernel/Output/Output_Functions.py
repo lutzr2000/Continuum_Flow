@@ -1,7 +1,7 @@
 import json
 import os
 import queue
-import subprocess
+import socket
 import threading
 from multiprocessing import shared_memory
 
@@ -10,41 +10,30 @@ import numpy as np
 FIELD_NAMES = ('u', 'v', 'w', 'p', 'T', 'smoke', 'fuel', 'flame')
 WRITER_COUNT = 4
 
-
-def create_output_field_map(u, v, w, p, T, smoke, fuel, flame):
+def setup_output(
+    outpath,
+    output_variables,
+    template_fields,
+    queue_size,
+    delta,
+    host_writer_endpoint,
+):
     """
-    collects all simulation fields in one dictionary for simpler output handling.
-
-    Args:
-        u (3d-array): x-velocity field
-        v (3d-array): y-velocity field
-        w (3d-array): z-velocity field
-        p (3d-array): pressure field
-        T (3d-array): temperature field
-        smoke (3d-array): smoke field
-        fuel (3d-array): fuel field
-        flame (3d-array): flame field
-    Returns:
-        dict: field names mapped to numpy arrays
-    """
-    return dict(zip(FIELD_NAMES, (u, v, w, p, T, smoke, fuel, flame)))
-
-
-def setup_output(outpath, output_variables, template_fields, queue_size, blender_python_exe, vdb_writer_script, delta):
-    """
-    prepares the shared-memory buffers and starts persistent writer workers.
+    prepares shared-memory buffers and starts host-writer forwarder threads.
 
     Args:
         outpath (str): output directory for vdb files
         output_variables (list[str]): names of the fields that should be written
         template_fields (dict): field names mapped to template arrays
         queue_size (int): number of reusable buffer sets
-        blender_python_exe (str): path to Blender's Python executable
-        vdb_writer_script (str): path to the VDB writer script
         delta (float): grid spacing
+        host_writer_endpoint (dict): host/port for Blender's in-process writer
     Returns:
-        tuple: write queue, buffer queue, writer threads and list of shared memory blocks
+        tuple: write queue, buffer queue, forwarder threads and list of shared-memory blocks
     """
+    if not host_writer_endpoint:
+        raise RuntimeError('No host VDB writer endpoint was configured.')
+
     os.makedirs(outpath, exist_ok=True)
 
     write_queue = queue.Queue(maxsize=queue_size)
@@ -69,7 +58,14 @@ def setup_output(outpath, output_variables, template_fields, queue_size, blender
     for _ in range(WRITER_COUNT):
         writer_thread = threading.Thread(
             target=writer_thread_func,
-            args=(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script),
+            args=(
+                write_queue,
+                buffer_pool,
+                outpath,
+                delta,
+                output_variables,
+                host_writer_endpoint,
+            ),
             daemon=True,
         )
         writer_thread.start()
@@ -100,11 +96,11 @@ def enqueue_output(write_queue, buffer_pool, output_variables, source_fields, ou
 
 def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
     """
-    waits for all output work to finish and releases the shared-memory buffers.
+    waits for all forwarded output work to finish and releases shared-memory buffers.
 
     Args:
         write_queue (queue.Queue): queue with pending output jobs
-        writer_threads (list[threading.Thread]): background writer threads
+        writer_threads (list[threading.Thread]): background host-writer forwarder threads
         shared_memory_blocks (list): shared memory objects used for output buffering
     Returns:
         None
@@ -121,7 +117,7 @@ def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
 
 def create_writer_payload(fields, output_variables, output_path, time_value, delta):
     """
-    builds the metadata package that is sent to the persistent VDB writer.
+    builds the metadata package that is sent to Blender's host VDB writer.
 
     Args:
         fields (dict): output buffer with shared-memory numpy views
@@ -147,9 +143,29 @@ def create_writer_payload(fields, output_variables, output_path, time_value, del
     }
 
 
-def writer_thread_func(write_queue, buffer_pool, outpath, delta, output_variables, blender_python_exe, vdb_writer_script):
+def _send_payload_to_host_writer(writer_file, writer_payload):
+    """Send one VDB write job to Blender's host writer and wait for the ACK."""
+    writer_file.write((json.dumps(writer_payload) + '\n').encode('utf-8'))
+    writer_file.flush()
+    response_line = writer_file.readline()
+    if not response_line:
+        raise RuntimeError('host VDB writer closed the connection')
+
+    response = json.loads(response_line.decode('utf-8'))
+    if response.get('status') != 'ok':
+        raise RuntimeError(response.get('message', 'unknown host VDB writer error'))
+
+
+def writer_thread_func(
+    write_queue,
+    buffer_pool,
+    outpath,
+    delta,
+    output_variables,
+    host_writer_endpoint,
+):
     """
-    runs a persistent Blender Python process and forwards queued output jobs to it.
+    connects to Blender's host writer and forwards queued output jobs to it.
 
     Args:
         write_queue (queue.Queue): queue with pending output jobs
@@ -157,29 +173,24 @@ def writer_thread_func(write_queue, buffer_pool, outpath, delta, output_variable
         outpath (str): output directory for vdb files
         delta (float): grid spacing
         output_variables (list[str]): names of the fields that should be written
-        blender_python_exe (str): path to Blender's Python executable
-        vdb_writer_script (str): path to the VDB writer script
+        host_writer_endpoint (dict): host/port for Blender's in-process writer
     Returns:
         None
     """
-    writer_process = None
+    writer_socket = None
+    writer_file = None
     try:
-        writer_process = subprocess.Popen(
-            [blender_python_exe, vdb_writer_script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+        writer_socket = socket.create_connection(
+            (host_writer_endpoint['host'], int(host_writer_endpoint['port']))
         )
+        writer_file = writer_socket.makefile('rwb')
 
         while True:
             item = write_queue.get()
             if item is None:
-                if writer_process.stdin is not None:
-                    writer_process.stdin.write('__QUIT__\n')
-                    writer_process.stdin.flush()
-                    writer_process.stdin.close()
+                writer_file.write(b'__QUIT__\n')
+                writer_file.flush()
+                writer_file.close()
                 write_queue.task_done()
                 break
 
@@ -188,23 +199,17 @@ def writer_thread_func(write_queue, buffer_pool, outpath, delta, output_variable
             writer_payload = create_writer_payload(fields, output_variables, vdb_output_path, time_value, delta)
 
             try:
-                writer_process.stdin.write(json.dumps(writer_payload) + '\n')
-                writer_process.stdin.flush()
-                response_line = writer_process.stdout.readline()
-                if not response_line:
-                    raise RuntimeError(writer_process.stderr.read().strip())
-
-                response = json.loads(response_line)
-                if response.get('status') != 'ok':
-                    raise RuntimeError(response.get('message', 'unknown VDB writer error'))
+                _send_payload_to_host_writer(writer_file, writer_payload)
             except Exception as exc:
                 print(f'VDB write failed for output {output_idx}: {exc}')
 
             buffer_pool.put(fields)
             write_queue.task_done()
     finally:
-        if writer_process is not None:
-            writer_process.wait()
+        if writer_file is not None and not writer_file.closed:
+            writer_file.close()
+        if writer_socket is not None:
+            writer_socket.close()
 
 
 def cleanup_output_buffers(shared_memory_blocks):

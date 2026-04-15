@@ -72,6 +72,12 @@ BlenderCFDConfigModule = _load_ui_module(
     (".Config_Export", "UI.Config_Export", "Config_Export", "UI.Create_Config_Dict", "Create_Config_Dict"),
 )
 
+BlenderCFDHostWriterModule = _load_ui_module(
+    "blendercfd_host_writer",
+    "Host_Writer.py",
+    (".Host_Writer", "UI.Host_Writer", "Host_Writer"),
+)
+
 BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket
 BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
 BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
@@ -119,7 +125,24 @@ def _run_kernel(config_dict):
     )
     process.stdin.write(json.dumps(config_dict))
     process.stdin.close()
-    return python_executable
+    return process, python_executable
+
+
+def _run_blocking_bake(config_dict):
+    """Run the kernel while this Blender process serves VDB write requests."""
+    writer_server = BlenderCFDHostWriterModule.HostVDBWriterServer()
+    writer_server.start()
+    config_dict["_host_vdb_writer"] = writer_server.endpoint()
+
+    process = None
+    try:
+        process, python_executable = _run_kernel(config_dict)
+        return_code = process.wait()
+        if return_code != 0:
+            raise RuntimeError(f"Kernel process failed with exit code {return_code}")
+        return python_executable
+    finally:
+        writer_server.stop()
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -963,7 +986,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         """Build the current config dict and run the CFD kernel."""
         try:
             config_dict = BlenderCFDConfigModule.build_config_dict(context)
-            python_executable = _run_kernel(config_dict)
+            python_executable = _run_blocking_bake(config_dict)
         except ModuleNotFoundError as exc:
             missing_module = getattr(exc, "name", None) or str(exc)
             self.report(
@@ -976,7 +999,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             return {"CANCELLED"}
 
         simulation_count = len(config_dict.get("simulations", ()))
-        self.report({"INFO"}, f"Started BlenderCFD bake for {simulation_count} simulation(s) via {python_executable}.")
+        self.report({"INFO"}, f"Finished BlenderCFD bake for {simulation_count} simulation(s) via {python_executable}.")
         return {"FINISHED"}
 
 

@@ -1,5 +1,4 @@
 import sys
-import os
 from time import perf_counter
 
 import numpy as np
@@ -16,9 +15,6 @@ import Kernel.Time_Step as Time_Step
 # Parameters
 # ===============================
 
-BLENDER_PYTHON_EXE = r"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"
-VDB_WRITER_SCRIPT = os.path.join(os.path.dirname(__file__), "Output", "VDB_Writer.py")
-CPU_PARALLEL = True
 THREADS_PER_BLOCK_3D = (8, 8, 8)
 THREADS_PER_BLOCK_2D = (4, 4)
 REDUCTION_THREADS_PER_BLOCK = 512
@@ -521,7 +517,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
 # ===============================
 
 def main(config=None):
-    simulation_params = Helper_Functions.apply_config(config, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT)
+    simulation_params = Helper_Functions.apply_config(config)
 
     T_MAX = simulation_params["T_MAX"]
     CFL_MAX = simulation_params["CFL_MAX"]
@@ -536,6 +532,7 @@ def main(config=None):
     WRITE_QUEUE_SIZE = simulation_params["WRITE_QUEUE_SIZE"]
     OUTPATH = simulation_params["OUTPATH"]
     OUTPUT_VARIABLES = simulation_params["OUTPUT_VARIABLES"]
+    HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
     BC_CONFIG = simulation_params["BC_CONFIG"]
     U_INFLOW = simulation_params["U_INFLOW"]
     V_INFLOW = simulation_params["V_INFLOW"]
@@ -627,7 +624,11 @@ def main(config=None):
     g = 9.81
     fx_max = 0.0
     fy_max = 0.0
-    fz_max = 0.0
+    source_temperature_delta = max(
+        0.0,
+        float(gpu_constants["SOURCE_TEMPERATURE_MAX"] - gpu_constants["T_REFERENCE"]),
+    )
+    fz_max = g * gpu_constants["BUOANCY_FACTOR"] * source_temperature_delta * 1.5
 
     #------------Dynamic time step-------------------
     t = 0.0
@@ -648,7 +649,12 @@ def main(config=None):
     
     section_start = perf_counter()
     write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
-        OUTPATH, OUTPUT_VARIABLES, host_output_fields, WRITE_QUEUE_SIZE, BLENDER_PYTHON_EXE, VDB_WRITER_SCRIPT, DELTA
+        OUTPATH,
+        OUTPUT_VARIABLES,
+        host_output_fields,
+        WRITE_QUEUE_SIZE,
+        DELTA,
+        HOST_VDB_WRITER,
     )
     section_timings["setup_output"] += perf_counter() - section_start
 
