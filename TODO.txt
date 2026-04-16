@@ -1,5 +1,5 @@
 simplify code for turbulence forcing
-When rebaking properly clean the old vdb data from blender
+When rebaking properly clean the old vdb data from blender, ok this currently fails because blender is not able to properly delete the VDBs from internal cache why? (Even purge data does not work proberly?)
 implement other forces
 Vorticity boost
 Source velocity spawn

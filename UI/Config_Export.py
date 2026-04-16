@@ -199,6 +199,7 @@ def _serialize_force_node(node):
         base_data["scale"] = float(node.scale)
         base_data["frequency"] = float(node.frequency)
         base_data["amplitude"] = float(node.amplitude)
+        base_data["seed"] = int(getattr(node, "seed", 0))
 
     return base_data
 

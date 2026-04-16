@@ -1548,7 +1548,7 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
     """
     Node used to define a procedural turbulence force field.
 
-    The node stores scale, frequency, and amplitude parameters and exposes a
+    The node stores scale, frequency, amplitude, and seed parameters and exposes a
     placeholder output socket for future graph connections.
     """
 
@@ -1575,6 +1575,11 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
         name="Amplitude",
         default=1.0,
         min=0.0,
+    )
+
+    seed: IntProperty(  # type: ignore
+        name="Seed",
+        default=0,
     )
 
     @classmethod
@@ -1611,6 +1616,7 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
         col.prop(self, "scale")
         col.prop(self, "frequency")
         col.prop(self, "amplitude")
+        col.prop(self, "seed")
 
 
 class BlenderCFDObstacleNode(bpy.types.Node):
