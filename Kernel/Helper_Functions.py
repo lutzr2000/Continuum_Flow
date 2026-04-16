@@ -84,6 +84,16 @@ def build_output_performance_config(output_cfg):
     }
 
 
+def resolve_output_dtype(output_cfg):
+    """Resolve the requested VDB storage precision from the exported output node."""
+    precision_name = str(output_cfg.get("precision", "float16")).strip().lower()
+    precision_mapping = {
+        "float16": np.float16,
+        "float32": np.float32,
+    }
+    return precision_mapping.get(precision_name, np.float16)
+
+
 def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
     simulations = config.get("simulations")
@@ -102,6 +112,7 @@ def apply_config(config):
     force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
     source_temperature_max = float(np.max(source_data["temperature"]))
     output_performance = build_output_performance_config(output_cfg)
+    output_dtype = resolve_output_dtype(output_cfg)
 
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
@@ -140,6 +151,7 @@ def apply_config(config):
         "OUTPUT_FORWARDER_COUNT": output_performance["writer_processes"],
         "WRITE_QUEUE_SIZE": output_performance["buffer_count"],
         "OUTPATH": output_cfg.get("output_path", ""),
+        "OUTPUT_DTYPE": output_dtype,
         "OUTPUT_VARIABLES": collect_output_variables(output_cfg),
         "HOST_VDB_WRITER": host_vdb_writer,
         "BC_CONFIG": bc_config,

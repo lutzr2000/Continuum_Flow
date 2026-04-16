@@ -1047,6 +1047,15 @@ class BlenderCFDOutputNode(bpy.types.Node):
         soft_max=8,
     )
 
+    output_precision: EnumProperty(  # type: ignore
+        name="Precision",
+        items=(
+            ("float16", "Half (float16)", "Write VDB grids with 16-bit floating point values"),
+            ("float32", "Full (float32)", "Write VDB grids with 32-bit floating point values"),
+        ),
+        default="float16",
+    )
+
     export_u: BoolProperty(  # type: ignore
         name="Velocity x",
         default=True,
@@ -1142,6 +1151,7 @@ class BlenderCFDOutputNode(bpy.types.Node):
         """Draw the editable controls shown inside the node body."""
         layout.prop(self, "fps")
         layout.prop(self, "writer_processes")
+        layout.prop(self, "output_precision")
 
         fields_box = layout.box()
         fields_box.label(text="Fields")

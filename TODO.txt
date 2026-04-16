@@ -1,0 +1,5 @@
+simplify code for turbulence forcing
+When rebaking properly clean the old vdb data from blender
+implement other forces
+Vorticity boost
+Source velocity spawn

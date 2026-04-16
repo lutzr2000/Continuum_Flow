@@ -6,11 +6,19 @@ import numpy as np
 import openvdb
 
 
-def _as_vdb_input_array(array):
+def _as_vdb_input_array(array, dtype):
     """Return an array layout that OpenVDB can consume without avoidable copies."""
-    if array.dtype == np.float32 and array.flags["C_CONTIGUOUS"]:
+    if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
         return array
-    return np.asarray(array, dtype=np.float32, order="C")
+    return np.asarray(array, dtype=dtype, order="C")
+
+
+def _create_scalar_grid(dtype):
+    """Create a scalar OpenVDB grid and configure its file storage precision."""
+    dtype = np.dtype(dtype)
+    grid = openvdb.FloatGrid()
+    grid.saveFloatAsHalf = bool(dtype == np.float16)
+    return grid, np.float32
 
 
 def _grid_transform_from_payload(payload, shape):
@@ -49,9 +57,9 @@ def write_vdb(payload):
                 buffer=shm.buf,
             )
 
-            grid = openvdb.FloatGrid()
+            grid, grid_dtype = _create_scalar_grid(array.dtype)
             grid.name = variable_name
-            grid.copyFromArray(_as_vdb_input_array(array))
+            grid.copyFromArray(_as_vdb_input_array(array, grid_dtype))
             grid.transform = _grid_transform_from_payload(payload, array.shape)
             grids.append(grid)
 

@@ -16,6 +16,7 @@ def setup_output(
     forwarder_count,
     delta,
     host_writer_endpoint,
+    output_dtype=None,
 ):
     """
     prepares shared-memory buffers and starts host-writer forwarder threads.
@@ -28,6 +29,7 @@ def setup_output(
         forwarder_count (int): number of host-writer forwarder threads
         delta (float): grid spacing
         host_writer_endpoint (dict): host/port for Blender's in-process writer
+        output_dtype (dtype-like): target dtype used for output buffers and VDB storage
     Returns:
         tuple: write queue, buffer queue, forwarder threads and list of shared-memory blocks
     """
@@ -39,22 +41,25 @@ def setup_output(
     write_queue = queue.Queue(maxsize=queue_size)
     buffer_pool = queue.Queue(maxsize=queue_size)
     shared_memory_blocks = []
+    output_dtype = np.dtype(output_dtype or np.float16)
 
     for _ in range(queue_size):
         fields = {}
         for variable_name in output_variables:
             template_array = template_fields[variable_name]
             shape = tuple(template_array.shape)
-            dtype = np.dtype(template_array.dtype)
-            nbytes = int(np.prod(shape)) * dtype.itemsize
+            source_dtype = np.dtype(template_array.dtype)
+            nbytes = int(np.prod(shape)) * output_dtype.itemsize
             shm = shared_memory.SharedMemory(create=True, size=nbytes)
             shared_memory_blocks.append(shm)
             fields[variable_name] = {
-                'array': np.ndarray(shape, dtype=dtype, buffer=shm.buf),
+                'array': np.ndarray(shape, dtype=output_dtype, buffer=shm.buf),
                 'shape': shape,
-                'dtype': str(dtype),
+                'dtype': str(output_dtype),
                 'shm_name': shm.name,
             }
+            if source_dtype != output_dtype:
+                fields[variable_name]['transfer_array'] = np.empty(shape, dtype=source_dtype)
         buffer_pool.put(fields)
 
     writer_threads = []
@@ -93,7 +98,13 @@ def enqueue_device_output(write_queue, buffer_pool, output_variables, source_dev
     """
     fields = buffer_pool.get()
     for variable_name in output_variables:
-        source_device_fields[variable_name].copy_to_host(fields[variable_name]['array'])
+        field_info = fields[variable_name]
+        transfer_array = field_info.get('transfer_array')
+        if transfer_array is None:
+            source_device_fields[variable_name].copy_to_host(field_info['array'])
+        else:
+            source_device_fields[variable_name].copy_to_host(transfer_array)
+            np.copyto(field_info['array'], transfer_array, casting='same_kind')
     write_queue.put((int(output_index), float(time_value), fields))
 
 

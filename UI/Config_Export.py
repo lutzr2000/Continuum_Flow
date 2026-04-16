@@ -209,6 +209,7 @@ def _serialize_output_node(node):
     return {
         "node_name": node.name,
         "fps": int(node.fps),
+        "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
             "u": bool(node.export_u),
             "v": bool(node.export_v),
