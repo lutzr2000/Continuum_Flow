@@ -1,5 +1,6 @@
 from time import perf_counter
 
+import math
 import numpy as np
 from numba import cuda
 
@@ -414,6 +415,124 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
 
 
 @cuda.jit(cache=True)
+def compute_vorticity_field(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta):
+    """
+    computes the vorticity field and its magnitude on the GPU.
+
+    Each thread evaluates the curl of the velocity field in one interior fluid
+    cell with central differences. The three vorticity components are written
+    to dedicated work arrays so the confinement step can reuse them without
+    recomputing derivatives, and the scalar magnitude field is stored for the
+    subsequent gradient evaluation.
+
+    Args:
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
+        obstacle_mask (device array): boolean obstacle mask used to skip solids
+        omega_x (device array): output array for the x-component of vorticity
+        omega_y (device array): output array for the y-component of vorticity
+        omega_z (device array): output array for the z-component of vorticity
+        omega_magnitude (device array): output array for the vorticity magnitude
+        delta (float): grid spacing
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = u.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
+        obstacle_mask[i, j, k]
+    ):
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
+        return
+
+    half_inv_delta = 0.5 / delta
+
+    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
+    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
+    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
+    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
+    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
+    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
+
+    wx = dw_dy - dv_dz
+    wy = du_dz - dw_dx
+    wz = dv_dx - du_dy
+
+    omega_x[i, j, k] = wx
+    omega_y[i, j, k] = wy
+    omega_z[i, j, k] = wz
+    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
+
+
+@cuda.jit(cache=True)
+def apply_vorticity_confinement(
+    obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, Fx, Fy, Fz, delta, vorticity_strength
+):
+    """
+    adds the vorticity confinement force to the body-force field on the GPU.
+
+    Each thread computes the gradient of the precomputed vorticity magnitude,
+    normalizes it to the confinement direction N and evaluates the force
+    epsilon * (N x omega) in one interior fluid cell. The resulting force is
+    accumulated into the existing force arrays so confinement combines with
+    turbulence, buoyancy and any authored force fields.
+
+    Args:
+        obstacle_mask (device array): boolean obstacle mask used to skip solids
+        omega_x (device array): x-component of the vorticity field
+        omega_y (device array): y-component of the vorticity field
+        omega_z (device array): z-component of the vorticity field
+        omega_magnitude (device array): scalar vorticity magnitude field
+        Fx (device array): x-direction force field updated in-place
+        Fy (device array): y-direction force field updated in-place
+        Fz (device array): z-direction force field updated in-place
+        delta (float): grid spacing
+        vorticity_strength (float): confinement strength epsilon from the UI
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = omega_magnitude.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 2 or j < 2 or k < 2 or
+        i >= nx - 2 or j >= ny - 2 or k >= nz - 2 or
+        obstacle_mask[i, j, k]
+    ):
+        return
+
+    half_inv_delta = 0.5 / delta
+    grad_x = (omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]) * half_inv_delta
+    grad_y = (omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]) * half_inv_delta
+    grad_z = (omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]) * half_inv_delta
+
+    grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
+    if grad_length <= 1.0e-12:
+        return
+
+    nx_dir = grad_x / grad_length
+    ny_dir = grad_y / grad_length
+    nz_dir = grad_z / grad_length
+
+    wx = omega_x[i, j, k]
+    wy = omega_y[i, j, k]
+    wz = omega_z[i, j, k]
+
+    Fx[i, j, k] += vorticity_strength * (ny_dir * wz - nz_dir * wy)
+    Fy[i, j, k] += vorticity_strength * (nz_dir * wx - nx_dir * wz)
+    Fz[i, j, k] += vorticity_strength * (nx_dir * wy - ny_dir * wx)
+
+
+@cuda.jit(cache=True)
 def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
                          delta, nu_temperature, nu_smoke, nu_fuel,
                          temperature_dissipation_rate, temperature_production_rate,
@@ -560,6 +679,8 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
 # ===============================
 
 def main(config=None):
+    #------------Initialise-------------------
+    total_start_time = perf_counter()
     simulation_params = Helper_Functions.apply_config(config)
 
     T_MAX = simulation_params["T_MAX"]
@@ -583,22 +704,22 @@ def main(config=None):
     W_INFLOW = simulation_params["W_INFLOW"]
 
     section_timings = {
-        "initial_bcs": 0.0,
-        "initial_obstacle": 0.0,
-        "initial_dt": 0.0,
-        "setup_output": 0.0,
-        "forces": 0.0,
-        "pressure": 0.0,
-        "velocity": 0.0,
-        "scalars": 0.0,
-        "bcs": 0.0,
-        "obstacle": 0.0,
-        "output": 0.0,
-        "dt_update": 0.0,
+        "Initial_boundary_conditions": 0.0,
+        "Initial_obstacle": 0.0,
+        "Initial_dt": 0.0,
+        "Setup_output": 0.0,
+        "Forces": 0.0,
+        "Vorticity": 0.0,
+        "Pressure": 0.0,
+        "Velocity": 0.0,
+        "Scalars": 0.0,
+        "Boundary_conditions": 0.0,
+        "Obstacles": 0.0,
+        "Output": 0.0,
+        "Update_dt": 0.0,
     }
-    total_start_time = perf_counter()
-
-    #------------Initialise-------------------
+    
+    print("################################################################")
     print('Initialise')
     print('Cell count: ', int(NX * NY * NZ))
 
@@ -622,6 +743,10 @@ def main(config=None):
     fuel_work = device_state["fuel_work"]
     flame = device_state["flame"]
     flame_work = device_state["flame_work"]
+    vorticity_x = device_state["vorticity_x"]
+    vorticity_y = device_state["vorticity_y"]
+    vorticity_z = device_state["vorticity_z"]
+    vorticity_magnitude = device_state["vorticity_magnitude"]
     Fx = device_state["Fx"]
     Fy = device_state["Fy"]
     Fz = device_state["Fz"]
@@ -661,7 +786,7 @@ def main(config=None):
     section_start = perf_counter()
     u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
     cuda.synchronize()
-    section_timings["initial_bcs"] += perf_counter() - section_start
+    section_timings["Initial_boundary_conditions"] += perf_counter() - section_start
 
     #------------Source-------------------
     section_start = perf_counter()
@@ -673,7 +798,7 @@ def main(config=None):
         u, v, w, p, T, smoke, fuel, flame, obstacle_mask
     )
     cuda.synchronize()
-    section_timings["initial_obstacle"] += perf_counter() - section_start
+    section_timings["Initial_obstacle"] += perf_counter() - section_start
 
     device_fields.update({
         "u": u,
@@ -705,7 +830,7 @@ def main(config=None):
         u, v, w, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
-    section_timings["initial_dt"] += perf_counter() - section_start
+    section_timings["Initial_dt"] += perf_counter() - section_start
     if dt > 1.0 / OUTPUT_FPS:
         dt = 1.0 / OUTPUT_FPS
 
@@ -724,7 +849,7 @@ def main(config=None):
         HOST_VDB_WRITER,
         output_dtype=simulation_params["OUTPUT_DTYPE"],
     )
-    section_timings["setup_output"] += perf_counter() - section_start
+    section_timings["Setup_output"] += perf_counter() - section_start
 
     #------------Main time loop-------------------
     print('Start time iteration')
@@ -753,7 +878,20 @@ def main(config=None):
             T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
         )
         cuda.synchronize()
-        section_timings["forces"] += perf_counter() - section_start
+        section_timings["Forces"] += perf_counter() - section_start
+
+        if gpu_constants["VORTICITY"] > 0.0:
+            section_start = perf_counter()
+            compute_vorticity_field[blockspergrid_3d, THREADS_PER_BLOCK_3D](
+                u, v, w, obstacle_mask, vorticity_x, vorticity_y, vorticity_z,
+                vorticity_magnitude, gpu_constants["DELTA"]
+            )
+            apply_vorticity_confinement[blockspergrid_3d, THREADS_PER_BLOCK_3D](
+                obstacle_mask, vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude,
+                Fx, Fy, Fz, gpu_constants["DELTA"], gpu_constants["VORTICITY"]
+            )
+            cuda.synchronize()
+            section_timings["Vorticity"] += perf_counter() - section_start
 
         #------------Pressure-------------------
         section_start = perf_counter()
@@ -763,7 +901,7 @@ def main(config=None):
             gpu_constants["T_REFERENCE"], MAX_ITER
         )
         cuda.synchronize()
-        section_timings["pressure"] += perf_counter() - section_start
+        section_timings["Pressure"] += perf_counter() - section_start
 
         #------------Velocity-------------------
         section_start = perf_counter()
@@ -772,7 +910,7 @@ def main(config=None):
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
         )
         cuda.synchronize()
-        section_timings["velocity"] += perf_counter() - section_start
+        section_timings["Velocity"] += perf_counter() - section_start
 
         u, u_work = u_work, u
         v, v_work = v_work, v
@@ -796,7 +934,7 @@ def main(config=None):
             gpu_constants["T_REFERENCE"],
         )
         cuda.synchronize()
-        section_timings["scalars"] += perf_counter() - section_start
+        section_timings["Scalars"] += perf_counter() - section_start
 
         #------------Swap-------------------
         T, temperature_work = temperature_work, T
@@ -810,7 +948,7 @@ def main(config=None):
             u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
         )
         cuda.synchronize()
-        section_timings["bcs"] += perf_counter() - section_start
+        section_timings["Boundary_conditions"] += perf_counter() - section_start
 
         #------------Source-------------------
         section_start = perf_counter()
@@ -822,7 +960,7 @@ def main(config=None):
             u, v, w, p, T, smoke, fuel, flame, obstacle_mask
         )
         cuda.synchronize()
-        section_timings["obstacle"] += perf_counter() - section_start
+        section_timings["Obstacles"] += perf_counter() - section_start
         device_fields["u"] = u
         device_fields["v"] = v
         device_fields["w"] = w
@@ -843,7 +981,7 @@ def main(config=None):
                 output_index,
                 t,
             )
-            section_timings["output"] += perf_counter() - section_start
+            section_timings["Output"] += perf_counter() - section_start
 
             output_index += 1
             next_output_time += OUTPUT_TIME_STEP
@@ -862,7 +1000,7 @@ def main(config=None):
             u, v, w, fx_max, fy_max, fz_max,
             gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
         )
-        section_timings["dt_update"] += perf_counter() - section_start
+        section_timings["Update_dt"] += perf_counter() - section_start
 
         dt_max_increase = dt * 1.5
         dt_max_decrease = dt * 0.5
@@ -889,3 +1027,4 @@ def main(config=None):
         share = 100.0 * elapsed / total_runtime if total_runtime > 0.0 else 0.0
         print(f'  {name}: {elapsed:.3f} s ({share:.1f}%)')
     print(f'  total: {total_runtime:.3f} s')
+    print("################################################################")

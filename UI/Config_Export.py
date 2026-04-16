@@ -132,6 +132,9 @@ def _serialize_physics_node(node):
             "burn_rate": float(node.fuel_burn_rate),
             "ignition_temperature": float(node.fuel_ignition_temperature),
         },
+        "extras": {
+            "vorticity": float(getattr(node, "vorticity", 0.0)),
+        },
     }
 
 

@@ -782,6 +782,14 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         unit="TEMPERATURE",
     )
 
+    vorticity: FloatProperty(  # type: ignore
+        name="Vorticity",
+        default=0.0,
+        min=0.0,
+        max=5.0,
+        precision=3,
+    )
+
     @classmethod
     def poll(cls, ntree):
         """Return whether the node can be added to the given node tree."""
@@ -850,6 +858,11 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
                 "fuel_burn_rate",
                 "fuel_ignition_temperature",
             ),
+        )
+        self._draw_group(
+            layout,
+            "Extras",
+            ("vorticity",),
         )
 
 
