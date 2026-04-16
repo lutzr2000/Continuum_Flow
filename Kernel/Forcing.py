@@ -1,5 +1,4 @@
 import hashlib
-
 import numpy as np
 
 
@@ -14,18 +13,20 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     amplitude = float(force_cfg.get("amplitude", 0.0))
     spatial_scale = max(float(force_cfg.get("scale", 1.0)), delta * 2.0, 1e-6)
     seed_base = int(force_cfg.get("seed", 0))
+    components = ("x", "y", "z")
 
     #------------Basis fields-------------------
     if amplitude == 0.0:
-        basis_a = tuple(np.zeros(shape, dtype=dtype) for _ in range(3))
-        basis_b = tuple(np.zeros(shape, dtype=dtype) for _ in range(3))
+        basis_by_suffix = {
+            suffix: tuple(np.zeros(shape, dtype=dtype) for _ in components)
+            for suffix in ("a", "b")
+        }
     else:
         x = np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
         y = np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
         z = np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
 
-        basis_components = []
-        for seed_suffix in ("a", "b"):
+        def build_basis(seed_suffix):
             digest = hashlib.sha256()
             for part in (
                 seed_base,
@@ -41,9 +42,7 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
             seed = int.from_bytes(digest.digest()[:8], byteorder="little", signed=False)
             rng = np.random.default_rng(seed)
 
-            fx = np.zeros(shape, dtype=np.float32)
-            fy = np.zeros(shape, dtype=np.float32)
-            fz = np.zeros(shape, dtype=np.float32)
+            field = {component: np.zeros(shape, dtype=np.float32) for component in components}
 
             #------------Waves-------------------
             for _ in range(5):
@@ -63,37 +62,33 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
                     ) / wavelength + phase
                 )
 
-                fx += rng.uniform(-1.0, 1.0) * wave
-                fy += rng.uniform(-1.0, 1.0) * wave
-                fz += rng.uniform(-1.0, 1.0) * wave
+                for component in components:
+                    field[component] += rng.uniform(-1.0, 1.0) * wave
 
             #------------Normalise-------------------
-            fx -= np.mean(fx, dtype=np.float64)
-            fy -= np.mean(fy, dtype=np.float64)
-            fz -= np.mean(fz, dtype=np.float64)
-            rms = np.sqrt(np.mean(fx * fx + fy * fy + fz * fz, dtype=np.float64))
+            for component in components:
+                field[component] -= np.mean(field[component], dtype=np.float64)
+            rms = np.sqrt(
+                sum(
+                    np.mean(field[component] * field[component], dtype=np.float64)
+                    for component in components
+                )
+            )
             if rms > 1e-12:
                 scale = amplitude / rms
-                fx *= scale
-                fy *= scale
-                fz *= scale
+                for component in components:
+                    field[component] *= scale
 
-            basis_components.append((
-                fx.astype(dtype, copy=False),
-                fy.astype(dtype, copy=False),
-                fz.astype(dtype, copy=False),
-            ))
+            return tuple(field[component].astype(dtype, copy=False) for component in components)
 
-        basis_a, basis_b = basis_components
+        basis_by_suffix = {suffix: build_basis(suffix) for suffix in ("a", "b")}
 
     #------------Store-------------------
-    force_state["turbulence_fx_a"].append(basis_a[0])
-    force_state["turbulence_fy_a"].append(basis_a[1])
-    force_state["turbulence_fz_a"].append(basis_a[2])
-    force_state["turbulence_fx_b"].append(basis_b[0])
-    force_state["turbulence_fy_b"].append(basis_b[1])
-    force_state["turbulence_fz_b"].append(basis_b[2])
-    force_state["turbulence_angular_frequencies"].append(
+    for suffix in ("a", "b"):
+        basis = basis_by_suffix[suffix]
+        for index, component in enumerate(components):
+            force_state["turbulence"][f"F{component}_{suffix}"].append(basis[index])
+    force_state["turbulence"]["angular_frequencies"].append(
         2.0 * np.pi * max(float(force_cfg.get("frequency", 0.0)), 0.0)
     )
 
@@ -113,19 +108,22 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     )
     delta = float(domain_cfg["resolution"])
     dtype = np.dtype(dtype)
+    components = ("x", "y", "z")
 
     #------------Initialise-------------------
     force_state = {
         "Fx_base": np.zeros(shape, dtype=dtype),
         "Fy_base": np.zeros(shape, dtype=dtype),
         "Fz_base": np.zeros(shape, dtype=dtype),
-        "turbulence_fx_a": [],
-        "turbulence_fy_a": [],
-        "turbulence_fz_a": [],
-        "turbulence_fx_b": [],
-        "turbulence_fy_b": [],
-        "turbulence_fz_b": [],
-        "turbulence_angular_frequencies": [],
+        "turbulence": {
+            "Fx_a": [],
+            "Fy_a": [],
+            "Fz_a": [],
+            "Fx_b": [],
+            "Fy_b": [],
+            "Fz_b": [],
+            "angular_frequencies": [],
+        },
     }
 
     #------------Dispatch force nodes-------------------
@@ -139,50 +137,43 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
             pass
 
     #------------Pack turbulence arrays-------------------
-    if force_state["turbulence_fx_a"]:
-        turbulence_fx_a = np.stack(force_state["turbulence_fx_a"]).astype(dtype, copy=False)
-        turbulence_fy_a = np.stack(force_state["turbulence_fy_a"]).astype(dtype, copy=False)
-        turbulence_fz_a = np.stack(force_state["turbulence_fz_a"]).astype(dtype, copy=False)
-        turbulence_fx_b = np.stack(force_state["turbulence_fx_b"]).astype(dtype, copy=False)
-        turbulence_fy_b = np.stack(force_state["turbulence_fy_b"]).astype(dtype, copy=False)
-        turbulence_fz_b = np.stack(force_state["turbulence_fz_b"]).astype(dtype, copy=False)
-    else:
-        turbulence_fx_a = np.zeros((0,) + shape, dtype=dtype)
-        turbulence_fy_a = np.zeros((0,) + shape, dtype=dtype)
-        turbulence_fz_a = np.zeros((0,) + shape, dtype=dtype)
-        turbulence_fx_b = np.zeros((0,) + shape, dtype=dtype)
-        turbulence_fy_b = np.zeros((0,) + shape, dtype=dtype)
-        turbulence_fz_b = np.zeros((0,) + shape, dtype=dtype)
-
-    turbulence = {
-        "Fx_a": turbulence_fx_a,
-        "Fy_a": turbulence_fy_a,
-        "Fz_a": turbulence_fz_a,
-        "Fx_b": turbulence_fx_b,
-        "Fy_b": turbulence_fy_b,
-        "Fz_b": turbulence_fz_b,
-        "angular_frequencies": np.asarray(
-            force_state["turbulence_angular_frequencies"], dtype=dtype
-        ),
-    }
+    turbulence = {}
+    for suffix in ("a", "b"):
+        for component in components:
+            key = f"F{component}_{suffix}"
+            if force_state["turbulence"][key]:
+                turbulence[key] = np.stack(force_state["turbulence"][key]).astype(dtype, copy=False)
+            else:
+                turbulence[key] = np.zeros((0,) + shape, dtype=dtype)
+    turbulence["angular_frequencies"] = np.asarray(
+        force_state["turbulence"]["angular_frequencies"], dtype=dtype
+    )
 
     #------------Initial force state-------------------
     fx_initial = force_state["Fx_base"].copy()
     fy_initial = force_state["Fy_base"].copy()
     fz_initial = force_state["Fz_base"].copy()
-    for index in range(len(force_state["turbulence_angular_frequencies"])):
-        fx_initial += turbulence["Fx_a"][index]
-        fy_initial += turbulence["Fy_a"][index]
-        fz_initial += turbulence["Fz_a"][index]
+    initial_components = {
+        "x": fx_initial,
+        "y": fy_initial,
+        "z": fz_initial,
+    }
+    for index in range(len(force_state["turbulence"]["angular_frequencies"])):
+        for component in components:
+            initial_components[component] += turbulence[f"F{component}_a"][index]
 
     #------------Force bounds-------------------
-    fx_dynamic_max = 0.0
-    fy_dynamic_max = 0.0
-    fz_dynamic_max = 0.0
-    for index in range(len(force_state["turbulence_angular_frequencies"])):
-        fx_dynamic_max += float(np.max(np.hypot(turbulence["Fx_a"][index], turbulence["Fx_b"][index])))
-        fy_dynamic_max += float(np.max(np.hypot(turbulence["Fy_a"][index], turbulence["Fy_b"][index])))
-        fz_dynamic_max += float(np.max(np.hypot(turbulence["Fz_a"][index], turbulence["Fz_b"][index])))
+    dynamic_max = {component: 0.0 for component in components}
+    for index in range(len(force_state["turbulence"]["angular_frequencies"])):
+        for component in components:
+            dynamic_max[component] += float(
+                np.max(
+                    np.hypot(
+                        turbulence[f"F{component}_a"][index],
+                        turbulence[f"F{component}_b"][index],
+                    )
+                )
+            )
 
     #------------Return-------------------
     return {
@@ -194,8 +185,8 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fz": fz_initial,
         "turbulence": turbulence,
         "max_abs": (
-            fx_dynamic_max,
-            fy_dynamic_max,
-            fz_dynamic_max,
+            dynamic_max["x"],
+            dynamic_max["y"],
+            dynamic_max["z"],
         ),
     }

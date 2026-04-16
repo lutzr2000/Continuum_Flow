@@ -89,12 +89,14 @@ BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
+_ACTIVE_BAKE_OPERATOR = None
 
 
 def _draw_blendercfd_status_progress(header, context):
     """Draw BlenderCFD bake progress in Blender's bottom status bar."""
     layout = header.layout
     layout.separator_spacer()
+    layout.label(text="BlenderCFD Bake:")
     row = layout.row()
     row.ui_units_x = 10
     row.progress(
@@ -102,6 +104,8 @@ def _draw_blendercfd_status_progress(header, context):
         text=f"{_STATUS_PROGRESS_PERCENT:.1f}%",
         type="BAR",
     )
+    row = layout.row(align=True)
+    row.operator("blendercfd.cancel_bake", text="", icon="PANEL_CLOSE", emboss=False)
     layout.separator_spacer()
 
 
@@ -1188,6 +1192,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     _reader_error = None
     _window_manager = None
     _workspace = None
+    _cancel_requested = False
 
     def _drain_kernel_output(self):
         """Process all kernel output currently waiting for Blender's main thread."""
@@ -1240,6 +1245,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
 
     def _cleanup_bake(self, context):
         """Release modal bake resources."""
+        global _ACTIVE_BAKE_OPERATOR
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
@@ -1250,6 +1256,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if self._session is not None:
             self._session["writer_server"].stop()
             self._session = None
+
+        if _ACTIVE_BAKE_OPERATOR is self:
+            _ACTIVE_BAKE_OPERATOR = None
 
     def _cancel_running_process(self):
         """Stop the kernel process when the modal bake is cancelled."""
@@ -1267,10 +1276,17 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             process.kill()
             process.wait()
 
+    def _request_cancel(self):
+        """Mark the running bake for cancellation and stop the kernel process."""
+        self._cancel_requested = True
+        self._cancel_running_process()
+
     def modal(self, context, event):
         """Keep Blender responsive while the external kernel process is baking."""
         if event.type == "ESC":
-            self._cancel_running_process()
+            self._request_cancel()
+
+        if self._cancel_requested:
             self._cleanup_bake(context)
             self.report({"WARNING"}, "BlenderCFD bake cancelled.")
             return {"CANCELLED"}
@@ -1339,10 +1355,32 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._reader_error = None
         self._window_manager = context.window_manager
         self._workspace = context.workspace
+        self._cancel_requested = False
+        global _ACTIVE_BAKE_OPERATOR
+        _ACTIVE_BAKE_OPERATOR = self
         self._set_status_progress(context)
         self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
+
+
+class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
+    """Cancel the currently running BlenderCFD bake from the status bar."""
+
+    bl_idname = "blendercfd.cancel_bake"
+    bl_label = "Cancel BlenderCFD Bake"
+    bl_description = "Cancel the currently running BlenderCFD bake"
+
+    def execute(self, context):
+        """Request cancellation for the active BlenderCFD bake."""
+        active_operator = _ACTIVE_BAKE_OPERATOR
+        if active_operator is None or active_operator._session is None:
+            self.report({"WARNING"}, "No BlenderCFD bake is currently running.")
+            return {"CANCELLED"}
+
+        active_operator._request_cancel()
+        active_operator._tag_status_bar_redraw(context)
+        return {"FINISHED"}
 
 
 class BlenderCFDViewerNode(bpy.types.Node):
@@ -1680,6 +1718,7 @@ classes = (
     BlenderCFDReferenceFrameSocket,
     BlenderCFDResultSocket,
     BlenderCFD_OT_bake,
+    BlenderCFD_OT_cancel_bake,
     BlenderCFDDomainNode,
     BlenderCFDGeometryNode,
     BlenderCFDForceConstantNode,

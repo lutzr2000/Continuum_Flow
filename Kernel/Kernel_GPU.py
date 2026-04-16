@@ -29,7 +29,7 @@ Helper_Functions.REDUCTION_THREADS_PER_BLOCK = REDUCTION_THREADS_PER_BLOCK
 # Methods
 # ===============================
 
-@cuda.jit
+@cuda.jit(cache=True)
 def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     """
     CUDA kernel that updates all three velocity components based on the
@@ -160,7 +160,7 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     vn[i, j, k] = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
     wn[i, j, k] = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
 
-@cuda.jit
+@cuda.jit(cache=True)
 def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expansion_rate, t_reference):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
@@ -225,7 +225,7 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expa
     )
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
     """
     performs one Jacobi iteration of the 3D pressure Poisson equation on the GPU.
@@ -257,7 +257,7 @@ def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
         ) / 6.0
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def _pressure_poisson_apply_neumann_bcs(p):
     """
     applies the hard-coded zero-gradient pressure boundary conditions on all
@@ -344,7 +344,7 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
     return p_old
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def update_force_fields(Fx_base, Fy_base, Fz_base,
                         turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
                         turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
@@ -388,7 +388,7 @@ def update_force_fields(Fx_base, Fy_base, Fz_base,
     Fz[i, j, k] = fz
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
@@ -413,7 +413,7 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
     Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
                          delta, nu_temperature, nu_smoke, nu_fuel,
                          temperature_dissipation_rate, temperature_production_rate,
