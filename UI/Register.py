@@ -2,6 +2,7 @@ import bpy
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from nodeitems_utils import register_node_categories, unregister_node_categories
 
 
@@ -48,11 +49,58 @@ def _load_module(file_names, module_name):
     raise ImportError(f"Keines dieser Module konnte geladen werden: {readable_names}")
 
 
+def _load_module_from_relative_path(relative_path, module_name):
+    """Load a UI module from a path relative to the UI directory."""
+    relative_path = Path(relative_path)
+    candidate_paths = []
+
+    if "__file__" in globals():
+        candidate_paths.append(Path(__file__).resolve().parent / relative_path)
+
+    current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
+    if current_text is not None and current_text.filepath:
+        candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().parent / relative_path)
+
+    candidate_paths.append((Path.cwd() / "UI" / relative_path).resolve())
+
+    seen = set()
+    for candidate in candidate_paths:
+        candidate_str = str(candidate)
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+
+        if not candidate.exists():
+            continue
+
+        spec = importlib.util.spec_from_file_location(module_name, candidate)
+        if spec is None or spec.loader is None:
+            continue
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    raise ImportError(f"Keines dieser Module konnte geladen werden: {relative_path}")
+
+
 node_tree_module = _load_module(("Node_Tree.py", "NodeTree.py"), "blendercfd_nodetree")
 socket_module = _load_module("Sockets.py", "blendercfd_sockets")
-nodes_module = _load_module("Nodes.py", "blendercfd_nodes")
 viewer_module = _load_module("Viewer.py", "blendercfd_viewer")
 config_module = _load_module(("Config_Export.py", "Create_Config_Dict.py"), "blendercfd_create_config_dict")
+general_nodes_module = _load_module_from_relative_path(Path("Nodes") / "General_Nodes.py", "blendercfd_general_nodes")
+source_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Source_and_Obstacle_Nodes.py", "blendercfd_source_obstacle_nodes")
+force_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Force_Nodes.py", "blendercfd_force_nodes")
+output_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Output_Nodes.py", "blendercfd_output_nodes")
+nodes_module = SimpleNamespace(
+    classes=(
+        *general_nodes_module.classes,
+        *source_nodes_module.classes,
+        *force_nodes_module.classes,
+        *output_nodes_module.classes,
+    )
+)
 
 
 def register():
