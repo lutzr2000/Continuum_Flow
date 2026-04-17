@@ -6,4 +6,5 @@ User should be able to sepcify frame range to bake?
 lock buttons during bake
 Deactivate modules when nothing is connected
 Make sure only proper connections work
-Obstacles show weird behaviour with smoke, seem to suck it in? Maybe wrong BC ? Neumann instead of dirichlet?
+Animated Obstacles and Source
+Animated constants???

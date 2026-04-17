@@ -83,7 +83,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
 
 
 @cuda.jit
-def _obstacle_bc_kernel(u, v, w, p, smoke, fuel, flame, mask):
+def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask):
     """
     applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
 
@@ -110,13 +110,12 @@ def _obstacle_bc_kernel(u, v, w, p, smoke, fuel, flame, mask):
         u[i, j, k] = 0.0
         v[i, j, k] = 0.0
         w[i, j, k] = 0.0
-        p[i, j, k] = 0.0
         smoke[i, j, k] = 0.0
         fuel[i, j, k] = 0.0
         flame[i, j, k] = 0.0
 
 
-def obstacle_bc(u, v, w, p, T, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
+def obstacle_bc(u, v, w, T, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
     """
     applies all obstacle boundary conditions to the GPU field state.
 
@@ -146,6 +145,6 @@ def obstacle_bc(u, v, w, p, T, smoke, fuel, flame, obstacle_mask, threadsperbloc
         (obstacle_mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
     )
 
-    _obstacle_bc_kernel[blockspergrid, threadsperblock](u, v, w, p, smoke, fuel, flame, obstacle_mask)
+    _obstacle_bc_kernel[blockspergrid, threadsperblock](u, v, w, smoke, fuel, flame, obstacle_mask)
 
-    return u, v, w, p, T, smoke, fuel, flame
+    return u, v, w, T, smoke, fuel, flame
