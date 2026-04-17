@@ -3,9 +3,12 @@ import json
 import importlib
 import importlib.util
 import queue
+import copy
+import shutil
 import subprocess
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
 
@@ -90,6 +93,8 @@ PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
 _ACTIVE_BAKE_OPERATOR = None
+_LAST_BAKE_CONFIG_DICT = None
+_BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
 
 
 def _draw_blendercfd_status_progress(header, context):
@@ -114,6 +119,113 @@ def _set_status_progress_values(percent):
     global _STATUS_PROGRESS_PERCENT, _STATUS_PROGRESS_FACTOR
     _STATUS_PROGRESS_PERCENT = max(0.0, min(100.0, float(percent)))
     _STATUS_PROGRESS_FACTOR = _STATUS_PROGRESS_PERCENT / 100.0
+
+
+def _tag_all_areas_redraw(context=None):
+    """Request a redraw for all visible Blender areas."""
+    window_manager = getattr(context, "window_manager", None) if context is not None else None
+    if window_manager is None:
+        window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
+
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            area.tag_redraw()
+
+
+def _set_bake_state_active(active, context=None, config_dict=None):
+    """Store the last bake config and refresh the UI after bake state changes."""
+    global _LAST_BAKE_CONFIG_DICT
+    if active and config_dict is not None:
+        _LAST_BAKE_CONFIG_DICT = config_dict
+    elif not active:
+        _LAST_BAKE_CONFIG_DICT = None
+    _tag_all_areas_redraw(context)
+
+
+def _iter_output_directory_vdb_files(output_directory):
+    """Yield all VDB files that belong to one configured output directory."""
+    output_directory = Path(output_directory).resolve()
+    if not output_directory.exists():
+        return
+
+    for vdb_file in sorted(output_directory.glob("*.vdb")):
+        if vdb_file.is_file():
+            yield vdb_file
+
+    for child_directory in sorted(output_directory.iterdir()):
+        if not child_directory.is_dir():
+            continue
+        if not child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+            continue
+        for vdb_file in sorted(child_directory.glob("*.vdb")):
+            if vdb_file.is_file():
+                yield vdb_file
+
+
+def _output_directory_has_vdbs(output_directory):
+    """Return whether an output directory currently contains baked VDB files."""
+    return any(_iter_output_directory_vdb_files(output_directory))
+
+
+def _config_has_baked_vdbs(config_dict):
+    """Return whether any configured output directory currently contains baked VDB files."""
+    return any(_output_directory_has_vdbs(output_directory) for output_directory in _output_directories_from_config(config_dict))
+
+
+def _path_is_same_or_within_directory(path_value, directory):
+    """Return whether a path points at the given directory or one of its children."""
+    try:
+        resolved_path = Path(path_value).resolve()
+        resolved_directory = Path(directory).resolve()
+    except Exception:
+        return False
+
+    if resolved_path == resolved_directory:
+        return True
+
+    try:
+        return resolved_directory in resolved_path.parents
+    except Exception:
+        return False
+
+
+def _display_output_directory_name(output_directory):
+    """Return a user-facing output label for one baked output directory."""
+    output_directory = Path(output_directory)
+    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+        return output_directory.parent.name or output_directory.name
+    return output_directory.name
+
+
+def _prepared_output_directory(base_output_path, bake_token):
+    """Return the per-bake output directory used to avoid Blender filepath caching."""
+    base_directory = Path(base_output_path).resolve()
+    return base_directory / f"{_BAKE_OUTPUT_DIRECTORY_PREFIX}{bake_token}"
+
+
+def _prepare_config_for_bake(config_dict):
+    """Clone the config and route every output into a fresh per-bake subdirectory."""
+    prepared_config = copy.deepcopy(config_dict)
+    bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    prepared_config.setdefault("meta", {})["bake_token"] = bake_token
+
+    for simulation_cfg in prepared_config.get("simulations", ()):
+        for output_cfg in simulation_cfg.get("outputs", ()):
+            output_path = output_cfg.get("output_path", "")
+            if not output_path:
+                continue
+
+            base_output_path = str(Path(output_path).resolve())
+            bake_output_path = str(_prepared_output_directory(base_output_path, bake_token))
+            output_cfg["base_output_path"] = base_output_path
+            output_cfg["output_path"] = bake_output_path
+
+    return prepared_config
 
 def _kernel_directory():
     """Return the local Kernel directory path."""
@@ -265,19 +377,126 @@ def _baked_vdb_files(output_directory):
     return sorted(output_directory.glob("*.vdb"))
 
 
+def _volume_data_matches_output_directory(volume_data, output_directory):
+    """Return whether a Blender volume datablock references an output directory."""
+    if volume_data is None:
+        return False
+
+    filepath = getattr(volume_data, "filepath", "")
+    if not filepath:
+        return False
+
+    try:
+        resolved_filepath = Path(bpy.path.abspath(filepath)).resolve()
+    except Exception:
+        try:
+            resolved_filepath = Path(filepath).resolve()
+        except Exception:
+            return False
+
+    return _path_is_same_or_within_directory(resolved_filepath, output_directory)
+
+
+def _object_matches_output_directory(volume_object, output_directory):
+    """Return whether a volume object belongs to a baked BlenderCFD output directory."""
+    if volume_object.type != "VOLUME":
+        return False
+
+    if volume_object.get("blendercfd_output_path") == str(output_directory):
+        return True
+
+    if volume_object.get("blendercfd_auto_import"):
+        return _volume_data_matches_output_directory(volume_object.data, output_directory)
+
+    return False
+
+
 def _remove_previous_baked_volume(output_directory):
-    """Remove an older auto-imported BlenderCFD volume for this output directory."""
-    output_path = str(output_directory)
+    """Remove older BlenderCFD volume objects and datablocks for one output directory."""
+    output_directory = Path(output_directory).resolve()
+    removed_count = 0
+    matched_volume_data = set()
+
     for volume_object in list(bpy.data.objects):
-        if not volume_object.get("blendercfd_auto_import"):
-            continue
-        if volume_object.get("blendercfd_output_path") != output_path:
+        if not _object_matches_output_directory(volume_object, output_directory):
             continue
 
         volume_data = volume_object.data if volume_object.type == "VOLUME" else None
+        if volume_data is not None:
+            matched_volume_data.add(volume_data)
         bpy.data.objects.remove(volume_object, do_unlink=True)
-        if volume_data is not None and volume_data.users == 0:
+        removed_count += 1
+
+    for volume_data in list(bpy.data.volumes):
+        if volume_data not in matched_volume_data and not _volume_data_matches_output_directory(volume_data, output_directory):
+            continue
+        try:
             bpy.data.volumes.remove(volume_data)
+        except TypeError:
+            bpy.data.volumes.remove(volume_data)
+
+    return removed_count
+
+
+def _delete_baked_vdb_files(output_directory):
+    """Delete all baked VDB files inside one output directory."""
+    output_directory = Path(output_directory).resolve()
+    if not output_directory.exists():
+        return 0
+
+    deleted_files = 0
+    for vdb_file in list(_iter_output_directory_vdb_files(output_directory)):
+        vdb_file.unlink(missing_ok=True)
+        deleted_files += 1
+
+    return deleted_files
+
+
+def _remove_bake_output_directory(output_directory):
+    """Remove an empty or dedicated per-bake output directory after VDB deletion."""
+    output_directory = Path(output_directory).resolve()
+    if not output_directory.exists() or not output_directory.is_dir():
+        return
+
+    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+        shutil.rmtree(output_directory, ignore_errors=True)
+        return
+
+    try:
+        output_directory.rmdir()
+    except OSError:
+        pass
+
+
+def _purge_blender_baked_data(context):
+    """Run Blender cleanup steps after removing imported VDB volumes."""
+    try:
+        bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
+    except (RuntimeError, TypeError):
+        pass
+
+    scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
+    if scene is not None:
+        scene.frame_set(scene.frame_current)
+
+    _tag_all_areas_redraw(context)
+
+
+def _free_bake(context, config_dict=None):
+    """Delete baked VDB files on disk and purge the imported Blender volume data."""
+    cleanup_config = config_dict or _LAST_BAKE_CONFIG_DICT
+    output_directories = _output_directories_from_config(cleanup_config) if cleanup_config else []
+
+    removed_volumes = 0
+    deleted_files = 0
+    for output_directory in output_directories:
+        removed_volumes += _remove_previous_baked_volume(output_directory)
+        deleted_files += _delete_baked_vdb_files(output_directory)
+        _remove_bake_output_directory(output_directory)
+
+    _purge_blender_baked_data(context)
+    _set_bake_state_active(False, context=context)
+    return removed_volumes, deleted_files
 
 
 def _import_baked_vdb_sequence(output_directory, vdb_files):
@@ -300,7 +519,7 @@ def _import_baked_vdb_sequence(output_directory, vdb_files):
     for imported_object in imported_objects:
         if imported_object.type != "VOLUME":
             continue
-        imported_object.name = f"BlenderCFD {output_directory.name}"
+        imported_object.name = f"BlenderCFD {_display_output_directory_name(output_directory)}"
         imported_object["blendercfd_auto_import"] = True
         imported_object["blendercfd_output_path"] = str(output_directory)
 
@@ -1184,7 +1403,13 @@ class BlenderCFDOutputNode(bpy.types.Node):
 
         layout.prop(self, "output_path")
         layout.separator()
-        layout.operator("blendercfd.bake", text="Bake", icon="RENDER_STILL")
+        resolved_output_path = bpy.path.abspath(self.output_path) if self.output_path else ""
+        button_is_free_bake = bool(resolved_output_path) and _output_directory_has_vdbs(resolved_output_path)
+        layout.operator(
+            "blendercfd.bake",
+            text="Free Bake" if button_is_free_bake else "Bake",
+            icon="TRASH" if button_is_free_bake else "RENDER_STILL",
+        )
 
 
 class BlenderCFD_OT_bake(bpy.types.Operator):
@@ -1347,8 +1572,30 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
 
     def execute(self, context):
         """Build the current config dict and run the CFD kernel."""
+        global _ACTIVE_BAKE_OPERATOR
+
         try:
-            self._config_dict = BlenderCFDConfigModule.build_config_dict(context)
+            live_config_dict = BlenderCFDConfigModule.build_config_dict(context)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Bake failed: {exc}")
+            return {"CANCELLED"}
+
+        if _config_has_baked_vdbs(live_config_dict):
+            active_operator = _ACTIVE_BAKE_OPERATOR
+            if active_operator is not None and active_operator._session is not None:
+                active_operator._request_cancel()
+                self.report({"INFO"}, "Bake cancellation requested. Press Free Bake again after the bake stops.")
+                return {"FINISHED"}
+
+            removed_volumes, deleted_files = _free_bake(context, config_dict=live_config_dict)
+            self.report(
+                {"INFO"},
+                f"Freed bake data. Removed {removed_volumes} volume object(s) and deleted {deleted_files} VDB file(s).",
+            )
+            return {"FINISHED"}
+
+        try:
+            self._config_dict = _prepare_config_for_bake(live_config_dict)
             self._session = _start_bake_session(self._config_dict)
         except ModuleNotFoundError as exc:
             missing_module = getattr(exc, "name", None) or str(exc)
@@ -1361,6 +1608,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
 
+        _set_bake_state_active(True, context=context, config_dict=self._config_dict)
         self._output_tail = []
         self._progress_percent = 0.0
         self._progress_factor = 0.0
@@ -1369,7 +1617,6 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._window_manager = context.window_manager
         self._workspace = context.workspace
         self._cancel_requested = False
-        global _ACTIVE_BAKE_OPERATOR
         _ACTIVE_BAKE_OPERATOR = self
         self._set_status_progress(context)
         self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
