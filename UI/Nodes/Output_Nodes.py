@@ -26,6 +26,8 @@ BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
 
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
 BlenderCFDResultSocket = GeneralNodes.BlenderCFDResultSocket
+is_bake_running = GeneralNodes.is_bake_running
+set_bake_running = GeneralNodes.set_bake_running
 
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
@@ -464,6 +466,7 @@ class BlenderCFDOutputNode(bpy.types.Node):
         self._sync_input_socket()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         layout.prop(self, "fps")
         layout.prop(self, "writer_processes")
         layout.prop(self, "output_precision")
@@ -558,6 +561,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             self._session = None
         if _ACTIVE_BAKE_OPERATOR is self:
             _ACTIVE_BAKE_OPERATOR = None
+        set_bake_running(False, context=context)
 
     def _cancel_running_process(self):
         if self._session is None:
@@ -633,13 +637,16 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             self._config_dict = _prepare_config_for_bake(live_config_dict)
             self._session = _start_bake_session(self._config_dict)
         except ModuleNotFoundError as exc:
+            set_bake_running(False, context=context)
             missing_module = getattr(exc, "name", None) or str(exc)
             self.report({"ERROR"}, f"Bake failed: missing Python module '{missing_module}' in {sys.executable}")
             return {"CANCELLED"}
         except Exception as exc:
+            set_bake_running(False, context=context)
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
         _set_bake_state_active(True, context=context, config_dict=self._config_dict)
+        set_bake_running(True, context=context)
         self._output_tail = []
         self._progress_percent = 0.0
         self._progress_factor = 0.0

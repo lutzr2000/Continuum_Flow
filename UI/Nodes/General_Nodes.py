@@ -73,6 +73,32 @@ BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
 BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
 BlenderCFDReferenceFrameSocket = _sockets_module.BlenderCFDReferenceFrameSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
+BLENDERCFD_BAKE_RUNNING_KEY = "blendercfd_bake_running"
+
+
+def _window_manager_from_context(context=None):
+    """Return the current Blender window manager if available."""
+    return getattr(context, "window_manager", None) or getattr(bpy.context, "window_manager", None)
+
+
+def set_bake_running(is_running, context=None):
+    """Store whether BlenderCFD currently has a bake running."""
+    window_manager = _window_manager_from_context(context)
+    if window_manager is None:
+        return
+
+    if is_running:
+        window_manager[BLENDERCFD_BAKE_RUNNING_KEY] = True
+    else:
+        window_manager.pop(BLENDERCFD_BAKE_RUNNING_KEY, None)
+
+
+def is_bake_running(context=None):
+    """Return whether BlenderCFD currently has a bake running."""
+    window_manager = _window_manager_from_context(context)
+    if window_manager is None:
+        return False
+    return bool(window_manager.get(BLENDERCFD_BAKE_RUNNING_KEY, False))
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
@@ -140,6 +166,7 @@ class BlenderCFDDomainNode(bpy.types.Node):
             box.prop(self, velocity_attr, text="Velocity")
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "resolution")
         col.prop(self, "nx")
@@ -210,6 +237,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
             col.prop(self, property_name)
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         self._draw_group(layout, "Fluid", ("fluid_density", "fluid_viscosity"))
         self._draw_group(layout, "Temperature", ("temperature_diffusion", "temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate"))
         self._draw_group(layout, "Smoke", ("smoke_diffusion", "smoke_dissipation"))
@@ -252,6 +280,7 @@ class BlenderCFDReferenceFrameNode(bpy.types.Node):
         self._sync_sockets()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         layout.prop(self, "source_object", text="Object")
 
 
@@ -317,6 +346,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
             col.prop(self, property_name)
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         self._draw_group(layout, "Time", ("simulation_length", "cfl"))
         self._draw_group(layout, "Solver", ("iterations",))
 
@@ -357,6 +387,7 @@ class BlenderCFDViewerNode(bpy.types.Node):
         BlenderCFDViewerModule.disable_domain_preview()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.operator("blendercfd.viewer_show_domain", text="Show Domain", icon="HIDE_OFF")
         col.operator("blendercfd.viewer_hide_domain", text="Hide Domain", icon="HIDE_ON")

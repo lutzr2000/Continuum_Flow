@@ -4,6 +4,7 @@ from bpy.props import FloatProperty, PointerProperty
 
 BlenderCFDIntSocket = GeneralNodes.BlenderCFDIntSocket
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
+is_bake_running = GeneralNodes.is_bake_running
 
 
 class BlenderCFDSourceNode(bpy.types.Node):
@@ -52,6 +53,7 @@ class BlenderCFDSourceNode(bpy.types.Node):
         self._sync_sockets()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "fuel")
         col.prop(self, "smoke")
@@ -93,6 +95,7 @@ class BlenderCFDGeometryNode(bpy.types.Node):
         self._sync_sockets()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         layout.prop(self, "source_object", text="Object")
 
 

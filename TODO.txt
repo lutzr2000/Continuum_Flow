@@ -1,7 +1,7 @@
 improve look of turbulent forcing, sine waves are sometimes visible
 implement other forces
 Source velocity spawn
-Temperature currently can not be saved sparsly because non zero, but easily fixable?
+Temperature currently can not be saved sparsly because non zero, but easily fixable? (add option to save all data sparsly)
 User should be able to sepcify frame range to bake?
 lock buttons during bake
 Deactivate modules when nothing is connected

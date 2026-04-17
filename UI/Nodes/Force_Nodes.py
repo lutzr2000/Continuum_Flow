@@ -4,6 +4,7 @@ from bpy.props import FloatProperty, FloatVectorProperty
 
 BlenderCFDForceSocket = GeneralNodes.BlenderCFDForceSocket
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
+is_bake_running = GeneralNodes.is_bake_running
 
 
 class BlenderCFDForceConstantNode(bpy.types.Node):
@@ -43,6 +44,7 @@ class BlenderCFDForceConstantNode(bpy.types.Node):
         self._sync_output_socket()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "fx")
         col.prop(self, "fy")
@@ -85,6 +87,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
         self._sync_output_socket()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "strength")
         col.prop(self, "position")
@@ -128,6 +131,7 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
         self._sync_output_socket()
 
     def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "scale")
         col.prop(self, "frequency")
