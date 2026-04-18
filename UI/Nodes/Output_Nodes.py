@@ -257,6 +257,20 @@ def _output_directories_from_config(config_dict):
     return output_directories
 
 
+def _start_frame_for_output_directory(config_dict, output_directory):
+    output_directory = Path(output_directory).resolve()
+    for simulation_cfg in config_dict.get("simulations", ()):
+        settings = simulation_cfg.get("settings", {})
+        start_frame = int(settings.get("start_frame", 1))
+        for output_cfg in simulation_cfg.get("outputs", ()):
+            output_path = output_cfg.get("output_path", "")
+            if not output_path:
+                continue
+            if Path(output_path).resolve() == output_directory:
+                return start_frame
+    return 1
+
+
 def _config_has_baked_vdbs(config_dict):
     return any(_output_directory_has_vdbs(output_directory) for output_directory in _output_directories_from_config(config_dict))
 
@@ -365,7 +379,17 @@ def _free_bake(context, config_dict=None):
     return removed_volumes, deleted_files
 
 
-def _import_baked_vdb_sequence(output_directory, vdb_files):
+def _apply_imported_volume_sequence_settings(volume_data, start_frame, frame_count):
+    if volume_data is None:
+        return
+    volume_data.is_sequence = True
+    volume_data.frame_duration = max(1, int(frame_count))
+    volume_data.frame_start = int(start_frame)
+    if hasattr(volume_data, "sequence_mode"):
+        volume_data.sequence_mode = "CLIP"
+
+
+def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
     _remove_previous_baked_volume(output_directory)
     existing_objects = set(bpy.data.objects)
     first_file = vdb_files[0]
@@ -381,6 +405,7 @@ def _import_baked_vdb_sequence(output_directory, vdb_files):
     for imported_object in imported_objects:
         if imported_object.type != "VOLUME":
             continue
+        _apply_imported_volume_sequence_settings(imported_object.data, start_frame, len(vdb_files))
         imported_object.name = f"BlenderCFD {_display_output_directory_name(output_directory)}"
         imported_object["blendercfd_auto_import"] = True
         imported_object["blendercfd_output_path"] = str(output_directory)
@@ -397,7 +422,8 @@ def _import_baked_vdbs(config_dict):
         vdb_files = _baked_vdb_files(output_directory)
         if not vdb_files:
             continue
-        imported_count += _import_baked_vdb_sequence(output_directory, vdb_files)
+        start_frame = _start_frame_for_output_directory(config_dict, output_directory)
+        imported_count += _import_baked_vdb_sequence(output_directory, vdb_files, start_frame)
     return imported_count, missing_directories
 
 

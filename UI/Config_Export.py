@@ -66,6 +66,28 @@ def _linked_output_nodes(node, socket_name, expected_idname=None):
     return linked_nodes
 
 
+def _resolve_simulation_output_fps(simulation_node, context=None):
+    """Resolve the FPS that defines frame-to-time conversion for one simulation."""
+    output_nodes = _linked_output_nodes(simulation_node, "Result", "BLENDERCFD_OUTPUT_NODE")
+    if output_nodes:
+        return max(1, int(getattr(output_nodes[0], "fps", 24)))
+
+    scene = getattr(context, "scene", None) if context is not None else None
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    if render is not None:
+        return max(1, int(getattr(render, "fps", 24)))
+    return 24
+
+
+def _simulation_length_from_frames(start_frame, end_frame, fps):
+    """Convert an exported frame range to kernel simulation seconds."""
+    if end_frame <= start_frame:
+        raise ValueError("Simulation end frame must be greater than the start frame.")
+    return float(end_frame - start_frame) / float(fps)
+
+
 def _linked_geometry_names(node):
     """Return the linked geometry object names for a source or obstacle node."""
     geometry_nodes = _linked_geometry_nodes(node)
@@ -276,11 +298,16 @@ def _build_simulation_entry(simulation_node, context=None):
 
     output_nodes = _linked_output_nodes(simulation_node, "Result", "BLENDERCFD_OUTPUT_NODE")
     viewer_nodes = _linked_output_nodes(simulation_node, "Result", "BLENDERCFD_VIEWER_NODE")
+    start_frame = int(getattr(simulation_node, "start_frame", 1))
+    end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
+    simulation_fps = _resolve_simulation_output_fps(simulation_node, context=context)
 
     return {
         "node_name": simulation_node.name,
         "settings": {
-            "simulation_length": float(simulation_node.simulation_length),
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+            "simulation_length": _simulation_length_from_frames(start_frame, end_frame, simulation_fps),
             "cfl": float(simulation_node.cfl),
             "iterations": int(simulation_node.iterations),
         },

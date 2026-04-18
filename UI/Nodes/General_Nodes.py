@@ -294,7 +294,8 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     bl_width_min = 240.0
     bl_width_max = 420.0
 
-    simulation_length: FloatProperty(name="Simulation Length", default=10.0, min=0.001, unit="TIME")  # type: ignore
+    start_frame: IntProperty(name="Start Frame", default=1, min=0)  # type: ignore
+    end_frame: IntProperty(name="End Frame", default=250, min=1)  # type: ignore
     cfl: FloatProperty(name="CFL", default=0.8, min=0.000001, max=1.0)  # type: ignore
     iterations: IntProperty(name="Iterations", default=4, min=0, max=500, soft_min=0, soft_max=500)  # type: ignore
 
@@ -330,6 +331,10 @@ class BlenderCFDSimulationNode(bpy.types.Node):
         self._ensure_output_socket()
 
     def init(self, context):
+        scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
+        if scene is not None:
+            self.start_frame = int(getattr(scene, "frame_start", self.start_frame))
+            self.end_frame = int(getattr(scene, "frame_end", self.end_frame))
         self._sync_sockets()
 
     def copy(self, node):
@@ -347,7 +352,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
 
     def draw_buttons(self, context, layout):
         layout.enabled = not is_bake_running(context)
-        self._draw_group(layout, "Time", ("simulation_length", "cfl"))
+        self._draw_group(layout, "Time", ("start_frame", "end_frame", "cfl"))
         self._draw_group(layout, "Solver", ("iterations",))
 
 

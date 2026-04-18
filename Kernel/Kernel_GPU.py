@@ -691,6 +691,7 @@ def main(config=None):
     simulation_params = Helper_Functions.apply_config(config)
 
     T_MAX = simulation_params["T_MAX"]
+    FRAME_START = simulation_params["FRAME_START"]
     CFL_MAX = simulation_params["CFL_MAX"]
     MAX_ITER = simulation_params["MAX_ITER"]
     DELTA = simulation_params["DELTA"]
@@ -857,6 +858,7 @@ def main(config=None):
     section_start = perf_counter()
     write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
         OUTPATH,
+        FRAME_START,
         OUTPUT_BUFFER_VARIABLES,
         Helper_Functions.select_fields(device_fields, OUTPUT_BUFFER_VARIABLES),
         WRITE_QUEUE_SIZE,

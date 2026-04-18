@@ -178,6 +178,7 @@ def apply_config(config):
         "EXPANSION_RATE": float(physics_cfg["temperature"]["expansion_rate"]),
         "VORTICITY": float(physics_cfg.get("extras", {}).get("vorticity", 0.0)),
         "T_MAX": float(simulation_cfg["settings"]["simulation_length"]),
+        "FRAME_START": int(simulation_cfg["settings"].get("start_frame", 0)),
         "CFL_MAX": float(simulation_cfg["settings"]["cfl"]),
         "MAX_ITER": int(simulation_cfg["settings"]["iterations"]),
         "PRECISION": np.float32,

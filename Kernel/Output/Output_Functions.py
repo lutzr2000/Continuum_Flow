@@ -10,6 +10,7 @@ import numpy as np
 
 def setup_output(
     outpath,
+    frame_start,
     buffered_variables,
     template_fields,
     queue_size,
@@ -23,6 +24,7 @@ def setup_output(
 
     Args:
         outpath (str): output directory for vdb files
+        frame_start (int): Blender frame number used for the first written VDB
         buffered_variables (list[str]): names of the fields that should be copied into shared memory
         template_fields (dict): field names mapped to CUDA device arrays
         queue_size (int): number of reusable buffer sets
@@ -70,6 +72,7 @@ def setup_output(
                 write_queue,
                 buffer_pool,
                 outpath,
+                frame_start,
                 delta,
                 buffered_variables,
                 host_writer_endpoint,
@@ -217,6 +220,7 @@ def writer_thread_func(
     write_queue,
     buffer_pool,
     outpath,
+    frame_start,
     delta,
     buffered_variables,
     host_writer_endpoint,
@@ -228,6 +232,7 @@ def writer_thread_func(
         write_queue (queue.Queue): queue with pending output jobs
         buffer_pool (queue.Queue): queue with reusable shared-memory buffers
         outpath (str): output directory for vdb files
+        frame_start (int): Blender frame number used for the first written VDB
         delta (float): grid spacing
         buffered_variables (list[str]): names of the fields that should be copied into shared memory
         host_writer_endpoint (dict): host/port for Blender's in-process writer
@@ -252,13 +257,14 @@ def writer_thread_func(
                 break
 
             output_idx, time_value, fields, output_field_config = item
-            vdb_output_path = os.path.join(outpath, f'frame_{output_idx:06d}.vdb')
+            frame_idx = int(frame_start) + int(output_idx)
+            vdb_output_path = os.path.join(outpath, f'frame_{frame_idx:06d}.vdb')
             writer_payload = create_writer_payload(fields, output_field_config, vdb_output_path, time_value, delta)
 
             try:
                 _send_payload_to_host_writer(writer_file, writer_payload)
             except Exception as exc:
-                print(f'VDB write failed for output {output_idx}: {exc}')
+                print(f'VDB write failed for frame {frame_idx}: {exc}')
 
             buffer_pool.put(fields)
             write_queue.task_done()
