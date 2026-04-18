@@ -158,6 +158,7 @@ def _serialize_source_node(node, context=None):
         "fuel": float(node.fuel),
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
+        "velocity": _safe_float_vector(node.velocity),
         "geometry_inputs": _linked_geometry_names(node),
         "shape": "mesh" if geometry_exports else "empty",
         "mesh": {

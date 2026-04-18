@@ -1,4 +1,3 @@
-Source velocity spawn
 Temperature currently can not be saved sparsly because non zero, but easily fixable? (add option to save all data sparsly)
 User should be able to sepcify frame range to bake?
 Deactivate modules when nothing is connected

@@ -779,6 +779,9 @@ def main(config=None):
     source_temperature = device_state["source_temperature"]
     source_smoke = device_state["source_smoke"]
     source_fuel = device_state["source_fuel"]
+    source_velocity_x = device_state["source_velocity_x"]
+    source_velocity_y = device_state["source_velocity_y"]
+    source_velocity_z = device_state["source_velocity_z"]
     device_fields = {
         "u": u,
         "v": v,
@@ -798,8 +801,11 @@ def main(config=None):
 
     #------------Source-------------------
     section_start = perf_counter()
-    T, smoke, fuel = Source_BC.source_bc(
-        T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+    u, v, w, T, smoke, fuel = Source_BC.source_bc(
+        u, v, w, T, smoke, fuel,
+        source_mask,
+        source_temperature, source_smoke, source_fuel,
+        source_velocity_x, source_velocity_y, source_velocity_z,
     )
     #------------Obstacle-------------------
     u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
@@ -960,8 +966,11 @@ def main(config=None):
 
         #------------Source-------------------
         section_start = perf_counter()
-        T, smoke, fuel = Source_BC.source_bc(
-            T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+        u, v, w, T, smoke, fuel = Source_BC.source_bc(
+            u, v, w, T, smoke, fuel,
+            source_mask,
+            source_temperature, source_smoke, source_fuel,
+            source_velocity_x, source_velocity_y, source_velocity_z,
         )
         #------------Obstacle-------------------
         u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(

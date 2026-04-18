@@ -200,6 +200,13 @@ def upload_simulation_state_to_gpu(simulation_params):
     source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
     source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
     source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
+    source_velocity_x_host = np.asarray(source_field_data["velocity_x"], dtype=precision_dtype)
+    source_velocity_y_host = np.asarray(source_field_data["velocity_y"], dtype=precision_dtype)
+    source_velocity_z_host = np.asarray(source_field_data["velocity_z"], dtype=precision_dtype)
+
+    u[source_mask_host] = source_velocity_x_host[source_mask_host]
+    v[source_mask_host] = source_velocity_y_host[source_mask_host]
+    w[source_mask_host] = source_velocity_z_host[source_mask_host]
 
     T = np.maximum(T, source_temperature_host)
     smoke = np.maximum(smoke, source_smoke_host)
@@ -247,6 +254,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "source_temperature": cuda.to_device(source_temperature_host),
         "source_smoke": cuda.to_device(source_smoke_host),
         "source_fuel": cuda.to_device(source_fuel_host),
+        "source_velocity_x": cuda.to_device(source_velocity_x_host),
+        "source_velocity_y": cuda.to_device(source_velocity_y_host),
+        "source_velocity_z": cuda.to_device(source_velocity_z_host),
     }
 
     gpu_constants = {

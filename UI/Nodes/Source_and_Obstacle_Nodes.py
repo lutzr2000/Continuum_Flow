@@ -1,6 +1,6 @@
 import bpy
 import blendercfd_general_nodes as GeneralNodes
-from bpy.props import FloatProperty, PointerProperty
+from bpy.props import FloatProperty, FloatVectorProperty, PointerProperty
 
 BlenderCFDIntSocket = GeneralNodes.BlenderCFDIntSocket
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
@@ -8,7 +8,7 @@ is_bake_running = GeneralNodes.is_bake_running
 
 
 class BlenderCFDSourceNode(bpy.types.Node):
-    """Node used to define a generic CFD source region and its scalar strengths."""
+    """Node used to define a generic CFD source region and its scalar and velocity targets."""
 
     bl_idname = "BLENDERCFD_SOURCE_NODE"
     bl_label = "Source"
@@ -20,6 +20,7 @@ class BlenderCFDSourceNode(bpy.types.Node):
     fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0)  # type: ignore
     smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0)  # type: ignore
     temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0, unit="TEMPERATURE")  # type: ignore
+    velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -58,6 +59,10 @@ class BlenderCFDSourceNode(bpy.types.Node):
         col.prop(self, "fuel")
         col.prop(self, "smoke")
         col.prop(self, "temperature")
+
+        velocity_col = layout.column(align=True)
+        velocity_col.label(text="Velocity")
+        velocity_col.prop(self, "velocity", text="")
 
 
 class BlenderCFDGeometryNode(bpy.types.Node):

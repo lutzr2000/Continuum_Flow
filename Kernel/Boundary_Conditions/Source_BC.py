@@ -11,6 +11,8 @@ def build_source_data(domain_cfg, source_entries):
     build persistent source target fields from exported source nodes.
 
     Multiple source nodes are merged with a max operation per scalar field.
+    Velocity targets are written directly so later overlapping sources override
+    earlier ones component-wise.
 
     Args:
         domain_cfg (dict): exported domain configuration
@@ -29,6 +31,9 @@ def build_source_data(domain_cfg, source_entries):
     temperature_field = np.zeros((nx, ny, nz), dtype=np.float32)
     smoke_field = np.zeros((nx, ny, nz), dtype=np.float32)
     fuel_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    velocity_x_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    velocity_y_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
 
     for source_entry in source_entries:
@@ -47,6 +52,11 @@ def build_source_data(domain_cfg, source_entries):
         if not np.any(source_mask):
             continue
 
+        velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
+        velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
+        velocity_y = np.float32(velocity[1] if len(velocity) > 1 else 0.0)
+        velocity_z = np.float32(velocity[2] if len(velocity) > 2 else 0.0)
+
         source_active_mask |= source_mask
         temperature_field[source_mask] = np.maximum(
             temperature_field[source_mask],
@@ -60,24 +70,39 @@ def build_source_data(domain_cfg, source_entries):
             fuel_field[source_mask],
             np.float32(source_entry.get("fuel", 0.0)),
         )
+        velocity_x_field[source_mask] = velocity_x
+        velocity_y_field[source_mask] = velocity_y
+        velocity_z_field[source_mask] = velocity_z
 
     return {
         "mask": source_active_mask,
         "temperature": temperature_field,
         "smoke": smoke_field,
         "fuel": fuel_field,
+        "velocity_x": velocity_x_field,
+        "velocity_y": velocity_y_field,
+        "velocity_z": velocity_z_field,
     }
 
 
 @cuda.jit
-def _source_bc_kernel(T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel):
+def _source_bc_kernel(
+    u, v, w, T, smoke, fuel,
+    source_mask,
+    source_temperature, source_smoke, source_fuel,
+    source_velocity_x, source_velocity_y, source_velocity_z,
+):
     """
     clamps source regions to persistent source maxima on the GPU.
 
-    Each thread checks one source cell and raises temperature, smoke and fuel
-    to the configured source values when the source mask is active there.
+    Each thread checks one source cell, sets the configured source velocity,
+    and raises temperature, smoke and fuel to the configured source values
+    when the source mask is active there.
 
     Args:
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
         T (device array): temperature field
         smoke (device array): smoke field
         fuel (device array): fuel field
@@ -85,6 +110,9 @@ def _source_bc_kernel(T, smoke, fuel, source_mask, source_temperature, source_sm
         source_temperature (device array): source temperature targets
         source_smoke (device array): source smoke targets
         source_fuel (device array): source fuel targets
+        source_velocity_x (device array): source x-velocity targets
+        source_velocity_y (device array): source y-velocity targets
+        source_velocity_z (device array): source z-velocity targets
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = source_mask.shape
@@ -98,6 +126,9 @@ def _source_bc_kernel(T, smoke, fuel, source_mask, source_temperature, source_sm
     source_temperature_value = source_temperature[i, j, k]
     source_smoke_value = source_smoke[i, j, k]
     source_fuel_value = source_fuel[i, j, k]
+    u[i, j, k] = source_velocity_x[i, j, k]
+    v[i, j, k] = source_velocity_y[i, j, k]
+    w[i, j, k] = source_velocity_z[i, j, k]
 
     if T[i, j, k] < source_temperature_value:
         T[i, j, k] = source_temperature_value
@@ -107,14 +138,23 @@ def _source_bc_kernel(T, smoke, fuel, source_mask, source_temperature, source_sm
         fuel[i, j, k] = source_fuel_value
 
 
-def source_bc(T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel, threadsperblock=None):
+def source_bc(
+    u, v, w, T, smoke, fuel,
+    source_mask,
+    source_temperature, source_smoke, source_fuel,
+    source_velocity_x, source_velocity_y, source_velocity_z,
+    threadsperblock=None,
+):
     """
     applies all source boundary conditions to the GPU field state.
 
-    Temperature, smoke and fuel are clamped to their persistent source target
-    values inside active source cells.
+    Velocity is imposed directly and temperature, smoke and fuel are clamped to
+    their persistent source target values inside active source cells.
 
     Args:
+        u (device array): x-velocity field
+        v (device array): y-velocity field
+        w (device array): z-velocity field
         T (device array): temperature field
         smoke (device array): smoke field
         fuel (device array): fuel field
@@ -122,9 +162,12 @@ def source_bc(T, smoke, fuel, source_mask, source_temperature, source_smoke, sou
         source_temperature (device array): source temperature targets
         source_smoke (device array): source smoke targets
         source_fuel (device array): source fuel targets
+        source_velocity_x (device array): source x-velocity targets
+        source_velocity_y (device array): source y-velocity targets
+        source_velocity_z (device array): source z-velocity targets
         threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
-        tuple: updated temperature, smoke and fuel fields
+        tuple: updated velocity, temperature, smoke and fuel fields
     """
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_3D
@@ -136,6 +179,9 @@ def source_bc(T, smoke, fuel, source_mask, source_temperature, source_smoke, sou
     )
 
     _source_bc_kernel[blockspergrid, threadsperblock](
-        T, smoke, fuel, source_mask, source_temperature, source_smoke, source_fuel
+        u, v, w, T, smoke, fuel,
+        source_mask,
+        source_temperature, source_smoke, source_fuel,
+        source_velocity_x, source_velocity_y, source_velocity_z,
     )
-    return T, smoke, fuel
+    return u, v, w, T, smoke, fuel
