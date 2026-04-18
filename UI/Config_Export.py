@@ -195,9 +195,11 @@ def _serialize_force_node(node):
             "y": float(node.fy),
             "z": float(node.fz),
         }
-    elif node.bl_idname == "BLENDERCFD_FORCE_POINT_NODE":
+    elif node.bl_idname == "BLENDERCFD_FORCE_SWIRL_NODE":
         base_data["strength"] = float(node.strength)
-        base_data["position"] = _safe_float_vector(node.position)
+        base_data["origin"] = _safe_float_vector(node.origin)
+        base_data["axis"] = _safe_float_vector(node.axis)
+        base_data["radius"] = float(node.radius)
     elif node.bl_idname == "BLENDERCFD_FORCE_TURBULENCE_NODE":
         base_data["scale"] = float(node.scale)
         base_data["frequency"] = float(node.frequency)

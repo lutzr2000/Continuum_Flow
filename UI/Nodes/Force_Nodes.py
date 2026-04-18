@@ -51,18 +51,20 @@ class BlenderCFDForceConstantNode(bpy.types.Node):
         col.prop(self, "fz")
 
 
-class BlenderCFDForcePointNode(bpy.types.Node):
-    """Node used to define a point force at a given position in space."""
+class BlenderCFDForceSwirlNode(bpy.types.Node):
+    """Node used to define a swirl force around an origin and axis."""
 
-    bl_idname = "BLENDERCFD_FORCE_POINT_NODE"
-    bl_label = "Force Point"
+    bl_idname = "BLENDERCFD_FORCE_SWIRL_NODE"
+    bl_label = "Force Swirl"
     bl_icon = "EMPTY_ARROWS"
     bl_width_default = 220.0
     bl_width_min = 200.0
     bl_width_max = 340.0
 
     strength: FloatProperty(name="Strength", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
-    position: FloatVectorProperty(name="Position", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
+    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
+    axis: FloatVectorProperty(name="Axis", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0))  # type: ignore
+    radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -90,7 +92,9 @@ class BlenderCFDForcePointNode(bpy.types.Node):
         layout.enabled = not is_bake_running(context)
         col = layout.column(align=True)
         col.prop(self, "strength")
-        col.prop(self, "position")
+        col.prop(self, "origin")
+        col.prop(self, "axis")
+        col.prop(self, "radius")
 
 
 class BlenderCFDForceTurbulenceNode(bpy.types.Node):
@@ -141,6 +145,6 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
 
 classes = (
     BlenderCFDForceConstantNode,
-    BlenderCFDForcePointNode,
+    BlenderCFDForceSwirlNode,
     BlenderCFDForceTurbulenceNode,
 )

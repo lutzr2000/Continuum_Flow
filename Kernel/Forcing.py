@@ -2,6 +2,81 @@ import hashlib
 import numpy as np
 
 
+def forcing_constant(force_state, force_cfg, dtype):
+    """
+    Add one spatially uniform constant force node to the static base field.
+
+    The exported config stores the force vector directly as x/y/z components.
+    Multiple constant nodes accumulate linearly.
+    """
+    force_vector = force_cfg.get("force", {})
+    force_state["Fx_base"] += np.asarray(float(force_vector.get("x", 0.0)), dtype=dtype)
+    force_state["Fy_base"] += np.asarray(float(force_vector.get("y", 0.0)), dtype=dtype)
+    force_state["Fz_base"] += np.asarray(float(force_vector.get("z", 0.0)), dtype=dtype)
+
+
+def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
+    """
+    Add one swirl force field to the static base field.
+
+    The swirl rotates around the configured axis through the configured origin.
+    The force is tangential to circles around that axis, zero on the axis
+    itself, grows linearly with perpendicular distance, and is clipped outside
+    the configured radius.
+    """
+    strength = float(force_cfg.get("strength", 0.0))
+    origin = force_cfg.get("origin", (0.0, 0.0, 0.0))
+    axis = force_cfg.get("axis", (0.0, 0.0, 1.0))
+    radius = max(float(force_cfg.get("radius", 0.0)), 0.0)
+    if abs(strength) <= 1e-12 or radius <= 1e-12:
+        return
+
+    axis_vector = np.asarray(axis, dtype=np.float32)
+    axis_norm = float(np.linalg.norm(axis_vector))
+    if axis_norm <= 1e-12:
+        return
+    axis_unit = axis_vector / axis_norm
+
+    origin_x = -0.5 * shape[0] * delta
+    origin_y = -0.5 * shape[1] * delta
+    origin_z = 0.0
+    x = origin_x + np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
+    y = origin_y + np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
+    z = origin_z + np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
+
+    dx = x - float(origin[0])
+    dy = y - float(origin[1])
+    dz = z - float(origin[2])
+
+    axial_projection = (
+        dx * axis_unit[0] +
+        dy * axis_unit[1] +
+        dz * axis_unit[2]
+    )
+    radial_x = dx - axial_projection * axis_unit[0]
+    radial_y = dy - axial_projection * axis_unit[1]
+    radial_z = dz - axial_projection * axis_unit[2]
+    radial_distance = np.sqrt(
+        radial_x * radial_x +
+        radial_y * radial_y +
+        radial_z * radial_z
+    )
+
+    tangential_x = axis_unit[1] * radial_z - axis_unit[2] * radial_y
+    tangential_y = axis_unit[2] * radial_x - axis_unit[0] * radial_z
+    tangential_z = axis_unit[0] * radial_y - axis_unit[1] * radial_x
+
+    active_mask = (radial_distance > 1e-12) & (radial_distance <= radius)
+
+    fx = np.where(active_mask, strength * tangential_x, 0.0)
+    fy = np.where(active_mask, strength * tangential_y, 0.0)
+    fz = np.where(active_mask, strength * tangential_z, 0.0)
+
+    force_state["Fx_base"] += fx.astype(dtype, copy=False)
+    force_state["Fy_base"] += fy.astype(dtype, copy=False)
+    force_state["Fz_base"] += fz.astype(dtype, copy=False)
+
+
 def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     """
     Build the precomputed turbulence basis fields for one force node.
@@ -132,9 +207,9 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         if node_type == "BLENDERCFD_FORCE_TURBULENCE_NODE":
             forcing_turbulence(force_state, shape, delta, force_cfg, dtype)
         elif node_type == "BLENDERCFD_FORCE_CONSTANT_NODE":
-            pass
-        elif node_type == "BLENDERCFD_FORCE_POINT_NODE":
-            pass
+            forcing_constant(force_state, force_cfg, dtype)
+        elif node_type == "BLENDERCFD_FORCE_SWIRL_NODE":
+            forcing_swirl(force_state, shape, delta, force_cfg, dtype)
 
     #------------Pack turbulence arrays-------------------
     turbulence = {}
@@ -174,6 +249,11 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
                     )
                 )
             )
+    static_max = {
+        "x": float(np.max(np.abs(force_state["Fx_base"]))),
+        "y": float(np.max(np.abs(force_state["Fy_base"]))),
+        "z": float(np.max(np.abs(force_state["Fz_base"]))),
+    }
 
     #------------Return-------------------
     return {
@@ -185,8 +265,8 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fz": fz_initial,
         "turbulence": turbulence,
         "max_abs": (
-            dynamic_max["x"],
-            dynamic_max["y"],
-            dynamic_max["z"],
+            static_max["x"] + dynamic_max["x"],
+            static_max["y"] + dynamic_max["y"],
+            static_max["z"] + dynamic_max["z"],
         ),
     }
