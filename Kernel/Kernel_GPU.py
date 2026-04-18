@@ -163,7 +163,8 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
-    u, v, w, T, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference
+    u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
+    dt, point_divergence, delta, rho, expansion_rate, t_reference
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
@@ -173,11 +174,13 @@ def pressure_equation_right_side(
         v (device array): y-velocity field
         w (device array): z-velocity field
         T (device array): temperature field
+        obstacle_mask (device array): boolean obstacle mask used to zero solid vorticity
         b (device array): output array for the pressure equation right hand side
+        omega_x (device array): output array for the x-component of vorticity
+        omega_y (device array): output array for the y-component of vorticity
+        omega_z (device array): output array for the z-component of vorticity
+        omega_magnitude (device array): output array for the vorticity magnitude
         dt (float): timestep size
-        Fx (device array): x-direction body force field
-        Fy (device array): y-direction body force field
-        Fz (device array): z-direction body force field
         point_divergence (device array): authored divergence source field
         delta (float): grid spacing
         rho (float): density
@@ -187,7 +190,17 @@ def pressure_equation_right_side(
     i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
 
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1
+    ):
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
         return
 
     half_inv_delta = 0.5 / delta
@@ -218,16 +231,27 @@ def pressure_equation_right_side(
     )
 
     #------------Artifical thermal divergence-------------------
-    dFx_dx = (Fx[i + 1, j, k] - Fx[i - 1, j, k]) * half_inv_delta
-    dFy_dy = (Fy[i, j + 1, k] - Fy[i, j - 1, k]) * half_inv_delta
-    dFz_dz = (Fz[i, j, k + 1] - Fz[i, j, k - 1]) * half_inv_delta
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
     authored_divergence = point_divergence[i, j, k]
 
     #------------Right hand side-------------------
-    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - rho * (
-        nonlinear + dFx_dx + dFy_dy + dFz_dz
-    )
+    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - rho * nonlinear
+
+    if obstacle_mask[i, j, k]:
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
+        return
+
+    wx = dw_dy - dv_dz
+    wy = du_dz - dw_dx
+    wz = dv_dx - du_dy
+
+    omega_x[i, j, k] = wx
+    omega_y[i, j, k] = wy
+    omega_z[i, j, k] = wz
+    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
 
 @cuda.jit(cache=True)
@@ -299,7 +323,8 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
 
 def pressure_poisson(
-    u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference,
+    u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
+    dt, point_divergence, delta, rho, expansion_rate, t_reference,
     max_iter=10, threadsperblock_3d=None
 ):
     """
@@ -312,12 +337,14 @@ def pressure_poisson(
         w (device array): z-velocity field
         p (device array): pressure field
         T (device array): temperature field
+        obstacle_mask (device array): boolean obstacle mask used to zero solid vorticity
         p_work (device array): work array for the pressure iteration
         b (device array): work array for the pressure equation right hand side
+        omega_x (device array): work array for the x-component of vorticity
+        omega_y (device array): work array for the y-component of vorticity
+        omega_z (device array): work array for the z-component of vorticity
+        omega_magnitude (device array): work array for the vorticity magnitude
         dt (float): timestep size
-        Fx (device array): x-direction body force field
-        Fy (device array): y-direction body force field
-        Fz (device array): z-direction body force field
         point_divergence (device array): authored divergence source field
         delta (float): grid spacing
         rho (float): density
@@ -336,7 +363,8 @@ def pressure_poisson(
     )
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
-        u, v, w, T, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference
+        u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
+        dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
 
     p_old = p
@@ -419,65 +447,6 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
 
     g = 9.81
     Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
-
-
-@cuda.jit(cache=True)
-def compute_vorticity_field(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta):
-    """
-    computes the vorticity field and its magnitude on the GPU.
-
-    Each thread evaluates the curl of the velocity field in one interior fluid
-    cell with central differences. The three vorticity components are written
-    to dedicated work arrays so the confinement step can reuse them without
-    recomputing derivatives, and the scalar magnitude field is stored for the
-    subsequent gradient evaluation.
-
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        obstacle_mask (device array): boolean obstacle mask used to skip solids
-        omega_x (device array): output array for the x-component of vorticity
-        omega_y (device array): output array for the y-component of vorticity
-        omega_z (device array): output array for the z-component of vorticity
-        omega_magnitude (device array): output array for the vorticity magnitude
-        delta (float): grid spacing
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if (
-        i < 1 or j < 1 or k < 1 or
-        i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
-        obstacle_mask[i, j, k]
-    ):
-        omega_x[i, j, k] = 0.0
-        omega_y[i, j, k] = 0.0
-        omega_z[i, j, k] = 0.0
-        omega_magnitude[i, j, k] = 0.0
-        return
-
-    half_inv_delta = 0.5 / delta
-
-    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
-    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
-    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
-    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
-    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
-    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
-
-    wx = dw_dy - dv_dz
-    wy = du_dz - dw_dx
-    wz = dv_dx - du_dy
-
-    omega_x[i, j, k] = wx
-    omega_y[i, j, k] = wy
-    omega_z[i, j, k] = wz
-    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
-
 
 @cuda.jit(cache=True)
 def apply_vorticity_confinement(
@@ -689,7 +658,6 @@ def main(config=None):
     OUTPUT_FORWARDER_COUNT = simulation_params["OUTPUT_FORWARDER_COUNT"]
     OUTPATH = simulation_params["OUTPATH"]
     OUTPUT_FIELD_CONFIG = simulation_params["OUTPUT_FIELD_CONFIG"]
-    OUTPUT_VARIABLES = simulation_params["OUTPUT_VARIABLES"]
     OUTPUT_BUFFER_VARIABLES = simulation_params["OUTPUT_BUFFER_VARIABLES"]
     HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
     BC_CONFIG = simulation_params["BC_CONFIG"]
@@ -882,28 +850,25 @@ def main(config=None):
         cuda.synchronize()
         section_timings["Forces"] += perf_counter() - section_start
 
+        #------------Pressure-------------------
+        section_start = perf_counter()
+        p = pressure_poisson(
+            u, v, w, p, T, obstacle_mask, pressure_work, pressure_rhs,
+            vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
+            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
+            gpu_constants["T_REFERENCE"], MAX_ITER
+        )
+        cuda.synchronize()
+        section_timings["Pressure"] += perf_counter() - section_start
+
         if gpu_constants["VORTICITY"] > 0.0:
             section_start = perf_counter()
-            compute_vorticity_field[blockspergrid_3d, THREADS_PER_BLOCK_3D](
-                u, v, w, obstacle_mask, vorticity_x, vorticity_y, vorticity_z,
-                vorticity_magnitude, gpu_constants["DELTA"]
-            )
             apply_vorticity_confinement[blockspergrid_3d, THREADS_PER_BLOCK_3D](
                 obstacle_mask, vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude,
                 Fx, Fy, Fz, gpu_constants["DELTA"], gpu_constants["VORTICITY"]
             )
             cuda.synchronize()
             section_timings["Vorticity"] += perf_counter() - section_start
-
-        #------------Pressure-------------------
-        section_start = perf_counter()
-        p = pressure_poisson(
-            u, v, w, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz, point_divergence,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
-            gpu_constants["T_REFERENCE"], MAX_ITER
-        )
-        cuda.synchronize()
-        section_timings["Pressure"] += perf_counter() - section_start
 
         #------------Velocity-------------------
         section_start = perf_counter()

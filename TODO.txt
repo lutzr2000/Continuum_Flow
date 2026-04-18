@@ -3,7 +3,7 @@ TODO
 General:
 Can i split functions in Kernel und still tell cuda.jit to compile as one? This could make the code a lot more readable?
 Intercept solver divergence and stop the simulation
-Add a limiter vor velocity (maybe also acceleration?) to make the sovler more stable?
+Add a limiter for velocity (maybe also acceleration?) to make the sovler more stable?
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
@@ -11,10 +11,8 @@ Make obstacles and sources animatable
 Make some sliders animatable
 
 Performance:
-A large part of vorticity compute is very similar to the compute of pressure right hand side, pull these together to avoid double compute
-Is diffusion really necesarry? Especially for scalar fields?
 Modules that are disconnected should not be computed at all, same for parts where a relevant constant is equal to zero
-
+Improve turbulent force performance
 
 Bugs:
 Fix flow speed up when source mask intersects domain BC (probably conflict with BC)
