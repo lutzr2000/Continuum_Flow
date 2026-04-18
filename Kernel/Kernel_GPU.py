@@ -648,22 +648,6 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     smoke_convection = dt_over_delta * (uijk * smoke_dx + vijk * smoke_dy + wijk * smoke_dz)
     fuel_convection = dt_over_delta * (uijk * fuel_dx + vijk * fuel_dy + wijk * fuel_dz)
 
-    temp_diffusion = temp_diffusion_coeff * (
-        (T_xp - 2.0 * T_center + T_xm) +
-        (T_yp - 2.0 * T_center + T_ym) +
-        (T_zp - 2.0 * T_center + T_zm)
-    )
-    smoke_diffusion = smoke_diffusion_coeff * (
-        (smoke_xp - 2.0 * smoke_center + smoke_xm) +
-        (smoke_yp - 2.0 * smoke_center + smoke_ym) +
-        (smoke_zp - 2.0 * smoke_center + smoke_zm)
-    )
-    fuel_diffusion = fuel_diffusion_coeff * (
-        (fuel_xp - 2.0 * fuel_center + fuel_xm) +
-        (fuel_yp - 2.0 * fuel_center + fuel_ym) +
-        (fuel_zp - 2.0 * fuel_center + fuel_zm)
-    )
-
     if T_center > fuel_ignition_temperature:
         fuel_source = -fuel_burn_rate * fuel_center
     else:
@@ -675,9 +659,9 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     )
     smoke_source = smoke_production_rate * (-fuel_source) - smoke_dissipation_rate * smoke_center
 
-    T_out[i, j, k] = T_center - temp_convection + temp_diffusion + dt * temperature_source
-    smoke_out[i, j, k] = smoke_center - smoke_convection + smoke_diffusion + dt * smoke_source
-    fuel_out[i, j, k] = fuel_center - fuel_convection + fuel_diffusion + dt * fuel_source
+    T_out[i, j, k] = T_center - temp_convection + dt * temperature_source
+    smoke_out[i, j, k] = smoke_center - smoke_convection + dt * smoke_source
+    fuel_out[i, j, k] = fuel_center - fuel_convection + dt * fuel_source
     flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
 
 
