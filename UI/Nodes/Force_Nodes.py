@@ -97,6 +97,50 @@ class BlenderCFDForceSwirlNode(bpy.types.Node):
         col.prop(self, "radius")
 
 
+class BlenderCFDForcePointNode(bpy.types.Node):
+    """Node used to define a smoothed divergence source around one origin."""
+
+    bl_idname = "BLENDERCFD_FORCE_POINT_NODE"
+    bl_label = "Force Point"
+    bl_icon = "EMPTY_ARROWS"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 340.0
+
+    strength: FloatProperty(name="Strength", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
+    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
+    falloff: FloatProperty(name="Falloff", default=1.0, min=0.000001, unit="LENGTH")  # type: ignore
+
+    @classmethod
+    def poll(cls, ntree):
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _ensure_output_socket(self):
+        socket = self.outputs.get("Force")
+        if socket is None:
+            socket = self.outputs.new(BlenderCFDForceSocket.bl_idname, "Force")
+        return socket
+
+    def _sync_output_socket(self):
+        self._ensure_output_socket()
+
+    def init(self, context):
+        self._sync_output_socket()
+
+    def copy(self, node):
+        self._sync_output_socket()
+
+    def update(self):
+        self._sync_output_socket()
+
+    def draw_buttons(self, context, layout):
+        layout.enabled = not is_bake_running(context)
+        col = layout.column(align=True)
+        col.prop(self, "strength")
+        col.prop(self, "origin")
+        col.prop(self, "falloff")
+
+
 class BlenderCFDForceTurbulenceNode(bpy.types.Node):
     """Node used to define a procedural turbulence force field."""
 
@@ -146,5 +190,6 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
 classes = (
     BlenderCFDForceConstantNode,
     BlenderCFDForceSwirlNode,
+    BlenderCFDForcePointNode,
     BlenderCFDForceTurbulenceNode,
 )

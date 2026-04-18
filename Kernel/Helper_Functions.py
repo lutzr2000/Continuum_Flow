@@ -191,6 +191,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     Fx = np.asarray(force_field_data["Fx"], dtype=precision_dtype)
     Fy = np.asarray(force_field_data["Fy"], dtype=precision_dtype)
     Fz = np.asarray(force_field_data["Fz"], dtype=precision_dtype)
+    point_divergence = np.asarray(force_field_data["point_divergence"], dtype=precision_dtype)
     turbulence_data = force_field_data["turbulence"]
 
     obstacle_mask_host = np.asarray(simulation_params["obstacle_mask"])
@@ -229,6 +230,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "Fx": cuda.to_device(Fx),
         "Fy": cuda.to_device(Fy),
         "Fz": cuda.to_device(Fz),
+        "point_divergence": cuda.to_device(point_divergence),
         "Fx_base": cuda.to_device(Fx_base),
         "Fy_base": cuda.to_device(Fy_base),
         "Fz_base": cuda.to_device(Fz_base),

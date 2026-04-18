@@ -7,3 +7,6 @@ Make sure only proper connections work
 Animated Obstacles and Source
 Animated constants???
 Force nodes draw in behaviour
+Make animatable sliders
+Intercept solver divergence
+Make solver more stable (limiter?)

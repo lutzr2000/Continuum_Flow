@@ -162,7 +162,9 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     wn[i, j, k] = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
 
 @cuda.jit(cache=True)
-def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expansion_rate, t_reference):
+def pressure_equation_right_side(
+    u, v, w, T, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference
+):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
 
@@ -176,6 +178,7 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expa
         Fx (device array): x-direction body force field
         Fy (device array): y-direction body force field
         Fz (device array): z-direction body force field
+        point_divergence (device array): authored divergence source field
         delta (float): grid spacing
         rho (float): density
         expansion_rate (float): thermal expansion coupling
@@ -219,9 +222,10 @@ def pressure_equation_right_side(u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expa
     dFy_dy = (Fy[i, j + 1, k] - Fy[i, j - 1, k]) * half_inv_delta
     dFz_dz = (Fz[i, j, k + 1] - Fz[i, j, k - 1]) * half_inv_delta
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
+    authored_divergence = point_divergence[i, j, k]
 
     #------------Right hand side-------------------
-    b[i, j, k] = rho_over_dt * (divergence - thermal_divergence) - rho * (
+    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - rho * (
         nonlinear + dFx_dx + dFy_dy + dFz_dz
     )
 
@@ -294,8 +298,10 @@ def _pressure_poisson_apply_neumann_bcs(p):
         p[i, j, k] = p[i, j, nz - 2]
 
 
-def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expansion_rate, t_reference,
-                     max_iter=10, threadsperblock_3d=None):
+def pressure_poisson(
+    u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference,
+    max_iter=10, threadsperblock_3d=None
+):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
     Jacobi iterations and Neumann boundary conditions.
@@ -312,6 +318,7 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
         Fx (device array): x-direction body force field
         Fy (device array): y-direction body force field
         Fz (device array): z-direction body force field
+        point_divergence (device array): authored divergence source field
         delta (float): grid spacing
         rho (float): density
         expansion_rate (float): thermal expansion coupling
@@ -329,7 +336,7 @@ def pressure_poisson(u, v, w, p, T, p_work, b, dt, Fx, Fy, Fz, delta, rho, expan
     )
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
-        u, v, w, T, b, dt, Fx, Fy, Fz, delta, rho, expansion_rate, t_reference
+        u, v, w, T, b, dt, Fx, Fy, Fz, point_divergence, delta, rho, expansion_rate, t_reference
     )
 
     p_old = p
@@ -753,6 +760,7 @@ def main(config=None):
     Fx_base = device_state["Fx_base"]
     Fy_base = device_state["Fy_base"]
     Fz_base = device_state["Fz_base"]
+    point_divergence = device_state["point_divergence"]
     turbulence_Fx_a = device_state["turbulence_Fx_a"]
     turbulence_Fy_a = device_state["turbulence_Fy_a"]
     turbulence_Fz_a = device_state["turbulence_Fz_a"]
@@ -896,7 +904,7 @@ def main(config=None):
         #------------Pressure-------------------
         section_start = perf_counter()
         p = pressure_poisson(
-            u, v, w, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz,
+            u, v, w, p, T, pressure_work, pressure_rhs, dt, Fx, Fy, Fz, point_divergence,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
             gpu_constants["T_REFERENCE"], MAX_ITER
         )

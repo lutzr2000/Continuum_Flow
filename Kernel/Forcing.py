@@ -15,6 +15,44 @@ def forcing_constant(force_state, force_cfg, dtype):
     force_state["Fz_base"] += np.asarray(float(force_vector.get("z", 0.0)), dtype=dtype)
 
 
+def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
+    """
+    Add one smoothed point divergence source to the pressure RHS helper field.
+
+    The source is a scalar divergence profile centered at `origin` and shaped
+    by a Gaussian falloff length so it stays smooth around the source point.
+    The profile is normalised over the discrete cell volumes so `strength`
+    acts like an integrated source rate and remains stable when the grid
+    resolution changes. Positive strength expands locally, negative strength
+    contracts locally.
+    """
+    strength = float(force_cfg.get("strength", 0.0))
+    origin = force_cfg.get("origin", (0.0, 0.0, 0.0))
+    falloff = max(float(force_cfg.get("falloff", 1.0)), 1.0e-6)
+    if abs(strength) <= 1.0e-12:
+        return
+
+    origin_x = -0.5 * shape[0] * delta
+    origin_y = -0.5 * shape[1] * delta
+    origin_z = 0.0
+    x = origin_x + np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
+    y = origin_y + np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
+    z = origin_z + np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
+
+    dx = x - float(origin[0])
+    dy = y - float(origin[1])
+    dz = z - float(origin[2])
+    distance2 = dx * dx + dy * dy + dz * dz
+    weight = np.exp(-distance2 / (falloff * falloff))
+    weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta ** 3)
+    if weight_integral <= 1.0e-12:
+        return
+
+    # Convert the user strength into a resolution-independent divergence rate density.
+    divergence_rate = (strength / weight_integral) * weight
+    force_state["point_divergence"] += divergence_rate.astype(dtype, copy=False)
+
+
 def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
     """
     Add one swirl force field to the static base field.
@@ -190,6 +228,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fx_base": np.zeros(shape, dtype=dtype),
         "Fy_base": np.zeros(shape, dtype=dtype),
         "Fz_base": np.zeros(shape, dtype=dtype),
+        "point_divergence": np.zeros(shape, dtype=dtype),
         "turbulence": {
             "Fx_a": [],
             "Fy_a": [],
@@ -210,6 +249,8 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
             forcing_constant(force_state, force_cfg, dtype)
         elif node_type == "BLENDERCFD_FORCE_SWIRL_NODE":
             forcing_swirl(force_state, shape, delta, force_cfg, dtype)
+        elif node_type == "BLENDERCFD_FORCE_POINT_NODE":
+            forcing_point_divergence(force_state, shape, delta, force_cfg, dtype)
 
     #------------Pack turbulence arrays-------------------
     turbulence = {}
@@ -263,6 +304,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fx": fx_initial,
         "Fy": fy_initial,
         "Fz": fz_initial,
+        "point_divergence": force_state["point_divergence"],
         "turbulence": turbulence,
         "max_abs": (
             static_max["x"] + dynamic_max["x"],
