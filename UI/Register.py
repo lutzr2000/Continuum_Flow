@@ -132,6 +132,10 @@ def register():
         except Exception:
             pass
         bpy.utils.register_class(cls)
+    try:
+        viewer_module.enable_force_preview()
+    except Exception:
+        pass
 
     for cls in config_module.classes:
         try:
@@ -155,6 +159,10 @@ def unregister():
 
     try:
         viewer_module.disable_domain_preview()
+    except Exception:
+        pass
+    try:
+        viewer_module.disable_force_preview()
     except Exception:
         pass
 

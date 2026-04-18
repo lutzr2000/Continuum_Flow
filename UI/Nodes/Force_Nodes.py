@@ -109,7 +109,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
 
     strength: FloatProperty(name="Strength", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
-    falloff: FloatProperty(name="Falloff", default=1.0, min=0.000001, unit="LENGTH")  # type: ignore
+    radius: FloatProperty(name="Radius", default=1.0, min=0.000001, unit="LENGTH")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -138,7 +138,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
         col = layout.column(align=True)
         col.prop(self, "strength")
         col.prop(self, "origin")
-        col.prop(self, "falloff")
+        col.prop(self, "radius")
 
 
 class BlenderCFDForceTurbulenceNode(bpy.types.Node):

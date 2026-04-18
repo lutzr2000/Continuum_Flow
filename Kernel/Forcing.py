@@ -20,7 +20,7 @@ def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
     Add one smoothed point divergence source to the pressure RHS helper field.
 
     The source is a scalar divergence profile centered at `origin` and shaped
-    by a Gaussian falloff length so it stays smooth around the source point.
+    by a Gaussian radius so it stays smooth around the source point.
     The profile is normalised over the discrete cell volumes so `strength`
     acts like an integrated source rate and remains stable when the grid
     resolution changes. Positive strength expands locally, negative strength
@@ -28,7 +28,7 @@ def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
     """
     strength = float(force_cfg.get("strength", 0.0))
     origin = force_cfg.get("origin", (0.0, 0.0, 0.0))
-    falloff = max(float(force_cfg.get("falloff", 1.0)), 1.0e-6)
+    radius = max(float(force_cfg.get("radius", 1.0)), 1.0e-6)
     if abs(strength) <= 1.0e-12:
         return
 
@@ -43,7 +43,7 @@ def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
     dy = y - float(origin[1])
     dz = z - float(origin[2])
     distance2 = dx * dx + dy * dy + dz * dz
-    weight = np.exp(-distance2 / (falloff * falloff))
+    weight = np.exp(-distance2 / (radius * radius))
     weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta ** 3)
     if weight_integral <= 1.0e-12:
         return
