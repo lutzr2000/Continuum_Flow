@@ -14,6 +14,7 @@ THREADS_PER_BLOCK_2D = (4, 4)
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
+SPARSE_MASK_FIELDS = ("smoke", "flame")
 
 
 def emit_progress(percent, time_value=None):
@@ -53,24 +54,63 @@ def build_boundary_config(domain_cfg):
     return bc_config, inflow_velocity
 
 
-def collect_output_variables(output_cfg):
-    """Translate exported output field toggles to kernel field identifiers."""
-    field_mapping = {
-        "u": "u",
-        "v": "v",
-        "w": "w",
-        "p": "p",
-        "t": "T",
-        "smoke": "smoke",
-        "fuel": "fuel",
-        "flame": "flame",
+def _field_option_value(fields_cfg, key, legacy_key=None):
+    """Read one output-field option from new nested config or legacy bool config."""
+    entry = fields_cfg.get(key)
+    if isinstance(entry, dict):
+        return {
+            "enabled": bool(entry.get("enabled", False)),
+            "sparse": bool(entry.get("sparse", False)),
+        }
+
+    if legacy_key is None:
+        legacy_key = key
+    return {
+        "enabled": bool(fields_cfg.get(legacy_key, False)),
+        "sparse": False,
     }
 
-    enabled_fields = []
-    for field_name, is_enabled in output_cfg.get("fields", {}).items():
-        if is_enabled and field_name in field_mapping:
-            enabled_fields.append(field_mapping[field_name])
-    return enabled_fields
+
+def build_output_field_config(output_cfg):
+    """Translate output settings to concrete kernel field export rules."""
+    fields_cfg = output_cfg.get("fields", {})
+    velocity_cfg = _field_option_value(fields_cfg, "velocity")
+    if "velocity" not in fields_cfg:
+        velocity_cfg = {
+            "enabled": bool(fields_cfg.get("u", False) or fields_cfg.get("v", False) or fields_cfg.get("w", False)),
+            "sparse": False,
+        }
+    pressure_cfg = _field_option_value(fields_cfg, "pressure", "p")
+    temperature_cfg = _field_option_value(fields_cfg, "temperature", "t")
+    smoke_cfg = _field_option_value(fields_cfg, "smoke")
+    fuel_cfg = _field_option_value(fields_cfg, "fuel")
+    flame_cfg = _field_option_value(fields_cfg, "flame")
+
+    return {
+        "u": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
+        "v": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
+        "w": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
+        "p": {"export": pressure_cfg["enabled"], "sparse": pressure_cfg["sparse"]},
+        "T": {"export": temperature_cfg["enabled"], "sparse": temperature_cfg["sparse"]},
+        "smoke": {"export": smoke_cfg["enabled"], "sparse": smoke_cfg["sparse"]},
+        "fuel": {"export": fuel_cfg["enabled"], "sparse": fuel_cfg["sparse"]},
+        "flame": {"export": flame_cfg["enabled"], "sparse": flame_cfg["sparse"]},
+    }
+
+
+def collect_output_variables(output_field_config):
+    """Return the concrete field names that should be written to the VDB."""
+    return [field_name for field_name, cfg in output_field_config.items() if cfg.get("export")]
+
+
+def collect_buffer_variables(output_field_config):
+    """Return all fields that must be copied to host buffers for one output frame."""
+    buffer_fields = list(collect_output_variables(output_field_config))
+    if any(cfg.get("export") and cfg.get("sparse") for cfg in output_field_config.values()):
+        for mask_field in SPARSE_MASK_FIELDS:
+            if mask_field not in buffer_fields:
+                buffer_fields.append(mask_field)
+    return buffer_fields
 
 
 def build_output_performance_config(output_cfg):
@@ -113,6 +153,7 @@ def apply_config(config):
     source_temperature_max = float(np.max(source_data["temperature"]))
     output_performance = build_output_performance_config(output_cfg)
     output_dtype = resolve_output_dtype(output_cfg)
+    output_field_config = build_output_field_config(output_cfg)
 
     BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
     BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
@@ -153,7 +194,9 @@ def apply_config(config):
         "WRITE_QUEUE_SIZE": output_performance["buffer_count"],
         "OUTPATH": output_cfg.get("output_path", ""),
         "OUTPUT_DTYPE": output_dtype,
-        "OUTPUT_VARIABLES": collect_output_variables(output_cfg),
+        "OUTPUT_FIELD_CONFIG": output_field_config,
+        "OUTPUT_VARIABLES": collect_output_variables(output_field_config),
+        "OUTPUT_BUFFER_VARIABLES": collect_buffer_variables(output_field_config),
         "HOST_VDB_WRITER": host_vdb_writer,
         "BC_CONFIG": bc_config,
         "U_INFLOW": inflow_velocity[0],

@@ -1,4 +1,3 @@
-Temperature currently can not be saved sparsly because non zero, but easily fixable? (add option to save all data sparsly)
 User should be able to sepcify frame range to bake?
 Deactivate modules when nothing is connected
 Make sure only proper connections work
@@ -7,3 +6,4 @@ Animated constants???
 Make animatable sliders
 Intercept solver divergence
 Make solver more stable (limiter?)
+Delete cache subfolders that are empty

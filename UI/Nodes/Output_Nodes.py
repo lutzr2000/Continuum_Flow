@@ -421,14 +421,18 @@ class BlenderCFDOutputNode(bpy.types.Node):
         ),
         default="float16",
     )
-    export_u: BoolProperty(name="Velocity x", default=True)  # type: ignore
-    export_v: BoolProperty(name="Velocity y", default=True)  # type: ignore
-    export_w: BoolProperty(name="Velocity z", default=True)  # type: ignore
-    export_p: BoolProperty(name="Pressure", default=True)  # type: ignore
-    export_t: BoolProperty(name="Temperature", default=True)  # type: ignore
+    export_velocity: BoolProperty(name="Velocity", default=False)  # type: ignore
+    sparse_velocity: BoolProperty(name="Sparse", default=True)  # type: ignore
+    export_p: BoolProperty(name="Pressure", default=False)  # type: ignore
+    sparse_p: BoolProperty(name="Sparse", default=True)  # type: ignore
+    export_t: BoolProperty(name="Temperature", default=False)  # type: ignore
+    sparse_t: BoolProperty(name="Sparse", default=True)  # type: ignore
     export_smoke: BoolProperty(name="Smoke", default=True)  # type: ignore
-    export_fuel: BoolProperty(name="Fuel", default=True)  # type: ignore
+    sparse_smoke: BoolProperty(name="Sparse", default=True)  # type: ignore
+    export_fuel: BoolProperty(name="Fuel", default=False)  # type: ignore
+    sparse_fuel: BoolProperty(name="Sparse", default=True)  # type: ignore
     export_flame: BoolProperty(name="Flame", default=True)  # type: ignore
+    sparse_flame: BoolProperty(name="Sparse", default=True)  # type: ignore
     output_path: StringProperty(name="Path", default="", subtype="DIR_PATH")  # type: ignore
 
     @classmethod
@@ -465,6 +469,13 @@ class BlenderCFDOutputNode(bpy.types.Node):
     def update(self):
         self._sync_input_socket()
 
+    def _draw_field_row(self, layout, export_attr, sparse_attr):
+        row = layout.row(align=True)
+        row.prop(self, export_attr)
+        sparse_row = row.row(align=True)
+        sparse_row.enabled = bool(getattr(self, export_attr))
+        sparse_row.prop(self, sparse_attr, text="Sparse")
+
     def draw_buttons(self, context, layout):
         layout.enabled = not is_bake_running(context)
         layout.prop(self, "fps")
@@ -473,14 +484,12 @@ class BlenderCFDOutputNode(bpy.types.Node):
         fields_box = layout.box()
         fields_box.label(text="Fields")
         fields_col = fields_box.column(align=True)
-        fields_col.prop(self, "export_u")
-        fields_col.prop(self, "export_v")
-        fields_col.prop(self, "export_w")
-        fields_col.prop(self, "export_p")
-        fields_col.prop(self, "export_t")
-        fields_col.prop(self, "export_smoke")
-        fields_col.prop(self, "export_fuel")
-        fields_col.prop(self, "export_flame")
+        self._draw_field_row(fields_col, "export_velocity", "sparse_velocity")
+        self._draw_field_row(fields_col, "export_p", "sparse_p")
+        self._draw_field_row(fields_col, "export_t", "sparse_t")
+        self._draw_field_row(fields_col, "export_smoke", "sparse_smoke")
+        self._draw_field_row(fields_col, "export_fuel", "sparse_fuel")
+        self._draw_field_row(fields_col, "export_flame", "sparse_flame")
         layout.prop(self, "output_path")
         layout.separator()
         resolved_output_path = bpy.path.abspath(self.output_path) if self.output_path else ""

@@ -703,7 +703,9 @@ def main(config=None):
     WRITE_QUEUE_SIZE = simulation_params["WRITE_QUEUE_SIZE"]
     OUTPUT_FORWARDER_COUNT = simulation_params["OUTPUT_FORWARDER_COUNT"]
     OUTPATH = simulation_params["OUTPATH"]
+    OUTPUT_FIELD_CONFIG = simulation_params["OUTPUT_FIELD_CONFIG"]
     OUTPUT_VARIABLES = simulation_params["OUTPUT_VARIABLES"]
+    OUTPUT_BUFFER_VARIABLES = simulation_params["OUTPUT_BUFFER_VARIABLES"]
     HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
     BC_CONFIG = simulation_params["BC_CONFIG"]
     U_INFLOW = simulation_params["U_INFLOW"]
@@ -855,8 +857,8 @@ def main(config=None):
     section_start = perf_counter()
     write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
         OUTPATH,
-        OUTPUT_VARIABLES,
-        Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES),
+        OUTPUT_BUFFER_VARIABLES,
+        Helper_Functions.select_fields(device_fields, OUTPUT_BUFFER_VARIABLES),
         WRITE_QUEUE_SIZE,
         OUTPUT_FORWARDER_COUNT,
         DELTA,
@@ -993,10 +995,11 @@ def main(config=None):
             Output_Functions.enqueue_device_output(
                 write_queue,
                 buffer_pool,
-                OUTPUT_VARIABLES,
-                Helper_Functions.select_fields(device_fields, OUTPUT_VARIABLES),
+                OUTPUT_BUFFER_VARIABLES,
+                Helper_Functions.select_fields(device_fields, OUTPUT_BUFFER_VARIABLES),
                 output_index,
                 t,
+                OUTPUT_FIELD_CONFIG,
             )
             section_timings["Output"] += perf_counter() - section_start
 

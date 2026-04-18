@@ -222,14 +222,30 @@ def _serialize_output_node(node):
         "fps": int(node.fps),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
-            "u": bool(node.export_u),
-            "v": bool(node.export_v),
-            "w": bool(node.export_w),
-            "p": bool(node.export_p),
-            "t": bool(node.export_t),
-            "smoke": bool(node.export_smoke),
-            "fuel": bool(node.export_fuel),
-            "flame": bool(node.export_flame),
+            "velocity": {
+                "enabled": bool(getattr(node, "export_velocity", True)),
+                "sparse": bool(getattr(node, "sparse_velocity", False)),
+            },
+            "pressure": {
+                "enabled": bool(node.export_p),
+                "sparse": bool(getattr(node, "sparse_p", False)),
+            },
+            "temperature": {
+                "enabled": bool(node.export_t),
+                "sparse": bool(getattr(node, "sparse_t", False)),
+            },
+            "smoke": {
+                "enabled": bool(node.export_smoke),
+                "sparse": bool(getattr(node, "sparse_smoke", False)),
+            },
+            "fuel": {
+                "enabled": bool(node.export_fuel),
+                "sparse": bool(getattr(node, "sparse_fuel", False)),
+            },
+            "flame": {
+                "enabled": bool(node.export_flame),
+                "sparse": bool(getattr(node, "sparse_flame", False)),
+            },
         },
         "performance": {
             "writer_processes": int(getattr(node, "writer_processes", 4)),

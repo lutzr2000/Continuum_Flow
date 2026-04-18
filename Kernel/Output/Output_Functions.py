@@ -10,7 +10,7 @@ import numpy as np
 
 def setup_output(
     outpath,
-    output_variables,
+    buffered_variables,
     template_fields,
     queue_size,
     forwarder_count,
@@ -23,7 +23,7 @@ def setup_output(
 
     Args:
         outpath (str): output directory for vdb files
-        output_variables (list[str]): names of the fields that should be written
+        buffered_variables (list[str]): names of the fields that should be copied into shared memory
         template_fields (dict): field names mapped to CUDA device arrays
         queue_size (int): number of reusable buffer sets
         forwarder_count (int): number of host-writer forwarder threads
@@ -45,7 +45,7 @@ def setup_output(
 
     for _ in range(queue_size):
         fields = {}
-        for variable_name in output_variables:
+        for variable_name in buffered_variables:
             template_array = template_fields[variable_name]
             shape = tuple(template_array.shape)
             source_dtype = np.dtype(template_array.dtype)
@@ -71,7 +71,7 @@ def setup_output(
                 buffer_pool,
                 outpath,
                 delta,
-                output_variables,
+                buffered_variables,
                 host_writer_endpoint,
             ),
             daemon=True,
@@ -82,14 +82,22 @@ def setup_output(
     return write_queue, buffer_pool, writer_threads, shared_memory_blocks
 
 
-def enqueue_device_output(write_queue, buffer_pool, output_variables, source_device_fields, output_index, time_value):
+def enqueue_device_output(
+    write_queue,
+    buffer_pool,
+    buffered_variables,
+    source_device_fields,
+    output_index,
+    time_value,
+    output_field_config,
+):
     """
     copies one output frame directly from CUDA device arrays into shared memory.
 
     Args:
         write_queue (queue.Queue): queue with pending output jobs
         buffer_pool (queue.Queue): queue with reusable shared-memory buffers
-        output_variables (list[str]): names of the fields that should be written
+        buffered_variables (list[str]): names of the fields that should be copied into shared memory
         source_device_fields (dict): field names mapped to CUDA device arrays
         output_index (int): output frame index
         time_value (float): physical simulation time
@@ -97,7 +105,7 @@ def enqueue_device_output(write_queue, buffer_pool, output_variables, source_dev
         None
     """
     fields = buffer_pool.get()
-    for variable_name in output_variables:
+    for variable_name in buffered_variables:
         field_info = fields[variable_name]
         transfer_array = field_info.get('transfer_array')
         if transfer_array is None:
@@ -105,7 +113,7 @@ def enqueue_device_output(write_queue, buffer_pool, output_variables, source_dev
         else:
             source_device_fields[variable_name].copy_to_host(transfer_array)
             np.copyto(field_info['array'], transfer_array, casting='same_kind')
-    write_queue.put((int(output_index), float(time_value), fields))
+    write_queue.put((int(output_index), float(time_value), fields, output_field_config))
 
 
 def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
@@ -139,22 +147,27 @@ def _domain_origin_from_shape(shape, delta):
     )
 
 
-def create_writer_payload(fields, output_variables, output_path, time_value, delta):
+def create_writer_payload(fields, output_field_config, output_path, time_value, delta):
     """
     builds the metadata package that is sent to Blender's host VDB writer.
 
     Args:
         fields (dict): output buffer with shared-memory numpy views
-        output_variables (list[str]): names of the fields that should be written
+        output_field_config (dict): concrete export settings for the buffered fields
         output_path (str): full path of the target vdb file
         time_value (float): physical simulation time
         delta (float): grid spacing
     Returns:
         dict: serializable writer payload
     """
+    output_variables = [
+        variable_name
+        for variable_name, field_cfg in output_field_config.items()
+        if field_cfg.get('export')
+    ]
     first_field_shape = fields[output_variables[0]]['shape'] if output_variables else (0, 0, 0)
 
-    return {
+    payload = {
         'output_path': output_path,
         'time': float(time_value),
         'delta': float(delta),
@@ -167,10 +180,24 @@ def create_writer_payload(fields, output_variables, output_path, time_value, del
                 'shape': fields[variable_name]['shape'],
                 'dtype': fields[variable_name]['dtype'],
                 'shm_name': fields[variable_name]['shm_name'],
+                'sparse': bool(output_field_config[variable_name].get('sparse', False)),
             }
             for variable_name in output_variables
         },
     }
+
+    if any(field_info.get('sparse', False) for field_info in payload['fields'].values()):
+        payload['sparse_mask_fields'] = {
+            variable_name: {
+                'shape': fields[variable_name]['shape'],
+                'dtype': fields[variable_name]['dtype'],
+                'shm_name': fields[variable_name]['shm_name'],
+            }
+            for variable_name in ('smoke', 'flame')
+            if variable_name in fields
+        }
+
+    return payload
 
 
 def _send_payload_to_host_writer(writer_file, writer_payload):
@@ -191,7 +218,7 @@ def writer_thread_func(
     buffer_pool,
     outpath,
     delta,
-    output_variables,
+    buffered_variables,
     host_writer_endpoint,
 ):
     """
@@ -202,7 +229,7 @@ def writer_thread_func(
         buffer_pool (queue.Queue): queue with reusable shared-memory buffers
         outpath (str): output directory for vdb files
         delta (float): grid spacing
-        output_variables (list[str]): names of the fields that should be written
+        buffered_variables (list[str]): names of the fields that should be copied into shared memory
         host_writer_endpoint (dict): host/port for Blender's in-process writer
     Returns:
         None
@@ -224,9 +251,9 @@ def writer_thread_func(
                 write_queue.task_done()
                 break
 
-            output_idx, time_value, fields = item
+            output_idx, time_value, fields, output_field_config = item
             vdb_output_path = os.path.join(outpath, f'frame_{output_idx:06d}.vdb')
-            writer_payload = create_writer_payload(fields, output_variables, vdb_output_path, time_value, delta)
+            writer_payload = create_writer_payload(fields, output_field_config, vdb_output_path, time_value, delta)
 
             try:
                 _send_payload_to_host_writer(writer_file, writer_payload)
