@@ -510,17 +510,15 @@ def apply_vorticity_confinement(
 
 @cuda.jit(cache=True)
 def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
-                         delta, nu_temperature, nu_smoke, nu_fuel,
-                         temperature_dissipation_rate, temperature_production_rate,
+                         delta, temperature_dissipation_rate, temperature_production_rate,
                          smoke_dissipation_rate, smoke_production_rate,
                          fuel_burn_rate, fuel_ignition_temperature, t_reference):
     """
     updates temperature, smoke and fuel in one GPU transport sweep.
 
-    Convection is evaluated with first-order upwinding, diffusion with central
-    differences and the source terms model fuel ignition, temperature release
-    and smoke production. A flame indicator is written alongside the updated
-    scalar fields.
+    Convection is evaluated with first-order upwinding and the source terms
+    model fuel ignition, temperature release and smoke production. A flame
+    indicator is written alongside the updated scalar fields.
 
     Args:
         T (device array): temperature field
@@ -535,9 +533,6 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
         fuel_out (device array): output array for updated fuel density
         flame_out (device array): output array for the flame indicator
         delta (float): grid spacing
-        nu_temperature (float): diffusion coefficient for temperature
-        nu_smoke (float): diffusion coefficient for smoke
-        nu_fuel (float): diffusion coefficient for fuel
         temperature_dissipation_rate (float): temperature dissipation coefficient
         temperature_production_rate (float): temperature production coefficient
         smoke_dissipation_rate (float): smoke dissipation coefficient
@@ -553,10 +548,6 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
         return
 
     dt_over_delta = dt / delta
-    dt_over_delta2 = dt / (delta * delta)
-    temp_diffusion_coeff = nu_temperature * dt_over_delta2
-    smoke_diffusion_coeff = nu_smoke * dt_over_delta2
-    fuel_diffusion_coeff = nu_fuel * dt_over_delta2
 
     uijk = u[i, j, k]
     vijk = v[i, j, k]
@@ -889,9 +880,6 @@ def main(config=None):
             T, smoke, fuel, u, v, w, dt,
             temperature_work, smoke_work, fuel_work, flame_work,
             gpu_constants["DELTA"],
-            gpu_constants["NU_TEMPERATURE"],
-            gpu_constants["NU_SMOKE"],
-            gpu_constants["NU_FUEL"],
             gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
             gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
             gpu_constants["SMOKE_DISSIPATION_RATE"],

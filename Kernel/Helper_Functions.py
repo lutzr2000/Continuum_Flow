@@ -163,9 +163,6 @@ def apply_config(config):
     return {
         "RHO": float(physics_cfg["fluid"]["density"]),
         "NU": float(physics_cfg["fluid"]["viscosity"]),
-        "NU_TEMPERATURE": float(physics_cfg["temperature"]["diffusion"]),
-        "NU_SMOKE": float(physics_cfg["smoke"]["diffusion"]),
-        "NU_FUEL": float(physics_cfg["fuel"]["diffusion"]),
         "TEMPERATURE_DISSIPATION_RATE": float(physics_cfg["temperature"]["dissipation"]),
         "TEMPERATURE_PRODUCTION_RATE": 1.0,
         "SMOKE_DISSIPATION_RATE": float(physics_cfg["smoke"]["dissipation"]),
@@ -306,9 +303,6 @@ def upload_simulation_state_to_gpu(simulation_params):
     gpu_constants = {
         "RHO": precision_dtype.type(simulation_params["RHO"]),
         "NU": precision_dtype.type(simulation_params["NU"]),
-        "NU_TEMPERATURE": precision_dtype.type(simulation_params["NU_TEMPERATURE"]),
-        "NU_SMOKE": precision_dtype.type(simulation_params["NU_SMOKE"]),
-        "NU_FUEL": precision_dtype.type(simulation_params["NU_FUEL"]),
         "TEMPERATURE_DISSIPATION_RATE": precision_dtype.type(simulation_params["TEMPERATURE_DISSIPATION_RATE"]),
         "TEMPERATURE_PRODUCTION_RATE": precision_dtype.type(simulation_params["TEMPERATURE_PRODUCTION_RATE"]),
         "SMOKE_DISSIPATION_RATE": precision_dtype.type(simulation_params["SMOKE_DISSIPATION_RATE"]),

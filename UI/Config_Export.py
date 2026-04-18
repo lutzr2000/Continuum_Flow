@@ -138,18 +138,15 @@ def _serialize_physics_node(node):
             "viscosity": float(node.fluid_viscosity),
         },
         "temperature": {
-            "diffusion": float(node.temperature_diffusion),
             "dissipation": float(node.temperature_dissipation),
             "reference_temperature": float(node.reference_temperature),
             "buoyancy": float(node.buoyancy),
             "expansion_rate": float(node.expansion_rate),
         },
         "smoke": {
-            "diffusion": float(node.smoke_diffusion),
             "dissipation": float(node.smoke_dissipation),
         },
         "fuel": {
-            "diffusion": float(node.fuel_diffusion),
             "dissipation": float(node.fuel_dissipation),
             "burn_rate": float(node.fuel_burn_rate),
             "ignition_temperature": float(node.fuel_ignition_temperature),

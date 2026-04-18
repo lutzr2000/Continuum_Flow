@@ -13,8 +13,13 @@ Make some sliders animatable
 Performance:
 Modules that are disconnected should not be computed at all, same for parts where a relevant constant is equal to zero
 Improve turbulent force performance
+Better memory usage?
+Better output write performance
 
 Bugs:
 Fix flow speed up when source mask intersects domain BC (probably conflict with BC)
 Make sure only proper connections work
 Cache subolders need to be deleted when they are empty
+
+Output:
+Write data more like Blenders native solver
