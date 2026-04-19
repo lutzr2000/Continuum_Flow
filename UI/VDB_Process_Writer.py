@@ -17,8 +17,23 @@ def _create_scalar_grid(storage_dtype):
     """Create a scalar OpenVDB grid and configure its file storage precision."""
     storage_dtype = np.dtype(storage_dtype)
     grid = openvdb.FloatGrid()
-    grid.saveFloatAsHalf = bool(storage_dtype == np.float16)
+    if hasattr(grid, "saveFloatAsHalf"):
+        grid.saveFloatAsHalf = bool(storage_dtype == np.float16)
     return grid, np.float32
+
+
+def _create_vector_grid(storage_dtype):
+    """Create a vector OpenVDB grid and configure its file storage precision."""
+    storage_dtype = np.dtype(storage_dtype)
+    for grid_class_name in ("Vec3SGrid", "VectorGrid", "Vec3fGrid"):
+        grid_class = getattr(openvdb, grid_class_name, None)
+        if grid_class is None:
+            continue
+        grid = grid_class()
+        if hasattr(grid, "saveFloatAsHalf"):
+            grid.saveFloatAsHalf = bool(storage_dtype == np.float16)
+        return grid, np.float32
+    raise AttributeError("No supported OpenVDB vector grid class is available.")
 
 
 def _nonzero_mask(array):
@@ -60,7 +75,10 @@ def _array_for_export(array, dtype, sparse_mask=None, sparse=False):
     """Prepare one field array for VDB export, applying sparse masking when requested."""
     if sparse and sparse_mask is not None:
         masked_array = np.zeros(array.shape, dtype=dtype)
-        np.copyto(masked_array, array, where=sparse_mask, casting="same_kind")
+        copy_mask = sparse_mask
+        while copy_mask.ndim < array.ndim:
+            copy_mask = np.expand_dims(copy_mask, axis=-1)
+        np.copyto(masked_array, array, where=copy_mask, casting="same_kind")
         return _as_vdb_input_array(masked_array, dtype)
     return _as_vdb_input_array(array, dtype)
 
@@ -84,6 +102,33 @@ def _grid_transform_from_payload(payload, shape):
     return transform
 
 
+def _open_grid_field_arrays(grid_info):
+    """Open all shared-memory arrays needed to build one VDB grid."""
+    field_arrays = {}
+    open_shared_memory = []
+    for field_name, field_info in grid_info.get("fields", {}).items():
+        shm, array = _load_shared_array(field_info)
+        field_arrays[field_name] = array
+        open_shared_memory.append(shm)
+    return field_arrays, open_shared_memory
+
+
+def _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask):
+    """Assemble one scalar or vector array in the layout expected by OpenVDB."""
+    field_names = list(grid_info.get("fields", {}).keys())
+    if grid_info.get("grid_type") == "vector":
+        array = np.stack([field_arrays[field_name] for field_name in field_names], axis=-1)
+    else:
+        array = field_arrays[field_names[0]]
+
+    return _array_for_export(
+        array,
+        grid_dtype,
+        sparse_mask=sparse_mask,
+        sparse=bool(grid_info.get("sparse", False)),
+    )
+
+
 def write_vdb(payload):
     """Create one VDB file from field data stored in shared memory."""
     output_vdb_path = payload["output_path"]
@@ -94,22 +139,20 @@ def write_vdb(payload):
         sparse_mask, sparse_mask_handles = _sparse_export_mask(payload)
         open_shared_memory.extend(sparse_mask_handles)
 
-        for variable_name, field_info in payload["fields"].items():
-            shm, array = _load_shared_array(field_info)
-            open_shared_memory.append(shm)
+        for grid_info in payload.get("grids", ()):
+            field_arrays, field_handles = _open_grid_field_arrays(grid_info)
+            open_shared_memory.extend(field_handles)
 
-            storage_dtype = np.dtype(field_info.get("storage_dtype", field_info["dtype"]))
-            grid, grid_dtype = _create_scalar_grid(storage_dtype)
-            grid.name = variable_name
-            grid.copyFromArray(
-                _array_for_export(
-                    array,
-                    grid_dtype,
-                    sparse_mask=sparse_mask,
-                    sparse=bool(field_info.get("sparse", False)),
-                )
-            )
-            grid.transform = _grid_transform_from_payload(payload, array.shape)
+            storage_dtype = np.dtype(grid_info.get("storage_dtype", grid_info["dtype"]))
+            if grid_info.get("grid_type") == "vector":
+                grid, grid_dtype = _create_vector_grid(storage_dtype)
+            else:
+                grid, grid_dtype = _create_scalar_grid(storage_dtype)
+
+            grid_array = _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask)
+            grid.name = str(grid_info["name"]).lower()
+            grid.copyFromArray(grid_array)
+            grid.transform = _grid_transform_from_payload(payload, tuple(grid_info["shape"]))
             grids.append(grid)
 
         openvdb.write(output_vdb_path, grids=grids)

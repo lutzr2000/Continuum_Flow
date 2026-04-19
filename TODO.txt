@@ -16,6 +16,3 @@ Better memory usage?
 Bugs:
 Make sure only proper connections work
 Cache subolders need to be deleted when they are empty
-
-Output:
-Write data more like Blenders native solver

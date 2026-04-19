@@ -144,6 +144,50 @@ def _domain_origin_from_shape(shape, delta):
     )
 
 
+def _build_grid_payload(fields, output_field_config):
+    """Describe the VDB grids that should be assembled from buffered fields."""
+    grid_entries = []
+
+    velocity_cfg = output_field_config.get('u', {})
+    if velocity_cfg.get('export') and all(component in fields for component in ('u', 'v', 'w')):
+        grid_entries.append(
+            {
+                'name': 'velocity',
+                'field_names': ['u', 'v', 'w'],
+                'grid_type': 'vector',
+                'shape': fields['u']['shape'],
+                'dtype': fields['u']['dtype'],
+                'storage_dtype': fields['u']['storage_dtype'],
+                'sparse': bool(velocity_cfg.get('sparse', False)),
+            }
+        )
+
+    scalar_grid_names = {
+        'p': 'pressure',
+        'T': 'temperature',
+        'smoke': 'density',
+        'fuel': 'fuel',
+        'flame': 'flame',
+    }
+    for field_name, grid_name in scalar_grid_names.items():
+        field_cfg = output_field_config.get(field_name, {})
+        if not field_cfg.get('export') or field_name not in fields:
+            continue
+        grid_entries.append(
+            {
+                'name': grid_name,
+                'field_names': [field_name],
+                'grid_type': 'scalar',
+                'shape': fields[field_name]['shape'],
+                'dtype': fields[field_name]['dtype'],
+                'storage_dtype': fields[field_name]['storage_dtype'],
+                'sparse': bool(field_cfg.get('sparse', False)),
+            }
+        )
+
+    return grid_entries
+
+
 def create_writer_payload(fields, output_field_config, output_path, time_value, delta):
     """
     builds the metadata package that is sent to Blender's host VDB writer.
@@ -157,12 +201,8 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
     Returns:
         dict: serializable writer payload
     """
-    output_variables = [
-        variable_name
-        for variable_name, field_cfg in output_field_config.items()
-        if field_cfg.get('export')
-    ]
-    first_field_shape = fields[output_variables[0]]['shape'] if output_variables else (0, 0, 0)
+    grid_entries = _build_grid_payload(fields, output_field_config)
+    first_field_shape = grid_entries[0]['shape'] if grid_entries else (0, 0, 0)
 
     payload = {
         'output_path': output_path,
@@ -172,19 +212,29 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
             'voxel_size': float(delta),
             'origin': _domain_origin_from_shape(first_field_shape, delta),
         },
-        'fields': {
-            variable_name: {
-                'shape': fields[variable_name]['shape'],
-                'dtype': fields[variable_name]['dtype'],
-                'storage_dtype': fields[variable_name]['storage_dtype'],
-                'shm_name': fields[variable_name]['shm_name'],
-                'sparse': bool(output_field_config[variable_name].get('sparse', False)),
+        'grids': [
+            {
+                'name': grid_entry['name'],
+                'grid_type': grid_entry['grid_type'],
+                'shape': grid_entry['shape'],
+                'dtype': grid_entry['dtype'],
+                'storage_dtype': grid_entry['storage_dtype'],
+                'sparse': grid_entry['sparse'],
+                'fields': {
+                    field_name: {
+                        'shape': fields[field_name]['shape'],
+                        'dtype': fields[field_name]['dtype'],
+                        'storage_dtype': fields[field_name]['storage_dtype'],
+                        'shm_name': fields[field_name]['shm_name'],
+                    }
+                    for field_name in grid_entry['field_names']
+                },
             }
-            for variable_name in output_variables
-        },
+            for grid_entry in grid_entries
+        ],
     }
 
-    if any(field_info.get('sparse', False) for field_info in payload['fields'].values()):
+    if any(grid_entry.get('sparse', False) for grid_entry in payload['grids']):
         payload['sparse_mask_fields'] = {
             variable_name: {
                 'shape': fields[variable_name]['shape'],
