@@ -94,7 +94,7 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
         nu (float): kinematic viscosity
         cfl_max (float): maximum admissible CFL number
     Returns:
-        float: stable timestep
+        tuple[float, bool]: stable timestep and divergence flag
     """
     eps = 1e-12
     total_size = u.size
@@ -104,6 +104,14 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
     _velocity_maxima_timestep[blockspergrid, REDUCTION_THREADS_PER_BLOCK](u, v, w, maxima, total_size)
 
     abs_u_max, abs_v_max, abs_w_max = maxima.copy_to_host()
+    solver_diverged = bool(
+        np.isinf(abs_u_max) or
+        np.isinf(abs_v_max) or
+        np.isinf(abs_w_max)
+    )
+
+    if solver_diverged:
+        return 0.0, True
 
     cfl_delta = cfl_max * delta
     dt_conv = min(
@@ -118,4 +126,4 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
         cfl_delta * rho / max(abs(float(fz_max)), eps),
     )
 
-    return min(dt_conv, dt_diff, dt_forcing)
+    return min(dt_conv, dt_diff, dt_forcing), False

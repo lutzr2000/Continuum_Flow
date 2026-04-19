@@ -786,11 +786,14 @@ def main(config=None):
     t = 0.0
 
     section_start = perf_counter()
-    dt = Time_Step.compute_new_timestep_gpu(
+    dt, solver_diverged = Time_Step.compute_new_timestep_gpu(
         u, v, w, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
     )
     section_timings["Initial_dt"] += perf_counter() - section_start
+    if solver_diverged:
+        print('solver divergence')
+        return
     if dt > 1.0 / OUTPUT_FPS:
         dt = 1.0 / OUTPUT_FPS
 
@@ -955,11 +958,14 @@ def main(config=None):
         t += dt
 
         section_start = perf_counter()
-        dt_new = Time_Step.compute_new_timestep_gpu(
+        dt_new, solver_diverged = Time_Step.compute_new_timestep_gpu(
             u, v, w, fx_max, fy_max, fz_max,
             gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
         )
         section_timings["Update_dt"] += perf_counter() - section_start
+        if solver_diverged:
+            print('ERROR: The solver diverged, stopping the simulation!')
+            break
 
         dt_max_increase = dt * 1.5
         dt_max_decrease = dt * 0.5

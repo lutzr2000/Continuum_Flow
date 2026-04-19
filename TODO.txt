@@ -1,7 +1,6 @@
 TODO
 
 General:
-Can i split functions in Kernel und still tell cuda.jit to compile as one? This could make the code a lot more readable?
 Intercept solver divergence and stop the simulation
 Add a limiter for velocity (maybe also acceleration?) to make the sovler more stable?
 
