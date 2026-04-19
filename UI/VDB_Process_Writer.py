@@ -13,11 +13,11 @@ def _as_vdb_input_array(array, dtype):
     return np.asarray(array, dtype=dtype, order="C")
 
 
-def _create_scalar_grid(dtype):
+def _create_scalar_grid(storage_dtype):
     """Create a scalar OpenVDB grid and configure its file storage precision."""
-    dtype = np.dtype(dtype)
+    storage_dtype = np.dtype(storage_dtype)
     grid = openvdb.FloatGrid()
-    grid.saveFloatAsHalf = bool(dtype == np.float16)
+    grid.saveFloatAsHalf = bool(storage_dtype == np.float16)
     return grid, np.float32
 
 
@@ -98,7 +98,8 @@ def write_vdb(payload):
             shm, array = _load_shared_array(field_info)
             open_shared_memory.append(shm)
 
-            grid, grid_dtype = _create_scalar_grid(array.dtype)
+            storage_dtype = np.dtype(field_info.get("storage_dtype", field_info["dtype"]))
+            grid, grid_dtype = _create_scalar_grid(storage_dtype)
             grid.name = variable_name
             grid.copyFromArray(
                 _array_for_export(

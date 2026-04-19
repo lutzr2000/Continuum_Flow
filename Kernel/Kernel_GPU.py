@@ -811,7 +811,7 @@ def main(config=None):
         OUTPUT_FORWARDER_COUNT,
         DELTA,
         HOST_VDB_WRITER,
-        output_dtype=simulation_params["OUTPUT_DTYPE"],
+        storage_dtype=simulation_params["OUTPUT_DTYPE"],
     )
     section_timings["Setup_output"] += perf_counter() - section_start
 

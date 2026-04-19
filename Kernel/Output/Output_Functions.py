@@ -17,7 +17,7 @@ def setup_output(
     forwarder_count,
     delta,
     host_writer_endpoint,
-    output_dtype=None,
+    storage_dtype=None,
 ):
     """
     prepares shared-memory buffers and starts host-writer forwarder threads.
@@ -31,7 +31,7 @@ def setup_output(
         forwarder_count (int): number of host-writer forwarder threads
         delta (float): grid spacing
         host_writer_endpoint (dict): host/port for Blender's in-process writer
-        output_dtype (dtype-like): target dtype used for output buffers and VDB storage
+        storage_dtype (dtype-like): target dtype used for VDB file storage
     Returns:
         tuple: write queue, buffer queue, forwarder threads and list of shared-memory blocks
     """
@@ -43,7 +43,7 @@ def setup_output(
     write_queue = queue.Queue(maxsize=queue_size)
     buffer_pool = queue.Queue(maxsize=queue_size)
     shared_memory_blocks = []
-    output_dtype = np.dtype(output_dtype or np.float16)
+    storage_dtype = np.dtype(storage_dtype or np.float16)
 
     for _ in range(queue_size):
         fields = {}
@@ -51,17 +51,16 @@ def setup_output(
             template_array = template_fields[variable_name]
             shape = tuple(template_array.shape)
             source_dtype = np.dtype(template_array.dtype)
-            nbytes = int(np.prod(shape)) * output_dtype.itemsize
+            nbytes = int(np.prod(shape)) * source_dtype.itemsize
             shm = shared_memory.SharedMemory(create=True, size=nbytes)
             shared_memory_blocks.append(shm)
             fields[variable_name] = {
-                'array': np.ndarray(shape, dtype=output_dtype, buffer=shm.buf),
+                'array': np.ndarray(shape, dtype=source_dtype, buffer=shm.buf),
                 'shape': shape,
-                'dtype': str(output_dtype),
+                'dtype': str(source_dtype),
+                'storage_dtype': str(storage_dtype),
                 'shm_name': shm.name,
             }
-            if source_dtype != output_dtype:
-                fields[variable_name]['transfer_array'] = np.empty(shape, dtype=source_dtype)
         buffer_pool.put(fields)
 
     writer_threads = []
@@ -110,12 +109,7 @@ def enqueue_device_output(
     fields = buffer_pool.get()
     for variable_name in buffered_variables:
         field_info = fields[variable_name]
-        transfer_array = field_info.get('transfer_array')
-        if transfer_array is None:
-            source_device_fields[variable_name].copy_to_host(field_info['array'])
-        else:
-            source_device_fields[variable_name].copy_to_host(transfer_array)
-            np.copyto(field_info['array'], transfer_array, casting='same_kind')
+        source_device_fields[variable_name].copy_to_host(field_info['array'])
     write_queue.put((int(output_index), float(time_value), fields, output_field_config))
 
 
@@ -182,6 +176,7 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
             variable_name: {
                 'shape': fields[variable_name]['shape'],
                 'dtype': fields[variable_name]['dtype'],
+                'storage_dtype': fields[variable_name]['storage_dtype'],
                 'shm_name': fields[variable_name]['shm_name'],
                 'sparse': bool(output_field_config[variable_name].get('sparse', False)),
             }
@@ -194,6 +189,7 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
             variable_name: {
                 'shape': fields[variable_name]['shape'],
                 'dtype': fields[variable_name]['dtype'],
+                'storage_dtype': fields[variable_name]['storage_dtype'],
                 'shm_name': fields[variable_name]['shm_name'],
             }
             for variable_name in ('smoke', 'flame')

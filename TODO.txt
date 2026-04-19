@@ -1,7 +1,6 @@
 TODO
 
 General:
-Intercept solver divergence and stop the simulation
 Add a limiter for velocity (maybe also acceleration?) to make the sovler more stable?
 
 Features:
@@ -13,7 +12,6 @@ Performance:
 Modules that are disconnected should not be computed at all, same for parts where a relevant constant is equal to zero
 Improve turbulent force performance
 Better memory usage?
-Better output write performance
 
 Bugs:
 Fix flow speed up when source mask intersects domain BC (probably conflict with BC)
