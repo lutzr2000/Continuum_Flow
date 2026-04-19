@@ -900,14 +900,6 @@ def main(config=None):
         fuel, fuel_work = fuel_work, fuel
         flame, flame_work = flame_work, flame
 
-        #------------BCs-------------------
-        section_start = perf_counter()
-        u, v, w, p, T = BC.apply_all_BC(
-            u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
-        )
-        cuda.synchronize()
-        section_timings["Boundary_conditions"] += perf_counter() - section_start
-
         #------------Source-------------------
         section_start = perf_counter()
         u, v, w, T, smoke, fuel = Source_BC.source_bc(
@@ -922,6 +914,16 @@ def main(config=None):
         )
         cuda.synchronize()
         section_timings["Obstacles"] += perf_counter() - section_start
+
+        #------------BCs-------------------
+        section_start = perf_counter()
+        u, v, w, p, T = BC.apply_all_BC(
+            u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
+        )
+        cuda.synchronize()
+        section_timings["Boundary_conditions"] += perf_counter() - section_start
+
+        #------------Output-------------------
         device_fields["u"] = u
         device_fields["v"] = v
         device_fields["w"] = w
@@ -931,7 +933,6 @@ def main(config=None):
         device_fields["fuel"] = fuel
         device_fields["flame"] = flame
 
-        #------------Output-------------------
         while t >= next_output_time:
             section_start = perf_counter()
             Output_Functions.enqueue_device_output(

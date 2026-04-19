@@ -14,7 +14,6 @@ Improve turbulent force performance
 Better memory usage?
 
 Bugs:
-Fix flow speed up when source mask intersects domain BC (probably conflict with BC)
 Make sure only proper connections work
 Cache subolders need to be deleted when they are empty
 

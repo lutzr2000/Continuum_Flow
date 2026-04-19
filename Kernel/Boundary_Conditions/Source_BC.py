@@ -36,6 +36,8 @@ def build_source_data(domain_cfg, source_entries):
     velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
 
+    boundary_clip_layers = 4 # this is important, otherwise there can be conflict between Neumann BC and Sources
+
     for source_entry in source_entries:
         if source_entry.get("shape") != "mesh":
             continue
@@ -49,6 +51,14 @@ def build_source_data(domain_cfg, source_entries):
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
+        if boundary_clip_layers > 0:
+            source_mask[:boundary_clip_layers, :, :] = False
+            source_mask[-boundary_clip_layers:, :, :] = False
+            source_mask[:, :boundary_clip_layers, :] = False
+            source_mask[:, -boundary_clip_layers:, :] = False
+            source_mask[:, :, :boundary_clip_layers] = False
+            source_mask[:, :, -boundary_clip_layers:] = False
+
         if not np.any(source_mask):
             continue
 
