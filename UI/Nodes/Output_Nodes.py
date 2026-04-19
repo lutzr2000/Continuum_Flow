@@ -341,6 +341,26 @@ def _delete_baked_vdb_files(output_directory):
     return deleted_files
 
 
+def _remove_empty_bake_subdirectories(output_directory):
+    """Remove empty BlenderCFD bake subdirectories below one base output directory."""
+    output_directory = Path(output_directory).resolve()
+    if not output_directory.exists() or not output_directory.is_dir():
+        return 0
+
+    removed_directories = 0
+    for child_directory in sorted(output_directory.iterdir(), reverse=True):
+        if not child_directory.is_dir():
+            continue
+        if not child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+            continue
+        try:
+            child_directory.rmdir()
+            removed_directories += 1
+        except OSError:
+            pass
+    return removed_directories
+
+
 def _remove_bake_output_directory(output_directory):
     output_directory = Path(output_directory).resolve()
     if not output_directory.exists() or not output_directory.is_dir():
@@ -373,6 +393,7 @@ def _free_bake(context, config_dict=None):
     for output_directory in output_directories:
         removed_volumes += _remove_previous_baked_volume(output_directory)
         deleted_files += _delete_baked_vdb_files(output_directory)
+        _remove_empty_bake_subdirectories(output_directory)
         _remove_bake_output_directory(output_directory)
     _purge_blender_baked_data(context)
     _set_bake_state_active(False, context=context)
