@@ -36,6 +36,10 @@ _STATUS_PROGRESS_FACTOR = 0.0
 _ACTIVE_BAKE_OPERATOR = None
 _LAST_BAKE_CONFIG_DICT = None
 _BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
+_SOLVER_DIVERGENCE_MESSAGES = (
+    "solver divergence",
+    "solver diverged",
+)
 
 
 def _draw_blendercfd_status_progress(header, context):
@@ -198,6 +202,13 @@ def _handle_kernel_output_line(line, output_tail):
             return None
     sys.stdout.write(line)
     sys.stdout.flush()
+    return None
+
+
+def _solver_divergence_message_from_line(line):
+    normalized_line = line.strip().lower()
+    if any(message in normalized_line for message in _SOLVER_DIVERGENCE_MESSAGES):
+        return "Bake stopped: the solver diverged."
     return None
 
 
@@ -454,8 +465,8 @@ class BlenderCFDOutputNode(bpy.types.Node):
     bl_width_min = 240.0
     bl_width_max = 420.0
 
-    fps: IntProperty(name="FPS", default=24, min=1, max=240, soft_min=1, soft_max=120)  # type: ignore
-    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, soft_max=8)  # type: ignore
+    fps: IntProperty(name="FPS", default=24, min=1, max=240, soft_min=1, description="Output frame rate") # type: ignore
+    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, soft_max=8, description="How many writer processes are launched, usually four give the best performance")  # type: ignore
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(
@@ -559,6 +570,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     _progress_percent = 0.0
     _progress_factor = 0.0
     _reader_error = None
+    _solver_divergence_message = None
     _window_manager = None
     _workspace = None
     _cancel_requested = False
@@ -576,6 +588,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                     self._progress_percent = percent
                     self._progress_factor = percent / 100.0
                     _set_status_progress_values(percent)
+                divergence_message = _solver_divergence_message_from_line(payload)
+                if divergence_message is not None:
+                    self._solver_divergence_message = divergence_message
             elif event_type == "error":
                 self._reader_error = payload
 
@@ -658,6 +673,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if reader_error:
             self.report({"ERROR"}, f"Bake failed while reading kernel output: {reader_error}")
             return {"CANCELLED"}
+        if self._solver_divergence_message is not None:
+            self.report({"WARNING"}, self._solver_divergence_message)
+            return {"CANCELLED"}
         if return_code != 0:
             self.report({"ERROR"}, f"Bake failed: Kernel process failed with exit code {return_code}{self._recent_kernel_output_detail()}")
             return {"CANCELLED"}
@@ -714,6 +732,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._progress_factor = 0.0
         _set_status_progress_values(0.0)
         self._reader_error = None
+        self._solver_divergence_message = None
         self._window_manager = context.window_manager
         self._workspace = context.workspace
         self._cancel_requested = False

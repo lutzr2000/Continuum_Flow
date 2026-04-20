@@ -17,9 +17,9 @@ class BlenderCFDForceConstantNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 320.0
 
-    fx: FloatProperty(name="Fx", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
-    fy: FloatProperty(name="Fy", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
-    fz: FloatProperty(name="Fz", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
+    fx: FloatProperty(name="Fx", default=0.0, min=-100.0, max=100.0, description="Force in the x-direction")  # type: ignore
+    fy: FloatProperty(name="Fy", default=0.0, min=-100.0, max=100.0, description="Force in the y-direction")  # type: ignore
+    fz: FloatProperty(name="Fz", default=0.0, min=-100.0, max=100.0, description="Force in the z-direction")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -61,10 +61,10 @@ class BlenderCFDForceSwirlNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 340.0
 
-    strength: FloatProperty(name="Strength", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
-    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
-    axis: FloatVectorProperty(name="Axis", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0))  # type: ignore
-    radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH")  # type: ignore
+    strength: FloatProperty(name="Strength", default=0.0, min=-10.0, max=10.0, description="Strength of swirl")  # type: ignore
+    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the swirl, flow will rotate about this point")  # type: ignore
+    axis: FloatVectorProperty(name="Axis", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0), description="Axis of swirl, flow will rotate around this axis")  # type: ignore
+    radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius until which the swirl is applied")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -107,9 +107,9 @@ class BlenderCFDForcePointNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 340.0
 
-    strength: FloatProperty(name="Strength", default=0.0, min=-10000.0, max=10000.0, soft_min=-10000.0, soft_max=10000.0)  # type: ignore
-    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH")  # type: ignore
-    radius: FloatProperty(name="Radius", default=1.0, min=0.000001, unit="LENGTH")  # type: ignore
+    strength: FloatProperty(name="Strength", default=0.0, min=-10.0, max=10.0, description="Strength of force")  # type: ignore
+    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the point force")  # type: ignore
+    radius: FloatProperty(name="Radius", default=1.0, min=0.000001, unit="LENGTH", description="Radius in which the force is applied")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -151,10 +151,10 @@ class BlenderCFDForceTurbulenceNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 340.0
 
-    scale: FloatProperty(name="Scale", default=1.0, min=0.0)  # type: ignore
-    frequency: FloatProperty(name="Frequency", default=1.0, min=0.0)  # type: ignore
-    amplitude: FloatProperty(name="Amplitude", default=1.0, min=0.0)  # type: ignore
-    seed: bpy.props.IntProperty(name="Seed", default=0)  # type: ignore
+    scale: FloatProperty(name="Scale", default=1.0, min=0.0, description="Scale of turbulent force, bigger means more large scale fluctuations")  # type: ignore
+    frequency: FloatProperty(name="Frequency", default=1.0, min=0.0, description="Frequency of turbulence, bigger means faster fluctuations")  # type: ignore
+    amplitude: FloatProperty(name="Amplitude", default=1.0, min=0.0, description="Amplitude of turbulent force")  # type: ignore
+    seed: bpy.props.IntProperty(name="Seed", default=0, description="Random seed for turbulence")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):

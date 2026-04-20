@@ -17,10 +17,10 @@ class BlenderCFDSourceNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 360.0
 
-    fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0)  # type: ignore
-    smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0)  # type: ignore
-    temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, max=10000.0, soft_min=0.0, soft_max=10000.0, unit="TEMPERATURE")  # type: ignore
-    velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY")  # type: ignore
+    fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, max=100.0, soft_min=0.0, description="Amount of fuel to spawn")  # type: ignore
+    smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, max=100.0, soft_min=0.0, description="Amount of smoke to spawn")  # type: ignore
+    temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, max=2000.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn")  # type: ignore
+    velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity")  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
