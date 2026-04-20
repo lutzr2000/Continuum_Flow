@@ -2,6 +2,73 @@ import bpy
 from bpy.props import IntProperty
 
 
+_INVALID_SOCKET_COLOR = (0.95, 0.20, 0.20, 1.0)
+
+_SOCKET_ROLE_BY_NODE_AND_NAME = {
+    ("BLENDERCFD_DOMAIN_NODE", "Domain"): "domain",
+    ("BLENDERCFD_PHYSICS_NODE", "Physics"): "physics",
+    ("BLENDERCFD_OBSTACLE_NODE", "Obstacle"): "obstacles",
+    ("BLENDERCFD_SOURCE_NODE", "Source"): "source",
+    ("BLENDERCFD_SIMULATION_NODE", "Domain"): "domain",
+    ("BLENDERCFD_SIMULATION_NODE", "Physics"): "physics",
+    ("BLENDERCFD_SIMULATION_NODE", "Obstacles"): "obstacles",
+    ("BLENDERCFD_SIMULATION_NODE", "Source"): "source",
+    ("BLENDERCFD_SIMULATION_NODE", "Forces"): "forces",
+    ("BLENDERCFD_SIMULATION_NODE", "Reference Frame"): "reference_frame",
+    ("BLENDERCFD_SIMULATION_NODE", "Result"): "result",
+    ("BLENDERCFD_OUTPUT_NODE", "Result"): "result",
+    ("BLENDERCFD_VIEWER_NODE", "Result"): "result",
+    ("BLENDERCFD_GEOMETRY_NODE", "Geometry"): "geometry",
+    ("BLENDERCFD_SOURCE_NODE", "Geometry"): "geometry",
+    ("BLENDERCFD_OBSTACLE_NODE", "Geometry"): "geometry",
+}
+
+_SOCKET_ROLE_BY_SOCKET_IDNAME = {
+    "BLENDERCFD_FORCE_SOCKET": "forces",
+    "BLENDERCFD_REFERENCE_FRAME_SOCKET": "reference_frame",
+    "BLENDERCFD_RESULT_SOCKET": "result",
+    "NodeSocketGeometry": "geometry",
+}
+
+
+def _socket_role(socket):
+    node = getattr(socket, "node", None)
+    node_idname = getattr(node, "bl_idname", "")
+    role = _SOCKET_ROLE_BY_NODE_AND_NAME.get((node_idname, getattr(socket, "name", "")))
+    if role is not None:
+        return role
+    return _SOCKET_ROLE_BY_SOCKET_IDNAME.get(getattr(socket, "bl_idname", ""))
+
+
+def _is_valid_link(link):
+    from_socket = getattr(link, "from_socket", None)
+    to_socket = getattr(link, "to_socket", None)
+    if from_socket is None or to_socket is None:
+        return True
+
+    from_role = _socket_role(from_socket)
+    to_role = _socket_role(to_socket)
+    if from_role is None or to_role is None:
+        return True
+    return from_role == to_role
+
+
+def _socket_has_invalid_links(socket):
+    try:
+        return any(not _is_valid_link(link) for link in socket.links)
+    except Exception:
+        return False
+
+
+def tree_has_invalid_links(node_tree):
+    if node_tree is None:
+        return False
+    try:
+        return any(not _is_valid_link(link) for link in node_tree.links)
+    except Exception:
+        return False
+
+
 class BlenderCFDIntSocket(bpy.types.NodeSocket):
     """
     Integer socket used by BlenderCFD nodes to expose bounded scalar values.
@@ -28,6 +95,8 @@ class BlenderCFDIntSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
         return (0.90, 0.55, 0.20, 1.0)
 
 
@@ -45,6 +114,8 @@ class BlenderCFDLinkSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
         return (0.90, 0.55, 0.20, 1.0)
 
 
@@ -62,6 +133,8 @@ class BlenderCFDForceSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
         return (0.45, 0.65, 0.95, 1.0)
 
 
@@ -79,6 +152,8 @@ class BlenderCFDResultSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
         return (0.65, 0.35, 0.85, 1.0)
 
 
@@ -96,6 +171,8 @@ class BlenderCFDReferenceFrameSocket(bpy.types.NodeSocket):
 
     def draw_color(self, context, node):
         """Return the display color of the socket."""
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
         return (0.95, 0.45, 0.75, 1.0)
 
 

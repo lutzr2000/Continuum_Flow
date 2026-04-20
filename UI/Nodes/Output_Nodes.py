@@ -26,6 +26,7 @@ BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
 
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
 BlenderCFDResultSocket = GeneralNodes.BlenderCFDResultSocket
+tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links
 is_bake_running = GeneralNodes.is_bake_running
 set_bake_running = GeneralNodes.set_bake_running
 
@@ -536,7 +537,12 @@ class BlenderCFDOutputNode(bpy.types.Node):
         layout.separator()
         resolved_output_path = bpy.path.abspath(self.output_path) if self.output_path else ""
         button_is_free_bake = bool(resolved_output_path) and _output_directory_has_vdbs(resolved_output_path)
-        layout.operator("blendercfd.bake", text="Free Bake" if button_is_free_bake else "Bake", icon="TRASH" if button_is_free_bake else "RENDER_STILL")
+        has_invalid_links = tree_has_invalid_links(getattr(self, "id_data", None))
+        if has_invalid_links:
+            layout.label(text="Bake disabled: invalid socket connection", icon="ERROR")
+        button_row = layout.row()
+        button_row.enabled = (not is_bake_running(context)) and not has_invalid_links
+        button_row.operator("blendercfd.bake", text="Free Bake" if button_is_free_bake else "Bake", icon="TRASH" if button_is_free_bake else "RENDER_STILL")
 
 
 class BlenderCFD_OT_bake(bpy.types.Operator):
@@ -669,6 +675,11 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         return {"FINISHED"}
 
     def execute(self, context):
+        resolve_node_tree = getattr(BlenderCFDConfigModule, "_resolve_node_tree", None)
+        node_tree = resolve_node_tree(context) if callable(resolve_node_tree) else None
+        if tree_has_invalid_links(node_tree):
+            self.report({"ERROR"}, "Bake disabled: invalid socket connection in the node tree.")
+            return {"CANCELLED"}
         global _ACTIVE_BAKE_OPERATOR
         try:
             live_config_dict = BlenderCFDConfigModule.build_config_dict(context)

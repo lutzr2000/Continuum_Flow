@@ -2,6 +2,9 @@ TODO
 
 General:
 Add a limiter for velocity (maybe also acceleration?) to make the sovler more stable?
+Make solver more stable in General
+UI tooltips
+Reference Frame
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
@@ -13,5 +16,3 @@ Modules that are disconnected should not be computed at all, same for parts wher
 Improve turbulent force performance
 Better memory usage?
 
-Bugs:
-Make sure only proper connections work
