@@ -367,11 +367,6 @@ def _remove_bake_output_directory(output_directory):
         return
     if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
         shutil.rmtree(output_directory, ignore_errors=True)
-        return
-    try:
-        output_directory.rmdir()
-    except OSError:
-        pass
 
 
 def _purge_blender_baked_data(context):

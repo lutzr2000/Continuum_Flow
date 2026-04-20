@@ -166,7 +166,7 @@ def apply_config(config):
         "TEMPERATURE_DISSIPATION_RATE": float(physics_cfg["temperature"]["dissipation"]),
         "TEMPERATURE_PRODUCTION_RATE": 1.0,
         "SMOKE_DISSIPATION_RATE": float(physics_cfg["smoke"]["dissipation"]),
-        "SMOKE_PRODUCTION_RATE": 1.0,
+        "SMOKE_PRODUCTION_RATE": float(physics_cfg["smoke"].get("production_rate", 1.0)),
         "FUEL_BURN_RATE": float(physics_cfg["fuel"]["burn_rate"]),
         "FUEL_IGNITION_TEMPERATURE": float(physics_cfg["fuel"]["ignition_temperature"]),
         "T_REFERENCE": float(physics_cfg["temperature"]["reference_temperature"]),

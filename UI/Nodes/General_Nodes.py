@@ -199,6 +199,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
     buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=1.0, precision=4)  # type: ignore
     expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=1.0, precision=4)  # type: ignore
     smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.1, min=0.0, max=100.0)  # type: ignore
+    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, max=100.0)  # type: ignore
     fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, max=100.0)  # type: ignore
     fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, max=100.0)  # type: ignore
     fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=10000.0, unit="TEMPERATURE")  # type: ignore
@@ -237,7 +238,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         layout.enabled = not is_bake_running(context)
         self._draw_group(layout, "Fluid", ("fluid_density", "fluid_viscosity"))
         self._draw_group(layout, "Temperature", ("temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate"))
-        self._draw_group(layout, "Smoke", ("smoke_dissipation",))
+        self._draw_group(layout, "Smoke", ("smoke_dissipation", "smoke_production_rate"))
         self._draw_group(layout, "Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature"))
         self._draw_group(layout, "Extras", ("vorticity",))
 

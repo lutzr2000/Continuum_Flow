@@ -145,6 +145,7 @@ def _serialize_physics_node(node):
         },
         "smoke": {
             "dissipation": float(node.smoke_dissipation),
+            "production_rate": float(getattr(node, "smoke_production_rate", 1.0)),
         },
         "fuel": {
             "dissipation": float(node.fuel_dissipation),
