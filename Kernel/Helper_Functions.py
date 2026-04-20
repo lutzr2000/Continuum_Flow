@@ -151,6 +151,15 @@ def apply_config(config):
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
     force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
     source_temperature_max = float(np.max(source_data["temperature"]))
+    has_source = bool(np.any(source_data["mask"]))
+    has_obstacle = bool(np.any(obstacle_data["mask"]))
+    has_force = bool(
+        np.any(force_data["Fx_base"]) or
+        np.any(force_data["Fy_base"]) or
+        np.any(force_data["Fz_base"]) or
+        np.any(force_data["point_divergence"]) or
+        force_data["turbulence"]["angular_frequencies"].size > 0
+    )
     output_performance = build_output_performance_config(output_cfg)
     output_dtype = resolve_output_dtype(output_cfg)
     output_field_config = build_output_field_config(output_cfg)
@@ -196,6 +205,9 @@ def apply_config(config):
         "OUTPUT_VARIABLES": collect_output_variables(output_field_config),
         "OUTPUT_BUFFER_VARIABLES": collect_buffer_variables(output_field_config),
         "HOST_VDB_WRITER": host_vdb_writer,
+        "HAS_SOURCE": has_source,
+        "HAS_OBSTACLE": has_obstacle,
+        "HAS_FORCE": has_force,
         "BC_CONFIG": bc_config,
         "U_INFLOW": inflow_velocity[0],
         "V_INFLOW": inflow_velocity[1],
@@ -324,6 +336,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "FORCE_X_MAX": precision_dtype.type(force_field_data["max_abs"][0]),
         "FORCE_Y_MAX": precision_dtype.type(force_field_data["max_abs"][1]),
         "FORCE_Z_MAX": precision_dtype.type(force_field_data["max_abs"][2]),
+        "HAS_SOURCE": simulation_params["HAS_SOURCE"],
+        "HAS_OBSTACLE": simulation_params["HAS_OBSTACLE"],
+        "HAS_FORCE": simulation_params["HAS_FORCE"],
     }
 
     return device_state, gpu_constants

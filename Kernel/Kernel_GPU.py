@@ -667,7 +667,7 @@ def main(config=None):
         "Velocity": 0.0,
         "Scalars": 0.0,
         "Boundary_conditions": 0.0,
-        "Obstacles": 0.0,
+        "Obstacles_and_Sources": 0.0,
         "Output": 0.0,
         "Update_dt": 0.0,
     }
@@ -747,16 +747,18 @@ def main(config=None):
 
     #------------Source-------------------
     section_start = perf_counter()
-    u, v, w, T, smoke, fuel = Source_BC.source_bc(
-        u, v, w, T, smoke, fuel,
-        source_mask,
-        source_temperature, source_smoke, source_fuel,
-        source_velocity_x, source_velocity_y, source_velocity_z,
-    )
+    if gpu_constants["HAS_SOURCE"]:
+        u, v, w, T, smoke, fuel = Source_BC.source_bc(
+            u, v, w, T, smoke, fuel,
+            source_mask,
+            source_temperature, source_smoke, source_fuel,
+            source_velocity_x, source_velocity_y, source_velocity_z,
+        )
     #------------Obstacle-------------------
-    u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
-        u, v, w, T, smoke, fuel, flame, obstacle_mask
-    )
+    if gpu_constants["HAS_OBSTACLE"]:
+        u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
+            u, v, w, T, smoke, fuel, flame, obstacle_mask
+        )
     cuda.synchronize()
     section_timings["Initial_obstacle"] += perf_counter() - section_start
 
@@ -838,12 +840,12 @@ def main(config=None):
             turbulence_cos_coeffs, turbulence_sin_coeffs,
             turbulence_count, Fx, Fy, Fz
         )
+
         buoyancy_approximation[blockspergrid_3d, THREADS_PER_BLOCK_3D](
             T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
         )
         cuda.synchronize()
         section_timings["Forces"] += perf_counter() - section_start
-
         #------------Pressure-------------------
         section_start = perf_counter()
         p = pressure_poisson(
@@ -902,18 +904,20 @@ def main(config=None):
 
         #------------Source-------------------
         section_start = perf_counter()
-        u, v, w, T, smoke, fuel = Source_BC.source_bc(
-            u, v, w, T, smoke, fuel,
-            source_mask,
-            source_temperature, source_smoke, source_fuel,
-            source_velocity_x, source_velocity_y, source_velocity_z,
-        )
+        if gpu_constants["HAS_SOURCE"]:
+            u, v, w, T, smoke, fuel = Source_BC.source_bc(
+                u, v, w, T, smoke, fuel,
+                source_mask,
+                source_temperature, source_smoke, source_fuel,
+                source_velocity_x, source_velocity_y, source_velocity_z,
+            )
         #------------Obstacle-------------------
-        u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
-            u, v, w, T, smoke, fuel, flame, obstacle_mask
-        )
+        if gpu_constants["HAS_OBSTACLE"]:
+            u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
+                u, v, w, T, smoke, fuel, flame, obstacle_mask
+            )
         cuda.synchronize()
-        section_timings["Obstacles"] += perf_counter() - section_start
+        section_timings["Obstacles_and_Sources"] += perf_counter() - section_start
 
         #------------BCs-------------------
         section_start = perf_counter()

@@ -5,14 +5,13 @@ Add a limiter for velocity (maybe also acceleration?) to make the sovler more st
 Make solver more stable in General
 UI tooltips
 Reference Frame
+UI slider limits, soft limits and units
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
 Make obstacles and sources animatable
 Make some sliders animatable
 
-Performance:
-Modules that are disconnected should not be computed at all, same for parts where a relevant constant is equal to zero
-Improve turbulent force performance
-Better memory usage?
-
+Bug:
+Show in UI when solver diverged not just stop
+Acceleration due to BC conflict with source is not fully fixed yet
