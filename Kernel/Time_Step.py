@@ -3,6 +3,11 @@ from numba import cuda
 
 REDUCTION_THREADS_PER_BLOCK = 256
 
+
+def reset_velocity_maxima(maxima, host_zeros):
+    """Reset the persistent velocity-maxima reduction buffer to zero."""
+    maxima.copy_to_device(host_zeros)
+
 @cuda.jit
 def _velocity_maxima_timestep(u, v, w, maxima, total_size):
     """
@@ -72,7 +77,9 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
         cuda.atomic.max(maxima, 2, s_w[0])
 
 
-def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cfl_max):
+def compute_new_timestep_gpu(
+    u, v, w, maxima, fx_max, fy_max, fz_max, rho, delta, nu, cfl_max, max_dt=None
+):
     """
     computes a stable timestep from convection, diffusion and forcing limits on the GPU.
 
@@ -86,6 +93,7 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
         u (device array): x-velocity field
         v (device array): y-velocity field
         w (device array): z-velocity field
+        maxima (device array): persistent reduction buffer with shape (3,)
         fx_max (float): maximum absolute x-direction force used in the timestep limiter
         fy_max (float): maximum absolute y-direction force used in the timestep limiter
         fz_max (float): maximum absolute z-direction force used in the timestep limiter
@@ -93,13 +101,13 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
         delta (float): grid spacing
         nu (float): kinematic viscosity
         cfl_max (float): maximum admissible CFL number
+        max_dt (float, optional): upper bound for the returned timestep
     Returns:
         tuple[float, bool]: stable timestep and divergence flag
     """
     eps = 1e-12
     total_size = u.size
     blockspergrid = min(1024, (total_size + REDUCTION_THREADS_PER_BLOCK - 1) // REDUCTION_THREADS_PER_BLOCK)
-    maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
 
     _velocity_maxima_timestep[blockspergrid, REDUCTION_THREADS_PER_BLOCK](u, v, w, maxima, total_size)
 
@@ -126,4 +134,8 @@ def compute_new_timestep_gpu(u, v, w, fx_max, fy_max, fz_max, rho, delta, nu, cf
         cfl_delta * rho / max(abs(float(fz_max)), eps),
     )
 
-    return min(dt_conv, dt_diff, dt_forcing), False
+    dt = min(dt_conv, dt_diff, dt_forcing)
+    if max_dt is not None:
+        dt = min(dt, float(max_dt))
+
+    return dt, False

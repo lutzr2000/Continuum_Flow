@@ -413,7 +413,7 @@ def no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     return u, v, w, p, T
 
 
-def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
+def apply_all_BC(u, v, w, p, T, bc_config):
     """
     applies all configured domain boundary conditions to the GPU field state.
 
@@ -427,9 +427,6 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
         p (device array): pressure field
         T (device array): temperature field
         bc_config (dict): boundary-condition configuration indexed by domain side
-        u_inflow (float): default inflow velocity in x-direction
-        v_inflow (float): default inflow velocity in y-direction
-        w_inflow (float): default inflow velocity in z-direction
     Returns:
         tuple: updated velocity, pressure and temperature fields
     """
@@ -442,9 +439,9 @@ def apply_all_BC(u, v, w, p, T, bc_config, u_inflow, v_inflow, w_inflow):
             u, v, w, p, T = inflow_bc(
                 u, v, w, p, T,
                 side,
-                bc.get("u", u_inflow),
-                bc.get("v", v_inflow),
-                bc.get("w", w_inflow),
+                bc.get("u", 0.0),
+                bc.get("v", 0.0),
+                bc.get("w", 0.0),
                 bc.get("T", bc.get("temperature")),
             )
         elif bc_type == "WALL":

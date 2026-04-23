@@ -29,29 +29,65 @@ def emit_progress(percent, time_value=None):
 
 
 def build_boundary_config(domain_cfg):
-    """Build BC config and extract the first inflow velocity from boundary faces."""
+    """Build per-face BC config from the exported domain settings."""
     zero_velocity = (0.0, 0.0, 0.0)
     boundary_cfg = domain_cfg.get("boundary_conditions", {})
     bc_config = {}
-    inflow_velocity = zero_velocity
 
     for face_name in BOUNDARY_FACE_NAMES:
         face_cfg = boundary_cfg.get(face_name, {})
         bc_type = face_cfg.get("type", "OUTFLOW")
-        bc_config[face_name] = {
+        face_bc = {
             "type": bc_type,
         }
 
-        if bc_type == "INFLOW" and inflow_velocity == zero_velocity:
-            velocity = face_cfg.get("velocity", zero_velocity)
-            if len(velocity) >= 3:
-                inflow_velocity = (
-                    float(velocity[0]),
-                    float(velocity[1]),
-                    float(velocity[2]),
-                )
+        velocity = face_cfg.get("velocity", zero_velocity)
+        if len(velocity) >= 3:
+            face_bc["u"] = float(velocity[0])
+            face_bc["v"] = float(velocity[1])
+            face_bc["w"] = float(velocity[2])
 
-    return bc_config, inflow_velocity
+        if "temperature" in face_cfg:
+            face_bc["temperature"] = float(face_cfg["temperature"])
+        if "T" in face_cfg:
+            face_bc["T"] = float(face_cfg["T"])
+
+        bc_config[face_name] = face_bc
+
+    return bc_config
+
+
+def initial_velocity_from_inflows(bc_config):
+    """
+    Build one uniform initial velocity vector from all configured inflow faces.
+
+    A uniform start field avoids the old arbitrary "first inflow wins" behavior
+    while still preventing a zero initialization when inflows are present.
+    Opposing or multiple inflows are combined by averaging their prescribed
+    velocity vectors.
+    """
+    inflow_count = 0
+    initial_u = 0.0
+    initial_v = 0.0
+    initial_w = 0.0
+
+    for bc in bc_config.values():
+        if bc.get("type") != "INFLOW":
+            continue
+        inflow_count += 1
+        initial_u += float(bc.get("u", 0.0))
+        initial_v += float(bc.get("v", 0.0))
+        initial_w += float(bc.get("w", 0.0))
+
+    if inflow_count == 0:
+        return 0.0, 0.0, 0.0
+
+    inv_count = 1.0 / float(inflow_count)
+    return (
+        initial_u * inv_count,
+        initial_v * inv_count,
+        initial_w * inv_count,
+    )
 
 
 def _field_option_value(fields_cfg, key, legacy_key=None):
@@ -146,7 +182,8 @@ def apply_config(config):
     force_entries = simulation_cfg.get("forces", [])
     host_vdb_writer = config.get("_host_vdb_writer")
 
-    bc_config, inflow_velocity = build_boundary_config(domain_cfg)
+    bc_config = build_boundary_config(domain_cfg)
+    initial_velocity = initial_velocity_from_inflows(bc_config)
     obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
     force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
@@ -209,9 +246,9 @@ def apply_config(config):
         "HAS_OBSTACLE": has_obstacle,
         "HAS_FORCE": has_force,
         "BC_CONFIG": bc_config,
-        "U_INFLOW": inflow_velocity[0],
-        "V_INFLOW": inflow_velocity[1],
-        "W_INFLOW": inflow_velocity[2],
+        "INITIAL_U": initial_velocity[0],
+        "INITIAL_V": initial_velocity[1],
+        "INITIAL_W": initial_velocity[2],
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
         "force_field_data": force_data,
@@ -227,9 +264,9 @@ def upload_simulation_state_to_gpu(simulation_params):
     ny = simulation_params["NY"]
     nz = simulation_params["NZ"]
 
-    u = np.full((nx, ny, nz), simulation_params["U_INFLOW"], dtype=precision_dtype)
-    v = np.full((nx, ny, nz), simulation_params["V_INFLOW"], dtype=precision_dtype)
-    w = np.full((nx, ny, nz), simulation_params["W_INFLOW"], dtype=precision_dtype)
+    u = np.full((nx, ny, nz), simulation_params["INITIAL_U"], dtype=precision_dtype)
+    v = np.full((nx, ny, nz), simulation_params["INITIAL_V"], dtype=precision_dtype)
+    w = np.full((nx, ny, nz), simulation_params["INITIAL_W"], dtype=precision_dtype)
 
     p = np.zeros((nx, ny, nz), dtype=precision_dtype)
     T = np.full((nx, ny, nz), simulation_params["T_REFERENCE"], dtype=precision_dtype)
@@ -310,6 +347,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "source_velocity_x": cuda.to_device(source_velocity_x_host),
         "source_velocity_y": cuda.to_device(source_velocity_y_host),
         "source_velocity_z": cuda.to_device(source_velocity_z_host),
+        "velocity_maxima": cuda.device_array(3, dtype=np.float32),
     }
 
     gpu_constants = {
@@ -327,9 +365,6 @@ def upload_simulation_state_to_gpu(simulation_params):
         "EXPANSION_RATE": precision_dtype.type(simulation_params["EXPANSION_RATE"]),
         "VORTICITY": precision_dtype.type(simulation_params["VORTICITY"]),
         "DELTA": precision_dtype.type(simulation_params["DELTA"]),
-        "U_INFLOW": precision_dtype.type(simulation_params["U_INFLOW"]),
-        "V_INFLOW": precision_dtype.type(simulation_params["V_INFLOW"]),
-        "W_INFLOW": precision_dtype.type(simulation_params["W_INFLOW"]),
         "NX": simulation_params["NX"],
         "NY": simulation_params["NY"],
         "NZ": simulation_params["NZ"],

@@ -193,7 +193,7 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
 
     fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.1, max=10, precision=4, description="Density of the fluid, default is air")  # type: ignore
     fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, max=0.1, precision=6, description="Viscosity of the fluid, default is air")  # type: ignore
-    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=10, description="Rate of temperature dissipation, lower means slower dissipation")  # type: ignore
+    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=100, description="Rate of temperature dissipation, lower means slower dissipation")  # type: ignore
     reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up")  # type: ignore
     buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=0.1, precision=4, description="Higher values result in quicker rising of air")  # type: ignore
     expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=0.1, precision=4, description="Higher values result in more expansion of warm air")  # type: ignore

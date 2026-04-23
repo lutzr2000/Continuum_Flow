@@ -34,11 +34,31 @@ def _tag_view3d_redraw():
 
 def _domain_dimensions(domain_node):
     """Return the world-space domain dimensions derived from the node settings."""
+    if not _is_valid_domain_node(domain_node):
+        raise ValueError("Domain preview node is no longer valid.")
     return (
         float(domain_node.nx) * float(domain_node.resolution),
         float(domain_node.ny) * float(domain_node.resolution),
         float(domain_node.nz) * float(domain_node.resolution),
     )
+
+
+def _is_valid_domain_node(domain_node):
+    """Return whether one Blender domain node can still be accessed safely."""
+    if domain_node is None:
+        return False
+    try:
+        if getattr(domain_node, "bl_idname", "") != "BLENDERCFD_DOMAIN_NODE":
+            return False
+        if getattr(domain_node, "id_data", None) is None:
+            return False
+        float(domain_node.resolution)
+        int(domain_node.nx)
+        int(domain_node.ny)
+        int(domain_node.nz)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return False
+    return True
 
 
 def _domain_center(domain_node):
@@ -372,12 +392,14 @@ def _build_preview_segments(domain_node):
 
 def _draw_preview():
     """Draw the active domain preview in the 3D viewport."""
-    if _ACTIVE_DOMAIN is None or _ACTIVE_DOMAIN.id_data is None:
+    if not _is_valid_domain_node(_ACTIVE_DOMAIN):
+        disable_domain_preview()
         return
 
     try:
         domain_lines, cell_lines = _build_preview_segments(_ACTIVE_DOMAIN)
     except Exception:
+        disable_domain_preview()
         return
 
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")

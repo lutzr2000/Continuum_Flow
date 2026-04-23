@@ -625,6 +625,33 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
 
 
+def apply_all_BC(
+    u, v, w, p, T, smoke, fuel, flame,
+    bc_config,
+    has_obstacle, obstacle_mask,
+    has_source, source_mask, source_temperature, source_smoke, source_fuel,
+    source_velocity_x, source_velocity_y, source_velocity_z,
+):
+    """
+    Apply obstacle, source and domain constraints in the fixed overwrite order.
+    """
+    if has_obstacle:
+        u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
+            u, v, w, T, smoke, fuel, flame, obstacle_mask
+        )
+
+    if has_source:
+        u, v, w, T, smoke, fuel = Source_BC.source_bc(
+            u, v, w, T, smoke, fuel,
+            source_mask,
+            source_temperature, source_smoke, source_fuel,
+            source_velocity_x, source_velocity_y, source_velocity_z,
+        )
+
+    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, bc_config)
+    return u, v, w, p, T, smoke, fuel, flame
+
+
 # ===============================
 # Main
 # ===============================
@@ -652,14 +679,8 @@ def main(config=None):
     OUTPUT_BUFFER_VARIABLES = simulation_params["OUTPUT_BUFFER_VARIABLES"]
     HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
     BC_CONFIG = simulation_params["BC_CONFIG"]
-    U_INFLOW = simulation_params["U_INFLOW"]
-    V_INFLOW = simulation_params["V_INFLOW"]
-    W_INFLOW = simulation_params["W_INFLOW"]
 
     section_timings = {
-        "Initial_boundary_conditions": 0.0,
-        "Initial_obstacle": 0.0,
-        "Initial_dt": 0.0,
         "Setup_output": 0.0,
         "Forces": 0.0,
         "Vorticity": 0.0,
@@ -728,6 +749,8 @@ def main(config=None):
     source_velocity_x = device_state["source_velocity_x"]
     source_velocity_y = device_state["source_velocity_y"]
     source_velocity_z = device_state["source_velocity_z"]
+    velocity_maxima = device_state["velocity_maxima"]
+    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
     device_fields = {
         "u": u,
         "v": v,
@@ -739,39 +762,18 @@ def main(config=None):
         "flame": flame,
     }
 
-    #------------BCs-------------------
+    #------------Apply all BCs-------------------
     section_start = perf_counter()
-    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW)
+    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+        u, v, w, p, T, smoke, fuel, flame,
+        BC_CONFIG,
+        gpu_constants["HAS_OBSTACLE"], obstacle_mask,
+        gpu_constants["HAS_SOURCE"], source_mask, source_temperature, source_smoke, source_fuel,
+        source_velocity_x, source_velocity_y, source_velocity_z,
+    )
     cuda.synchronize()
-    section_timings["Initial_boundary_conditions"] += perf_counter() - section_start
-
-    #------------Source-------------------
-    section_start = perf_counter()
-    if gpu_constants["HAS_SOURCE"]:
-        u, v, w, T, smoke, fuel = Source_BC.source_bc(
-            u, v, w, T, smoke, fuel,
-            source_mask,
-            source_temperature, source_smoke, source_fuel,
-            source_velocity_x, source_velocity_y, source_velocity_z,
-        )
-    #------------Obstacle-------------------
-    if gpu_constants["HAS_OBSTACLE"]:
-        u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
-            u, v, w, T, smoke, fuel, flame, obstacle_mask
-        )
-    cuda.synchronize()
-    section_timings["Initial_obstacle"] += perf_counter() - section_start
-
-    device_fields.update({
-        "u": u,
-        "v": v,
-        "w": w,
-        "p": p,
-        "T": T,
-        "smoke": smoke,
-        "fuel": fuel,
-        "flame": flame,
-    })
+    elapsed = perf_counter() - section_start
+    section_timings["Boundary_conditions"] += elapsed
 
     #------------Estimate force maxima-------------------
     g = 9.81
@@ -788,16 +790,16 @@ def main(config=None):
     t = 0.0
 
     section_start = perf_counter()
+    Time_Step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
     dt, solver_diverged = Time_Step.compute_new_timestep_gpu(
-        u, v, w, fx_max, fy_max, fz_max,
-        gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
+        u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
+        gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX,
+        max_dt=1.0 / OUTPUT_FPS,
     )
-    section_timings["Initial_dt"] += perf_counter() - section_start
+    section_timings["Update_dt"] += perf_counter() - section_start
     if solver_diverged:
         print('solver divergence')
         return
-    if dt > 1.0 / OUTPUT_FPS:
-        dt = 1.0 / OUTPUT_FPS
 
     #------------Prepare Output-------------------
     next_output_time = 0.0
@@ -902,30 +904,18 @@ def main(config=None):
         fuel, fuel_work = fuel_work, fuel
         flame, flame_work = flame_work, flame
 
-        #------------Source-------------------
+        #------------Apply all BCs-------------------
         section_start = perf_counter()
-        if gpu_constants["HAS_SOURCE"]:
-            u, v, w, T, smoke, fuel = Source_BC.source_bc(
-                u, v, w, T, smoke, fuel,
-                source_mask,
-                source_temperature, source_smoke, source_fuel,
-                source_velocity_x, source_velocity_y, source_velocity_z,
-            )
-        #------------Obstacle-------------------
-        if gpu_constants["HAS_OBSTACLE"]:
-            u, v, w, T, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
-                u, v, w, T, smoke, fuel, flame, obstacle_mask
-            )
-        cuda.synchronize()
-        section_timings["Obstacles_and_Sources"] += perf_counter() - section_start
-
-        #------------BCs-------------------
-        section_start = perf_counter()
-        u, v, w, p, T = BC.apply_all_BC(
-            u, v, w, p, T, BC_CONFIG, U_INFLOW, V_INFLOW, W_INFLOW
+        u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+            u, v, w, p, T, smoke, fuel, flame,
+            BC_CONFIG,
+            gpu_constants["HAS_OBSTACLE"], obstacle_mask,
+            gpu_constants["HAS_SOURCE"], source_mask, source_temperature, source_smoke, source_fuel,
+            source_velocity_x, source_velocity_y, source_velocity_z,
         )
         cuda.synchronize()
-        section_timings["Boundary_conditions"] += perf_counter() - section_start
+        elapsed = perf_counter() - section_start
+        section_timings["Boundary_conditions"] += elapsed
 
         #------------Output-------------------
         device_fields["u"] = u
@@ -963,27 +953,17 @@ def main(config=None):
         t += dt
 
         section_start = perf_counter()
+        Time_Step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
         dt_new, solver_diverged = Time_Step.compute_new_timestep_gpu(
-            u, v, w, fx_max, fy_max, fz_max,
-            gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX
+            u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
+            gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], CFL_MAX,
+            max_dt=1.0 / OUTPUT_FPS,
         )
         section_timings["Update_dt"] += perf_counter() - section_start
         if solver_diverged:
             print('ERROR: The solver diverged, stopping the simulation!')
             break
-
-        dt_max_increase = dt * 1.5
-        dt_max_decrease = dt * 0.5
-
-        if dt_new > dt_max_increase:
-            dt = dt_max_increase
-        elif dt_new < dt_max_decrease:
-            dt = dt_max_decrease
-        else:
-            dt = dt_new
-
-        if dt > 1.0 / OUTPUT_FPS:
-            dt = 1.0 / OUTPUT_FPS
+        dt = dt_new
 
     #------------Empty write queue-------------------
     Output_Functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
