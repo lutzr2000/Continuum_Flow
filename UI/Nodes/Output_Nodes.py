@@ -465,8 +465,8 @@ class BlenderCFDOutputNode(bpy.types.Node):
     bl_width_min = 240.0
     bl_width_max = 420.0
 
-    fps: IntProperty(name="FPS", default=24, min=1, max=240, soft_min=1, description="Output frame rate") # type: ignore
-    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, soft_max=8, description="How many writer processes are launched, usually four give the best performance")  # type: ignore
+    fps: IntProperty(name="FPS", default=24, min=1, max=240, soft_min=1, description="Output frame rate",options=set()) # type: ignore
+    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, soft_max=8, description="How many writer processes are launched, usually four give the best performance",options=set())  # type: ignore
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(

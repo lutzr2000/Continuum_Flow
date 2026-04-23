@@ -117,22 +117,22 @@ class BlenderCFDDomainNode(bpy.types.Node):
         ("OUTFLOW", "Outflow", "Outflow boundary"),
         ("INFLOW", "Inflow", "Inflow boundary with prescribed velocity"),
     )
-    resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.001, unit="LENGTH", description="Grid resolution")  # type: ignore
-    nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in x")  # type: ignore
-    ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in y")  # type: ignore
-    nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in z") # type: ignore
-    x_low_bc: bpy.props.EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    x_high_bc: bpy.props.EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    y_low_bc: bpy.props.EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    y_high_bc: bpy.props.EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    z_low_bc: bpy.props.EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    z_high_bc: bpy.props.EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW")  # type: ignore
-    x_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
-    x_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
-    y_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
-    y_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
-    z_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
-    z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY")  # type: ignore
+    resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.001, unit="LENGTH", description="Grid resolution",options=set())  # type: ignore
+    nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in x",options=set())  # type: ignore
+    ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in y",options=set())  # type: ignore
+    nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in z",options=set()) # type: ignore
+    x_low_bc: bpy.props.EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    x_high_bc: bpy.props.EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    y_low_bc: bpy.props.EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    y_high_bc: bpy.props.EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    z_low_bc: bpy.props.EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    z_high_bc: bpy.props.EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
+    x_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    x_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    y_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    y_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    z_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -191,18 +191,18 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 360.0
 
-    fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.1, max=10, precision=4, description="Density of the fluid, default is air")  # type: ignore
-    fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, max=0.1, precision=6, description="Viscosity of the fluid, default is air")  # type: ignore
-    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=100, description="Rate of temperature dissipation, lower means slower dissipation")  # type: ignore
-    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up")  # type: ignore
-    buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=0.1, precision=4, description="Higher values result in quicker rising of air")  # type: ignore
-    expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=0.1, precision=4, description="Higher values result in more expansion of warm air")  # type: ignore
-    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.1, min=0.0, max=100.0, precision=4, description="Rate of smoke dissipation, lower means slower dissipation")  # type: ignore
-    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, max=100.0, precision=4, description="Rate of smoke production due to burning, higher means more production")   # type: ignore
-    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, max=100.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation")   # type: ignore
-    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, max=100.0, precision=4, description="How quickly fuel is burned, lower means slower burning")   # type: ignore
-    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite")  # type: ignore
-    vorticity: FloatProperty(name="Vorticity", default=1.0, min=0.0, max=5.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl")  # type: ignore
+    fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.1, max=10, precision=4, description="Density of the fluid, default is air",options=set())  # type: ignore
+    fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, max=0.1, precision=6, description="Viscosity of the fluid, default is air",options=set())  # type: ignore
+    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=100, description="Rate of temperature dissipation, lower means slower dissipation",options={'ANIMATABLE'})  # type: ignore
+    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up",options={'ANIMATABLE'})  # type: ignore
+    buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=0.1, precision=4, description="Higher values result in quicker rising of air",options={'ANIMATABLE'})  # type: ignore
+    expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=0.1, precision=4, description="Higher values result in more expansion of warm air",options={'ANIMATABLE'})  # type: ignore
+    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.1, min=0.0, max=100.0, precision=4, description="Rate of smoke dissipation, lower means slower dissipation",options={'ANIMATABLE'})  # type: ignore
+    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, max=100.0, precision=4, description="Rate of smoke production due to burning, higher means more production",options={'ANIMATABLE'})   # type: ignore
+    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, max=100.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation",options={'ANIMATABLE'})   # type: ignore
+    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, max=100.0, precision=4, description="How quickly fuel is burned, lower means slower burning",options={'ANIMATABLE'})   # type: ignore
+    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite",options={'ANIMATABLE'})  # type: ignore
+    vorticity: FloatProperty(name="Vorticity", default=1.0, min=0.0, max=5.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl",options={'ANIMATABLE'})  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -291,10 +291,10 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     bl_width_min = 240.0
     bl_width_max = 420.0
 
-    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation")  # type: ignore
-    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation")  # type: ignore
-    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver")  # type: ignore
-    iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations")  # type: ignore
+    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation",options=set())  # type: ignore
+    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation",options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver",options=set())  # type: ignore
+    iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations",options=set())  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
