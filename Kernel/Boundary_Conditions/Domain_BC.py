@@ -1,7 +1,6 @@
 from numba import cuda
 
-THREADS_PER_BLOCK_3D = (8, 8, 8)
-THREADS_PER_BLOCK_2D = (16, 16)
+from Kernel.Kernel_Config import THREADS_PER_BLOCK_2D, boundary_face_blocks_per_grid
 
 
 @cuda.jit
@@ -253,33 +252,6 @@ def _side_to_axis_and_index(side):
     raise ValueError(f"Unknown boundary side '{side}'")
 
 
-def _boundary_blockspergrid(field_shape, axis, threadsperblock):
-    """
-    computes the 2D grid dimensions needed to launch one boundary-face kernel.
-
-    Args:
-        field_shape (tuple[int, int, int]): full shape of the affected 3D field
-        axis (int): face orientation encoded as 0 for x, 1 for y and 2 for z
-        threadsperblock (tuple[int, int]): CUDA thread block shape for face kernels
-    Returns:
-        tuple[int, int]: CUDA grid shape for the selected face
-    """
-    if axis == 0:
-        return (
-            (field_shape[1] + threadsperblock[0] - 1) // threadsperblock[0],
-            (field_shape[2] + threadsperblock[1] - 1) // threadsperblock[1],
-        )
-    if axis == 1:
-        return (
-            (field_shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-            (field_shape[2] + threadsperblock[1] - 1) // threadsperblock[1],
-        )
-    return (
-        (field_shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (field_shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-    )
-
-
 def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None, threadsperblock=None):
     """
     applies inflow boundary conditions to one side of the domain on the GPU.
@@ -306,7 +278,7 @@ def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None, 
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_2D
     axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
+    blockspergrid = boundary_face_blocks_per_grid(u.shape, axis, threadsperblock)
     _inflow_bc_kernel[blockspergrid, threadsperblock](
         u, v, w, p, T,
         axis, side_index,
@@ -339,7 +311,7 @@ def outflow_bc(u, v, w, p, T, side, threadsperblock=None):
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_2D
     axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
+    blockspergrid = boundary_face_blocks_per_grid(u.shape, axis, threadsperblock)
     _outflow_bc_kernel[blockspergrid, threadsperblock](u, v, w, p, T, axis, side_index)
     return u, v, w, p, T
 
@@ -368,7 +340,7 @@ def slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_2D
     axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
+    blockspergrid = boundary_face_blocks_per_grid(u.shape, axis, threadsperblock)
     _slip_wall_bc_kernel[blockspergrid, threadsperblock](
         u, v, w, p, T,
         axis, side_index,
@@ -402,7 +374,7 @@ def no_slip_wall_bc(u, v, w, p, T, side, t_wall=None, threadsperblock=None):
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_2D
     axis, side_index = _side_to_axis_and_index(side)
-    blockspergrid = _boundary_blockspergrid(u.shape, axis, threadsperblock)
+    blockspergrid = boundary_face_blocks_per_grid(u.shape, axis, threadsperblock)
     _no_slip_wall_bc_kernel[blockspergrid, threadsperblock](
         u, v, w, p, T,
         axis, side_index,

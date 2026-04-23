@@ -2,8 +2,7 @@ import numpy as np
 from numba import cuda
 
 import Kernel.Boundary_Conditions.Obstacles as Obstacles
-
-THREADS_PER_BLOCK_3D = (8, 8, 8)
+from Kernel.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
 
 def build_source_data(domain_cfg, source_entries):
@@ -182,11 +181,7 @@ def source_bc(
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_3D
 
-    blockspergrid = (
-        (source_mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (source_mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (source_mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
+    blockspergrid = volume_blocks_per_grid(source_mask.shape, threadsperblock)
 
     _source_bc_kernel[blockspergrid, threadsperblock](
         u, v, w, T, smoke, fuel,

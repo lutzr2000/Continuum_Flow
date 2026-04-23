@@ -2,8 +2,7 @@ import numpy as np
 from numba import cuda
 
 import Kernel.Boundary_Conditions.Obstacles as Obstacles
-
-THREADS_PER_BLOCK_3D = (8, 8, 8)
+from Kernel.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
 
 def _combine_exported_obstacles(obstacle_entries):
@@ -87,14 +86,13 @@ def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask):
     """
     applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
 
-    Each thread checks one obstacle cell and clears velocity, pressure and
+    Each thread checks one obstacle cell and clears velocity and the supported
     scalar values when the mask marks that cell as solid.
 
     Args:
         u (device array): x-velocity field
         v (device array): y-velocity field
         w (device array): z-velocity field
-        p (device array): pressure field
         smoke (device array): smoke field
         fuel (device array): fuel field
         flame (device array): flame indicator field
@@ -115,36 +113,30 @@ def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask):
         flame[i, j, k] = 0.0
 
 
-def obstacle_bc(u, v, w, T, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
+def obstacle_bc(u, v, w, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
     """
     applies all obstacle boundary conditions to the GPU field state.
 
-    Velocity, pressure and scalar fields are cleared inside obstacle cells so
+    Velocity and supported scalar fields are cleared inside obstacle cells so
     obstacle regions stay empty and act as solid regions.
 
     Args:
         u (device array): x-velocity field
         v (device array): y-velocity field
         w (device array): z-velocity field
-        p (device array): pressure field
-        T (device array): temperature field
         smoke (device array): smoke field
         fuel (device array): fuel field
         flame (device array): flame indicator field
         obstacle_mask (device array): boolean obstacle mask
         threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
-        tuple: updated velocity, pressure and scalar fields
+        tuple: updated velocity and scalar fields
     """
     if threadsperblock is None:
         threadsperblock = THREADS_PER_BLOCK_3D
 
-    blockspergrid = (
-        (obstacle_mask.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (obstacle_mask.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (obstacle_mask.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
-    )
+    blockspergrid = volume_blocks_per_grid(obstacle_mask.shape, threadsperblock)
 
     _obstacle_bc_kernel[blockspergrid, threadsperblock](u, v, w, smoke, fuel, flame, obstacle_mask)
 
-    return u, v, w, T, smoke, fuel, flame
+    return u, v, w, smoke, fuel, flame

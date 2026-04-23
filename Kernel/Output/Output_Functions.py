@@ -125,7 +125,6 @@ def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
         None
     """
     write_queue.join()
-    write_queue.join()
     for _ in writer_threads:
         write_queue.put(None)
     write_queue.join()

@@ -1,7 +1,10 @@
 import numpy as np
 from numba import cuda
 
-REDUCTION_THREADS_PER_BLOCK = 256
+from Kernel.Kernel_Config import (
+    REDUCTION_THREADS_PER_BLOCK,
+    reduction_blocks_per_grid,
+)
 
 
 def reset_velocity_maxima(maxima, host_zeros):
@@ -107,7 +110,7 @@ def compute_new_timestep_gpu(
     """
     eps = 1e-12
     total_size = u.size
-    blockspergrid = min(1024, (total_size + REDUCTION_THREADS_PER_BLOCK - 1) // REDUCTION_THREADS_PER_BLOCK)
+    blockspergrid = reduction_blocks_per_grid(total_size)
 
     _velocity_maxima_timestep[blockspergrid, REDUCTION_THREADS_PER_BLOCK](u, v, w, maxima, total_size)
 

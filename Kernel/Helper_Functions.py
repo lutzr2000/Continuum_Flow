@@ -4,13 +4,10 @@ import sys
 import numpy as np
 from numba import cuda
 
-import Kernel.Boundary_Conditions.Domain_BC as BC
 import Kernel.Forcing as Forcing
 import Kernel.Boundary_Conditions.Obstacle_BC as Obstacle_BC
 import Kernel.Boundary_Conditions.Source_BC as Source_BC
 
-THREADS_PER_BLOCK_3D = (8, 8, 8)
-THREADS_PER_BLOCK_2D = (4, 4)
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
@@ -200,11 +197,6 @@ def apply_config(config):
     output_performance = build_output_performance_config(output_cfg)
     output_dtype = resolve_output_dtype(output_cfg)
     output_field_config = build_output_field_config(output_cfg)
-
-    BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
-    BC.THREADS_PER_BLOCK_2D = THREADS_PER_BLOCK_2D
-    Obstacle_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
-    Source_BC.THREADS_PER_BLOCK_3D = THREADS_PER_BLOCK_3D
 
     return {
         "RHO": float(physics_cfg["fluid"]["density"]),
