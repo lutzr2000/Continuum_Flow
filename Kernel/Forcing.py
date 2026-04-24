@@ -9,6 +9,9 @@ def forcing_constant(force_state, force_cfg, dtype):
     The exported config stores the force vector directly as x/y/z components.
     Multiple constant nodes accumulate linearly.
     """
+    if force_cfg.get("animations"):
+        return
+
     force_vector = force_cfg.get("force", {})
     force_state["Fx_base"] += np.asarray(float(force_vector.get("x", 0.0)), dtype=dtype)
     force_state["Fy_base"] += np.asarray(float(force_vector.get("y", 0.0)), dtype=dtype)

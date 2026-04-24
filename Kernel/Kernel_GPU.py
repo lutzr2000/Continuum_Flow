@@ -367,7 +367,8 @@ def update_force_fields(Fx_base, Fy_base, Fz_base,
                         turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
                         turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
                         turbulence_cos_coeffs, turbulence_sin_coeffs,
-                        turbulence_count, Fx, Fy, Fz):
+                        turbulence_count, animated_force_x, animated_force_y, animated_force_z,
+                        Fx, Fy, Fz):
     """
     Update body-force fields from base fields and animated turbulence bases.
 
@@ -381,9 +382,9 @@ def update_force_fields(Fx_base, Fy_base, Fz_base,
     if i >= nx or j >= ny or k >= nz:
         return
 
-    fx = Fx_base[i, j, k]
-    fy = Fy_base[i, j, k]
-    fz = Fz_base[i, j, k]
+    fx = Fx_base[i, j, k] + animated_force_x
+    fy = Fy_base[i, j, k] + animated_force_y
+    fz = Fz_base[i, j, k] + animated_force_z
 
     for turbulence_index in range(turbulence_count):
         cos_coeff = turbulence_cos_coeffs[turbulence_index]
@@ -404,7 +405,6 @@ def update_force_fields(Fx_base, Fy_base, Fz_base,
     Fx[i, j, k] = fx
     Fy[i, j, k] = fy
     Fz[i, j, k] = fz
-
 
 @cuda.jit(cache=True)
 def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
@@ -661,6 +661,7 @@ def main(config=None):
     OUTPUT_BUFFER_VARIABLES = simulation_params["OUTPUT_BUFFER_VARIABLES"]
     HOST_VDB_WRITER = simulation_params["HOST_VDB_WRITER"]
     BC_CONFIG = simulation_params["BC_CONFIG"]
+    animation_state = simulation_params["ANIMATION_STATE"]
 
     section_timings = {
         "Setup_output": 0.0,
@@ -670,7 +671,6 @@ def main(config=None):
         "Velocity": 0.0,
         "Scalars": 0.0,
         "Boundary_conditions": 0.0,
-        "Obstacles_and_Sources": 0.0,
         "Output": 0.0,
         "Update_dt": 0.0,
     }
@@ -757,20 +757,11 @@ def main(config=None):
     elapsed = perf_counter() - section_start
     section_timings["Boundary_conditions"] += elapsed
 
-    #------------Estimate force maxima-------------------
-    g = 9.81
-    fx_max = float(gpu_constants["FORCE_X_MAX"])
-    fy_max = float(gpu_constants["FORCE_Y_MAX"])
-    source_temperature_delta = max(
-        0.0,
-        float(gpu_constants["SOURCE_TEMPERATURE_MAX"] - gpu_constants["T_REFERENCE"]),
-    )
-    fz_buoyancy_max = g * gpu_constants["BUOANCY_FACTOR"] * source_temperature_delta * 1.5
-    fz_max = float(gpu_constants["FORCE_Z_MAX"]) + float(fz_buoyancy_max)
+    t = 0.0
+    animated_force = Helper_Functions.update_animated_gpu_constants(animation_state, gpu_constants, t)
+    fx_max, fy_max, fz_max = Helper_Functions.estimate_theoretical_force_maxima(gpu_constants, animation_state)
 
     #------------Dynamic time step-------------------
-    t = 0.0
-
     section_start = perf_counter()
     Time_Step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
     dt, solver_diverged = Time_Step.compute_new_timestep_gpu(
@@ -809,6 +800,7 @@ def main(config=None):
     while t < T_MAX:
         #------------Forces-------------------
         section_start = perf_counter()
+        animated_force = Helper_Functions.update_animated_gpu_constants(animation_state, gpu_constants, t)
         if turbulence_count > 0:
             turbulence_cos_coeffs.copy_to_device(np.cos(turbulence_angular_frequencies * t))
             turbulence_sin_coeffs.copy_to_device(np.sin(turbulence_angular_frequencies * t))
@@ -817,7 +809,11 @@ def main(config=None):
             turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
             turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
             turbulence_cos_coeffs, turbulence_sin_coeffs,
-            turbulence_count, Fx, Fy, Fz
+            turbulence_count,
+            np.float32(animated_force["x"]),
+            np.float32(animated_force["y"]),
+            np.float32(animated_force["z"]),
+            Fx, Fy, Fz
         )
 
         buoyancy_approximation[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](

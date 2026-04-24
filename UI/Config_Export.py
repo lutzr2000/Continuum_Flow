@@ -32,6 +32,92 @@ def _safe_float_vector(value):
     return [float(component) for component in value]
 
 
+def _safe_animation_value(value):
+    """Convert one sampled Blender property value to a JSON-friendly shape."""
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__len__") and not isinstance(value, (int, float, bool)):
+        return _safe_float_vector(value)
+    return float(value)
+
+
+def _animated_property_names(node):
+    """Return all node property names explicitly marked animatable in the UI."""
+    property_names = []
+    for prop in node.bl_rna.properties:
+        if prop.identifier == "rna_type" or prop.is_readonly:
+            continue
+        if "ANIMATABLE" not in getattr(prop, "options", set()):
+            continue
+        property_names.append(prop.identifier)
+    return property_names
+
+
+def _node_property_is_animated(node, property_name):
+    """Return whether the node property is driven by F-curves or drivers."""
+    node_tree = getattr(node, "id_data", None)
+    animation_data = getattr(node_tree, "animation_data", None)
+    if animation_data is None:
+        return False
+
+    property_path = node.path_from_id(property_name)
+    action = getattr(animation_data, "action", None)
+    if action is not None:
+        for fcurve in action.fcurves:
+            if getattr(fcurve, "data_path", "") == property_path:
+                return True
+
+    drivers = getattr(animation_data, "drivers", None)
+    if drivers is not None:
+        for fcurve in drivers:
+            if getattr(fcurve, "data_path", "") == property_path:
+                return True
+
+    return False
+
+
+def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
+    """Sample animated node properties once per Blender frame for kernel playback."""
+    animated_properties = [
+        property_name
+        for property_name in _animated_property_names(node)
+        if _node_property_is_animated(node, property_name)
+    ]
+    if not animated_properties:
+        return {}
+
+    scene = getattr(context, "scene", None) if context is not None else None
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return {}
+
+    current_frame = int(getattr(scene, "frame_current", start_frame))
+    frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
+    sampled_values = {property_name: [] for property_name in animated_properties}
+
+    try:
+        for frame in frame_numbers:
+            scene.frame_set(frame)
+            for property_name in animated_properties:
+                sampled_values[property_name].append(
+                    _safe_animation_value(getattr(node, property_name))
+                )
+    finally:
+        scene.frame_set(current_frame)
+
+    return {
+        property_name: {
+            "times": [
+                float(frame - int(start_frame)) / float(fps)
+                for frame in frame_numbers
+            ],
+            "values": sampled_values[property_name],
+        }
+        for property_name in animated_properties
+    }
+
+
 def _linked_input_nodes(node, socket_name, expected_idname=None):
     """Return upstream nodes connected to the given input socket."""
     socket = node.inputs.get(socket_name)
@@ -129,7 +215,7 @@ def _serialize_domain_node(node):
     }
 
 
-def _serialize_physics_node(node):
+def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
     """Serialize one physics node."""
     return {
         "node_name": node.name,
@@ -155,6 +241,13 @@ def _serialize_physics_node(node):
         "extras": {
             "vorticity": float(getattr(node, "vorticity", 0.0)),
         },
+        "animations": _serialize_node_animations(
+            node,
+            start_frame,
+            end_frame,
+            fps,
+            context=context,
+        ),
     }
 
 
@@ -167,7 +260,7 @@ def _serialize_reference_frame_node(node):
     }
 
 
-def _serialize_source_node(node, context=None):
+def _serialize_source_node(node, start_frame, end_frame, fps, context=None):
     """Serialize one source node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
     depsgraph = context.evaluated_depsgraph_get() if context is not None else None
@@ -179,6 +272,13 @@ def _serialize_source_node(node, context=None):
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
         "velocity": _safe_float_vector(node.velocity),
+        "animations": _serialize_node_animations(
+            node,
+            start_frame,
+            end_frame,
+            fps,
+            context=context,
+        ),
         "geometry_inputs": _linked_geometry_names(node),
         "shape": "mesh" if geometry_exports else "empty",
         "mesh": {
@@ -203,11 +303,18 @@ def _serialize_obstacle_node(node, context=None):
     }
 
 
-def _serialize_force_node(node):
+def _serialize_force_node(node, start_frame, end_frame, fps, context=None):
     """Serialize one force node by its concrete subtype."""
     base_data = {
         "node_name": node.name,
         "node_type": node.bl_idname,
+        "animations": _serialize_node_animations(
+            node,
+            start_frame,
+            end_frame,
+            fps,
+            context=context,
+        ),
     }
 
     if node.bl_idname == "BLENDERCFD_FORCE_CONSTANT_NODE":
@@ -310,15 +417,43 @@ def _build_simulation_entry(simulation_node, context=None):
             "iterations": int(simulation_node.iterations),
         },
         "domain": _serialize_domain_node(domain_nodes[0]) if domain_nodes else None,
-        "physics": _serialize_physics_node(physics_nodes[0]) if physics_nodes else None,
+        "physics": (
+            _serialize_physics_node(
+                physics_nodes[0],
+                start_frame,
+                end_frame,
+                simulation_fps,
+                context=context,
+            )
+            if physics_nodes
+            else None
+        ),
         "reference_frame": (
             _serialize_reference_frame_node(reference_frame_nodes[0])
             if reference_frame_nodes
             else None
         ),
-        "sources": [_serialize_source_node(node, context=context) for node in source_nodes],
+        "sources": [
+            _serialize_source_node(
+                node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+                context=context,
+            )
+            for node in source_nodes
+        ],
         "obstacles": [_serialize_obstacle_node(node, context=context) for node in obstacle_nodes],
-        "forces": [_serialize_force_node(node) for node in force_nodes],
+        "forces": [
+            _serialize_force_node(
+                node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+                context=context,
+            )
+            for node in force_nodes
+        ],
         "outputs": [_serialize_output_node(node) for node in output_nodes],
         "viewers": [_serialize_viewer_node(node) for node in viewer_nodes],
     }

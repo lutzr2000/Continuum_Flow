@@ -12,6 +12,17 @@ BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 SPARSE_MASK_FIELDS = ("smoke", "flame")
+PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
+    "temperature_dissipation": "TEMPERATURE_DISSIPATION_RATE",
+    "reference_temperature": "T_REFERENCE",
+    "buoyancy": "BUOANCY_FACTOR",
+    "expansion_rate": "EXPANSION_RATE",
+    "smoke_dissipation": "SMOKE_DISSIPATION_RATE",
+    "smoke_production_rate": "SMOKE_PRODUCTION_RATE",
+    "fuel_burn_rate": "FUEL_BURN_RATE",
+    "fuel_ignition_temperature": "FUEL_IGNITION_TEMPERATURE",
+    "vorticity": "VORTICITY",
+}
 
 
 def emit_progress(percent, time_value=None):
@@ -167,6 +178,188 @@ def resolve_output_dtype(output_cfg):
     return precision_mapping.get(precision_name, np.float16)
 
 
+def _animation_series_to_arrays(animation_entry, dtype):
+    """Convert one exported animation series to contiguous numpy arrays."""
+    if not animation_entry:
+        return None
+
+    times = np.asarray(animation_entry.get("times", ()), dtype=np.float32)
+    values = np.asarray(animation_entry.get("values", ()), dtype=dtype)
+    if times.size == 0 or values.size == 0:
+        return None
+
+    return {
+        "times": np.ascontiguousarray(times),
+        "values": np.ascontiguousarray(values),
+        "cursor": 0,
+    }
+
+
+def build_animation_state(simulation_cfg, dtype=np.float32):
+    """Build compact runtime animation data for lightweight kernel updates."""
+    dtype = np.dtype(dtype)
+    animation_state = {
+        "constants": {},
+        "constant_force": {},
+        "enabled": False,
+    }
+
+    physics_cfg = simulation_cfg.get("physics") or {}
+    physics_animations = physics_cfg.get("animations", {})
+    for property_name, constant_name in PHYSICS_ANIMATION_TO_GPU_CONSTANT.items():
+        series = _animation_series_to_arrays(physics_animations.get(property_name), dtype)
+        if series is None:
+            continue
+        animation_state["constants"][constant_name] = series
+        animation_state["enabled"] = True
+
+    combined_force_times = None
+    combined_force_values = {
+        "x": None,
+        "y": None,
+        "z": None,
+    }
+    force_property_to_axis = {
+        "fx": "x",
+        "fy": "y",
+        "fz": "z",
+    }
+    for force_cfg in simulation_cfg.get("forces", ()):
+        if force_cfg.get("node_type") != "BLENDERCFD_FORCE_CONSTANT_NODE":
+            continue
+        animations = force_cfg.get("animations", {})
+        for property_name, axis_name in force_property_to_axis.items():
+            series = _animation_series_to_arrays(animations.get(property_name), dtype)
+            if series is None:
+                continue
+            if combined_force_times is None:
+                combined_force_times = series["times"].copy()
+            if combined_force_values[axis_name] is None:
+                combined_force_values[axis_name] = np.zeros_like(series["values"], dtype=dtype)
+            combined_force_values[axis_name] += series["values"]
+            animation_state["enabled"] = True
+
+    if combined_force_times is not None:
+        for axis_name in ("x", "y", "z"):
+            values = combined_force_values[axis_name]
+            if values is None:
+                values = np.zeros(combined_force_times.shape, dtype=dtype)
+            animation_state["constant_force"][axis_name] = {
+                "times": np.ascontiguousarray(combined_force_times.copy()),
+                "values": np.ascontiguousarray(values),
+                "cursor": 0,
+            }
+
+    return animation_state
+
+
+def _interpolate_animation_series(series, time_value):
+    """Interpolate one monotonic time series with a rolling cursor."""
+    if not series:
+        return 0.0
+
+    times = series["times"]
+    values = series["values"]
+    if times.size == 0:
+        return 0.0
+    if times.size == 1 or time_value <= float(times[0]):
+        return values[0]
+
+    cursor = int(series.get("cursor", 0))
+    last_segment = int(times.size - 2)
+    if cursor > last_segment:
+        cursor = last_segment
+
+    while cursor < last_segment and time_value >= float(times[cursor + 1]):
+        cursor += 1
+    series["cursor"] = cursor
+
+    if cursor >= last_segment and time_value >= float(times[-1]):
+        return values[-1]
+
+    t0 = float(times[cursor])
+    t1 = float(times[cursor + 1])
+    if t1 <= t0:
+        return values[cursor]
+
+    alpha = (float(time_value) - t0) / (t1 - t0)
+    return values[cursor] * (1.0 - alpha) + values[cursor + 1] * alpha
+
+
+def update_animated_gpu_constants(animation_state, gpu_constants, time_value):
+    """Update animated scalar kernel constants and uniform constant-force offsets."""
+    animated_force = {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+    }
+    if not animation_state or not animation_state.get("enabled"):
+        return animated_force
+
+    for constant_name, series in animation_state.get("constants", {}).items():
+        gpu_constants[constant_name] = np.float32(_interpolate_animation_series(series, time_value))
+
+    for axis_name, series in animation_state.get("constant_force", {}).items():
+        animated_force[axis_name] = float(_interpolate_animation_series(series, time_value))
+
+    return animated_force
+
+
+def _series_max_abs(series):
+    """Return the maximum absolute value of one sampled linear animation series."""
+    if not series:
+        return 0.0
+
+    values = series.get("values")
+    if values is None or values.size == 0:
+        return 0.0
+    return float(np.max(np.abs(values)))
+
+
+def estimate_theoretical_force_maxima(gpu_constants, animation_state):
+    """Estimate one conservative force bound for the whole simulation run."""
+    g = 9.81
+    constant_force_animation = animation_state.get("constant_force", {}) if animation_state else {}
+    fx_max = float(gpu_constants["FORCE_X_MAX"]) + _series_max_abs(constant_force_animation.get("x"))
+    fy_max = float(gpu_constants["FORCE_Y_MAX"]) + _series_max_abs(constant_force_animation.get("y"))
+
+    reference_temperature_series = (
+        animation_state.get("constants", {}).get("T_REFERENCE")
+        if animation_state
+        else None
+    )
+    buoyancy_factor_series = (
+        animation_state.get("constants", {}).get("BUOANCY_FACTOR")
+        if animation_state
+        else None
+    )
+    reference_temperature_min = float(gpu_constants["T_REFERENCE"])
+    if reference_temperature_series and reference_temperature_series["values"].size > 0:
+        reference_temperature_min = min(
+            reference_temperature_min,
+            float(np.min(reference_temperature_series["values"])),
+        )
+
+    buoyancy_factor_max_abs = abs(float(gpu_constants["BUOANCY_FACTOR"]))
+    if buoyancy_factor_series and buoyancy_factor_series["values"].size > 0:
+        buoyancy_factor_max_abs = max(
+            buoyancy_factor_max_abs,
+            float(np.max(np.abs(buoyancy_factor_series["values"]))),
+        )
+
+    source_temperature_delta = max(
+        0.0,
+        float(gpu_constants["SOURCE_TEMPERATURE_MAX"] - reference_temperature_min),
+    )
+    fz_buoyancy_max = g * buoyancy_factor_max_abs * source_temperature_delta * 1.5
+    fz_max = (
+        float(gpu_constants["FORCE_Z_MAX"]) +
+        _series_max_abs(constant_force_animation.get("z")) +
+        float(fz_buoyancy_max)
+    )
+    return fx_max, fy_max, fz_max
+
+
 def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
     simulations = config.get("simulations")
@@ -197,21 +390,54 @@ def apply_config(config):
     output_performance = build_output_performance_config(output_cfg)
     output_dtype = resolve_output_dtype(output_cfg)
     output_field_config = build_output_field_config(output_cfg)
+    animation_state = build_animation_state(simulation_cfg, dtype=np.float32)
+    if animation_state["constant_force"]:
+        has_force = True
+    temperature_dissipation_rate = float(physics_cfg["temperature"]["dissipation"])
+    smoke_dissipation_rate = float(physics_cfg["smoke"]["dissipation"])
+    smoke_production_rate = float(physics_cfg["smoke"].get("production_rate", 1.0))
+    fuel_burn_rate = float(physics_cfg["fuel"]["burn_rate"])
+    fuel_ignition_temperature = float(physics_cfg["fuel"]["ignition_temperature"])
+    t_reference = float(physics_cfg["temperature"]["reference_temperature"])
+    buoyancy_factor = float(physics_cfg["temperature"]["buoyancy"])
+    expansion_rate = float(physics_cfg["temperature"]["expansion_rate"])
+    vorticity = float(physics_cfg.get("extras", {}).get("vorticity", 0.0))
+
+    for constant_name, series in animation_state["constants"].items():
+        initial_value = float(series["values"][0])
+        if constant_name == "TEMPERATURE_DISSIPATION_RATE":
+            temperature_dissipation_rate = initial_value
+        elif constant_name == "SMOKE_DISSIPATION_RATE":
+            smoke_dissipation_rate = initial_value
+        elif constant_name == "SMOKE_PRODUCTION_RATE":
+            smoke_production_rate = initial_value
+        elif constant_name == "FUEL_BURN_RATE":
+            fuel_burn_rate = initial_value
+        elif constant_name == "FUEL_IGNITION_TEMPERATURE":
+            fuel_ignition_temperature = initial_value
+        elif constant_name == "T_REFERENCE":
+            t_reference = initial_value
+        elif constant_name == "BUOANCY_FACTOR":
+            buoyancy_factor = initial_value
+        elif constant_name == "EXPANSION_RATE":
+            expansion_rate = initial_value
+        elif constant_name == "VORTICITY":
+            vorticity = initial_value
 
     return {
         "RHO": float(physics_cfg["fluid"]["density"]),
         "NU": float(physics_cfg["fluid"]["viscosity"]),
-        "TEMPERATURE_DISSIPATION_RATE": float(physics_cfg["temperature"]["dissipation"]),
+        "TEMPERATURE_DISSIPATION_RATE": temperature_dissipation_rate,
         "TEMPERATURE_PRODUCTION_RATE": 1.0,
-        "SMOKE_DISSIPATION_RATE": float(physics_cfg["smoke"]["dissipation"]),
-        "SMOKE_PRODUCTION_RATE": float(physics_cfg["smoke"].get("production_rate", 1.0)),
-        "FUEL_BURN_RATE": float(physics_cfg["fuel"]["burn_rate"]),
-        "FUEL_IGNITION_TEMPERATURE": float(physics_cfg["fuel"]["ignition_temperature"]),
-        "T_REFERENCE": float(physics_cfg["temperature"]["reference_temperature"]),
+        "SMOKE_DISSIPATION_RATE": smoke_dissipation_rate,
+        "SMOKE_PRODUCTION_RATE": smoke_production_rate,
+        "FUEL_BURN_RATE": fuel_burn_rate,
+        "FUEL_IGNITION_TEMPERATURE": fuel_ignition_temperature,
+        "T_REFERENCE": t_reference,
         "SOURCE_TEMPERATURE_MAX": source_temperature_max,
-        "BUOANCY_FACTOR": float(physics_cfg["temperature"]["buoyancy"]),
-        "EXPANSION_RATE": float(physics_cfg["temperature"]["expansion_rate"]),
-        "VORTICITY": float(physics_cfg.get("extras", {}).get("vorticity", 0.0)),
+        "BUOANCY_FACTOR": buoyancy_factor,
+        "EXPANSION_RATE": expansion_rate,
+        "VORTICITY": vorticity,
         "T_MAX": float(simulation_cfg["settings"]["simulation_length"]),
         "FRAME_START": int(simulation_cfg["settings"].get("start_frame", 0)),
         "CFL_MAX": float(simulation_cfg["settings"]["cfl"]),
@@ -238,6 +464,7 @@ def apply_config(config):
         "HAS_OBSTACLE": has_obstacle,
         "HAS_FORCE": has_force,
         "BC_CONFIG": bc_config,
+        "ANIMATION_STATE": animation_state,
         "INITIAL_U": initial_velocity[0],
         "INITIAL_V": initial_velocity[1],
         "INITIAL_W": initial_velocity[2],
