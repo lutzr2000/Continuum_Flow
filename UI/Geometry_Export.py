@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import bpy
 
@@ -32,24 +34,61 @@ def _object_to_worldspace_triangles(source_object, depsgraph=None):
 
     try:
         mesh.calc_loop_triangles()
-        if not mesh.loop_triangles:
+        triangle_count = len(mesh.loop_triangles)
+        vertex_count = len(mesh.vertices)
+        if triangle_count == 0 or vertex_count == 0:
             return np.empty((0, 3, 3), dtype=np.float32)
 
+        local_vertices = np.empty(vertex_count * 3, dtype=np.float32)
+        mesh.vertices.foreach_get("co", local_vertices)
+        local_vertices = local_vertices.reshape(vertex_count, 3)
+
+        # Transform all vertices in one NumPy pass instead of one Python loop per vertex.
         matrix_world = object_eval.matrix_world.copy()
-        world_vertices = np.asarray(
-            [(matrix_world @ vertex.co)[:] for vertex in mesh.vertices],
-            dtype=np.float32,
-        )
-        triangles = np.asarray(
-            [[world_vertices[index] for index in triangle.vertices] for triangle in mesh.loop_triangles],
-            dtype=np.float32,
-        )
-        return triangles
+        linear = np.asarray(matrix_world.to_3x3(), dtype=np.float32)
+        translation = np.asarray(matrix_world.translation, dtype=np.float32)
+        world_vertices = local_vertices @ linear.T
+        world_vertices += translation
+
+        triangle_vertex_indices = np.empty(triangle_count * 3, dtype=np.int32)
+        mesh.loop_triangles.foreach_get("vertices", triangle_vertex_indices)
+        triangle_vertex_indices = triangle_vertex_indices.reshape(triangle_count, 3)
+    
+        return np.ascontiguousarray(world_vertices[triangle_vertex_indices], dtype=np.float32)
     finally:
         object_eval.to_mesh_clear()
 
 
-def export_object_geometry(source_object, depsgraph=None):
+def _sanitize_file_stem(name):
+    """Return a filesystem-friendly file stem for one Blender object name."""
+    safe_name = "".join(character if character.isalnum() or character in ("-", "_") else "_" for character in str(name))
+    safe_name = safe_name.strip("._")
+    return safe_name or "mesh"
+
+
+def _serialize_triangles(triangles, source_object=None, storage_dir=None):
+    """Serialize triangles either inline for JSON or to a binary cache file for bake startup."""
+    if storage_dir is None:
+        return {
+            "triangles": triangles.tolist(),
+        }
+
+    storage_dir = Path(storage_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    object_name = getattr(source_object, "name", None) if source_object is not None else None
+    triangle_file_path = storage_dir / f"{_sanitize_file_stem(object_name)}.npy"
+    suffix = 1
+    while triangle_file_path.exists():
+        triangle_file_path = storage_dir / f"{_sanitize_file_stem(object_name)}_{suffix}.npy"
+        suffix += 1
+    np.save(triangle_file_path, np.ascontiguousarray(triangles, dtype=np.float32), allow_pickle=False)
+    return {
+        "triangles_file": str(triangle_file_path),
+        "triangles_shape": [int(axis_length) for axis_length in triangles.shape],
+    }
+
+
+def export_object_geometry(source_object, depsgraph=None, storage_dir=None):
     """Serialize one Blender object as world-space triangle data."""
     triangles = _object_to_worldspace_triangles(source_object, depsgraph=depsgraph)
     if triangles.size == 0:
@@ -67,13 +106,13 @@ def export_object_geometry(source_object, depsgraph=None):
             "min": bounds_min,
             "max": bounds_max,
         },
-        "triangles": triangles.tolist(),
+        **_serialize_triangles(triangles, source_object=source_object, storage_dir=storage_dir),
     }
 
 
-def export_geometry_nodes(geometry_nodes, depsgraph=None):
+def export_geometry_nodes(geometry_nodes, depsgraph=None, storage_dir=None):
     """Serialize all linked geometry nodes into obstacle-ready triangle payloads."""
     exports = []
     for source_object in _iter_source_objects(geometry_nodes):
-        exports.append(export_object_geometry(source_object, depsgraph=depsgraph))
+        exports.append(export_object_geometry(source_object, depsgraph=depsgraph, storage_dir=storage_dir))
     return exports

@@ -126,11 +126,20 @@ def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0
     delta = np.float32(delta)
 
     for mesh_object in mesh_objects:
-        triangles = np.asarray(mesh_object.get("triangles", ()), dtype=np.float32)
+        triangle_file = mesh_object.get("triangles_file")
+        if triangle_file:
+            triangles = np.load(triangle_file, allow_pickle=False)
+        else:
+            triangles = np.asarray(mesh_object.get("triangles", ()), dtype=np.float32)
+
         if triangles.size == 0:
             continue
 
-        triangles = triangles.reshape((-1, 3, 3))
+        triangle_shape = mesh_object.get("triangles_shape", ())
+        if triangle_shape:
+            triangles = np.asarray(triangles, dtype=np.float32).reshape(tuple(int(axis_length) for axis_length in triangle_shape))
+        else:
+            triangles = np.asarray(triangles, dtype=np.float32).reshape((-1, 3, 3))
         bounds = mesh_object.get("bounds", {})
         if bounds:
             bounds_min = np.asarray(bounds.get("min", (0.0, 0.0, 0.0)), dtype=np.float32)

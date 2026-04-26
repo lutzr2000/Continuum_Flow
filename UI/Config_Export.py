@@ -260,11 +260,15 @@ def _serialize_reference_frame_node(node):
     }
 
 
-def _serialize_source_node(node, start_frame, end_frame, fps, context=None):
+def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
     """Serialize one source node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
     depsgraph = context.evaluated_depsgraph_get() if context is not None else None
-    geometry_exports = GeometryExport.export_geometry_nodes(geometry_nodes, depsgraph=depsgraph)
+    geometry_exports = GeometryExport.export_geometry_nodes(
+        geometry_nodes,
+        depsgraph=depsgraph,
+        storage_dir=geometry_storage_dir,
+    )
 
     return {
         "node_name": node.name,
@@ -287,11 +291,15 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None):
     }
 
 
-def _serialize_obstacle_node(node, context=None):
+def _serialize_obstacle_node(node, context=None, geometry_storage_dir=None):
     """Serialize one obstacle node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
     depsgraph = context.evaluated_depsgraph_get() if context is not None else None
-    geometry_exports = GeometryExport.export_geometry_nodes(geometry_nodes, depsgraph=depsgraph)
+    geometry_exports = GeometryExport.export_geometry_nodes(
+        geometry_nodes,
+        depsgraph=depsgraph,
+        storage_dir=geometry_storage_dir,
+    )
 
     return {
         "node_name": node.name,
@@ -388,7 +396,7 @@ def _serialize_viewer_node(node):
     }
 
 
-def _build_simulation_entry(simulation_node, context=None):
+def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=None):
     """Build a grouped config entry for one simulation node."""
     domain_nodes = _linked_input_nodes(simulation_node, "Domain", "BLENDERCFD_DOMAIN_NODE")
     physics_nodes = _linked_input_nodes(simulation_node, "Physics", "BLENDERCFD_PHYSICS_NODE")
@@ -440,10 +448,18 @@ def _build_simulation_entry(simulation_node, context=None):
                 end_frame,
                 simulation_fps,
                 context=context,
+                geometry_storage_dir=geometry_storage_dir,
             )
             for node in source_nodes
         ],
-        "obstacles": [_serialize_obstacle_node(node, context=context) for node in obstacle_nodes],
+        "obstacles": [
+            _serialize_obstacle_node(
+                node,
+                context=context,
+                geometry_storage_dir=geometry_storage_dir,
+            )
+            for node in obstacle_nodes
+        ],
         "forces": [
             _serialize_force_node(
                 node,
@@ -503,7 +519,7 @@ def _resolve_export_directory(simulation_entries):
     return Path.cwd()
 
 
-def build_config_dict(context=None):
+def build_config_dict(context=None, geometry_storage_dir=None):
     """Evaluate the BlenderCFD node tree and return a grouped config dict."""
     node_tree = _resolve_node_tree(context)
     if node_tree is None:
@@ -521,7 +537,14 @@ def build_config_dict(context=None):
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
             "simulation_count": len(simulation_nodes),
         },
-        "simulations": [_build_simulation_entry(node, context=context) for node in simulation_nodes],
+        "simulations": [
+            _build_simulation_entry(
+                node,
+                context=context,
+                geometry_storage_dir=geometry_storage_dir,
+            )
+            for node in simulation_nodes
+        ],
         "geometry_nodes": _collect_tree_geometry_nodes(node_tree),
     }
     return config_dict

@@ -132,9 +132,48 @@ def _prepared_output_directory(base_output_path, bake_token):
     return Path(base_output_path).resolve() / f"{_BAKE_OUTPUT_DIRECTORY_PREFIX}{bake_token}"
 
 
-def _prepare_config_for_bake(config_dict):
+def _bake_geometry_cache_directory(bake_token):
+    return _project_root_directory() / ".blendercfd_bake_cache" / bake_token / "geometry"
+
+
+def _cleanup_geometry_cache(config_dict):
+    if not config_dict:
+        return
+    geometry_cache_dir = (((config_dict.get("meta") or {}).get("geometry_cache_dir")) or "").strip()
+    if not geometry_cache_dir:
+        return
+
+    cache_root = (_project_root_directory() / ".blendercfd_bake_cache").resolve()
+    geometry_cache_path = Path(geometry_cache_dir).resolve()
+
+    try:
+        geometry_cache_path.relative_to(cache_root)
+    except ValueError:
+        return
+
+    shutil.rmtree(geometry_cache_path, ignore_errors=True)
+
+    current_path = geometry_cache_path.parent
+    while True:
+        try:
+            current_path.relative_to(cache_root)
+        except ValueError:
+            break
+
+        try:
+            current_path.rmdir()
+        except OSError:
+            break
+
+        if current_path == cache_root:
+            break
+        current_path = current_path.parent
+
+
+def _prepare_config_for_bake(config_dict, bake_token=None):
     prepared_config = copy.deepcopy(config_dict)
-    bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if not bake_token:
+        bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     prepared_config.setdefault("meta", {})["bake_token"] = bake_token
     for simulation_cfg in prepared_config.get("simulations", ()):
         for output_cfg in simulation_cfg.get("outputs", ()):
@@ -631,6 +670,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if self._session is not None:
             self._session["writer_server"].stop()
             self._session = None
+        _cleanup_geometry_cache(self._config_dict)
         if _ACTIVE_BAKE_OPERATOR is self:
             _ACTIVE_BAKE_OPERATOR = None
         set_bake_running(False, context=context)
@@ -699,29 +739,40 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             self.report({"ERROR"}, "Bake disabled: invalid socket connection in the node tree.")
             return {"CANCELLED"}
         global _ACTIVE_BAKE_OPERATOR
+        bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        geometry_cache_dir = _bake_geometry_cache_directory(bake_token)
         try:
-            live_config_dict = BlenderCFDConfigModule.build_config_dict(context)
+            live_config_dict = BlenderCFDConfigModule.build_config_dict(
+                context,
+                geometry_storage_dir=str(geometry_cache_dir),
+            )
+            live_config_dict.setdefault("meta", {})["geometry_cache_dir"] = str(geometry_cache_dir)
         except Exception as exc:
+            shutil.rmtree(geometry_cache_dir, ignore_errors=True)
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
         if _config_has_baked_vdbs(live_config_dict):
             active_operator = _ACTIVE_BAKE_OPERATOR
             if active_operator is not None and active_operator._session is not None:
+                _cleanup_geometry_cache(live_config_dict)
                 active_operator._request_cancel()
                 self.report({"INFO"}, "Bake cancellation requested. Press Free Bake again after the bake stops.")
                 return {"FINISHED"}
             removed_volumes, deleted_files = _free_bake(context, config_dict=live_config_dict)
+            _cleanup_geometry_cache(live_config_dict)
             self.report({"INFO"}, f"Freed bake data. Removed {removed_volumes} volume object(s) and deleted {deleted_files} VDB file(s).")
             return {"FINISHED"}
         try:
-            self._config_dict = _prepare_config_for_bake(live_config_dict)
+            self._config_dict = _prepare_config_for_bake(live_config_dict, bake_token=bake_token)
             self._session = _start_bake_session(self._config_dict)
         except ModuleNotFoundError as exc:
+            _cleanup_geometry_cache(live_config_dict)
             set_bake_running(False, context=context)
             missing_module = getattr(exc, "name", None) or str(exc)
             self.report({"ERROR"}, f"Bake failed: missing Python module '{missing_module}' in {sys.executable}")
             return {"CANCELLED"}
         except Exception as exc:
+            _cleanup_geometry_cache(live_config_dict)
             set_bake_running(False, context=context)
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
