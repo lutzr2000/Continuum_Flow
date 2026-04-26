@@ -37,8 +37,6 @@ def build_source_data(domain_cfg, source_entries):
     velocity_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
     runtime_entries = []
 
-    boundary_clip_layers = 4 # this is important, otherwise there can be conflict between Neumann BC and Sources
-
     for source_entry in source_entries:
         if source_entry.get("shape") != "mesh":
             continue
@@ -53,7 +51,6 @@ def build_source_data(domain_cfg, source_entries):
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
         source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
-        _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
         velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
@@ -109,22 +106,7 @@ def build_source_data(domain_cfg, source_entries):
         "velocity_y": velocity_y_field,
         "velocity_z": velocity_z_field,
         "runtime_entries": runtime_entries,
-        "boundary_clip_layers": boundary_clip_layers,
     }
-
-
-def _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers):
-    """Keep source masks away from hard domain boundaries to avoid BC conflicts."""
-    if boundary_clip_layers <= 0:
-        return source_mask
-
-    source_mask[:boundary_clip_layers, :, :] = False
-    source_mask[-boundary_clip_layers:, :, :] = False
-    source_mask[:, :boundary_clip_layers, :] = False
-    source_mask[:, -boundary_clip_layers:, :] = False
-    source_mask[:, :, :boundary_clip_layers] = False
-    source_mask[:, :, -boundary_clip_layers:] = False
-    return source_mask
 
 
 def update_source_data(source_data, time_value):
@@ -147,14 +129,12 @@ def update_source_data(source_data, time_value):
     velocity_y_field.fill(0.0)
     velocity_z_field.fill(0.0)
 
-    boundary_clip_layers = int(source_data.get("boundary_clip_layers", 0))
     for runtime_entry in source_data.get("runtime_entries", ()):
         source_mask = Obstacles.update_dynamic_mask(
             runtime_entry["runtime"],
             time_value,
             out_mask=runtime_entry["mask"],
         )
-        _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers)
         if not np.any(source_mask):
             continue
 
