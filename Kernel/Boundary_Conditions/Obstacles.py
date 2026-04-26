@@ -155,15 +155,17 @@ def _sample_mask_backwards_batched_cuda(
     task_origins,
     task_shapes,
     task_inv,
+    task_count,
+    total_size,
     delta,
     ox, oy, oz,
 ):
     n = cuda.grid(1)
-    if n >= task_offsets[-1]:
+    if n >= total_size:
         return
 
     task_index = 0
-    while task_index + 1 < task_offsets.shape[0] and n >= task_offsets[task_index + 1]:
+    while task_index + 1 < task_count and n >= task_offsets[task_index + 1]:
         task_index += 1
 
     base_n = n - task_offsets[task_index]
@@ -210,6 +212,25 @@ def _sample_mask_backwards_batched_cuda(
 
 def _blocks_for_linear_size(size, threadsperblock=DYNAMIC_SAMPLE_THREADS_PER_BLOCK):
     return max(1, (int(size) + threadsperblock - 1) // threadsperblock)
+
+
+def _ensure_runtime_task_buffers(runtime_data, task_count, total_size):
+    """Grow reusable GPU buffers for per-frame dynamic sampling tasks if needed."""
+    current_task_capacity = int(runtime_data.get("task_buffer_capacity", 0))
+    current_total_capacity = int(runtime_data.get("task_total_size_capacity", 0))
+    if current_task_capacity >= task_count and current_total_capacity >= total_size:
+        return
+
+    new_task_capacity = max(task_count, current_task_capacity)
+    new_total_capacity = max(total_size, current_total_capacity)
+
+    runtime_data["task_object_ids_device"] = cuda.device_array(new_task_capacity, dtype=np.int32)
+    runtime_data["task_origins_device"] = cuda.device_array((new_task_capacity, 3), dtype=np.int32)
+    runtime_data["task_shapes_device"] = cuda.device_array((new_task_capacity, 3), dtype=np.int32)
+    runtime_data["task_inv_device"] = cuda.device_array((new_task_capacity, 12), dtype=np.float32)
+    runtime_data["task_offsets_device"] = cuda.device_array(new_task_capacity + 1, dtype=np.int64)
+    runtime_data["task_buffer_capacity"] = new_task_capacity
+    runtime_data["task_total_size_capacity"] = new_total_capacity
 
 
 def _build_runtime_sample_tasks(runtime_data, time_value):
@@ -541,6 +562,13 @@ def prepare_dynamic_runtime_for_gpu(runtime_data):
     runtime_data["local_mask_offsets_device"] = cuda.to_device(np.asarray(mask_offsets, dtype=np.int32))
     runtime_data["local_mask_shapes_device"] = cuda.to_device(np.asarray(mask_shapes, dtype=np.int32))
     runtime_data["local_origins_device"] = cuda.to_device(np.asarray(mask_origins, dtype=np.float32))
+    runtime_data["task_object_ids_device"] = cuda.device_array(1, dtype=np.int32)
+    runtime_data["task_origins_device"] = cuda.device_array((1, 3), dtype=np.int32)
+    runtime_data["task_shapes_device"] = cuda.device_array((1, 3), dtype=np.int32)
+    runtime_data["task_inv_device"] = cuda.device_array((1, 12), dtype=np.float32)
+    runtime_data["task_offsets_device"] = cuda.device_array(2, dtype=np.int64)
+    runtime_data["task_buffer_capacity"] = 1
+    runtime_data["task_total_size_capacity"] = 0
 
     runtime_data["gpu_ready"] = True
     return runtime_data
@@ -591,12 +619,15 @@ def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
     tasks = _build_runtime_sample_tasks(runtime_data, time_value)
     has_obstacle = tasks is not None
     if has_obstacle:
-        task_object_ids_device = cuda.to_device(tasks["object_ids"])
-        task_origins_device = cuda.to_device(tasks["origins"])
-        task_shapes_device = cuda.to_device(tasks["shapes"])
-        task_inv_device = cuda.to_device(tasks["inv"])
-        task_offsets_device = cuda.to_device(tasks["offsets"])
+        task_count = int(tasks["object_ids"].shape[0])
         total_size = int(tasks["offsets"][-1])
+        _ensure_runtime_task_buffers(runtime_data, task_count, total_size)
+
+        runtime_data["task_object_ids_device"][:task_count].copy_to_device(tasks["object_ids"])
+        runtime_data["task_origins_device"][:task_count].copy_to_device(tasks["origins"])
+        runtime_data["task_shapes_device"][:task_count].copy_to_device(tasks["shapes"])
+        runtime_data["task_inv_device"][:task_count].copy_to_device(tasks["inv"])
+        runtime_data["task_offsets_device"][:task_count + 1].copy_to_device(tasks["offsets"])
 
         _sample_mask_backwards_batched_cuda[
             _blocks_for_linear_size(total_size),
@@ -607,11 +638,13 @@ def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
             runtime_data["local_mask_offsets_device"],
             runtime_data["local_mask_shapes_device"],
             runtime_data["local_origins_device"],
-            task_offsets_device,
-            task_object_ids_device,
-            task_origins_device,
-            task_shapes_device,
-            task_inv_device,
+            runtime_data["task_offsets_device"],
+            runtime_data["task_object_ids_device"],
+            runtime_data["task_origins_device"],
+            runtime_data["task_shapes_device"],
+            runtime_data["task_inv_device"],
+            task_count,
+            total_size,
             delta,
             np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
         )
