@@ -506,6 +506,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     obstacle_mask_host = np.asarray(simulation_params["obstacle_mask"])
     source_field_data = simulation_params["source_field_data"]
     source_mask_host = np.asarray(source_field_data["mask"])
+    source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
     source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
     source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
     source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
@@ -513,9 +514,9 @@ def upload_simulation_state_to_gpu(simulation_params):
     source_velocity_y_host = np.asarray(source_field_data["velocity_y"], dtype=precision_dtype)
     source_velocity_z_host = np.asarray(source_field_data["velocity_z"], dtype=precision_dtype)
 
-    u[source_mask_host] = source_velocity_x_host[source_mask_host]
-    v[source_mask_host] = source_velocity_y_host[source_mask_host]
-    w[source_mask_host] = source_velocity_z_host[source_mask_host]
+    u[source_velocity_mask_host] = source_velocity_x_host[source_velocity_mask_host]
+    v[source_velocity_mask_host] = source_velocity_y_host[source_velocity_mask_host]
+    w[source_velocity_mask_host] = source_velocity_z_host[source_velocity_mask_host]
 
     T = np.maximum(T, source_temperature_host)
     smoke = np.maximum(smoke, source_smoke_host)
@@ -560,6 +561,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "turbulence_sin_coeffs": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype)),
         "obstacle_mask": cuda.to_device(obstacle_mask_host),
         "source_mask": cuda.to_device(source_mask_host),
+        "source_velocity_mask": cuda.to_device(source_velocity_mask_host),
         "source_temperature": cuda.to_device(source_temperature_host),
         "source_smoke": cuda.to_device(source_smoke_host),
         "source_fuel": cuda.to_device(source_fuel_host),

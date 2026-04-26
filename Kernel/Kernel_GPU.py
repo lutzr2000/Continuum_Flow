@@ -611,7 +611,7 @@ def apply_all_BC(
     u, v, w, p, T, smoke, fuel, flame,
     bc_config,
     has_obstacle, obstacle_mask,
-    has_source, source_mask, source_temperature, source_smoke, source_fuel,
+    has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
 ):
     """
@@ -625,7 +625,7 @@ def apply_all_BC(
     if has_source:
         u, v, w, T, smoke, fuel = Source_BC.source_bc(
             u, v, w, T, smoke, fuel,
-            source_mask,
+            source_mask, source_velocity_mask,
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
         )
@@ -725,6 +725,7 @@ def main(config=None):
     turbulence_count = int(turbulence_angular_frequencies.size)
     obstacle_mask = device_state["obstacle_mask"]
     source_mask = device_state["source_mask"]
+    source_velocity_mask = device_state["source_velocity_mask"]
     source_temperature = device_state["source_temperature"]
     source_smoke = device_state["source_smoke"]
     source_fuel = device_state["source_fuel"]
@@ -750,7 +751,7 @@ def main(config=None):
         u, v, w, p, T, smoke, fuel, flame,
         BC_CONFIG,
         gpu_constants["HAS_OBSTACLE"], obstacle_mask,
-        gpu_constants["HAS_SOURCE"], source_mask, source_temperature, source_smoke, source_fuel,
+        gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
     )
     cuda.synchronize()
@@ -883,7 +884,7 @@ def main(config=None):
             u, v, w, p, T, smoke, fuel, flame,
             BC_CONFIG,
             gpu_constants["HAS_OBSTACLE"], obstacle_mask,
-            gpu_constants["HAS_SOURCE"], source_mask, source_temperature, source_smoke, source_fuel,
+            gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
         )
         cuda.synchronize()

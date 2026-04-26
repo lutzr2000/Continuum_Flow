@@ -34,6 +34,7 @@ def build_source_data(domain_cfg, source_entries):
     velocity_y_field = np.zeros((nx, ny, nz), dtype=np.float32)
     velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
+    velocity_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
 
     boundary_clip_layers = 4 # this is important, otherwise there can be conflict between Neumann BC and Sources
 
@@ -65,6 +66,9 @@ def build_source_data(domain_cfg, source_entries):
         velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
         velocity_y = np.float32(velocity[1] if len(velocity) > 1 else 0.0)
         velocity_z = np.float32(velocity[2] if len(velocity) > 2 else 0.0)
+        has_velocity_target = bool(
+            velocity_x != 0.0 or velocity_y != 0.0 or velocity_z != 0.0
+        )
 
         source_active_mask |= source_mask
         temperature_field[source_mask] = np.maximum(
@@ -79,12 +83,15 @@ def build_source_data(domain_cfg, source_entries):
             fuel_field[source_mask],
             np.float32(source_entry.get("fuel", 0.0)),
         )
-        velocity_x_field[source_mask] = velocity_x
-        velocity_y_field[source_mask] = velocity_y
-        velocity_z_field[source_mask] = velocity_z
+        if has_velocity_target:
+            velocity_active_mask[source_mask] = True
+            velocity_x_field[source_mask] = velocity_x
+            velocity_y_field[source_mask] = velocity_y
+            velocity_z_field[source_mask] = velocity_z
 
     return {
         "mask": source_active_mask,
+        "velocity_mask": velocity_active_mask,
         "temperature": temperature_field,
         "smoke": smoke_field,
         "fuel": fuel_field,
@@ -97,7 +104,7 @@ def build_source_data(domain_cfg, source_entries):
 @cuda.jit
 def _source_bc_kernel(
     u, v, w, T, smoke, fuel,
-    source_mask,
+    source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
 ):
@@ -116,6 +123,7 @@ def _source_bc_kernel(
         smoke (device array): smoke field
         fuel (device array): fuel field
         source_mask (device array): boolean source mask
+        source_velocity_mask (device array): boolean mask for cells with imposed velocity
         source_temperature (device array): source temperature targets
         source_smoke (device array): source smoke targets
         source_fuel (device array): source fuel targets
@@ -135,9 +143,11 @@ def _source_bc_kernel(
     source_temperature_value = source_temperature[i, j, k]
     source_smoke_value = source_smoke[i, j, k]
     source_fuel_value = source_fuel[i, j, k]
-    u[i, j, k] = source_velocity_x[i, j, k]
-    v[i, j, k] = source_velocity_y[i, j, k]
-    w[i, j, k] = source_velocity_z[i, j, k]
+
+    if source_velocity_mask[i, j, k]:
+        u[i, j, k] = source_velocity_x[i, j, k]
+        v[i, j, k] = source_velocity_y[i, j, k]
+        w[i, j, k] = source_velocity_z[i, j, k]
 
     if T[i, j, k] < source_temperature_value:
         T[i, j, k] = source_temperature_value
@@ -149,7 +159,7 @@ def _source_bc_kernel(
 
 def source_bc(
     u, v, w, T, smoke, fuel,
-    source_mask,
+    source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
     threadsperblock=None,
@@ -168,6 +178,7 @@ def source_bc(
         smoke (device array): smoke field
         fuel (device array): fuel field
         source_mask (device array): boolean source mask
+        source_velocity_mask (device array): boolean mask for cells with imposed velocity
         source_temperature (device array): source temperature targets
         source_smoke (device array): source smoke targets
         source_fuel (device array): source fuel targets
@@ -185,7 +196,7 @@ def source_bc(
 
     _source_bc_kernel[blockspergrid, threadsperblock](
         u, v, w, T, smoke, fuel,
-        source_mask,
+        source_mask, source_velocity_mask,
         source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
     )
