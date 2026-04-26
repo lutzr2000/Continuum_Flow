@@ -132,6 +132,7 @@ def build_source_data(domain_cfg, source_entries):
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
     velocity_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
     runtime_entries = []
+    has_animation = False
 
     for source_entry in source_entries:
         if source_entry.get("shape") != "mesh":
@@ -146,6 +147,7 @@ def build_source_data(domain_cfg, source_entries):
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
+        has_animation = has_animation or bool(source_runtime.get("is_animated", False))
         source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
@@ -202,11 +204,15 @@ def build_source_data(domain_cfg, source_entries):
         "velocity_y": velocity_y_field,
         "velocity_z": velocity_z_field,
         "runtime_entries": runtime_entries,
+        "is_animated": bool(has_animation),
     }
 
 
 def prepare_source_data_for_gpu(source_data):
     """Upload static local voxel masks for dynamic source sampling on the GPU."""
+    if not source_data.get("is_animated", False):
+        source_data["gpu_ready"] = False
+        return source_data
     for runtime_entry in source_data.get("runtime_entries", ()):
         Obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
     source_data["gpu_ready"] = True
@@ -215,6 +221,9 @@ def prepare_source_data_for_gpu(source_data):
 
 def update_source_data_gpu(source_data, device_state, time_value):
     """Rebuild dynamic source masks and fields directly on the GPU."""
+    if not source_data.get("is_animated", False):
+        source_data["last_has_source"] = bool(np.any(source_data["mask"]))
+        return source_data
     if not source_data.get("gpu_ready"):
         prepare_source_data_for_gpu(source_data)
 
@@ -253,16 +262,13 @@ def update_source_data_gpu(source_data, device_state, time_value):
             if local_mask_device is None:
                 continue
 
-            matrix = Obstacles._matrix_at(obj["transform_series"], time_value)
-            bounds = Obstacles._transform_bounds(obj["local_bounds_min"], obj["local_bounds_max"], matrix)
-            ix0, ix1, iy0, iy1, iz0, iz1 = Obstacles._bounds_to_indices(
-                bounds[0], bounds[1], delta, origin, shape=shape
-            )
-            if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
+            state = Obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+            if not state["active"]:
                 continue
+            ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
 
             any_source = True
-            inv = Obstacles._as_f32(np.linalg.inv(matrix))
+            inv = state["inv"]
             sx = int(ix1 - ix0 + 1)
             sy = int(iy1 - iy0 + 1)
             sz = int(iz1 - iz0 + 1)

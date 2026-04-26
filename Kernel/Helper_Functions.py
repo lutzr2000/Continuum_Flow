@@ -478,6 +478,10 @@ def apply_config(config):
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
         "force_field_data": force_data,
+        "HAS_DYNAMIC_BOUNDARIES": bool(
+            obstacle_data.get("is_animated", False) or
+            source_data.get("is_animated", False)
+        ),
     }
 
 
@@ -511,11 +515,11 @@ def upload_simulation_state_to_gpu(simulation_params):
     turbulence_data = force_field_data["turbulence"]
 
     obstacle_data = simulation_params.get("obstacle_data", {"mask": simulation_params["obstacle_mask"]})
-    if obstacle_data.get("runtime") is not None:
+    if obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
         Obstacles.prepare_dynamic_runtime_for_gpu(obstacle_data["runtime"])
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
     source_field_data = simulation_params["source_field_data"]
-    if source_field_data.get("runtime_entries"):
+    if source_field_data.get("is_animated", False):
         Source_BC.prepare_source_data_for_gpu(source_field_data)
     source_mask_host = np.asarray(source_field_data["mask"])
     source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
@@ -614,8 +618,11 @@ def upload_simulation_state_to_gpu(simulation_params):
 
 def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, time_value):
     """Update animated obstacle/source masks on the host and upload them to the GPU."""
+    if not simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
+        return
+
     obstacle_data = simulation_params.get("obstacle_data")
-    if obstacle_data is not None and obstacle_data.get("runtime") is not None:
+    if obstacle_data is not None and obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
         Obstacles.update_dynamic_mask_gpu(
             obstacle_data["runtime"],
             time_value,
@@ -624,7 +631,7 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_con
         gpu_constants["HAS_OBSTACLE"] = bool(obstacle_data["runtime"].get("last_has_obstacle", False))
 
     source_field_data = simulation_params.get("source_field_data")
-    if source_field_data is not None and source_field_data.get("runtime_entries"):
+    if source_field_data is not None and source_field_data.get("is_animated", False):
         Source_BC.update_source_data_gpu(source_field_data, device_state, time_value)
         gpu_constants["HAS_SOURCE"] = bool(source_field_data.get("last_has_source", False))
 

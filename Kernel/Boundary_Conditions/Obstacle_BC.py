@@ -69,6 +69,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
             "config": obstacle_cfg,
             "mask": obstacle_mask,
             "runtime": obstacle_runtime,
+            "is_animated": bool(obstacle_runtime.get("is_animated", False)),
         }
 
     if obstacle_cfg["shape"] == "empty":
@@ -79,6 +80,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
                 dtype=np.bool_,
             ),
             "runtime": None,
+            "is_animated": False,
         }
 
     raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")

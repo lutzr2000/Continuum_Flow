@@ -807,7 +807,7 @@ def main(config=None):
 
     while t < T_MAX:
         #------------Update dynamic masks-------------------
-        if t > 0.0:
+        if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
             section_start = perf_counter()
             Helper_Functions.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, t)
             cuda.synchronize()
