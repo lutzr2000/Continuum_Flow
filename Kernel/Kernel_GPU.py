@@ -665,6 +665,7 @@ def main(config=None):
 
     section_timings = {
         "Setup_output": 0.0,
+        "Dynamic_masks": 0.0,
         "Forces": 0.0,
         "Vorticity": 0.0,
         "Pressure": 0.0,
@@ -745,6 +746,12 @@ def main(config=None):
         "flame": flame,
     }
 
+    #------------Update dynamic masks-------------------
+    section_start = perf_counter()
+    Helper_Functions.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, 0.0)
+    cuda.synchronize()
+    section_timings["Dynamic_masks"] += perf_counter() - section_start
+
     #------------Apply all BCs-------------------
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
@@ -799,6 +806,13 @@ def main(config=None):
     blockspergrid_3d = Kernel_Config.volume_blocks_per_grid(u.shape, Kernel_Config.THREADS_PER_BLOCK_3D)
 
     while t < T_MAX:
+        #------------Update dynamic masks-------------------
+        if t > 0.0:
+            section_start = perf_counter()
+            Helper_Functions.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, t)
+            cuda.synchronize()
+            section_timings["Dynamic_masks"] += perf_counter() - section_start
+
         #------------Forces-------------------
         section_start = perf_counter()
         animated_force = Helper_Functions.update_animated_gpu_constants(animation_state, gpu_constants, t)

@@ -378,6 +378,11 @@ def apply_config(config):
     source_data = Source_BC.build_source_data(domain_cfg, source_entries)
     force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
     source_temperature_max = float(np.max(source_data["temperature"]))
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        source_temperature_max = max(
+            source_temperature_max,
+            float(runtime_entry.get("temperature", 0.0)),
+        )
     has_source = bool(np.any(source_data["mask"]))
     has_obstacle = bool(np.any(obstacle_data["mask"]))
     has_force = bool(
@@ -468,6 +473,7 @@ def apply_config(config):
         "INITIAL_U": initial_velocity[0],
         "INITIAL_V": initial_velocity[1],
         "INITIAL_W": initial_velocity[2],
+        "obstacle_data": obstacle_data,
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
         "force_field_data": force_data,
@@ -503,7 +509,8 @@ def upload_simulation_state_to_gpu(simulation_params):
     point_divergence = np.asarray(force_field_data["point_divergence"], dtype=precision_dtype)
     turbulence_data = force_field_data["turbulence"]
 
-    obstacle_mask_host = np.asarray(simulation_params["obstacle_mask"])
+    obstacle_data = simulation_params.get("obstacle_data", {"mask": simulation_params["obstacle_mask"]})
+    obstacle_mask_host = np.asarray(obstacle_data["mask"])
     source_field_data = simulation_params["source_field_data"]
     source_mask_host = np.asarray(source_field_data["mask"])
     source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
@@ -598,6 +605,28 @@ def upload_simulation_state_to_gpu(simulation_params):
     }
 
     return device_state, gpu_constants
+
+
+def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, time_value):
+    """Update animated obstacle/source masks on the host and upload them to the GPU."""
+    obstacle_data = simulation_params.get("obstacle_data")
+    if obstacle_data is not None and obstacle_data.get("runtime") is not None:
+        obstacle_mask_host = Obstacle_BC.update_obstacle_mask(obstacle_data, time_value)
+        device_state["obstacle_mask"].copy_to_device(np.asarray(obstacle_mask_host))
+        gpu_constants["HAS_OBSTACLE"] = bool(np.any(obstacle_mask_host))
+
+    source_field_data = simulation_params.get("source_field_data")
+    if source_field_data is not None and source_field_data.get("runtime_entries"):
+        Source_BC.update_source_data(source_field_data, time_value)
+        device_state["source_mask"].copy_to_device(np.asarray(source_field_data["mask"]))
+        device_state["source_velocity_mask"].copy_to_device(np.asarray(source_field_data["velocity_mask"]))
+        device_state["source_temperature"].copy_to_device(np.asarray(source_field_data["temperature"], dtype=simulation_params["PRECISION"]))
+        device_state["source_smoke"].copy_to_device(np.asarray(source_field_data["smoke"], dtype=simulation_params["PRECISION"]))
+        device_state["source_fuel"].copy_to_device(np.asarray(source_field_data["fuel"], dtype=simulation_params["PRECISION"]))
+        device_state["source_velocity_x"].copy_to_device(np.asarray(source_field_data["velocity_x"], dtype=simulation_params["PRECISION"]))
+        device_state["source_velocity_y"].copy_to_device(np.asarray(source_field_data["velocity_y"], dtype=simulation_params["PRECISION"]))
+        device_state["source_velocity_z"].copy_to_device(np.asarray(source_field_data["velocity_z"], dtype=simulation_params["PRECISION"]))
+        gpu_constants["HAS_SOURCE"] = bool(np.any(source_field_data["mask"]))
 
 
 def select_fields(field_map, field_names):

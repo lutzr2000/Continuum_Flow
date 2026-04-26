@@ -32,6 +32,11 @@ def _safe_float_vector(value):
     return [float(component) for component in value]
 
 
+def _safe_float_matrix(matrix):
+    """Convert a Blender matrix into nested Python float lists."""
+    return [[float(component) for component in row] for row in matrix]
+
+
 def _safe_animation_value(value):
     """Convert one sampled Blender property value to a JSON-friendly shape."""
     if isinstance(value, (str, bytes)):
@@ -194,6 +199,47 @@ def _linked_geometry_nodes(node):
     return _linked_input_nodes(node, "Geometry", "BLENDERCFD_GEOMETRY_NODE")
 
 
+def _sample_geometry_object_transforms(geometry_nodes, start_frame, end_frame, fps, context=None):
+    """Sample evaluated world transforms for linked geometry objects once per Blender frame."""
+    scene = getattr(context, "scene", None) if context is not None else None
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return {}
+
+    current_frame = int(getattr(scene, "frame_current", start_frame))
+    frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
+    transform_samples = {}
+
+    try:
+        for frame in frame_numbers:
+            scene.frame_set(frame)
+            depsgraph = context.evaluated_depsgraph_get() if context is not None else bpy.context.evaluated_depsgraph_get()
+            for geometry_node in geometry_nodes:
+                source_object = getattr(geometry_node, "source_object", None)
+                if source_object is None:
+                    continue
+
+                object_eval = source_object.evaluated_get(depsgraph)
+                matrix_world = object_eval.matrix_world.copy()
+                object_name = source_object.name
+                object_samples = transform_samples.setdefault(
+                    object_name,
+                    {
+                        "times": [
+                            float(sample_frame - int(start_frame)) / float(fps)
+                            for sample_frame in frame_numbers
+                        ],
+                        "matrices_world": [],
+                    },
+                )
+                object_samples["matrices_world"].append(_safe_float_matrix(matrix_world))
+    finally:
+        scene.frame_set(current_frame)
+
+    return transform_samples
+
+
 def _serialize_domain_node(node):
     """Serialize one domain node."""
     return {
@@ -269,6 +315,16 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
         depsgraph=depsgraph,
         storage_dir=geometry_storage_dir,
     )
+    transform_samples = _sample_geometry_object_transforms(
+        geometry_nodes,
+        start_frame,
+        end_frame,
+        fps,
+        context=context,
+    )
+    for geometry_export in geometry_exports:
+        object_name = geometry_export.get("object_name")
+        geometry_export["transform_animation"] = transform_samples.get(object_name, {})
 
     return {
         "node_name": node.name,
@@ -291,7 +347,7 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
     }
 
 
-def _serialize_obstacle_node(node, context=None, geometry_storage_dir=None):
+def _serialize_obstacle_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
     """Serialize one obstacle node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
     depsgraph = context.evaluated_depsgraph_get() if context is not None else None
@@ -300,6 +356,16 @@ def _serialize_obstacle_node(node, context=None, geometry_storage_dir=None):
         depsgraph=depsgraph,
         storage_dir=geometry_storage_dir,
     )
+    transform_samples = _sample_geometry_object_transforms(
+        geometry_nodes,
+        start_frame,
+        end_frame,
+        fps,
+        context=context,
+    )
+    for geometry_export in geometry_exports:
+        object_name = geometry_export.get("object_name")
+        geometry_export["transform_animation"] = transform_samples.get(object_name, {})
 
     return {
         "node_name": node.name,
@@ -455,6 +521,9 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
         "obstacles": [
             _serialize_obstacle_node(
                 node,
+                start_frame,
+                end_frame,
+                simulation_fps,
                 context=context,
                 geometry_storage_dir=geometry_storage_dir,
             )

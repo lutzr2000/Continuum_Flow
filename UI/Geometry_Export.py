@@ -59,6 +59,44 @@ def _object_to_worldspace_triangles(source_object, depsgraph=None):
         object_eval.to_mesh_clear()
 
 
+def _object_to_localspace_triangles(source_object, depsgraph=None):
+    """
+    Return a triangulated local-space vertex array for one Blender object.
+
+    The evaluated object is used so modifiers are baked into the exported mesh
+    while the object transform itself stays separate for runtime playback.
+    """
+    if source_object is None:
+        return np.empty((0, 3, 3), dtype=np.float32)
+
+    if depsgraph is None:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    object_eval = source_object.evaluated_get(depsgraph)
+    mesh = object_eval.to_mesh(preserve_all_data_layers=False, depsgraph=depsgraph)
+    if mesh is None:
+        return np.empty((0, 3, 3), dtype=np.float32)
+
+    try:
+        mesh.calc_loop_triangles()
+        triangle_count = len(mesh.loop_triangles)
+        vertex_count = len(mesh.vertices)
+        if triangle_count == 0 or vertex_count == 0:
+            return np.empty((0, 3, 3), dtype=np.float32)
+
+        local_vertices = np.empty(vertex_count * 3, dtype=np.float32)
+        mesh.vertices.foreach_get("co", local_vertices)
+        local_vertices = local_vertices.reshape(vertex_count, 3)
+
+        triangle_vertex_indices = np.empty(triangle_count * 3, dtype=np.int32)
+        mesh.loop_triangles.foreach_get("vertices", triangle_vertex_indices)
+        triangle_vertex_indices = triangle_vertex_indices.reshape(triangle_count, 3)
+
+        return np.ascontiguousarray(local_vertices[triangle_vertex_indices], dtype=np.float32)
+    finally:
+        object_eval.to_mesh_clear()
+
+
 def _sanitize_file_stem(name):
     """Return a filesystem-friendly file stem for one Blender object name."""
     safe_name = "".join(character if character.isalnum() or character in ("-", "_") else "_" for character in str(name))
@@ -89,8 +127,8 @@ def _serialize_triangles(triangles, source_object=None, storage_dir=None):
 
 
 def export_object_geometry(source_object, depsgraph=None, storage_dir=None):
-    """Serialize one Blender object as world-space triangle data."""
-    triangles = _object_to_worldspace_triangles(source_object, depsgraph=depsgraph)
+    """Serialize one Blender object as local-space triangle data."""
+    triangles = _object_to_localspace_triangles(source_object, depsgraph=depsgraph)
     if triangles.size == 0:
         bounds_min = [0.0, 0.0, 0.0]
         bounds_max = [0.0, 0.0, 0.0]

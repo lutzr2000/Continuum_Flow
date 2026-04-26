@@ -35,6 +35,7 @@ def build_source_data(domain_cfg, source_entries):
     velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
     velocity_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
+    runtime_entries = []
 
     boundary_clip_layers = 4 # this is important, otherwise there can be conflict between Neumann BC and Sources
 
@@ -47,20 +48,12 @@ def build_source_data(domain_cfg, source_entries):
         if not mesh_objects:
             continue
 
-        source_mask = Obstacles.mesh(
+        source_runtime = Obstacles.build_dynamic_runtime(
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
-        if boundary_clip_layers > 0:
-            source_mask[:boundary_clip_layers, :, :] = False
-            source_mask[-boundary_clip_layers:, :, :] = False
-            source_mask[:, :boundary_clip_layers, :] = False
-            source_mask[:, -boundary_clip_layers:, :] = False
-            source_mask[:, :, :boundary_clip_layers] = False
-            source_mask[:, :, -boundary_clip_layers:] = False
-
-        if not np.any(source_mask):
-            continue
+        source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
+        _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
         velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
@@ -69,6 +62,23 @@ def build_source_data(domain_cfg, source_entries):
         has_velocity_target = bool(
             velocity_x != 0.0 or velocity_y != 0.0 or velocity_z != 0.0
         )
+
+        runtime_entries.append(
+            {
+                "runtime": source_runtime,
+                "mask": source_mask.copy(),
+                "temperature": np.float32(source_entry.get("temperature", 0.0)),
+                "smoke": np.float32(source_entry.get("smoke", 0.0)),
+                "fuel": np.float32(source_entry.get("fuel", 0.0)),
+                "velocity_x": velocity_x,
+                "velocity_y": velocity_y,
+                "velocity_z": velocity_z,
+                "has_velocity_target": has_velocity_target,
+            }
+        )
+
+        if not np.any(source_mask):
+            continue
 
         source_active_mask |= source_mask
         temperature_field[source_mask] = np.maximum(
@@ -98,7 +108,77 @@ def build_source_data(domain_cfg, source_entries):
         "velocity_x": velocity_x_field,
         "velocity_y": velocity_y_field,
         "velocity_z": velocity_z_field,
+        "runtime_entries": runtime_entries,
+        "boundary_clip_layers": boundary_clip_layers,
     }
+
+
+def _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers):
+    """Keep source masks away from hard domain boundaries to avoid BC conflicts."""
+    if boundary_clip_layers <= 0:
+        return source_mask
+
+    source_mask[:boundary_clip_layers, :, :] = False
+    source_mask[-boundary_clip_layers:, :, :] = False
+    source_mask[:, :boundary_clip_layers, :] = False
+    source_mask[:, -boundary_clip_layers:, :] = False
+    source_mask[:, :, :boundary_clip_layers] = False
+    source_mask[:, :, -boundary_clip_layers:] = False
+    return source_mask
+
+
+def update_source_data(source_data, time_value):
+    """Rebuild source masks and persistent source target fields for the current time."""
+    source_active_mask = source_data["mask"]
+    velocity_active_mask = source_data["velocity_mask"]
+    temperature_field = source_data["temperature"]
+    smoke_field = source_data["smoke"]
+    fuel_field = source_data["fuel"]
+    velocity_x_field = source_data["velocity_x"]
+    velocity_y_field = source_data["velocity_y"]
+    velocity_z_field = source_data["velocity_z"]
+
+    source_active_mask.fill(False)
+    velocity_active_mask.fill(False)
+    temperature_field.fill(0.0)
+    smoke_field.fill(0.0)
+    fuel_field.fill(0.0)
+    velocity_x_field.fill(0.0)
+    velocity_y_field.fill(0.0)
+    velocity_z_field.fill(0.0)
+
+    boundary_clip_layers = int(source_data.get("boundary_clip_layers", 0))
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        source_mask = Obstacles.update_dynamic_mask(
+            runtime_entry["runtime"],
+            time_value,
+            out_mask=runtime_entry["mask"],
+        )
+        _clip_source_mask_to_domain_boundaries(source_mask, boundary_clip_layers)
+        if not np.any(source_mask):
+            continue
+
+        source_active_mask |= source_mask
+        temperature_field[source_mask] = np.maximum(
+            temperature_field[source_mask],
+            runtime_entry["temperature"],
+        )
+        smoke_field[source_mask] = np.maximum(
+            smoke_field[source_mask],
+            runtime_entry["smoke"],
+        )
+        fuel_field[source_mask] = np.maximum(
+            fuel_field[source_mask],
+            runtime_entry["fuel"],
+        )
+
+        if runtime_entry["has_velocity_target"]:
+            velocity_active_mask[source_mask] = True
+            velocity_x_field[source_mask] = runtime_entry["velocity_x"]
+            velocity_y_field[source_mask] = runtime_entry["velocity_y"]
+            velocity_z_field[source_mask] = runtime_entry["velocity_z"]
+
+    return source_data
 
 
 @cuda.jit

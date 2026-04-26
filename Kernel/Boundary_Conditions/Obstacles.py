@@ -282,3 +282,359 @@ def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0
         )
 
     return mask
+
+
+def _load_mesh_triangles(mesh_object):
+    """Load one mesh object's triangle payload into a contiguous float32 array."""
+    triangle_file = mesh_object.get("triangles_file")
+    if triangle_file:
+        triangles = np.load(triangle_file, allow_pickle=False)
+    else:
+        triangles = np.asarray(mesh_object.get("triangles", ()), dtype=np.float32)
+
+    if triangles.size == 0:
+        return np.empty((0, 3, 3), dtype=np.float32)
+
+    triangle_shape = mesh_object.get("triangles_shape", ())
+    if triangle_shape:
+        return np.ascontiguousarray(
+            np.asarray(triangles, dtype=np.float32).reshape(tuple(int(axis_length) for axis_length in triangle_shape)),
+            dtype=np.float32,
+        )
+    return np.ascontiguousarray(np.asarray(triangles, dtype=np.float32).reshape((-1, 3, 3)), dtype=np.float32)
+
+
+def _matrix_animation_to_runtime(transform_animation):
+    """Convert exported matrix samples into compact runtime arrays."""
+    if not transform_animation:
+        return {
+            "times": np.zeros(1, dtype=np.float32),
+            "matrices_world": np.eye(4, dtype=np.float32).reshape(1, 4, 4),
+            "cursor": 0,
+        }
+
+    times = np.asarray(transform_animation.get("times", (0.0,)), dtype=np.float32)
+    matrices = np.asarray(transform_animation.get("matrices_world", (np.eye(4, dtype=np.float32),)), dtype=np.float32)
+    if times.size == 0:
+        times = np.zeros(1, dtype=np.float32)
+    if matrices.size == 0:
+        matrices = np.eye(4, dtype=np.float32).reshape(1, 4, 4)
+    matrices = matrices.reshape((-1, 4, 4))
+
+    sample_count = min(times.shape[0], matrices.shape[0])
+    if sample_count <= 0:
+        sample_count = 1
+        times = np.zeros(1, dtype=np.float32)
+        matrices = np.eye(4, dtype=np.float32).reshape(1, 4, 4)
+    else:
+        times = times[:sample_count]
+        matrices = matrices[:sample_count]
+
+    return {
+        "times": np.ascontiguousarray(times, dtype=np.float32),
+        "matrices_world": np.ascontiguousarray(matrices, dtype=np.float32),
+        "cursor": 0,
+    }
+
+
+def _interpolate_matrix_series(series, time_value):
+    """Linearly interpolate one sampled world-matrix time series."""
+    times = series["times"]
+    matrices = series["matrices_world"]
+    if times.size == 0 or matrices.shape[0] == 0:
+        return np.eye(4, dtype=np.float32)
+    if times.size == 1 or time_value <= float(times[0]):
+        return np.asarray(matrices[0], dtype=np.float32)
+
+    cursor = int(series.get("cursor", 0))
+    last_segment = int(times.size - 2)
+    if cursor > last_segment:
+        cursor = last_segment
+
+    while cursor < last_segment and time_value >= float(times[cursor + 1]):
+        cursor += 1
+    series["cursor"] = cursor
+
+    if cursor >= last_segment and time_value >= float(times[-1]):
+        return np.asarray(matrices[-1], dtype=np.float32)
+
+    t0 = float(times[cursor])
+    t1 = float(times[cursor + 1])
+    if t1 <= t0:
+        return np.asarray(matrices[cursor], dtype=np.float32)
+
+    alpha = np.float32((float(time_value) - t0) / (t1 - t0))
+    return np.ascontiguousarray(
+        matrices[cursor] * (np.float32(1.0) - alpha) + matrices[cursor + 1] * alpha,
+        dtype=np.float32,
+    )
+
+
+def _apply_transform_to_triangles(triangles, matrix_world):
+    """Apply one 4x4 transform to a triangle array."""
+    if triangles.size == 0:
+        return np.empty((0, 3, 3), dtype=np.float32)
+
+    flat_vertices = triangles.reshape(-1, 3)
+    homogeneous_vertices = np.ones((flat_vertices.shape[0], 4), dtype=np.float32)
+    homogeneous_vertices[:, :3] = flat_vertices
+    transformed_vertices = homogeneous_vertices @ np.asarray(matrix_world, dtype=np.float32).T
+    return np.ascontiguousarray(transformed_vertices[:, :3].reshape(triangles.shape), dtype=np.float32)
+
+
+def _voxelize_triangles_to_local_mask(triangles, delta):
+    """Voxelize one triangle mesh into a cropped mask in the mesh's own coordinate space."""
+    if triangles.size == 0:
+        return None
+
+    flat_vertices = triangles.reshape(-1, 3)
+    bounds_min = flat_vertices.min(axis=0).astype(np.float32)
+    bounds_max = flat_vertices.max(axis=0).astype(np.float32)
+
+    ix_min = int(np.floor(bounds_min[0] / delta))
+    iy_min = int(np.floor(bounds_min[1] / delta))
+    iz_min = int(np.floor(bounds_min[2] / delta))
+    ix_max = int(np.ceil(bounds_max[0] / delta))
+    iy_max = int(np.ceil(bounds_max[1] / delta))
+    iz_max = int(np.ceil(bounds_max[2] / delta))
+
+    if ix_min > ix_max or iy_min > iy_max or iz_min > iz_max:
+        return None
+
+    local_mask = np.zeros((ix_max - ix_min + 1, iy_max - iy_min + 1, iz_max - iz_min + 1), dtype=np.bool_)
+    eps = np.float32(delta * 1.0e-5 + 1.0e-7)
+    line_offsets, candidate_triangle_indices, valid_triangles = _build_scanline_candidates(
+        triangles,
+        np.float32(delta),
+        np.float32(0.0),
+        np.float32(0.0),
+        iy_min,
+        iy_max,
+        iz_min,
+        iz_max,
+        eps,
+    )
+    if candidate_triangle_indices.size == 0:
+        return None
+
+    local_origin_x = np.float32(ix_min * delta)
+    local_origin_y = np.float32(iy_min * delta)
+    local_origin_z = np.float32(iz_min * delta)
+    _fill_mesh_mask(
+        local_mask,
+        valid_triangles,
+        np.float32(delta),
+        local_origin_x,
+        local_origin_y,
+        local_origin_z,
+        0,
+        local_mask.shape[0] - 1,
+        0,
+        local_mask.shape[1] - 1,
+        0,
+        local_mask.shape[2] - 1,
+        line_offsets,
+        candidate_triangle_indices,
+    )
+
+    return {
+        "mask": np.ascontiguousarray(local_mask),
+        "index_min": np.asarray((ix_min, iy_min, iz_min), dtype=np.int32),
+        "index_max": np.asarray((ix_max, iy_max, iz_max), dtype=np.int32),
+        "local_origin": np.asarray((local_origin_x, local_origin_y, local_origin_z), dtype=np.float32),
+        "local_bounds_min": np.asarray(
+            (local_origin_x, local_origin_y, local_origin_z),
+            dtype=np.float32,
+        ),
+        "local_bounds_max": np.asarray(
+            (
+                ix_max * delta,
+                iy_max * delta,
+                iz_max * delta,
+            ),
+            dtype=np.float32,
+        ),
+    }
+
+
+def _transform_aabb(bounds_min, bounds_max, matrix_world):
+    """Transform an axis-aligned box and return its transformed axis-aligned bounds."""
+    corners = np.asarray(
+        [
+            [bounds_min[0], bounds_min[1], bounds_min[2], 1.0],
+            [bounds_min[0], bounds_min[1], bounds_max[2], 1.0],
+            [bounds_min[0], bounds_max[1], bounds_min[2], 1.0],
+            [bounds_min[0], bounds_max[1], bounds_max[2], 1.0],
+            [bounds_max[0], bounds_min[1], bounds_min[2], 1.0],
+            [bounds_max[0], bounds_min[1], bounds_max[2], 1.0],
+            [bounds_max[0], bounds_max[1], bounds_min[2], 1.0],
+            [bounds_max[0], bounds_max[1], bounds_max[2], 1.0],
+        ],
+        dtype=np.float32,
+    )
+    transformed = corners @ np.asarray(matrix_world, dtype=np.float32).T
+    transformed_xyz = transformed[:, :3]
+    return transformed_xyz.min(axis=0).astype(np.float32), transformed_xyz.max(axis=0).astype(np.float32)
+
+
+@njit(cache=True, parallel=True)
+def _sample_object_mask_backwards(
+    output_mask,
+    base_mask,
+    delta,
+    domain_origin_x,
+    domain_origin_y,
+    domain_origin_z,
+    target_ix_min,
+    target_ix_max,
+    target_iy_min,
+    target_iy_max,
+    target_iz_min,
+    target_iz_max,
+    base_origin_x,
+    base_origin_y,
+    base_origin_z,
+    current_to_base_matrix,
+):
+    """Sample one cropped base mask into the new grid via inverse world transform."""
+    span_x = target_ix_max - target_ix_min + 1
+    span_y = target_iy_max - target_iy_min + 1
+    span_z = target_iz_max - target_iz_min + 1
+    sample_count = span_x * span_y * span_z
+    if sample_count <= 0:
+        return
+
+    base_nx, base_ny, base_nz = base_mask.shape
+    for linear_index in prange(sample_count):
+        i = target_ix_min + linear_index // (span_y * span_z)
+        yz_index = linear_index % (span_y * span_z)
+        j = target_iy_min + yz_index // span_z
+        k = target_iz_min + yz_index % span_z
+
+        x_world = np.float32(domain_origin_x + i * delta)
+        y_world = np.float32(domain_origin_y + j * delta)
+        z_world = np.float32(domain_origin_z + k * delta)
+
+        x_base = (
+            current_to_base_matrix[0, 0] * x_world +
+            current_to_base_matrix[0, 1] * y_world +
+            current_to_base_matrix[0, 2] * z_world +
+            current_to_base_matrix[0, 3]
+        )
+        y_base = (
+            current_to_base_matrix[1, 0] * x_world +
+            current_to_base_matrix[1, 1] * y_world +
+            current_to_base_matrix[1, 2] * z_world +
+            current_to_base_matrix[1, 3]
+        )
+        z_base = (
+            current_to_base_matrix[2, 0] * x_world +
+            current_to_base_matrix[2, 1] * y_world +
+            current_to_base_matrix[2, 2] * z_world +
+            current_to_base_matrix[2, 3]
+        )
+
+        base_i = int(np.floor((x_base - base_origin_x) / delta + 0.5))
+        base_j = int(np.floor((y_base - base_origin_y) / delta + 0.5))
+        base_k = int(np.floor((z_base - base_origin_z) / delta + 0.5))
+
+        if (
+            0 <= base_i < base_nx and
+            0 <= base_j < base_ny and
+            0 <= base_k < base_nz and
+            base_mask[base_i, base_j, base_k]
+        ):
+            output_mask[i, j, k] = True
+
+
+def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0.0):
+    """Build one reusable runtime payload for dynamic obstacle/source masks."""
+    runtime_objects = []
+    for mesh_object in mesh_objects:
+        triangles_local = _load_mesh_triangles(mesh_object)
+        if triangles_local.size == 0:
+            continue
+
+        transform_series = _matrix_animation_to_runtime(mesh_object.get("transform_animation", {}))
+        voxelized = _voxelize_triangles_to_local_mask(
+            triangles_local,
+            delta,
+        )
+        if voxelized is None or not np.any(voxelized["mask"]):
+            continue
+
+        runtime_objects.append(
+            {
+                "object_name": mesh_object.get("object_name"),
+                "local_mask": voxelized["mask"],
+                "local_index_min": voxelized["index_min"],
+                "local_index_max": voxelized["index_max"],
+                "local_origin": voxelized["local_origin"],
+                "local_bounds_min": voxelized["local_bounds_min"],
+                "local_bounds_max": voxelized["local_bounds_max"],
+                "transform_series": transform_series,
+            }
+        )
+
+    return {
+        "objects": runtime_objects,
+        "shape": (int(nx), int(ny), int(nz)),
+        "delta": np.float32(delta),
+        "origin": np.asarray((origin_x, origin_y, origin_z), dtype=np.float32),
+    }
+
+
+def update_dynamic_mask(runtime_data, time_value, out_mask=None):
+    """Update one combined mask by back-sampling all dynamic runtime objects."""
+    nx, ny, nz = runtime_data["shape"]
+    if out_mask is None:
+        out_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
+    else:
+        out_mask.fill(False)
+
+    if not runtime_data["objects"]:
+        return out_mask
+
+    delta = np.float32(runtime_data["delta"])
+    origin_x, origin_y, origin_z = runtime_data["origin"]
+
+    for runtime_object in runtime_data["objects"]:
+        current_matrix_world = _interpolate_matrix_series(runtime_object["transform_series"], time_value)
+        current_to_local = np.ascontiguousarray(np.linalg.inv(current_matrix_world), dtype=np.float32)
+
+        current_bounds_min, current_bounds_max = _transform_aabb(
+            runtime_object["local_bounds_min"],
+            runtime_object["local_bounds_max"],
+            current_matrix_world,
+        )
+
+        target_ix_min = max(0, int(np.floor((current_bounds_min[0] - origin_x) / delta)))
+        target_iy_min = max(0, int(np.floor((current_bounds_min[1] - origin_y) / delta)))
+        target_iz_min = max(0, int(np.floor((current_bounds_min[2] - origin_z) / delta)))
+        target_ix_max = min(nx - 1, int(np.ceil((current_bounds_max[0] - origin_x) / delta)))
+        target_iy_max = min(ny - 1, int(np.ceil((current_bounds_max[1] - origin_y) / delta)))
+        target_iz_max = min(nz - 1, int(np.ceil((current_bounds_max[2] - origin_z) / delta)))
+
+        if target_ix_min > target_ix_max or target_iy_min > target_iy_max or target_iz_min > target_iz_max:
+            continue
+
+        _sample_object_mask_backwards(
+            out_mask,
+            runtime_object["local_mask"],
+            delta,
+            np.float32(origin_x),
+            np.float32(origin_y),
+            np.float32(origin_z),
+            target_ix_min,
+            target_ix_max,
+            target_iy_min,
+            target_iy_max,
+            target_iz_min,
+            target_iz_max,
+            runtime_object["local_origin"][0],
+            runtime_object["local_origin"][1],
+            runtime_object["local_origin"][2],
+            current_to_local,
+        )
+
+    return out_mask

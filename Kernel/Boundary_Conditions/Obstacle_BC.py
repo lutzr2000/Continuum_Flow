@@ -54,7 +54,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
     if obstacle_cfg["shape"] == "mesh":
         mesh_cfg = obstacle_cfg.get("mesh", {})
         mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
-        obstacle_mask = Obstacles.mesh(
+        obstacle_runtime = Obstacles.build_dynamic_runtime(
             nx,
             ny,
             nz,
@@ -64,9 +64,11 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
             origin_y=origin_y,
             origin_z=origin_z,
         )
+        obstacle_mask = Obstacles.update_dynamic_mask(obstacle_runtime, 0.0)
         return {
             "config": obstacle_cfg,
             "mask": obstacle_mask,
+            "runtime": obstacle_runtime,
         }
 
     if obstacle_cfg["shape"] == "empty":
@@ -76,9 +78,21 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
                 (nx, ny, nz),
                 dtype=np.bool_,
             ),
+            "runtime": None,
         }
 
     raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
+
+
+def update_obstacle_mask(obstacle_data, time_value):
+    """Update the combined obstacle mask for the current simulation time."""
+    runtime = obstacle_data.get("runtime")
+    if runtime is None:
+        return obstacle_data["mask"]
+
+    updated_mask = Obstacles.update_dynamic_mask(runtime, time_value, out_mask=obstacle_data["mask"])
+    obstacle_data["mask"] = updated_mask
+    return updated_mask
 
 
 @cuda.jit

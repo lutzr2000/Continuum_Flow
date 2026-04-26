@@ -6,6 +6,7 @@ Make solver more stable in General
 Reference Frame
 Build CPU Kernel
 Enforcing inflow BC takes quite some time, why?
+The .npy caching for the mesh does not need an extra folder, can go in the general chache folder
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
@@ -14,3 +15,12 @@ Make some sliders animatable
 
 Bug:
 Acceleration due to BC conflict with source is not fully fixed yet
+Currently "Free Bake" purges everything (even meshes etc.), that should not happen
+
+IMPORTANT:
+For new mask in every time step: DO NOT voxelize in every time step, instead: voxelize at start once, then in every time step on GPU:
+1. Get the transform of the mesh
+2. Backwards transform of all voxels with the mesh transform
+3. Check if backwards transformed voxel is in an original voxel, if yes it is masked, else no mask
+
+Explained in ChatGPT Chat: Voxelgitter mit Mesh maskieren
