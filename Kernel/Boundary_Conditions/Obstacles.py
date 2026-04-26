@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
+
 @njit(cache=True)
 def _sort_first_n(values, count):
     """In-place insertion sort for the populated prefix of a float array."""
@@ -36,19 +37,112 @@ def _yz_projection_barycentric(y, z, triangle, eps):
     return True, w0, w1, w2
 
 
+@njit(cache=True)
+def _build_scanline_counts(local_iy_min, local_iy_max, local_iz_min, local_iz_max, z_span, line_counts):
+    """Count how many candidate triangles touch each local YZ scanline."""
+    triangle_count = local_iy_min.shape[0]
+    for triangle_index in range(triangle_count):
+        iy_start = local_iy_min[triangle_index]
+        iy_end = local_iy_max[triangle_index]
+        iz_start = local_iz_min[triangle_index]
+        iz_end = local_iz_max[triangle_index]
+
+        for local_iy in range(iy_start, iy_end + 1):
+            line_base = local_iy * z_span
+            for local_iz in range(iz_start, iz_end + 1):
+                line_counts[line_base + local_iz] += 1
+
+
+@njit(cache=True)
+def _write_scanline_candidates(local_iy_min, local_iy_max, local_iz_min, local_iz_max, z_span, write_positions, candidate_triangle_indices):
+    """Write candidate triangle indices into the flattened scanline lookup."""
+    triangle_count = local_iy_min.shape[0]
+    for triangle_index in range(triangle_count):
+        iy_start = local_iy_min[triangle_index]
+        iy_end = local_iy_max[triangle_index]
+        iz_start = local_iz_min[triangle_index]
+        iz_end = local_iz_max[triangle_index]
+
+        for local_iy in range(iy_start, iy_end + 1):
+            line_base = local_iy * z_span
+            for local_iz in range(iz_start, iz_end + 1):
+                line_index = line_base + local_iz
+                write_index = write_positions[line_index]
+                candidate_triangle_indices[write_index] = triangle_index
+                write_positions[line_index] = write_index + 1
+
+
+def _build_scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, iz_min, iz_max, eps):
+    """Build one compact candidate-triangle list for every YZ scanline."""
+    triangle_count = int(triangles.shape[0])
+    line_count = int((iy_max - iy_min + 1) * (iz_max - iz_min + 1))
+    if triangle_count == 0 or line_count <= 0:
+        return np.zeros(max(line_count, 0) + 1, dtype=np.int32), np.empty(0, dtype=np.int32), np.empty((0, 3, 3), dtype=np.float32)
+
+    triangle_y = triangles[:, :, 1]
+    triangle_z = triangles[:, :, 2]
+    denominator = (
+        (triangle_z[:, 1] - triangle_z[:, 2]) * (triangle_y[:, 0] - triangle_y[:, 2]) +
+        (triangle_y[:, 2] - triangle_y[:, 1]) * (triangle_z[:, 0] - triangle_z[:, 2])
+    )
+    valid_mask = np.abs(denominator) > eps
+    if not np.any(valid_mask):
+        return np.zeros(line_count + 1, dtype=np.int32), np.empty(0, dtype=np.int32), np.empty((0, 3, 3), dtype=np.float32)
+
+    valid_triangles = np.ascontiguousarray(triangles[valid_mask], dtype=np.float32)
+    y_min_world = triangle_y[valid_mask].min(axis=1)
+    y_max_world = triangle_y[valid_mask].max(axis=1)
+    z_min_world = triangle_z[valid_mask].min(axis=1)
+    z_max_world = triangle_z[valid_mask].max(axis=1)
+
+    local_iy_min = np.floor((y_min_world - origin_y - eps) / delta).astype(np.int32) - iy_min
+    local_iy_max = np.ceil((y_max_world - origin_y + eps) / delta).astype(np.int32) - iy_min
+    local_iz_min = np.floor((z_min_world - origin_z - eps) / delta).astype(np.int32) - iz_min
+    local_iz_max = np.ceil((z_max_world - origin_z + eps) / delta).astype(np.int32) - iz_min
+
+    local_y_span = iy_max - iy_min
+    local_z_span = iz_max - iz_min
+    np.clip(local_iy_min, 0, local_y_span, out=local_iy_min)
+    np.clip(local_iy_max, 0, local_y_span, out=local_iy_max)
+    np.clip(local_iz_min, 0, local_z_span, out=local_iz_min)
+    np.clip(local_iz_max, 0, local_z_span, out=local_iz_max)
+
+    z_span = local_z_span + 1
+    line_counts = np.zeros(line_count, dtype=np.int32)
+    _build_scanline_counts(local_iy_min, local_iy_max, local_iz_min, local_iz_max, z_span, line_counts)
+
+    line_offsets = np.empty(line_count + 1, dtype=np.int32)
+    line_offsets[0] = 0
+    np.cumsum(line_counts, dtype=np.int32, out=line_offsets[1:])
+
+    candidate_triangle_indices = np.empty(int(line_offsets[-1]), dtype=np.int32)
+    write_positions = line_offsets[:-1].copy()
+    _write_scanline_candidates(
+        local_iy_min,
+        local_iy_max,
+        local_iz_min,
+        local_iz_max,
+        z_span,
+        write_positions,
+        candidate_triangle_indices,
+    )
+
+    return line_offsets, candidate_triangle_indices, valid_triangles
+
+
 @njit(cache=True, parallel=True)
 def _fill_mesh_mask(mask, triangles, delta, origin_x, origin_y, origin_z,
-                    ix_min, ix_max, iy_min, iy_max, iz_min, iz_max):
+                    ix_min, ix_max, iy_min, iy_max, iz_min, iz_max,
+                    line_offsets, candidate_triangle_indices):
     """
     Fill a closed triangle mesh into a voxel mask using YZ scanlines.
 
-    For each (y, z) line we compute all x intersections with the triangle soup,
-    sort them, deduplicate shared-edge hits, and fill between intersection pairs.
+    For each (y, z) line we compute x intersections only against triangles whose
+    projected YZ bounds touch that scanline.
     """
     eps = np.float32(delta * 1.0e-5 + 1.0e-7)
     z_span = iz_max - iz_min + 1
     line_count = (iy_max - iy_min + 1) * z_span
-    triangle_count = triangles.shape[0]
 
     for line_index in prange(line_count):
         j = iy_min + line_index // z_span
@@ -56,10 +150,17 @@ def _fill_mesh_mask(mask, triangles, delta, origin_x, origin_y, origin_z,
         y = np.float32(origin_y + j * delta)
         z = np.float32(origin_z + k * delta)
 
-        intersections = np.empty(triangle_count, dtype=np.float32)
+        candidate_start = line_offsets[line_index]
+        candidate_end = line_offsets[line_index + 1]
+        candidate_count = candidate_end - candidate_start
+        if candidate_count < 2:
+            continue
+
+        intersections = np.empty(candidate_count, dtype=np.float32)
         hit_count = 0
 
-        for triangle_index in range(triangle_count):
+        for candidate_index in range(candidate_start, candidate_end):
+            triangle_index = candidate_triangle_indices[candidate_index]
             triangle = triangles[triangle_index]
             is_inside, w0, w1, w2 = _yz_projection_barycentric(y, z, triangle, eps)
             if not is_inside:
@@ -159,9 +260,25 @@ def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0
         if ix_min > ix_max or iy_min > iy_max or iz_min > iz_max:
             continue
 
+        eps = np.float32(delta * 1.0e-5 + 1.0e-7)
+        line_offsets, candidate_triangle_indices, triangles = _build_scanline_candidates(
+            triangles,
+            delta,
+            origin_y,
+            origin_z,
+            iy_min,
+            iy_max,
+            iz_min,
+            iz_max,
+            eps,
+        )
+        if candidate_triangle_indices.size == 0:
+            continue
+
         _fill_mesh_mask(
             mask, triangles, delta, origin_x, origin_y, origin_z,
-            ix_min, ix_max, iy_min, iy_max, iz_min, iz_max
+            ix_min, ix_max, iy_min, iy_max, iz_min, iz_max,
+            line_offsets, candidate_triangle_indices,
         )
 
     return mask
