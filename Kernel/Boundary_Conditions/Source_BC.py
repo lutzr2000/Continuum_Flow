@@ -1,8 +1,104 @@
+import math
+
 import numpy as np
 from numba import cuda
 
 import Kernel.Boundary_Conditions.Obstacles as Obstacles
 from Kernel.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
+
+
+@cuda.jit(cache=True)
+def _clear_source_fields_kernel(
+    source_mask,
+    source_velocity_mask,
+    source_temperature,
+    source_smoke,
+    source_fuel,
+    source_velocity_x,
+    source_velocity_y,
+    source_velocity_z,
+):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = source_mask.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    source_mask[i, j, k] = False
+    source_velocity_mask[i, j, k] = False
+    source_temperature[i, j, k] = 0.0
+    source_smoke[i, j, k] = 0.0
+    source_fuel[i, j, k] = 0.0
+    source_velocity_x[i, j, k] = 0.0
+    source_velocity_y[i, j, k] = 0.0
+    source_velocity_z[i, j, k] = 0.0
+
+
+@cuda.jit(cache=True)
+def _sample_source_entry_cuda(
+    source_mask,
+    source_velocity_mask,
+    source_temperature,
+    source_smoke,
+    source_fuel,
+    source_velocity_x,
+    source_velocity_y,
+    source_velocity_z,
+    base,
+    delta,
+    ox, oy, oz,
+    ix0, iy0, iz0,
+    sx, sy, sz,
+    base_ox, base_oy, base_oz,
+    m00, m01, m02, m03,
+    m10, m11, m12, m13,
+    m20, m21, m22, m23,
+    temperature_value,
+    smoke_value,
+    fuel_value,
+    has_velocity_target,
+    velocity_x_value,
+    velocity_y_value,
+    velocity_z_value,
+):
+    di, dj, dk = cuda.grid(3)
+    if di >= sx or dj >= sy or dk >= sz:
+        return
+
+    i = ix0 + di
+    j = iy0 + dj
+    k = iz0 + dk
+
+    x = ox + i * delta
+    y = oy + j * delta
+    z = oz + k * delta
+
+    bx = m00 * x + m01 * y + m02 * z + m03
+    by = m10 * x + m11 * y + m12 * z + m13
+    bz = m20 * x + m21 * y + m22 * z + m23
+
+    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+    bj = int(math.floor((by - base_oy) / delta + 0.5))
+    bk = int(math.floor((bz - base_oz) / delta + 0.5))
+
+    bn_x, bn_y, bn_z = base.shape
+    if not (0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]):
+        return
+
+    source_mask[i, j, k] = True
+
+    if source_temperature[i, j, k] < temperature_value:
+        source_temperature[i, j, k] = temperature_value
+    if source_smoke[i, j, k] < smoke_value:
+        source_smoke[i, j, k] = smoke_value
+    if source_fuel[i, j, k] < fuel_value:
+        source_fuel[i, j, k] = fuel_value
+
+    if has_velocity_target:
+        source_velocity_mask[i, j, k] = True
+        source_velocity_x[i, j, k] = velocity_x_value
+        source_velocity_y[i, j, k] = velocity_y_value
+        source_velocity_z[i, j, k] = velocity_z_value
 
 
 def build_source_data(domain_cfg, source_entries):
@@ -107,6 +203,101 @@ def build_source_data(domain_cfg, source_entries):
         "velocity_z": velocity_z_field,
         "runtime_entries": runtime_entries,
     }
+
+
+def prepare_source_data_for_gpu(source_data):
+    """Upload static local voxel masks for dynamic source sampling on the GPU."""
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        Obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
+    source_data["gpu_ready"] = True
+    return source_data
+
+
+def update_source_data_gpu(source_data, device_state, time_value):
+    """Rebuild dynamic source masks and fields directly on the GPU."""
+    if not source_data.get("gpu_ready"):
+        prepare_source_data_for_gpu(source_data)
+
+    source_mask = device_state["source_mask"]
+    source_velocity_mask = device_state["source_velocity_mask"]
+    source_temperature = device_state["source_temperature"]
+    source_smoke = device_state["source_smoke"]
+    source_fuel = device_state["source_fuel"]
+    source_velocity_x = device_state["source_velocity_x"]
+    source_velocity_y = device_state["source_velocity_y"]
+    source_velocity_z = device_state["source_velocity_z"]
+
+    _clear_source_fields_kernel[
+        volume_blocks_per_grid(source_mask.shape, THREADS_PER_BLOCK_3D),
+        THREADS_PER_BLOCK_3D,
+    ](
+        source_mask,
+        source_velocity_mask,
+        source_temperature,
+        source_smoke,
+        source_fuel,
+        source_velocity_x,
+        source_velocity_y,
+        source_velocity_z,
+    )
+
+    any_source = False
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        runtime = runtime_entry["runtime"]
+        shape = runtime["shape"]
+        origin = np.asarray(runtime["origin"], dtype=np.float32)
+        delta = np.float32(runtime["delta"])
+
+        for obj in runtime.get("objects", ()):
+            local_mask_device = obj.get("local_mask_device")
+            if local_mask_device is None:
+                continue
+
+            matrix = Obstacles._matrix_at(obj["transform_series"], time_value)
+            bounds = Obstacles._transform_bounds(obj["local_bounds_min"], obj["local_bounds_max"], matrix)
+            ix0, ix1, iy0, iy1, iz0, iz1 = Obstacles._bounds_to_indices(
+                bounds[0], bounds[1], delta, origin, shape=shape
+            )
+            if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
+                continue
+
+            any_source = True
+            inv = Obstacles._as_f32(np.linalg.inv(matrix))
+            sx = int(ix1 - ix0 + 1)
+            sy = int(iy1 - iy0 + 1)
+            sz = int(iz1 - iz0 + 1)
+            base_origin = obj["local_origin"]
+            blocks = volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D)
+
+            _sample_source_entry_cuda[blocks, THREADS_PER_BLOCK_3D](
+                source_mask,
+                source_velocity_mask,
+                source_temperature,
+                source_smoke,
+                source_fuel,
+                source_velocity_x,
+                source_velocity_y,
+                source_velocity_z,
+                local_mask_device,
+                delta,
+                np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
+                int(ix0), int(iy0), int(iz0),
+                sx, sy, sz,
+                np.float32(base_origin[0]), np.float32(base_origin[1]), np.float32(base_origin[2]),
+                np.float32(inv[0, 0]), np.float32(inv[0, 1]), np.float32(inv[0, 2]), np.float32(inv[0, 3]),
+                np.float32(inv[1, 0]), np.float32(inv[1, 1]), np.float32(inv[1, 2]), np.float32(inv[1, 3]),
+                np.float32(inv[2, 0]), np.float32(inv[2, 1]), np.float32(inv[2, 2]), np.float32(inv[2, 3]),
+                np.float32(runtime_entry["temperature"]),
+                np.float32(runtime_entry["smoke"]),
+                np.float32(runtime_entry["fuel"]),
+                bool(runtime_entry["has_velocity_target"]),
+                np.float32(runtime_entry["velocity_x"]),
+                np.float32(runtime_entry["velocity_y"]),
+                np.float32(runtime_entry["velocity_z"]),
+            )
+
+    source_data["last_has_source"] = bool(any_source)
+    return source_data
 
 
 def update_source_data(source_data, time_value):

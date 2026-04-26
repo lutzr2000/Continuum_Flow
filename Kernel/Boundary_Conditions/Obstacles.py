@@ -1,5 +1,11 @@
+import math
+
 import numpy as np
-from numba import njit, prange
+from numba import cuda, njit, prange
+
+from Kernel.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
+
+DYNAMIC_SAMPLE_THREADS_PER_BLOCK = 256
 
 
 # -----------------------------------------------------------------------------
@@ -127,6 +133,132 @@ def _sample_mask_backwards(out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0
 
         if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
             out[i, j, k] = True
+
+
+@cuda.jit(cache=True)
+def _clear_mask_cuda(mask):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = mask.shape
+    if i < nx and j < ny and k < nz:
+        mask[i, j, k] = False
+
+
+@cuda.jit(cache=True)
+def _sample_mask_backwards_batched_cuda(
+    out,
+    local_masks_flat,
+    local_mask_offsets,
+    local_mask_shapes,
+    local_origins,
+    task_offsets,
+    task_object_ids,
+    task_origins,
+    task_shapes,
+    task_inv,
+    delta,
+    ox, oy, oz,
+):
+    n = cuda.grid(1)
+    if n >= task_offsets[-1]:
+        return
+
+    task_index = 0
+    while task_index + 1 < task_offsets.shape[0] and n >= task_offsets[task_index + 1]:
+        task_index += 1
+
+    base_n = n - task_offsets[task_index]
+    sx = task_shapes[task_index, 0]
+    sy = task_shapes[task_index, 1]
+    sz = task_shapes[task_index, 2]
+    ix0 = task_origins[task_index, 0]
+    iy0 = task_origins[task_index, 1]
+    iz0 = task_origins[task_index, 2]
+
+    di = base_n // (sy * sz)
+    rem = base_n % (sy * sz)
+    dj = rem // sz
+    dk = rem % sz
+
+    i = ix0 + di
+    j = iy0 + dj
+    k = iz0 + dk
+
+    x = ox + i * delta
+    y = oy + j * delta
+    z = oz + k * delta
+
+    bx = task_inv[task_index, 0] * x + task_inv[task_index, 1] * y + task_inv[task_index, 2] * z + task_inv[task_index, 3]
+    by = task_inv[task_index, 4] * x + task_inv[task_index, 5] * y + task_inv[task_index, 6] * z + task_inv[task_index, 7]
+    bz = task_inv[task_index, 8] * x + task_inv[task_index, 9] * y + task_inv[task_index, 10] * z + task_inv[task_index, 11]
+
+    object_index = task_object_ids[task_index]
+    base_ox = local_origins[object_index, 0]
+    base_oy = local_origins[object_index, 1]
+    base_oz = local_origins[object_index, 2]
+    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+    bj = int(math.floor((by - base_oy) / delta + 0.5))
+    bk = int(math.floor((bz - base_oz) / delta + 0.5))
+
+    bn_x = local_mask_shapes[object_index, 0]
+    bn_y = local_mask_shapes[object_index, 1]
+    bn_z = local_mask_shapes[object_index, 2]
+    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+        flat_index = local_mask_offsets[object_index] + (bi * bn_y + bj) * bn_z + bk
+        if local_masks_flat[flat_index]:
+            out[i, j, k] = True
+
+
+def _blocks_for_linear_size(size, threadsperblock=DYNAMIC_SAMPLE_THREADS_PER_BLOCK):
+    return max(1, (int(size) + threadsperblock - 1) // threadsperblock)
+
+
+def _build_runtime_sample_tasks(runtime_data, time_value):
+    objects = runtime_data.get("objects", ())
+    shape = runtime_data["shape"]
+    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
+    delta = np.float32(runtime_data["delta"])
+
+    task_object_ids = []
+    task_origins = []
+    task_shapes = []
+    task_inv = []
+    task_offsets = [0]
+
+    for object_index, obj in enumerate(objects):
+        matrix = _matrix_at(obj["transform_series"], time_value)
+        bounds = _transform_bounds(obj["local_bounds_min"], obj["local_bounds_max"], matrix)
+        ix0, ix1, iy0, iy1, iz0, iz1 = _bounds_to_indices(bounds[0], bounds[1], delta, origin, shape=shape)
+        if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
+            continue
+
+        inv = _as_f32(np.linalg.inv(matrix))
+        sx = int(ix1 - ix0 + 1)
+        sy = int(iy1 - iy0 + 1)
+        sz = int(iz1 - iz0 + 1)
+        task_size = sx * sy * sz
+        if task_size <= 0:
+            continue
+
+        task_object_ids.append(object_index)
+        task_origins.append((ix0, iy0, iz0))
+        task_shapes.append((sx, sy, sz))
+        task_inv.append((
+            inv[0, 0], inv[0, 1], inv[0, 2], inv[0, 3],
+            inv[1, 0], inv[1, 1], inv[1, 2], inv[1, 3],
+            inv[2, 0], inv[2, 1], inv[2, 2], inv[2, 3],
+        ))
+        task_offsets.append(task_offsets[-1] + task_size)
+
+    if len(task_object_ids) == 0:
+        return None
+
+    return {
+        "object_ids": np.asarray(task_object_ids, dtype=np.int32),
+        "origins": np.asarray(task_origins, dtype=np.int32),
+        "shapes": np.asarray(task_shapes, dtype=np.int32),
+        "inv": np.asarray(task_inv, dtype=np.float32),
+        "offsets": np.asarray(task_offsets, dtype=np.int64),
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -375,7 +507,43 @@ def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_
         "shape": (int(nx), int(ny), int(nz)),
         "delta": np.float32(delta),
         "origin": np.asarray((origin_x, origin_y, origin_z), dtype=np.float32),
+        "gpu_ready": False,
     }
+
+
+def prepare_dynamic_runtime_for_gpu(runtime_data):
+    """Upload static per-object voxel masks so dynamic sampling can run on the GPU."""
+    if runtime_data.get("gpu_ready"):
+        return runtime_data
+
+    objects = runtime_data.get("objects", ())
+    mask_shapes = []
+    mask_offsets = [0]
+    mask_origins = []
+    flat_masks = []
+
+    for obj in objects:
+        local_mask = obj.get("local_mask")
+        if local_mask is None:
+            continue
+        local_mask = np.ascontiguousarray(local_mask)
+        flat_masks.append(local_mask.reshape(-1))
+        mask_shapes.append(local_mask.shape)
+        mask_origins.append(tuple(np.asarray(obj["local_origin"], dtype=np.float32)))
+        mask_offsets.append(mask_offsets[-1] + local_mask.size)
+
+    if flat_masks:
+        local_masks_flat = np.concatenate(flat_masks).astype(np.bool_, copy=False)
+    else:
+        local_masks_flat = np.empty(0, dtype=np.bool_)
+
+    runtime_data["local_masks_flat_device"] = cuda.to_device(local_masks_flat)
+    runtime_data["local_mask_offsets_device"] = cuda.to_device(np.asarray(mask_offsets, dtype=np.int32))
+    runtime_data["local_mask_shapes_device"] = cuda.to_device(np.asarray(mask_shapes, dtype=np.int32))
+    runtime_data["local_origins_device"] = cuda.to_device(np.asarray(mask_origins, dtype=np.float32))
+
+    runtime_data["gpu_ready"] = True
+    return runtime_data
 
 
 def update_dynamic_mask(runtime_data, time_value, out_mask=None):
@@ -405,3 +573,48 @@ def update_dynamic_mask(runtime_data, time_value, out_mask=None):
         )
 
     return out
+
+
+def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
+    """Update one combined world-space mask directly on the GPU."""
+    if out_mask is None:
+        raise ValueError("A device output mask is required for GPU dynamic updates.")
+
+    prepare_dynamic_runtime_for_gpu(runtime_data)
+
+    shape = runtime_data["shape"]
+    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
+    delta = np.float32(runtime_data["delta"])
+
+    _clear_mask_cuda[volume_blocks_per_grid(shape, THREADS_PER_BLOCK_3D), THREADS_PER_BLOCK_3D](out_mask)
+
+    tasks = _build_runtime_sample_tasks(runtime_data, time_value)
+    has_obstacle = tasks is not None
+    if has_obstacle:
+        task_object_ids_device = cuda.to_device(tasks["object_ids"])
+        task_origins_device = cuda.to_device(tasks["origins"])
+        task_shapes_device = cuda.to_device(tasks["shapes"])
+        task_inv_device = cuda.to_device(tasks["inv"])
+        task_offsets_device = cuda.to_device(tasks["offsets"])
+        total_size = int(tasks["offsets"][-1])
+
+        _sample_mask_backwards_batched_cuda[
+            _blocks_for_linear_size(total_size),
+            DYNAMIC_SAMPLE_THREADS_PER_BLOCK,
+        ](
+            out_mask,
+            runtime_data["local_masks_flat_device"],
+            runtime_data["local_mask_offsets_device"],
+            runtime_data["local_mask_shapes_device"],
+            runtime_data["local_origins_device"],
+            task_offsets_device,
+            task_object_ids_device,
+            task_origins_device,
+            task_shapes_device,
+            task_inv_device,
+            delta,
+            np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
+        )
+
+    runtime_data["last_has_obstacle"] = bool(has_obstacle)
+    return out_mask
