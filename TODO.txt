@@ -1,12 +1,12 @@
 TODO
 
 General:
-Add a limiter for velocity (maybe also acceleration?) to make the sovler more stable?
 Make solver more stable in General
 Reference Frame
 Build CPU Kernel
 Enforcing inflow BC takes quite some time, why?
 The .npy caching for the mesh does not need an extra folder, can go in the general chache folder
+The modifiers disaper after rebaking because of reloading
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic

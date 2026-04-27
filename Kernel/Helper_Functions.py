@@ -8,6 +8,7 @@ import Kernel.Forcing as Forcing
 import Kernel.Boundary_Conditions.Obstacle_BC as Obstacle_BC
 import Kernel.Boundary_Conditions.Obstacles as Obstacles
 import Kernel.Boundary_Conditions.Source_BC as Source_BC
+import Kernel.Kernel_Config as Kernel_Config
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
@@ -448,6 +449,12 @@ def apply_config(config):
         "FRAME_START": int(simulation_cfg["settings"].get("start_frame", 0)),
         "CFL_MAX": float(simulation_cfg["settings"]["cfl"]),
         "MAX_ITER": int(simulation_cfg["settings"]["iterations"]),
+        "MAX_VELOCITY_INCREMENT_FACTOR": float(
+            simulation_cfg["settings"].get(
+                "max_velocity_increment_factor",
+                Kernel_Config.MAX_VELOCITY_INCREMENT_FACTOR,
+            )
+        ),
         "PRECISION": np.float32,
         "CPU_COUNT": 1,
         "DELTA": float(domain_cfg["resolution"]),

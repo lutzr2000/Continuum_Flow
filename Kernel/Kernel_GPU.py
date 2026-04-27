@@ -17,7 +17,10 @@ import Kernel.Time_Step as Time_Step
 # ===============================
 
 @cuda.jit(cache=True)
-def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
+def update_velocity(
+    u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
+    max_velocity_increment_factor
+):
     """
     CUDA kernel that updates all three velocity components based on the
     momentum equation. Convection is done by first order upwind, diffusion with
@@ -38,6 +41,8 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
         delta (float): grid spacing
         rho (float): density
         nu (float): kinematic viscosity
+        max_velocity_increment_factor (float): maximum allowed per-step velocity
+            change relative to delta / dt
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
@@ -143,9 +148,18 @@ def update_velocity(u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu):
     pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
     #------------Update-------------------
-    un[i, j, k] = u_center - convection_x - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
-    vn[i, j, k] = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
-    wn[i, j, k] = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
+    u_raw = u_center - convection_x - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
+    v_raw = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
+    w_raw = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
+
+    max_increment = max_velocity_increment_factor * delta / dt
+    du = min(max(u_raw - u_center, -max_increment), max_increment)
+    dv = min(max(v_raw - v_center, -max_increment), max_increment)
+    dw = min(max(w_raw - w_center, -max_increment), max_increment)
+
+    un[i, j, k] = u_center + du
+    vn[i, j, k] = v_center + dv
+    wn[i, j, k] = w_center + dw
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
@@ -601,9 +615,13 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     )
     smoke_source = smoke_production_rate * (-fuel_source) - smoke_dissipation_rate * smoke_center
 
-    T_out[i, j, k] = T_center - temp_convection + dt * temperature_source
-    smoke_out[i, j, k] = smoke_center - smoke_convection + dt * smoke_source
-    fuel_out[i, j, k] = fuel_center - fuel_convection + dt * fuel_source
+    T_updated = T_center - temp_convection + dt * temperature_source
+    smoke_updated = smoke_center - smoke_convection + dt * smoke_source
+    fuel_updated = fuel_center - fuel_convection + dt * fuel_source
+
+    T_out[i, j, k] = max(T_updated, 0.0)
+    smoke_out[i, j, k] = max(smoke_updated, 0.0)
+    fuel_out[i, j, k] = max(fuel_updated, 0.0)
     flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
 
 
@@ -647,6 +665,7 @@ def main(config=None):
     FRAME_START = simulation_params["FRAME_START"]
     CFL_MAX = simulation_params["CFL_MAX"]
     MAX_ITER = simulation_params["MAX_ITER"]
+    MAX_VELOCITY_INCREMENT_FACTOR = simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"]
     DELTA = simulation_params["DELTA"]
     NX = simulation_params["NX"]
     NY = simulation_params["NY"]
@@ -860,7 +879,8 @@ def main(config=None):
         section_start = perf_counter()
         update_velocity[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
             u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"]
+            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
+            MAX_VELOCITY_INCREMENT_FACTOR,
         )
         cuda.synchronize()
         section_timings["Velocity"] += perf_counter() - section_start
