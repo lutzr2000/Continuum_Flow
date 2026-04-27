@@ -132,8 +132,9 @@ def _prepared_output_directory(base_output_path, bake_token):
     return Path(base_output_path).resolve() / f"{_BAKE_OUTPUT_DIRECTORY_PREFIX}{bake_token}"
 
 
-def _bake_geometry_cache_directory(bake_token):
-    return _project_root_directory() / ".blendercfd_bake_cache" / bake_token / "geometry"
+def _bake_geometry_cache_directory(output_directory, bake_token):
+    output_directory = Path(output_directory).resolve()
+    return _prepared_output_directory(output_directory, bake_token) / "geometry"
 
 
 def _cleanup_geometry_cache(config_dict):
@@ -143,21 +144,16 @@ def _cleanup_geometry_cache(config_dict):
     if not geometry_cache_dir:
         return
 
-    cache_root = (_project_root_directory() / ".blendercfd_bake_cache").resolve()
     geometry_cache_path = Path(geometry_cache_dir).resolve()
-
-    try:
-        geometry_cache_path.relative_to(cache_root)
-    except ValueError:
+    managed_output_directories = _output_directories_from_config(config_dict)
+    if not any(_path_is_same_or_within_directory(geometry_cache_path, output_directory) for output_directory in managed_output_directories):
         return
 
     shutil.rmtree(geometry_cache_path, ignore_errors=True)
 
     current_path = geometry_cache_path.parent
     while True:
-        try:
-            current_path.relative_to(cache_root)
-        except ValueError:
+        if not any(_path_is_same_or_within_directory(current_path, output_directory) for output_directory in managed_output_directories):
             break
 
         try:
@@ -165,7 +161,7 @@ def _cleanup_geometry_cache(config_dict):
         except OSError:
             break
 
-        if current_path == cache_root:
+        if any(current_path == output_directory for output_directory in managed_output_directories):
             break
         current_path = current_path.parent
 
@@ -326,6 +322,16 @@ def _config_has_baked_vdbs(config_dict):
     return any(_output_directory_has_vdbs(output_directory) for output_directory in _output_directories_from_config(config_dict))
 
 
+def _resolve_output_directory_hint(output_path_hint):
+    output_path_hint = (output_path_hint or "").strip()
+    if not output_path_hint:
+        return None
+    resolved_output_path = bpy.path.abspath(output_path_hint)
+    if not resolved_output_path:
+        return None
+    return Path(resolved_output_path).resolve()
+
+
 def _baked_vdb_files(output_directory):
     frame_files = sorted(output_directory.glob("frame_*.vdb"))
     if frame_files:
@@ -420,28 +426,37 @@ def _remove_bake_output_directory(output_directory):
         shutil.rmtree(output_directory, ignore_errors=True)
 
 
-def _purge_blender_baked_data(context):
-    try:
-        bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
-    except (RuntimeError, TypeError):
-        pass
+def _refresh_after_bake_cleanup(context):
     scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
     if scene is not None:
         scene.frame_set(scene.frame_current)
     _tag_all_areas_redraw(context)
 
 
-def _free_bake(context, config_dict=None):
-    cleanup_config = config_dict or _LAST_BAKE_CONFIG_DICT
-    output_directories = _output_directories_from_config(cleanup_config) if cleanup_config else []
+def _free_bake(context, config_dict=None, output_directories=None):
+    cleanup_directories = []
+    seen_paths = set()
+
+    for output_directory in output_directories or ():
+        resolved_output_directory = Path(output_directory).resolve()
+        resolved_output_directory_str = str(resolved_output_directory)
+        if resolved_output_directory_str in seen_paths:
+            continue
+        seen_paths.add(resolved_output_directory_str)
+        cleanup_directories.append(resolved_output_directory)
+
+    if not cleanup_directories:
+        cleanup_config = config_dict or _LAST_BAKE_CONFIG_DICT
+        cleanup_directories = _output_directories_from_config(cleanup_config) if cleanup_config else []
+
     removed_volumes = 0
     deleted_files = 0
-    for output_directory in output_directories:
+    for output_directory in cleanup_directories:
         removed_volumes += _remove_previous_baked_volume(output_directory)
         deleted_files += _delete_baked_vdb_files(output_directory)
         _remove_empty_bake_subdirectories(output_directory)
         _remove_bake_output_directory(output_directory)
-    _purge_blender_baked_data(context)
+    _refresh_after_bake_cleanup(context)
     _set_bake_state_active(False, context=context)
     return removed_volumes, deleted_files
 
@@ -592,7 +607,8 @@ class BlenderCFDOutputNode(bpy.types.Node):
             layout.label(text="Bake disabled: invalid socket connection", icon="ERROR")
         button_row = layout.row()
         button_row.enabled = (not is_bake_running(context)) and not has_invalid_links
-        button_row.operator("blendercfd.bake", text="Free Bake" if button_is_free_bake else "Bake", icon="TRASH" if button_is_free_bake else "RENDER_STILL")
+        operator = button_row.operator("blendercfd.bake", text="Free Bake" if button_is_free_bake else "Bake", icon="TRASH" if button_is_free_bake else "RENDER_STILL")
+        operator.output_path_hint = self.output_path
 
 
 class BlenderCFD_OT_bake(bpy.types.Operator):
@@ -601,6 +617,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     bl_idname = "blendercfd.bake"
     bl_label = "Bake BlenderCFD"
     bl_description = "Start the BlenderCFD bake process"
+    output_path_hint: StringProperty(default="", options={"SKIP_SAVE"})  # type: ignore
 
     _timer = None
     _session = None
@@ -733,6 +750,15 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         return {"FINISHED"}
 
     def execute(self, context):
+        hinted_output_directory = _resolve_output_directory_hint(self.output_path_hint)
+        if hinted_output_directory is not None and _output_directory_has_vdbs(hinted_output_directory):
+            removed_volumes, deleted_files = _free_bake(
+                context,
+                output_directories=(hinted_output_directory,),
+            )
+            self.report({"INFO"}, f"Freed bake data. Removed {removed_volumes} volume object(s) and deleted {deleted_files} VDB file(s).")
+            return {"FINISHED"}
+
         resolve_node_tree = getattr(BlenderCFDConfigModule, "_resolve_node_tree", None)
         node_tree = resolve_node_tree(context) if callable(resolve_node_tree) else None
         if tree_has_invalid_links(node_tree):
@@ -740,7 +766,8 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             return {"CANCELLED"}
         global _ACTIVE_BAKE_OPERATOR
         bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        geometry_cache_dir = _bake_geometry_cache_directory(bake_token)
+        geometry_output_directory = hinted_output_directory or _project_root_directory()
+        geometry_cache_dir = _bake_geometry_cache_directory(geometry_output_directory, bake_token)
         try:
             live_config_dict = BlenderCFDConfigModule.build_config_dict(
                 context,

@@ -5,8 +5,6 @@ Make solver more stable in General
 Reference Frame
 Build CPU Kernel
 Enforcing inflow BC takes quite some time, why?
-The .npy caching for the mesh does not need an extra folder, can go in the general chache folder
-The modifiers disaper after rebaking because of reloading
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
@@ -14,4 +12,3 @@ Make some sliders animatable
 
 Bug:
 Acceleration due to BC conflict with source is not fully fixed yet
-Currently "Free Bake" purges everything (even meshes etc.), that should not happen
