@@ -36,6 +36,7 @@ _STATUS_PROGRESS_FACTOR = 0.0
 _ACTIVE_BAKE_OPERATOR = None
 _LAST_BAKE_CONFIG_DICT = None
 _BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
+_BAKE_CANCEL_FILENAME = ".blendercfd_cancel"
 _SOLVER_DIVERGENCE_MESSAGES = (
     "solver divergence",
     "solver diverged",
@@ -137,6 +138,11 @@ def _bake_geometry_cache_directory(output_directory, bake_token):
     return _prepared_output_directory(output_directory, bake_token) / "geometry"
 
 
+def _bake_cancel_flag_path(output_directory, bake_token):
+    output_directory = Path(output_directory).resolve()
+    return _prepared_output_directory(output_directory, bake_token) / _BAKE_CANCEL_FILENAME
+
+
 def _cleanup_geometry_cache(config_dict):
     if not config_dict:
         return
@@ -166,11 +172,26 @@ def _cleanup_geometry_cache(config_dict):
         current_path = current_path.parent
 
 
+def _clear_bake_cancel_flag(config_dict):
+    if not config_dict:
+        return
+    meta_cfg = config_dict.get("meta") or {}
+    cancel_flag_path = (meta_cfg.get("cancel_flag_path") or "").strip()
+    if not cancel_flag_path:
+        return
+    try:
+        Path(cancel_flag_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _prepare_config_for_bake(config_dict, bake_token=None):
     prepared_config = copy.deepcopy(config_dict)
     if not bake_token:
         bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    prepared_config.setdefault("meta", {})["bake_token"] = bake_token
+    meta_cfg = prepared_config.setdefault("meta", {})
+    meta_cfg["bake_token"] = bake_token
+    cancel_flag_path = None
     for simulation_cfg in prepared_config.get("simulations", ()):
         for output_cfg in simulation_cfg.get("outputs", ()):
             output_path = output_cfg.get("output_path", "")
@@ -179,6 +200,10 @@ def _prepare_config_for_bake(config_dict, bake_token=None):
             base_output_path = str(Path(output_path).resolve())
             output_cfg["base_output_path"] = base_output_path
             output_cfg["output_path"] = str(_prepared_output_directory(base_output_path, bake_token))
+            if cancel_flag_path is None:
+                cancel_flag_path = _bake_cancel_flag_path(base_output_path, bake_token)
+    if cancel_flag_path is not None:
+        meta_cfg["cancel_flag_path"] = str(cancel_flag_path)
     return prepared_config
 
 
@@ -687,6 +712,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if self._session is not None:
             self._session["writer_server"].stop()
             self._session = None
+        _clear_bake_cancel_flag(self._config_dict)
         _cleanup_geometry_cache(self._config_dict)
         if _ACTIVE_BAKE_OPERATOR is self:
             _ACTIVE_BAKE_OPERATOR = None
@@ -707,15 +733,20 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
 
     def _request_cancel(self):
         self._cancel_requested = True
-        self._cancel_running_process()
+        if not self._config_dict:
+            return
+        cancel_flag_path = (((self._config_dict.get("meta") or {}).get("cancel_flag_path")) or "").strip()
+        if not cancel_flag_path:
+            return
+        try:
+            Path(cancel_flag_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(cancel_flag_path).write_text("cancel\n", encoding="utf-8")
+        except OSError:
+            self._cancel_running_process()
 
     def modal(self, context, event):
         if event.type == "ESC":
             self._request_cancel()
-        if self._cancel_requested:
-            self._cleanup_bake(context)
-            self.report({"WARNING"}, "BlenderCFD bake cancelled.")
-            return {"CANCELLED"}
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
         self._drain_kernel_output()
@@ -730,16 +761,32 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if reader_error:
             self.report({"ERROR"}, f"Bake failed while reading kernel output: {reader_error}")
             return {"CANCELLED"}
-        if self._solver_divergence_message is not None:
-            self.report({"WARNING"}, self._solver_divergence_message)
-            return {"CANCELLED"}
         if return_code != 0:
             self.report({"ERROR"}, f"Bake failed: Kernel process failed with exit code {return_code}{self._recent_kernel_output_detail()}")
             return {"CANCELLED"}
         try:
             imported_count, missing_directories = _import_baked_vdbs(self._config_dict)
         except Exception as exc:
-            self.report({"WARNING"}, f"Bake finished, but VDB import failed: {exc}")
+            if self._solver_divergence_message is not None:
+                self.report({"WARNING"}, f"{self._solver_divergence_message} VDB import failed: {exc}")
+            else:
+                self.report({"WARNING"}, f"Bake finished, but VDB import failed: {exc}")
+            return {"FINISHED"}
+        if self._solver_divergence_message is not None:
+            if imported_count > 0:
+                self.report({"WARNING"}, f"{self._solver_divergence_message} Imported {imported_count} VDB volume(s) up to that point.")
+            elif missing_directories:
+                self.report({"WARNING"}, f"{self._solver_divergence_message} No VDB output directory was found.")
+            else:
+                self.report({"WARNING"}, f"{self._solver_divergence_message} No VDB files were found to import.")
+            return {"FINISHED"}
+        if self._cancel_requested:
+            if imported_count > 0:
+                self.report({"WARNING"}, f"BlenderCFD bake cancelled. Imported {imported_count} VDB volume(s) up to that point.")
+            elif missing_directories:
+                self.report({"WARNING"}, "BlenderCFD bake cancelled. No VDB output directory was found.")
+            else:
+                self.report({"WARNING"}, "BlenderCFD bake cancelled. No VDB files were found to import.")
             return {"FINISHED"}
         if imported_count > 0:
             self.report({"INFO"}, f"Bake finished. Imported {imported_count} VDB volume(s).")
@@ -835,6 +882,7 @@ class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
             return {"CANCELLED"}
         active_operator._request_cancel()
         active_operator._tag_status_bar_redraw(context)
+        self.report({"INFO"}, "Bake cancellation requested.")
         return {"FINISHED"}
 
 

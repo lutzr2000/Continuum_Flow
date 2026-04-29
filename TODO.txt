@@ -1,11 +1,11 @@
 TODO
 
 General:
-Make solver more stable in General
 Reference Frame
 Build CPU Kernel
 When solver diverges still keep simulation up to that point
-When canceling bake make clean shutdown
+When canceling bake make clean shutdown, keep data till then
+Make forces more intuitive
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic

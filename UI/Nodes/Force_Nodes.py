@@ -61,7 +61,7 @@ class BlenderCFDForceSwirlNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 340.0
 
-    strength: FloatProperty(name="Strength", default=0.0, min=-10.0, max=10.0, description="Strength of swirl",options={'ANIMATABLE'})  # type: ignore
+    strength: FloatProperty(name="Strength", default=0.0, min=-100.0, max=100.0, description="Strength of swirl",options={'ANIMATABLE'})  # type: ignore
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the swirl, flow will rotate about this point",options={'ANIMATABLE'})  # type: ignore
     axis: FloatVectorProperty(name="Axis", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0), description="Axis of swirl, flow will rotate around this axis",options={'ANIMATABLE'})  # type: ignore
     radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius until which the swirl is applied",options={'ANIMATABLE'})  # type: ignore
@@ -107,7 +107,7 @@ class BlenderCFDForcePointNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 340.0
 
-    strength: FloatProperty(name="Strength", default=0.0, min=-10.0, max=10.0, description="Strength of force",options={'ANIMATABLE'})  # type: ignore
+    strength: FloatProperty(name="Strength", default=0.0, min=-100.0, max=100.0, description="Strength of force",options={'ANIMATABLE'})  # type: ignore
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the point force",options={'ANIMATABLE'})  # type: ignore
     radius: FloatProperty(name="Radius", default=1.0, min=0.000001, unit="LENGTH", description="Radius in which the force is applied",options={'ANIMATABLE'})  # type: ignore
 

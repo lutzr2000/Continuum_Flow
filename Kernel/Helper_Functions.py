@@ -366,6 +366,7 @@ def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
     simulations = config.get("simulations")
     simulation_cfg = simulations[0]
+    meta_cfg = config.get("meta") or {}
     domain_cfg = simulation_cfg.get("domain")
     physics_cfg = simulation_cfg.get("physics")
     output_cfg = simulation_cfg.get("outputs", [None])[0]
@@ -476,6 +477,7 @@ def apply_config(config):
         "OUTPUT_VARIABLES": collect_output_variables(output_field_config),
         "OUTPUT_BUFFER_VARIABLES": collect_buffer_variables(output_field_config),
         "HOST_VDB_WRITER": host_vdb_writer,
+        "meta": meta_cfg,
         "HAS_SOURCE": has_source,
         "HAS_OBSTACLE": has_obstacle,
         "HAS_FORCE": has_force,
