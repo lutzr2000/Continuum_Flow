@@ -4,7 +4,8 @@ General:
 Make solver more stable in General
 Reference Frame
 Build CPU Kernel
-Enforcing inflow BC takes quite some time, why?
+Maybe use Gauß Seidel red black, slower but better convergence
+When solver diverges still keep simulation up to that point
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
