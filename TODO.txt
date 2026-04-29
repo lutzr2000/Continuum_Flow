@@ -4,12 +4,9 @@ General:
 Make solver more stable in General
 Reference Frame
 Build CPU Kernel
-Maybe use Gauß Seidel red black, slower but better convergence
 When solver diverges still keep simulation up to that point
+When canceling bake make clean shutdown
 
 Features:
 Compared to Blenders fluid simulation my flow is still less swirly and dynamic
 Make some sliders animatable
-
-Bug:
-Acceleration due to BC conflict with source is not fully fixed yet

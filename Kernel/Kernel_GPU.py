@@ -287,6 +287,44 @@ def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
 
 
 @cuda.jit(cache=True)
+def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
+    """
+    Perform one in-place red-black Gauss-Seidel color pass of the 3D pressure
+    Poisson equation on the GPU.
+
+    Only interior cells whose `(i + j + k) % 2` matches `parity` are updated in
+    this launch. The complementary color is expected to be updated by a second
+    launch in the same iteration.
+
+    Args:
+        p (device array): pressure field updated in place
+        b (device array): right hand side of the pressure Poisson equation
+        delta (float): grid spacing
+        parity (int): `0` for red cells, `1` for black cells
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
+        ((i + j + k) & 1) != parity
+    ):
+        return
+
+    delta2 = delta * delta
+    p[i, j, k] = (
+        p[i + 1, j, k] + p[i - 1, j, k] +
+        p[i, j + 1, k] + p[i, j - 1, k] +
+        p[i, j, k + 1] + p[i, j, k - 1] -
+        delta2 * b[i, j, k]
+    ) / 6.0
+
+
+@cuda.jit(cache=True)
 def _pressure_poisson_apply_neumann_bcs(p):
     """
     applies the hard-coded zero-gradient pressure boundary conditions on all
@@ -325,7 +363,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, threadsperblock_3d=None
+    max_iter=10, pressure_solver="red_black_gauss_seidel", threadsperblock_3d=None
 ):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
@@ -350,7 +388,8 @@ def pressure_poisson(
         rho (float): density
         expansion_rate (float): thermal expansion coupling
         t_reference (float): reference temperature
-        max_iter (int): number of Jacobi iterations
+        max_iter (int): number of pressure iterations
+        pressure_solver (str): `jacobi` or `red_black_gauss_seidel` / `rbgs`
     Returns:
         device array: updated pressure field
     """
@@ -366,12 +405,21 @@ def pressure_poisson(
     p_old = p
     p_new = p_work
 
-    for _ in range(max_iter):
-        _pressure_poisson_jacobi_step[blockspergrid_3d, threadsperblock_3d](p_old, p_new, b, delta)
-        _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_new)
+    if pressure_solver=="red_black_gauss_seidel":
+        for _ in range(max_iter):
+            _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 0)
+            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
+            _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 1)
+            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
+        return p_old
 
-        #------------Swap-------------------
-        p_old, p_new = p_new, p_old
+    else:
+        for _ in range(max_iter):
+            _pressure_poisson_jacobi_step[blockspergrid_3d, threadsperblock_3d](p_old, p_new, b, delta)
+            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_new)
+
+            #------------Swap-------------------
+            p_old, p_new = p_new, p_old
 
     return p_old
 
@@ -633,8 +681,10 @@ def apply_all_BC(
     source_velocity_x, source_velocity_y, source_velocity_z,
 ):
     """
-    Apply obstacle, source and domain constraints in the fixed overwrite order.
+    Apply domain, obstacle and source constraints in the fixed overwrite order.
     """
+    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, bc_config)
+
     if has_obstacle:
         u, v, w, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
             u, v, w, smoke, fuel, flame, obstacle_mask
@@ -647,8 +697,6 @@ def apply_all_BC(
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
         )
-
-    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, bc_config)
     return u, v, w, p, T, smoke, fuel, flame
 
 
@@ -665,6 +713,7 @@ def main(config=None):
     FRAME_START = simulation_params["FRAME_START"]
     CFL_MAX = simulation_params["CFL_MAX"]
     MAX_ITER = simulation_params["MAX_ITER"]
+    PRESSURE_SOLVER = simulation_params["PRESSURE_SOLVER"]
     MAX_VELOCITY_INCREMENT_FACTOR = simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"]
     DELTA = simulation_params["DELTA"]
     NX = simulation_params["NX"]
@@ -861,7 +910,7 @@ def main(config=None):
             u, v, w, p, T, obstacle_mask, pressure_work, pressure_rhs,
             vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
-            gpu_constants["T_REFERENCE"], MAX_ITER
+            gpu_constants["T_REFERENCE"], MAX_ITER, PRESSURE_SOLVER
         )
         cuda.synchronize()
         section_timings["Pressure"] += perf_counter() - section_start
