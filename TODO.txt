@@ -4,8 +4,6 @@ General:
 Reference Frame
 Build CPU Kernel
 Make forces more intuitive
-Preset base node tree
-forces into a folder
 
 Features:
 Make some sliders animatable

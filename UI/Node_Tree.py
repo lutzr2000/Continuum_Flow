@@ -1,5 +1,5 @@
 import bpy
-from nodeitems_utils import NodeCategory, NodeItem
+from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
 
 
 # Unique IDs for the custom node tree and its menu categories.
@@ -37,10 +37,6 @@ def build_node_categories():
             items=[
                 NodeItem("BLENDERCFD_DOMAIN_NODE"),
                 NodeItem("BLENDERCFD_GEOMETRY_NODE"),
-                NodeItem("BLENDERCFD_FORCE_CONSTANT_NODE"),
-                NodeItem("BLENDERCFD_FORCE_SWIRL_NODE"),
-                NodeItem("BLENDERCFD_FORCE_POINT_NODE"),
-                NodeItem("BLENDERCFD_FORCE_TURBULENCE_NODE"),
                 NodeItem("BLENDERCFD_OUTPUT_NODE"),
                 NodeItem("BLENDERCFD_PHYSICS_NODE"),
                 NodeItem("BLENDERCFD_REFERENCE_FRAME_NODE"),
@@ -48,6 +44,29 @@ def build_node_categories():
                 NodeItem("BLENDERCFD_SOURCE_NODE"),
                 NodeItem("BLENDERCFD_OBSTACLE_NODE"),
                 NodeItem("BLENDERCFD_VIEWER_NODE"),
+            ],
+        ),
+        BlenderCFDNodeCategory(
+            "BLENDERCFD_FORCES",
+            "Forces",
+            items=[
+                NodeItem("BLENDERCFD_FORCE_CONSTANT_NODE"),
+                NodeItem("BLENDERCFD_FORCE_SWIRL_NODE"),
+                NodeItem("BLENDERCFD_FORCE_POINT_NODE"),
+                NodeItem("BLENDERCFD_FORCE_TURBULENCE_NODE"),
+            ],
+        ),
+        BlenderCFDNodeCategory(
+            "BLENDERCFD_PRESETS",
+            "Presets",
+            items=[
+                NodeItemCustom(
+                    draw=lambda _item, layout, _context: layout.operator(
+                        "blendercfd.add_basic_setup",
+                        text="Basic Simulation Setup",
+                        icon="NODETREE",
+                    ),
+                ),
             ],
         ),
     ]
