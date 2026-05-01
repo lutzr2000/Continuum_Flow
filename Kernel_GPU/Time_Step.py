@@ -1,7 +1,7 @@
 import numpy as np
 from numba import cuda
 
-from Kernel.Kernel_Config import (
+from Kernel_GPU.Kernel_Config import (
     REDUCTION_THREADS_PER_BLOCK,
     reduction_blocks_per_grid,
 )

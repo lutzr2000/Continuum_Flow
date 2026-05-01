@@ -3,8 +3,8 @@ import math
 import numpy as np
 from numba import cuda
 
-import Kernel.Boundary_Conditions.Obstacles as Obstacles
-from Kernel.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
+import Kernel_GPU.Boundary_Conditions.Obstacles as Obstacles
+from Kernel_GPU.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
 
 @cuda.jit(cache=True)

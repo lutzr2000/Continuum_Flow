@@ -209,8 +209,8 @@ def _prepare_config_for_bake(config_dict, bake_token=None):
 
 def _kernel_directory():
     if "__file__" in globals():
-        return Path(__file__).resolve().parents[2] / "Kernel"
-    return (Path.cwd() / "Kernel").resolve()
+        return Path(__file__).resolve().parents[2] / "Kernel_GPU"
+    return (Path.cwd() / "Kernel_GPU").resolve()
 
 
 def _project_root_directory():
@@ -233,8 +233,8 @@ def _run_kernel(config_dict):
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "from Kernel import Kernel_GPU; "
-        "Kernel_GPU.main(json.load(sys.stdin))"
+        "import Kernel_GPU.Kernel as KernelMain; "
+        "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
         [python_executable, "-u", "-c", bootstrap_code, str(project_root)],

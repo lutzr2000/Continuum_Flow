@@ -1,9 +1,10 @@
 TODO
 
+Features:
+Make some sliders animatable
+
 General:
 Build CPU Kernel
 
-Features:
-Make some sliders animatable
 
 
