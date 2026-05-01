@@ -1,9 +1,7 @@
 TODO
 
 General:
-Reference Frame
 Build CPU Kernel
-Refactor code
 
 Features:
 Make some sliders animatable

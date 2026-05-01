@@ -14,7 +14,6 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
     ("BLENDERCFD_SIMULATION_NODE", "Obstacles"): "obstacles",
     ("BLENDERCFD_SIMULATION_NODE", "Source"): "source",
     ("BLENDERCFD_SIMULATION_NODE", "Forces"): "forces",
-    ("BLENDERCFD_SIMULATION_NODE", "Reference Frame"): "reference_frame",
     ("BLENDERCFD_SIMULATION_NODE", "Result"): "result",
     ("BLENDERCFD_OUTPUT_NODE", "Result"): "result",
     ("BLENDERCFD_VIEWER_NODE", "Result"): "result",
@@ -25,7 +24,6 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
 
 _SOCKET_ROLE_BY_SOCKET_IDNAME = {
     "BLENDERCFD_FORCE_SOCKET": "forces",
-    "BLENDERCFD_REFERENCE_FRAME_SOCKET": "reference_frame",
     "BLENDERCFD_RESULT_SOCKET": "result",
     "NodeSocketGeometry": "geometry",
 }
@@ -157,29 +155,9 @@ class BlenderCFDResultSocket(bpy.types.NodeSocket):
         return (0.65, 0.35, 0.85, 1.0)
 
 
-class BlenderCFDReferenceFrameSocket(bpy.types.NodeSocket):
-    """
-    Socket used for reference-frame links in the BlenderCFD graph.
-    """
-
-    bl_idname = "BLENDERCFD_REFERENCE_FRAME_SOCKET"
-    bl_label = "BlenderCFD Reference Frame"
-
-    def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
-        layout.label(text=text)
-
-    def draw_color(self, context, node):
-        """Return the display color of the socket."""
-        if _socket_has_invalid_links(self):
-            return _INVALID_SOCKET_COLOR
-        return (0.95, 0.45, 0.75, 1.0)
-
-
 classes = (
     BlenderCFDIntSocket,
     BlenderCFDLinkSocket,
     BlenderCFDForceSocket,
     BlenderCFDResultSocket,
-    BlenderCFDReferenceFrameSocket,
 )

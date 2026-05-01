@@ -297,15 +297,6 @@ def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
     }
 
 
-def _serialize_reference_frame_node(node):
-    """Serialize one reference-frame node."""
-    source_object = getattr(node, "source_object", None)
-    return {
-        "node_name": node.name,
-        "object_name": source_object.name if source_object is not None else None,
-    }
-
-
 def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
     """Serialize one source node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
@@ -466,11 +457,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
     """Build a grouped config entry for one simulation node."""
     domain_nodes = _linked_input_nodes(simulation_node, "Domain", "BLENDERCFD_DOMAIN_NODE")
     physics_nodes = _linked_input_nodes(simulation_node, "Physics", "BLENDERCFD_PHYSICS_NODE")
-    reference_frame_nodes = _linked_input_nodes(
-        simulation_node,
-        "Reference Frame",
-        "BLENDERCFD_REFERENCE_FRAME_NODE",
-    )
     source_nodes = _linked_input_nodes(simulation_node, "Source", "BLENDERCFD_SOURCE_NODE")
     obstacle_nodes = _linked_input_nodes(simulation_node, "Obstacles", "BLENDERCFD_OBSTACLE_NODE")
     force_nodes = _linked_input_nodes(simulation_node, "Forces")
@@ -503,11 +489,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
                 context=context,
             )
             if physics_nodes
-            else None
-        ),
-        "reference_frame": (
-            _serialize_reference_frame_node(reference_frame_nodes[0])
-            if reference_frame_nodes
             else None
         ),
         "sources": [

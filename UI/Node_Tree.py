@@ -39,7 +39,6 @@ def build_node_categories():
                 NodeItem("BLENDERCFD_GEOMETRY_NODE"),
                 NodeItem("BLENDERCFD_OUTPUT_NODE"),
                 NodeItem("BLENDERCFD_PHYSICS_NODE"),
-                NodeItem("BLENDERCFD_REFERENCE_FRAME_NODE"),
                 NodeItem("BLENDERCFD_SIMULATION_NODE"),
                 NodeItem("BLENDERCFD_SOURCE_NODE"),
                 NodeItem("BLENDERCFD_OBSTACLE_NODE"),

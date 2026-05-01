@@ -3,7 +3,7 @@ import importlib
 import importlib.util
 import sys
 from pathlib import Path
-from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import FloatProperty, FloatVectorProperty, IntProperty
 
 
 def _ui_directory():
@@ -71,7 +71,6 @@ BlenderCFDViewerModule = _load_ui_module(
 BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket
 BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
 BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
-BlenderCFDReferenceFrameSocket = _sockets_module.BlenderCFDReferenceFrameSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 BLENDERCFD_BAKE_RUNNING_KEY = "blendercfd_bake_running"
 
@@ -259,45 +258,6 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
         self._draw_group(layout, "Extras", ("vorticity",))
 
 
-class BlenderCFDReferenceFrameNode(bpy.types.Node):
-    """Node used to define an object-based reference frame for the simulation."""
-
-    bl_idname = "BLENDERCFD_REFERENCE_FRAME_NODE"
-    bl_label = "Reference Frame"
-    bl_icon = "EMPTY_AXIS"
-    bl_width_default = 220.0
-    bl_width_min = 200.0
-    bl_width_max = 360.0
-
-    source_object: PointerProperty(name="Object", type=bpy.types.Object)  # type: ignore
-
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
-
-    def _ensure_output_socket(self):
-        socket = self.outputs.get("Reference Frame")
-        if socket is None:
-            socket = self.outputs.new(BlenderCFDReferenceFrameSocket.bl_idname, "Reference Frame")
-        return socket
-
-    def _sync_sockets(self):
-        self._ensure_output_socket()
-
-    def init(self, context):
-        self._sync_sockets()
-
-    def copy(self, node):
-        self._sync_sockets()
-
-    def update(self):
-        self._sync_sockets()
-
-    def draw_buttons(self, context, layout):
-        layout.enabled = not is_bake_running(context)
-        layout.prop(self, "source_object", text="Object")
-
-
 class BlenderCFDSimulationNode(bpy.types.Node):
     """Node used to collect all simulation-wide settings and input dependencies."""
 
@@ -318,7 +278,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
             ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster"),
             ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower"),
         ),
-        default="SECOND_ORDER_UPWIND",
+        default="FIRST_ORDER_UPWIND",
         options=set(),
     )  # type: ignore
 
@@ -330,7 +290,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
         socket = self.inputs.get(name)
         if socket is None:
             socket = self.inputs.new(
-                BlenderCFDReferenceFrameSocket.bl_idname if name == "Reference Frame" else BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname,
+                BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname,
                 name,
                 use_multi_input=multi_input,
             )
@@ -344,8 +304,13 @@ class BlenderCFDSimulationNode(bpy.types.Node):
             socket = self.outputs.new(BlenderCFDResultSocket.bl_idname, "Result")
         return socket
 
+    def _remove_legacy_socket(self, socket_collection, socket_name):
+        socket = socket_collection.get(socket_name)
+        if socket is not None:
+            socket_collection.remove(socket)
+
     def _sync_sockets(self):
-        self._ensure_input_socket("Reference Frame")
+        self._remove_legacy_socket(self.inputs, "Reference Frame")
         self._ensure_input_socket("Domain")
         self._ensure_input_socket("Physics")
         self._ensure_input_socket("Obstacles")
@@ -481,7 +446,6 @@ class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
 classes = (
     BlenderCFDDomainNode,
     BlenderCFDPhysicsNode,
-    BlenderCFDReferenceFrameNode,
     BlenderCFDSimulationNode,
     BlenderCFDViewerNode,
     BlenderCFD_OT_add_basic_setup,
