@@ -413,39 +413,6 @@ def pressure_equation_right_side(
     omega_z[i, j, k] = wz
     omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
-
-@cuda.jit(cache=True)
-def _pressure_poisson_jacobi_step(p_old, p_new, b, delta):
-    """
-    performs one Jacobi iteration of the 3D pressure Poisson equation on the GPU.
-
-    Each interior cell is updated from the previous pressure iterate `p_old`
-    using the 7-point stencil of the Laplace operator and the already computed
-    right hand side `b`. Boundary cells are skipped here because their values
-    are imposed separately by `_pressure_poisson_apply_neumann_bcs`.
-
-    Args:
-        p_old (device array): pressure field from the previous Jacobi iteration
-        p_new (device array): output array for the updated pressure field
-        b (device array): right hand side of the pressure Poisson equation
-        delta (float): grid spacing
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = p_old.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
-        delta2 = delta * delta
-        p_new[i, j, k] = (
-            p_old[i + 1, j, k] + p_old[i - 1, j, k] +
-            p_old[i, j + 1, k] + p_old[i, j - 1, k] +
-            p_old[i, j, k + 1] + p_old[i, j, k - 1] -
-            delta2 * b[i, j, k]
-        ) / 6.0
-
-
 @cuda.jit(cache=True)
 def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
     """
@@ -523,7 +490,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, pressure_solver="red_black_gauss_seidel", threadsperblock_3d=None
+    max_iter=10, threadsperblock_3d=None
 ):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
@@ -563,25 +530,14 @@ def pressure_poisson(
     )
 
     p_old = p
-    p_new = p_work
 
-    if pressure_solver=="red_black_gauss_seidel":
-        for _ in range(max_iter):
-            _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 0)
-            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
-            _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 1)
-            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
-        return p_old
-
-    else:
-        for _ in range(max_iter):
-            _pressure_poisson_jacobi_step[blockspergrid_3d, threadsperblock_3d](p_old, p_new, b, delta)
-            _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_new)
-
-            #------------Swap-------------------
-            p_old, p_new = p_new, p_old
-
+    for _ in range(max_iter):
+        _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 0)
+        _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
+        _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 1)
+        _pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
     return p_old
+
 
 
 @cuda.jit(cache=True)
@@ -836,7 +792,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
 def apply_all_BC(
     u, v, w, p, T, smoke, fuel, flame,
     bc_config,
-    has_obstacle, obstacle_mask,
+    has_obstacle, obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
     has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
 ):
@@ -847,7 +803,8 @@ def apply_all_BC(
 
     if has_obstacle:
         u, v, w, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
-            u, v, w, smoke, fuel, flame, obstacle_mask
+            u, v, w, smoke, fuel, flame,
+            obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
         )
 
     if has_source:
@@ -955,6 +912,9 @@ def main(config=None):
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
     obstacle_mask = device_state["obstacle_mask"]
+    obstacle_velocity_x = device_state["obstacle_velocity_x"]
+    obstacle_velocity_y = device_state["obstacle_velocity_y"]
+    obstacle_velocity_z = device_state["obstacle_velocity_z"]
     source_mask = device_state["source_mask"]
     source_velocity_mask = device_state["source_velocity_mask"]
     source_temperature = device_state["source_temperature"]
@@ -987,7 +947,7 @@ def main(config=None):
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
         BC_CONFIG,
-        gpu_constants["HAS_OBSTACLE"], obstacle_mask,
+        gpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
         gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
     )
@@ -1082,7 +1042,7 @@ def main(config=None):
                 u, v, w, p, T, obstacle_mask, pressure_work, pressure_rhs,
                 vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
                 gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
-                gpu_constants["T_REFERENCE"], MAX_ITER, PRESSURE_SOLVER
+                gpu_constants["T_REFERENCE"], MAX_ITER
             )
             cuda.synchronize()
             section_timings["Pressure"] += perf_counter() - section_start
@@ -1145,7 +1105,7 @@ def main(config=None):
             u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
                 u, v, w, p, T, smoke, fuel, flame,
                 BC_CONFIG,
-                gpu_constants["HAS_OBSTACLE"], obstacle_mask,
+                gpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
                 gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
                 source_velocity_x, source_velocity_y, source_velocity_z,
             )

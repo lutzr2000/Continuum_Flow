@@ -3,10 +3,6 @@ TODO
 General:
 Reference Frame
 Build CPU Kernel
-Make forces more intuitive
 
 Features:
 Make some sliders animatable
-
-Bug:
-likely an obstacle or source mask will not work properly if it is only partially in the domain in the beginning and then moves in

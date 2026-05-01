@@ -536,6 +536,9 @@ def upload_simulation_state_to_gpu(simulation_params):
     if obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
         Obstacles.prepare_dynamic_runtime_for_gpu(obstacle_data["runtime"])
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
+    obstacle_velocity_x_host = np.asarray(obstacle_data["velocity_x"], dtype=precision_dtype)
+    obstacle_velocity_y_host = np.asarray(obstacle_data["velocity_y"], dtype=precision_dtype)
+    obstacle_velocity_z_host = np.asarray(obstacle_data["velocity_z"], dtype=precision_dtype)
     source_field_data = simulation_params["source_field_data"]
     if source_field_data.get("is_animated", False):
         Source_BC.prepare_source_data_for_gpu(source_field_data)
@@ -594,6 +597,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "turbulence_cos_coeffs": cuda.to_device(np.ones(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype)),
         "turbulence_sin_coeffs": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype)),
         "obstacle_mask": cuda.to_device(obstacle_mask_host),
+        "obstacle_velocity_x": cuda.to_device(obstacle_velocity_x_host),
+        "obstacle_velocity_y": cuda.to_device(obstacle_velocity_y_host),
+        "obstacle_velocity_z": cuda.to_device(obstacle_velocity_z_host),
         "source_mask": cuda.to_device(source_mask_host),
         "source_velocity_mask": cuda.to_device(source_velocity_mask_host),
         "source_temperature": cuda.to_device(source_temperature_host),
@@ -641,10 +647,13 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_con
 
     obstacle_data = simulation_params.get("obstacle_data")
     if obstacle_data is not None and obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
-        Obstacles.update_dynamic_mask_gpu(
+        Obstacles.update_dynamic_obstacle_data_gpu(
             obstacle_data["runtime"],
             time_value,
             device_state["obstacle_mask"],
+            device_state["obstacle_velocity_x"],
+            device_state["obstacle_velocity_y"],
+            device_state["obstacle_velocity_z"],
         )
         gpu_constants["HAS_OBSTACLE"] = bool(obstacle_data["runtime"].get("last_has_obstacle", False))
 

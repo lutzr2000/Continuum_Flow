@@ -133,6 +133,43 @@ def _sample_mask_backwards(out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0
             out[i, j, k] = True
 
 
+@njit(cache=True, parallel=True)
+def _sample_obstacle_data_backwards(
+    out_mask, out_vx, out_vy, out_vz,
+    base, delta, ox, oy, oz,
+    ix0, ix1, iy0, iy1, iz0, iz1,
+    box, inv, rate
+):
+    """Back-sample one moving obstacle mask and its wall velocity into the world grid."""
+    base_ox, base_oy, base_oz = box
+    bn_x, bn_y, bn_z = base.shape
+    sx, sy, sz = ix1 - ix0 + 1, iy1 - iy0 + 1, iz1 - iz0 + 1
+
+    for n in prange(sx * sy * sz):
+        i = ix0 + n // (sy * sz)
+        r = n % (sy * sz)
+        j = iy0 + r // sz
+        k = iz0 + r % sz
+
+        x = np.float32(ox + i * delta)
+        y = np.float32(oy + j * delta)
+        z = np.float32(oz + k * delta)
+
+        bx = inv[0, 0] * x + inv[0, 1] * y + inv[0, 2] * z + inv[0, 3]
+        by = inv[1, 0] * x + inv[1, 1] * y + inv[1, 2] * z + inv[1, 3]
+        bz = inv[2, 0] * x + inv[2, 1] * y + inv[2, 2] * z + inv[2, 3]
+
+        bi = int(np.floor((bx - base_ox) / delta + 0.5))
+        bj = int(np.floor((by - base_oy) / delta + 0.5))
+        bk = int(np.floor((bz - base_oz) / delta + 0.5))
+
+        if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
+            out_mask[i, j, k] = True
+            out_vx[i, j, k] = rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
+            out_vy[i, j, k] = rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
+            out_vz[i, j, k] = rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
+
+
 @cuda.jit(cache=True)
 def _clear_mask_cuda(mask):
     i, j, k = cuda.grid(3)
@@ -146,6 +183,30 @@ def _clear_mask_box_cuda(mask, ix0, iy0, iz0, sx, sy, sz):
     di, dj, dk = cuda.grid(3)
     if di < sx and dj < sy and dk < sz:
         mask[ix0 + di, iy0 + dj, iz0 + dk] = False
+
+
+@cuda.jit(cache=True)
+def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = mask.shape
+    if i < nx and j < ny and k < nz:
+        mask[i, j, k] = False
+        velocity_x[i, j, k] = 0.0
+        velocity_y[i, j, k] = 0.0
+        velocity_z[i, j, k] = 0.0
+
+
+@cuda.jit(cache=True)
+def _clear_obstacle_fields_box_cuda(mask, velocity_x, velocity_y, velocity_z, ix0, iy0, iz0, sx, sy, sz):
+    di, dj, dk = cuda.grid(3)
+    if di < sx and dj < sy and dk < sz:
+        i = ix0 + di
+        j = iy0 + dj
+        k = iz0 + dk
+        mask[i, j, k] = False
+        velocity_x[i, j, k] = 0.0
+        velocity_y[i, j, k] = 0.0
+        velocity_z[i, j, k] = 0.0
 
 
 @cuda.jit(cache=True)
@@ -194,6 +255,63 @@ def _sample_mask_backwards_object_cuda(
         flat_index = local_mask_offsets[object_index] + (bi * bn_y + bj) * bn_z + bk
         if local_masks_flat[flat_index]:
             out[i, j, k] = True
+
+
+@cuda.jit(cache=True)
+def _sample_obstacle_data_backwards_object_cuda(
+    out_mask,
+    out_velocity_x,
+    out_velocity_y,
+    out_velocity_z,
+    local_masks_flat,
+    local_mask_offsets,
+    local_mask_shapes,
+    local_origins,
+    object_index,
+    ix0, iy0, iz0,
+    sx, sy, sz,
+    m00, m01, m02, m03,
+    m10, m11, m12, m13,
+    m20, m21, m22, m23,
+    r00, r01, r02, r03,
+    r10, r11, r12, r13,
+    r20, r21, r22, r23,
+    delta,
+    ox, oy, oz,
+):
+    di, dj, dk = cuda.grid(3)
+    if di >= sx or dj >= sy or dk >= sz:
+        return
+
+    i = ix0 + di
+    j = iy0 + dj
+    k = iz0 + dk
+
+    x = ox + i * delta
+    y = oy + j * delta
+    z = oz + k * delta
+
+    bx = m00 * x + m01 * y + m02 * z + m03
+    by = m10 * x + m11 * y + m12 * z + m13
+    bz = m20 * x + m21 * y + m22 * z + m23
+
+    base_ox = local_origins[object_index, 0]
+    base_oy = local_origins[object_index, 1]
+    base_oz = local_origins[object_index, 2]
+    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+    bj = int(math.floor((by - base_oy) / delta + 0.5))
+    bk = int(math.floor((bz - base_oz) / delta + 0.5))
+
+    bn_x = local_mask_shapes[object_index, 0]
+    bn_y = local_mask_shapes[object_index, 1]
+    bn_z = local_mask_shapes[object_index, 2]
+    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+        flat_index = local_mask_offsets[object_index] + (bi * bn_y + bj) * bn_z + bk
+        if local_masks_flat[flat_index]:
+            out_mask[i, j, k] = True
+            out_velocity_x[i, j, k] = r00 * bx + r01 * by + r02 * bz + r03
+            out_velocity_y[i, j, k] = r10 * bx + r11 * by + r12 * bz + r13
+            out_velocity_z[i, j, k] = r20 * bx + r21 * by + r22 * bz + r23
 
 
 # -----------------------------------------------------------------------------
@@ -391,27 +509,46 @@ def _transform_series_is_animated(series):
     return False
 
 
-def _matrix_at(series, t):
-    """Linear interpolation through sampled world matrices, with a monotonic cursor."""
+def _matrix_and_rate_at(series, t):
+    """Return the interpolated world matrix and its piecewise-linear time derivative."""
     times = series["times"]
     matrices = series["matrices_world"]
-    if times.size <= 1 or t <= float(times[0]):
-        return np.asarray(matrices[0], dtype=np.float32)
+    if times.size <= 1:
+        return (
+            np.asarray(matrices[0], dtype=np.float32),
+            np.zeros((4, 4), dtype=np.float32),
+        )
+
+    if t < float(times[0]):
+        return (
+            np.asarray(matrices[0], dtype=np.float32),
+            np.zeros((4, 4), dtype=np.float32),
+        )
 
     cursor = min(int(series.get("cursor", 0)), int(times.size - 2))
     while cursor < times.size - 2 and t >= float(times[cursor + 1]):
         cursor += 1
     series["cursor"] = cursor
 
-    if cursor >= times.size - 2 and t >= float(times[-1]):
-        return np.asarray(matrices[-1], dtype=np.float32)
+    if cursor >= times.size - 2 and t > float(times[-1]):
+        return (
+            np.asarray(matrices[-1], dtype=np.float32),
+            np.zeros((4, 4), dtype=np.float32),
+        )
 
     t0, t1 = float(times[cursor]), float(times[cursor + 1])
     if t1 <= t0:
-        return np.asarray(matrices[cursor], dtype=np.float32)
+        return (
+            np.asarray(matrices[cursor], dtype=np.float32),
+            np.zeros((4, 4), dtype=np.float32),
+        )
 
     a = np.float32((t - t0) / (t1 - t0))
-    return _as_f32(matrices[cursor] * (1.0 - a) + matrices[cursor + 1] * a)
+    matrix0 = np.asarray(matrices[cursor], dtype=np.float32)
+    matrix1 = np.asarray(matrices[cursor + 1], dtype=np.float32)
+    matrix = _as_f32(matrix0 * (1.0 - a) + matrix1 * a)
+    rate = _as_f32((matrix1 - matrix0) / np.float32(t1 - t0))
+    return matrix, rate
 
 
 def _invert_affine_matrix(matrix):
@@ -444,7 +581,7 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
     if state is not None and state.get("time_value") == float(time_value):
         return state
 
-    matrix = _matrix_at(obj["transform_series"], time_value)
+    matrix, matrix_rate = _matrix_and_rate_at(obj["transform_series"], time_value)
     bounds_min, bounds_max = _transform_bounds(
         obj["local_bounds_center"],
         obj["local_bounds_extent"],
@@ -456,6 +593,7 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
     state = {
         "time_value": float(time_value),
         "matrix": matrix,
+        "matrix_rate": matrix_rate,
         "bounds_min": bounds_min,
         "bounds_max": bounds_max,
         "index_bounds": index_bounds,
@@ -609,6 +747,52 @@ def update_dynamic_mask(runtime_data, time_value, out_mask=None):
     return out
 
 
+def update_dynamic_obstacle_data(
+    runtime_data,
+    time_value,
+    out_mask=None,
+    out_velocity_x=None,
+    out_velocity_y=None,
+    out_velocity_z=None,
+):
+    """Update one moving obstacle mask and its wall velocity fields on the host."""
+    shape = runtime_data["shape"]
+    out_mask = np.zeros(shape, dtype=np.bool_) if out_mask is None else out_mask
+    out_velocity_x = np.zeros(shape, dtype=np.float32) if out_velocity_x is None else out_velocity_x
+    out_velocity_y = np.zeros(shape, dtype=np.float32) if out_velocity_y is None else out_velocity_y
+    out_velocity_z = np.zeros(shape, dtype=np.float32) if out_velocity_z is None else out_velocity_z
+
+    out_mask.fill(False)
+    out_velocity_x.fill(0.0)
+    out_velocity_y.fill(0.0)
+    out_velocity_z.fill(0.0)
+
+    delta = np.float32(runtime_data["delta"])
+    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
+
+    for obj in runtime_data["objects"]:
+        state = _resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+        if not state["active"]:
+            continue
+        ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
+
+        _sample_obstacle_data_backwards(
+            out_mask,
+            out_velocity_x,
+            out_velocity_y,
+            out_velocity_z,
+            obj["local_mask"],
+            delta,
+            origin[0], origin[1], origin[2],
+            ix0, ix1, iy0, iy1, iz0, iz1,
+            obj["local_origin"],
+            state["inv"],
+            state["matrix_rate"],
+        )
+
+    return out_mask, out_velocity_x, out_velocity_y, out_velocity_z
+
+
 def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
     """Update one combined world-space mask directly on the GPU."""
     if out_mask is None:
@@ -680,3 +864,84 @@ def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
 
     runtime_data["last_has_obstacle"] = bool(has_obstacle)
     return out_mask
+
+
+def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_velocity_x, out_velocity_y, out_velocity_z):
+    """Update one moving obstacle mask and its wall velocity fields directly on the GPU."""
+    if out_mask is None or out_velocity_x is None or out_velocity_y is None or out_velocity_z is None:
+        raise ValueError("Device obstacle mask and velocity fields are required for GPU dynamic updates.")
+
+    prepare_dynamic_runtime_for_gpu(runtime_data)
+
+    shape = runtime_data["shape"]
+    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
+    delta = np.float32(runtime_data["delta"])
+    full_volume = int(shape[0] * shape[1] * shape[2])
+    dirty_regions = []
+    dirty_volume = 0
+    active_objects = []
+
+    for object_index, obj in enumerate(runtime_data["objects"]):
+        state = _resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+        previous_bounds = obj.get("last_gpu_index_bounds")
+        current_bounds = state["index_bounds"] if state["active"] else None
+        dirty_bounds = _merge_index_bounds(previous_bounds, current_bounds)
+        if dirty_bounds is not None:
+            dirty_regions.append(dirty_bounds)
+            sx, sy, sz = _region_shape(dirty_bounds)
+            dirty_volume += sx * sy * sz
+        if state["active"]:
+            active_objects.append((object_index, obj, state))
+
+    if not runtime_data.get("gpu_mask_initialized", False) or dirty_volume >= full_volume:
+        _clear_obstacle_fields_cuda[
+            volume_blocks_per_grid(shape, THREADS_PER_BLOCK_3D),
+            THREADS_PER_BLOCK_3D,
+        ](out_mask, out_velocity_x, out_velocity_y, out_velocity_z)
+    else:
+        for dirty_bounds in dirty_regions:
+            ix0, ix1, iy0, iy1, iz0, iz1 = dirty_bounds
+            sx, sy, sz = _region_shape(dirty_bounds)
+            _clear_obstacle_fields_box_cuda[
+                volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
+                THREADS_PER_BLOCK_3D,
+            ](out_mask, out_velocity_x, out_velocity_y, out_velocity_z, int(ix0), int(iy0), int(iz0), sx, sy, sz)
+
+    for object_index, obj, state in active_objects:
+        ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
+        sx, sy, sz = _region_shape(state["index_bounds"])
+        inv = state["inv"]
+        rate = state["matrix_rate"]
+        _sample_obstacle_data_backwards_object_cuda[
+            volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
+            THREADS_PER_BLOCK_3D,
+        ](
+            out_mask,
+            out_velocity_x,
+            out_velocity_y,
+            out_velocity_z,
+            runtime_data["local_masks_flat_device"],
+            runtime_data["local_mask_offsets_device"],
+            runtime_data["local_mask_shapes_device"],
+            runtime_data["local_origins_device"],
+            int(object_index),
+            int(ix0), int(iy0), int(iz0),
+            sx, sy, sz,
+            np.float32(inv[0, 0]), np.float32(inv[0, 1]), np.float32(inv[0, 2]), np.float32(inv[0, 3]),
+            np.float32(inv[1, 0]), np.float32(inv[1, 1]), np.float32(inv[1, 2]), np.float32(inv[1, 3]),
+            np.float32(inv[2, 0]), np.float32(inv[2, 1]), np.float32(inv[2, 2]), np.float32(inv[2, 3]),
+            np.float32(rate[0, 0]), np.float32(rate[0, 1]), np.float32(rate[0, 2]), np.float32(rate[0, 3]),
+            np.float32(rate[1, 0]), np.float32(rate[1, 1]), np.float32(rate[1, 2]), np.float32(rate[1, 3]),
+            np.float32(rate[2, 0]), np.float32(rate[2, 1]), np.float32(rate[2, 2]), np.float32(rate[2, 3]),
+            delta,
+            np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
+        )
+        obj["last_gpu_index_bounds"] = state["index_bounds"]
+
+    for obj in runtime_data["objects"]:
+        if obj.get("dynamic_state") is None or not obj["dynamic_state"].get("active", False):
+            obj["last_gpu_index_bounds"] = None
+
+    runtime_data["gpu_mask_initialized"] = True
+    runtime_data["last_has_obstacle"] = bool(len(active_objects) > 0)
+    return out_mask, out_velocity_x, out_velocity_y, out_velocity_z

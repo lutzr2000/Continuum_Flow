@@ -50,6 +50,9 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
+    zero_velocity_x = np.zeros((nx, ny, nz), dtype=np.float32)
+    zero_velocity_y = np.zeros((nx, ny, nz), dtype=np.float32)
+    zero_velocity_z = np.zeros((nx, ny, nz), dtype=np.float32)
 
     if obstacle_cfg["shape"] == "mesh":
         mesh_cfg = obstacle_cfg.get("mesh", {})
@@ -64,10 +67,16 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
             origin_y=origin_y,
             origin_z=origin_z,
         )
-        obstacle_mask = Obstacles.update_dynamic_mask(obstacle_runtime, 0.0)
+        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = Obstacles.update_dynamic_obstacle_data(
+            obstacle_runtime,
+            0.0,
+        )
         return {
             "config": obstacle_cfg,
             "mask": obstacle_mask,
+            "velocity_x": obstacle_velocity_x,
+            "velocity_y": obstacle_velocity_y,
+            "velocity_z": obstacle_velocity_z,
             "runtime": obstacle_runtime,
             "is_animated": bool(obstacle_runtime.get("is_animated", False)),
         }
@@ -79,6 +88,9 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
                 (nx, ny, nz),
                 dtype=np.bool_,
             ),
+            "velocity_x": zero_velocity_x,
+            "velocity_y": zero_velocity_y,
+            "velocity_z": zero_velocity_z,
             "runtime": None,
             "is_animated": False,
         }
@@ -92,13 +104,23 @@ def update_obstacle_mask(obstacle_data, time_value):
     if runtime is None:
         return obstacle_data["mask"]
 
-    updated_mask = Obstacles.update_dynamic_mask(runtime, time_value, out_mask=obstacle_data["mask"])
+    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = Obstacles.update_dynamic_obstacle_data(
+        runtime,
+        time_value,
+        out_mask=obstacle_data["mask"],
+        out_velocity_x=obstacle_data["velocity_x"],
+        out_velocity_y=obstacle_data["velocity_y"],
+        out_velocity_z=obstacle_data["velocity_z"],
+    )
     obstacle_data["mask"] = updated_mask
+    obstacle_data["velocity_x"] = updated_velocity_x
+    obstacle_data["velocity_y"] = updated_velocity_y
+    obstacle_data["velocity_z"] = updated_velocity_z
     return updated_mask
 
 
 @cuda.jit
-def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask):
+def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z):
     """
     applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
 
@@ -121,15 +143,19 @@ def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask):
         return
 
     if mask[i, j, k]:
-        u[i, j, k] = 0.0
-        v[i, j, k] = 0.0
-        w[i, j, k] = 0.0
+        u[i, j, k] = obstacle_velocity_x[i, j, k]
+        v[i, j, k] = obstacle_velocity_y[i, j, k]
+        w[i, j, k] = obstacle_velocity_z[i, j, k]
         smoke[i, j, k] = 0.0
         fuel[i, j, k] = 0.0
         flame[i, j, k] = 0.0
 
 
-def obstacle_bc(u, v, w, smoke, fuel, flame, obstacle_mask, threadsperblock=None):
+def obstacle_bc(
+    u, v, w, smoke, fuel, flame,
+    obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+    threadsperblock=None,
+):
     """
     applies all obstacle boundary conditions to the GPU field state.
 
@@ -153,6 +179,9 @@ def obstacle_bc(u, v, w, smoke, fuel, flame, obstacle_mask, threadsperblock=None
 
     blockspergrid = volume_blocks_per_grid(obstacle_mask.shape, threadsperblock)
 
-    _obstacle_bc_kernel[blockspergrid, threadsperblock](u, v, w, smoke, fuel, flame, obstacle_mask)
+    _obstacle_bc_kernel[blockspergrid, threadsperblock](
+        u, v, w, smoke, fuel, flame,
+        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+    )
 
     return u, v, w, smoke, fuel, flame
