@@ -489,6 +489,9 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
             "simulation_length": _simulation_length_from_frames(start_frame, end_frame, simulation_fps),
             "cfl": float(simulation_node.cfl),
             "iterations": int(simulation_node.iterations),
+            "velocity_advection_scheme": str(
+                getattr(simulation_node, "velocity_advection_scheme", "SECOND_ORDER_UPWIND")
+            ),
         },
         "domain": _serialize_domain_node(domain_nodes[0]) if domain_nodes else None,
         "physics": (

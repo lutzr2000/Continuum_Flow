@@ -295,6 +295,15 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation",options=set())  # type: ignore
     cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver",options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations",options=set())  # type: ignore
+    velocity_advection_scheme: bpy.props.EnumProperty(
+        name="",
+        items=(
+            ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster"),
+            ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower"),
+        ),
+        default="SECOND_ORDER_UPWIND",
+        options=set(),
+    )  # type: ignore
 
     @classmethod
     def poll(cls, ntree):
@@ -350,7 +359,7 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     def draw_buttons(self, context, layout):
         layout.enabled = not is_bake_running(context)
         self._draw_group(layout, "Time", ("start_frame", "end_frame", "cfl"))
-        self._draw_group(layout, "Solver", ("iterations",))
+        self._draw_group(layout, "Solver", ("iterations", "velocity_advection_scheme"))
 
 
 class BlenderCFDViewerNode(bpy.types.Node):

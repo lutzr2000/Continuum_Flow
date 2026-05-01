@@ -450,6 +450,12 @@ def apply_config(config):
         "FRAME_START": int(simulation_cfg["settings"].get("start_frame", 0)),
         "CFL_MAX": float(simulation_cfg["settings"]["cfl"]),
         "MAX_ITER": int(simulation_cfg["settings"]["iterations"]),
+        "VELOCITY_ADVECTION_SCHEME": str(
+            simulation_cfg["settings"].get(
+                "velocity_advection_scheme",
+                "SECOND_ORDER_UPWIND",
+            )
+        ),
         "PRESSURE_SOLVER": str(
             simulation_cfg["settings"].get("pressure_solver", "jacobi")
         ),
