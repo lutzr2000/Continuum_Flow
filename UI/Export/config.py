@@ -1,3 +1,5 @@
+"""Build and export BlenderCFD simulation config dictionaries from the node tree."""
+
 import json
 import importlib.util
 import sys
@@ -7,15 +9,15 @@ from pathlib import Path
 import bpy
 
 try:
-    from . import Geometry_Export as GeometryExport
+    from . import geometry as GeometryExport
 except ImportError:
     try:
-        import Geometry_Export as GeometryExport
+        import geometry as GeometryExport
     except ImportError:
         if "__file__" in globals():
-            geometry_export_path = Path(__file__).resolve().with_name("Geometry_Export.py")
+            geometry_export_path = Path(__file__).resolve().with_name("geometry.py")
         else:
-            geometry_export_path = (Path.cwd() / "UI" / "Geometry_Export.py").resolve()
+            geometry_export_path = (Path.cwd() / "UI" / "Export" / "geometry.py").resolve()
 
         spec = importlib.util.spec_from_file_location("blendercfd_geometry_export", geometry_export_path)
         module = importlib.util.module_from_spec(spec)
@@ -123,38 +125,31 @@ def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
     }
 
 
-def _linked_input_nodes(node, socket_name, expected_idname=None):
-    """Return upstream nodes connected to the given input socket."""
-    socket = node.inputs.get(socket_name)
+def _linked_socket_nodes(socket_collection, socket_name, linked_node_attr, expected_idname=None):
+    """Return linked nodes from one socket collection and link direction."""
+    socket = socket_collection.get(socket_name)
     if socket is None or not socket.is_linked:
         return []
 
     linked_nodes = []
     for link in socket.links:
-        from_node = getattr(link, "from_node", None)
-        if from_node is None:
+        linked_node = getattr(link, linked_node_attr, None)
+        if linked_node is None:
             continue
-        if expected_idname is not None and getattr(from_node, "bl_idname", "") != expected_idname:
+        if expected_idname is not None and getattr(linked_node, "bl_idname", "") != expected_idname:
             continue
-        linked_nodes.append(from_node)
+        linked_nodes.append(linked_node)
     return linked_nodes
+
+
+def _linked_input_nodes(node, socket_name, expected_idname=None):
+    """Return upstream nodes connected to the given input socket."""
+    return _linked_socket_nodes(node.inputs, socket_name, "from_node", expected_idname=expected_idname)
 
 
 def _linked_output_nodes(node, socket_name, expected_idname=None):
     """Return downstream nodes connected to the given output socket."""
-    socket = node.outputs.get(socket_name)
-    if socket is None or not socket.is_linked:
-        return []
-
-    linked_nodes = []
-    for link in socket.links:
-        to_node = getattr(link, "to_node", None)
-        if to_node is None:
-            continue
-        if expected_idname is not None and getattr(to_node, "bl_idname", "") != expected_idname:
-            continue
-        linked_nodes.append(to_node)
-    return linked_nodes
+    return _linked_socket_nodes(node.outputs, socket_name, "to_node", expected_idname=expected_idname)
 
 
 def _resolve_simulation_output_fps(simulation_node, context=None):
@@ -177,21 +172,6 @@ def _simulation_length_from_frames(start_frame, end_frame, fps):
     if end_frame <= start_frame:
         raise ValueError("Simulation end frame must be greater than the start frame.")
     return float(end_frame - start_frame) / float(fps)
-
-
-def _linked_geometry_names(node):
-    """Return the linked geometry object names for a source or obstacle node."""
-    geometry_nodes = _linked_geometry_nodes(node)
-    geometry_entries = []
-    for geometry_node in geometry_nodes:
-        source_object = getattr(geometry_node, "source_object", None)
-        geometry_entries.append(
-            {
-                "node_name": geometry_node.name,
-                "object_name": source_object.name if source_object is not None else None,
-            }
-        )
-    return geometry_entries
 
 
 def _linked_geometry_nodes(node):
@@ -240,6 +220,79 @@ def _sample_geometry_object_transforms(geometry_nodes, start_frame, end_frame, f
     return transform_samples
 
 
+_DOMAIN_BOUNDARY_AXES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
+_PHYSICS_SECTION_FIELDS = {
+    "fluid": (
+        ("density", "fluid_density", float, 0.0),
+        ("viscosity", "fluid_viscosity", float, 0.0),
+    ),
+    "temperature": (
+        ("dissipation", "temperature_dissipation", float, 0.0),
+        ("reference_temperature", "reference_temperature", float, 0.0),
+        ("buoyancy", "buoyancy", float, 0.0),
+        ("expansion_rate", "expansion_rate", float, 0.0),
+    ),
+    "smoke": (
+        ("dissipation", "smoke_dissipation", float, 0.0),
+        ("production_rate", "smoke_production_rate", float, 1.0),
+    ),
+    "fuel": (
+        ("dissipation", "fuel_dissipation", float, 0.0),
+        ("burn_rate", "fuel_burn_rate", float, 0.0),
+        ("ignition_temperature", "fuel_ignition_temperature", float, 0.0),
+    ),
+    "extras": (
+        ("vorticity", "vorticity", float, 0.0),
+    ),
+}
+_FORCE_NODE_FIELDS = {
+    "BLENDERCFD_FORCE_CONSTANT_NODE": (
+        ("force", (("x", "fx"), ("y", "fy"), ("z", "fz"))),
+    ),
+    "BLENDERCFD_FORCE_SWIRL_NODE": (
+        ("strength", "strength", float, 0.0),
+        ("origin", "origin", _safe_float_vector, None),
+        ("axis", "axis", _safe_float_vector, None),
+        ("radius", "radius", float, 0.0),
+    ),
+    "BLENDERCFD_FORCE_POINT_NODE": (
+        ("strength", "strength", float, 0.0),
+        ("origin", "origin", _safe_float_vector, None),
+        ("radius", "radius", float, 0.0),
+    ),
+    "BLENDERCFD_FORCE_TURBULENCE_NODE": (
+        ("scale", "scale", float, 0.0),
+        ("frequency", "frequency", float, 0.0),
+        ("amplitude", "amplitude", float, 0.0),
+        ("seed", "seed", int, 0),
+    ),
+}
+_OUTPUT_FIELD_SPECS = (
+    ("velocity", "export_velocity", "sparse_velocity", True),
+    ("pressure", "export_p", "sparse_p", False),
+    ("temperature", "export_t", "sparse_t", False),
+    ("smoke", "export_smoke", "sparse_smoke", False),
+    ("fuel", "export_fuel", "sparse_fuel", False),
+    ("flame", "export_flame", "sparse_flame", False),
+)
+
+
+def _serialize_named_fields(node, field_specs):
+    """Serialize a flat set of named fields from one node via declarative specs."""
+    return {
+        export_name: converter(getattr(node, property_name, default))
+        for export_name, property_name, converter, default in field_specs
+    }
+
+
+def _serialize_nested_vector(node, component_names):
+    """Serialize one nested vector object from multiple scalar node properties."""
+    return {
+        component_name: float(getattr(node, property_name))
+        for component_name, property_name in component_names
+    }
+
+
 def _serialize_domain_node(node):
     """Serialize one domain node."""
     return {
@@ -251,12 +304,11 @@ def _serialize_domain_node(node):
             "nz": int(node.nz),
         },
         "boundary_conditions": {
-            "x_low": {"type": node.x_low_bc, "velocity": _safe_float_vector(node.x_low_velocity)},
-            "x_high": {"type": node.x_high_bc, "velocity": _safe_float_vector(node.x_high_velocity)},
-            "y_low": {"type": node.y_low_bc, "velocity": _safe_float_vector(node.y_low_velocity)},
-            "y_high": {"type": node.y_high_bc, "velocity": _safe_float_vector(node.y_high_velocity)},
-            "z_low": {"type": node.z_low_bc, "velocity": _safe_float_vector(node.z_low_velocity)},
-            "z_high": {"type": node.z_high_bc, "velocity": _safe_float_vector(node.z_high_velocity)},
+            axis: {
+                "type": getattr(node, f"{axis}_bc"),
+                "velocity": _safe_float_vector(getattr(node, f"{axis}_velocity")),
+            }
+            for axis in _DOMAIN_BOUNDARY_AXES
         },
     }
 
@@ -265,27 +317,9 @@ def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
     """Serialize one physics node."""
     return {
         "node_name": node.name,
-        "fluid": {
-            "density": float(node.fluid_density),
-            "viscosity": float(node.fluid_viscosity),
-        },
-        "temperature": {
-            "dissipation": float(node.temperature_dissipation),
-            "reference_temperature": float(node.reference_temperature),
-            "buoyancy": float(node.buoyancy),
-            "expansion_rate": float(node.expansion_rate),
-        },
-        "smoke": {
-            "dissipation": float(node.smoke_dissipation),
-            "production_rate": float(getattr(node, "smoke_production_rate", 1.0)),
-        },
-        "fuel": {
-            "dissipation": float(node.fuel_dissipation),
-            "burn_rate": float(node.fuel_burn_rate),
-            "ignition_temperature": float(node.fuel_ignition_temperature),
-        },
-        "extras": {
-            "vorticity": float(getattr(node, "vorticity", 0.0)),
+        **{
+            section_name: _serialize_named_fields(node, field_specs)
+            for section_name, field_specs in _PHYSICS_SECTION_FIELDS.items()
         },
         "animations": _serialize_node_animations(
             node,
@@ -297,9 +331,8 @@ def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
     }
 
 
-def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
-    """Serialize one source node, including linked geometry names."""
-    geometry_nodes = _linked_geometry_nodes(node)
+def _build_geometry_payload(geometry_nodes, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
+    """Build shared geometry export data for source and obstacle nodes."""
     depsgraph = context.evaluated_depsgraph_get() if context is not None else None
     geometry_exports = GeometryExport.export_geometry_nodes(
         geometry_nodes,
@@ -316,6 +349,38 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
     for geometry_export in geometry_exports:
         object_name = geometry_export.get("object_name")
         geometry_export["transform_animation"] = transform_samples.get(object_name, {})
+
+    return {
+        "geometry_inputs": _linked_geometry_names_from_nodes(geometry_nodes),
+        "shape": "mesh" if geometry_exports else "empty",
+        "mesh": {
+            "objects": geometry_exports,
+        },
+    }
+
+
+def _linked_geometry_names_from_nodes(geometry_nodes):
+    """Return node/object name pairs for already resolved geometry nodes."""
+    return [
+        {
+            "node_name": geometry_node.name,
+            "object_name": getattr(getattr(geometry_node, "source_object", None), "name", None),
+        }
+        for geometry_node in geometry_nodes
+    ]
+
+
+def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
+    """Serialize one source node, including linked geometry names."""
+    geometry_nodes = _linked_geometry_nodes(node)
+    geometry_payload = _build_geometry_payload(
+        geometry_nodes,
+        start_frame,
+        end_frame,
+        fps,
+        context=context,
+        geometry_storage_dir=geometry_storage_dir,
+    )
 
     return {
         "node_name": node.name,
@@ -330,41 +395,25 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
             fps,
             context=context,
         ),
-        "geometry_inputs": _linked_geometry_names(node),
-        "shape": "mesh" if geometry_exports else "empty",
-        "mesh": {
-            "objects": geometry_exports,
-        },
+        **geometry_payload,
     }
 
 
 def _serialize_obstacle_node(node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None):
     """Serialize one obstacle node, including linked geometry names."""
     geometry_nodes = _linked_geometry_nodes(node)
-    depsgraph = context.evaluated_depsgraph_get() if context is not None else None
-    geometry_exports = GeometryExport.export_geometry_nodes(
-        geometry_nodes,
-        depsgraph=depsgraph,
-        storage_dir=geometry_storage_dir,
-    )
-    transform_samples = _sample_geometry_object_transforms(
+    geometry_payload = _build_geometry_payload(
         geometry_nodes,
         start_frame,
         end_frame,
         fps,
         context=context,
+        geometry_storage_dir=geometry_storage_dir,
     )
-    for geometry_export in geometry_exports:
-        object_name = geometry_export.get("object_name")
-        geometry_export["transform_animation"] = transform_samples.get(object_name, {})
 
     return {
         "node_name": node.name,
-        "geometry_inputs": _linked_geometry_names(node),
-        "shape": "mesh" if geometry_exports else "empty",
-        "mesh": {
-            "objects": geometry_exports,
-        },
+        **geometry_payload,
     }
 
 
@@ -381,27 +430,14 @@ def _serialize_force_node(node, start_frame, end_frame, fps, context=None):
             context=context,
         ),
     }
+    for field_spec in _FORCE_NODE_FIELDS.get(node.bl_idname, ()):
+        if len(field_spec) == 2:
+            field_name, component_names = field_spec
+            base_data[field_name] = _serialize_nested_vector(node, component_names)
+            continue
 
-    if node.bl_idname == "BLENDERCFD_FORCE_CONSTANT_NODE":
-        base_data["force"] = {
-            "x": float(node.fx),
-            "y": float(node.fy),
-            "z": float(node.fz),
-        }
-    elif node.bl_idname == "BLENDERCFD_FORCE_SWIRL_NODE":
-        base_data["strength"] = float(node.strength)
-        base_data["origin"] = _safe_float_vector(node.origin)
-        base_data["axis"] = _safe_float_vector(node.axis)
-        base_data["radius"] = float(node.radius)
-    elif node.bl_idname == "BLENDERCFD_FORCE_POINT_NODE":
-        base_data["strength"] = float(node.strength)
-        base_data["origin"] = _safe_float_vector(node.origin)
-        base_data["radius"] = float(node.radius)
-    elif node.bl_idname == "BLENDERCFD_FORCE_TURBULENCE_NODE":
-        base_data["scale"] = float(node.scale)
-        base_data["frequency"] = float(node.frequency)
-        base_data["amplitude"] = float(node.amplitude)
-        base_data["seed"] = int(getattr(node, "seed", 0))
+        field_name, property_name, converter, default = field_spec
+        base_data[field_name] = converter(getattr(node, property_name, default))
 
     return base_data
 
@@ -414,30 +450,11 @@ def _serialize_output_node(node):
         "fps": int(node.fps),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
-            "velocity": {
-                "enabled": bool(getattr(node, "export_velocity", True)),
-                "sparse": bool(getattr(node, "sparse_velocity", False)),
-            },
-            "pressure": {
-                "enabled": bool(node.export_p),
-                "sparse": bool(getattr(node, "sparse_p", False)),
-            },
-            "temperature": {
-                "enabled": bool(node.export_t),
-                "sparse": bool(getattr(node, "sparse_t", False)),
-            },
-            "smoke": {
-                "enabled": bool(node.export_smoke),
-                "sparse": bool(getattr(node, "sparse_smoke", False)),
-            },
-            "fuel": {
-                "enabled": bool(node.export_fuel),
-                "sparse": bool(getattr(node, "sparse_fuel", False)),
-            },
-            "flame": {
-                "enabled": bool(node.export_flame),
-                "sparse": bool(getattr(node, "sparse_flame", False)),
-            },
+            field_name: {
+                "enabled": bool(getattr(node, enabled_property, enabled_default)),
+                "sparse": bool(getattr(node, sparse_property, False)),
+            }
+            for field_name, enabled_property, sparse_property, enabled_default in _OUTPUT_FIELD_SPECS
         },
         "performance": {
             "writer_processes": int(getattr(node, "writer_processes", 4)),

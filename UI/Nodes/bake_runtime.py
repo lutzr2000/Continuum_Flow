@@ -39,13 +39,13 @@ BakeStorage = _load_sibling_module("blendercfd_bake_storage", "bake_storage.py")
 
 BlenderCFDConfigModule = GeneralNodes._load_ui_module(
     "blendercfd_create_config_dict",
-    ("Config_Export.py", "Create_Config_Dict.py"),
-    (".Config_Export", "UI.Config_Export", "Config_Export", "UI.Create_Config_Dict", "Create_Config_Dict"),
+    str(Path("Export") / "config.py"),
+    (".Export.config", "UI.Export.config", "Export.config"),
 )
 BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
     "blendercfd_host_writer",
-    "Host_Writer.py",
-    (".Host_Writer", "UI.Host_Writer", "Host_Writer"),
+    "Bake/writer_manager.py",
+    (".Bake.writer_manager", "UI.Bake.writer_manager", "Bake.writer_manager"),
 )
 
 tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links

@@ -1,3 +1,5 @@
+"""Worker process that receives JSON payloads and writes OpenVDB output files."""
+
 import json
 import sys
 from multiprocessing import shared_memory

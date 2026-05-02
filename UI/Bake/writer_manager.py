@@ -1,3 +1,5 @@
+"""Host-side manager for persistent VDB writer worker processes used during bakes."""
+
 import json
 import queue
 import socketserver
@@ -10,11 +12,11 @@ from pathlib import Path
 DEFAULT_VDB_WRITER_PROCESS_COUNT = 4
 
 
-def _ui_directory():
-    """Return the local UI directory path."""
+def _bake_directory():
+    """Return the local UI/Bake directory path."""
     if "__file__" in globals():
         return Path(__file__).resolve().parent
-    return (Path.cwd() / "UI").resolve()
+    return (Path.cwd() / "UI" / "Bake").resolve()
 
 
 def _resolve_blender_python_executable():
@@ -81,7 +83,7 @@ class _VDBWriterProcessPool:
     """Round-robin pool of persistent UI-side VDB writer processes."""
 
     def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT):
-        writer_script = _ui_directory() / "VDB_Process_Writer.py"
+        writer_script = _bake_directory() / "writer_worker.py"
         if not writer_script.exists():
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
 

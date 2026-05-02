@@ -1,3 +1,5 @@
+"""Serialize evaluated Blender geometry nodes into triangle data for BlenderCFD."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,50 +15,6 @@ def _iter_source_objects(geometry_nodes):
         if source_object is None:
             continue
         yield source_object
-
-
-def _object_to_worldspace_triangles(source_object, depsgraph=None):
-    """
-    Return a triangulated world-space vertex array for one Blender object.
-
-    The evaluated object is used so modifiers are baked into the exported mesh.
-    """
-    if source_object is None:
-        return np.empty((0, 3, 3), dtype=np.float32)
-
-    if depsgraph is None:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-
-    object_eval = source_object.evaluated_get(depsgraph)
-    mesh = object_eval.to_mesh(preserve_all_data_layers=False, depsgraph=depsgraph)
-    if mesh is None:
-        return np.empty((0, 3, 3), dtype=np.float32)
-
-    try:
-        mesh.calc_loop_triangles()
-        triangle_count = len(mesh.loop_triangles)
-        vertex_count = len(mesh.vertices)
-        if triangle_count == 0 or vertex_count == 0:
-            return np.empty((0, 3, 3), dtype=np.float32)
-
-        local_vertices = np.empty(vertex_count * 3, dtype=np.float32)
-        mesh.vertices.foreach_get("co", local_vertices)
-        local_vertices = local_vertices.reshape(vertex_count, 3)
-
-        # Transform all vertices in one NumPy pass instead of one Python loop per vertex.
-        matrix_world = object_eval.matrix_world.copy()
-        linear = np.asarray(matrix_world.to_3x3(), dtype=np.float32)
-        translation = np.asarray(matrix_world.translation, dtype=np.float32)
-        world_vertices = local_vertices @ linear.T
-        world_vertices += translation
-
-        triangle_vertex_indices = np.empty(triangle_count * 3, dtype=np.int32)
-        mesh.loop_triangles.foreach_get("vertices", triangle_vertex_indices)
-        triangle_vertex_indices = triangle_vertex_indices.reshape(triangle_count, 3)
-    
-        return np.ascontiguousarray(world_vertices[triangle_vertex_indices], dtype=np.float32)
-    finally:
-        object_eval.to_mesh_clear()
 
 
 def _object_to_localspace_triangles(source_object, depsgraph=None):
