@@ -103,8 +103,27 @@ nodes_module = SimpleNamespace(
 )
 
 
+def _remove_blendercfd_frame_change_handlers():
+    """Remove stale BlenderCFD frame-change handlers from previous reloads."""
+    handlers = bpy.app.handlers.frame_change_post
+    kept_handlers = []
+    for handler in handlers:
+        handler_name = getattr(handler, "__name__", "")
+        handler_module = getattr(handler, "__module__", "")
+        if handler_name == "blendercfd_frame_change_post":
+            continue
+        if "blendercfd_general_nodes" in handler_module:
+            continue
+        kept_handlers.append(handler)
+
+    if len(kept_handlers) != len(handlers):
+        handlers[:] = kept_handlers
+
+
 def register():
     """Register node tree classes, node classes, and add-menu categories."""
+    _remove_blendercfd_frame_change_handlers()
+
     for cls in node_tree_module.classes:
         try:
             bpy.utils.unregister_class(cls)
@@ -148,10 +167,18 @@ def register():
     except Exception:
         pass
     register_node_categories(node_tree_module.NODE_CATEGORIES_ID, node_tree_module.build_node_categories())
+    frame_change_handler = getattr(general_nodes_module, "blendercfd_frame_change_post", None)
+    if frame_change_handler is not None:
+        bpy.app.handlers.frame_change_post.append(frame_change_handler)
+    sync_animations = getattr(general_nodes_module, "sync_all_blendercfd_node_animations", None)
+    if callable(sync_animations):
+        sync_animations(getattr(bpy.context, "scene", None))
 
 
 def unregister():
     """Unregister menu categories and all BlenderCFD UI classes."""
+    _remove_blendercfd_frame_change_handlers()
+
     try:
         unregister_node_categories(node_tree_module.NODE_CATEGORIES_ID)
     except Exception:

@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from bpy.props import FloatProperty, FloatVectorProperty, IntProperty
+from bpy.app.handlers import persistent
 
 
 def _ui_directory():
@@ -73,6 +74,7 @@ BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
 BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 BLENDERCFD_BAKE_RUNNING_KEY = "blendercfd_bake_running"
+_SYNC_DEBUGGED_ACTIONS = set()
 
 
 def _window_manager_from_context(context=None):
@@ -115,6 +117,144 @@ def _node_cursor_location(context):
     if cursor is None:
         return (0.0, 0.0)
     return (float(cursor[0]), float(cursor[1]))
+
+
+def _iter_blendercfd_node_trees():
+    """Yield all BlenderCFD node trees in the current file."""
+    for node_tree in bpy.data.node_groups:
+        if getattr(node_tree, "bl_idname", "") == BlenderCFDNodeTree.bl_idname:
+            yield node_tree
+
+
+def _set_node_property_component(node, property_name, value, array_index):
+    """Assign one scalar F-curve value to a scalar or vector node property."""
+    current_value = getattr(node, property_name)
+    is_vector_like = hasattr(current_value, "__len__") and not isinstance(current_value, (str, bytes))
+
+    if array_index < 0 or not is_vector_like:
+        setattr(node, property_name, value)
+        return
+
+    current_value = list(current_value)
+    if array_index >= len(current_value):
+        return
+    current_value[array_index] = value
+    setattr(node, property_name, current_value)
+
+
+def _iter_keyframeable_node_properties(node_tree):
+    """Yield writable BlenderCFD node properties that expose a valid RNA path."""
+    for node in getattr(node_tree, "nodes", ()):
+        for prop in node.bl_rna.properties:
+            if prop.identifier == "rna_type" or prop.is_readonly:
+                continue
+            yield node, prop.identifier
+
+
+def _iter_action_fcurves(action):
+    """Yield F-curves from legacy or layered Blender actions."""
+    if action is None:
+        return
+
+    legacy_fcurves = getattr(action, "fcurves", None)
+    if legacy_fcurves is not None:
+        for fcurve in legacy_fcurves:
+            yield fcurve
+        return
+
+    layers = getattr(action, "layers", None)
+    if layers is None:
+        return
+
+    for layer in layers:
+        for strip in getattr(layer, "strips", ()):
+            channelbags = getattr(strip, "channelbags", None)
+            if channelbags is None:
+                continue
+            for channelbag in channelbags:
+                for fcurve in getattr(channelbag, "fcurves", ()):
+                    yield fcurve
+
+
+def _sync_node_tree_animation(node_tree, frame_value):
+    """Evaluate one BlenderCFD node-tree action and push values onto node properties."""
+    animation_data = getattr(node_tree, "animation_data", None)
+    action = getattr(animation_data, "action", None)
+    if action is None:
+        return
+
+    fcurves = list(_iter_action_fcurves(action))
+    if not fcurves:
+        return
+
+    property_path_map = {}
+    for node, property_name in _iter_keyframeable_node_properties(node_tree):
+        try:
+            property_path_map[node.path_from_id(property_name)] = (node, property_name)
+        except Exception:
+            continue
+
+    matched_any_curve = False
+    for fcurve in fcurves:
+        property_target = property_path_map.get(getattr(fcurve, "data_path", ""))
+        if property_target is None:
+            continue
+
+        node, property_name = property_target
+        evaluated_value = fcurve.evaluate(frame_value)
+        _set_node_property_component(
+            node,
+            property_name,
+            evaluated_value,
+            int(getattr(fcurve, "array_index", -1)),
+        )
+        matched_any_curve = True
+
+    action_key = str(getattr(action, "name_full", getattr(action, "name", "")))
+    if not matched_any_curve and action_key not in _SYNC_DEBUGGED_ACTIONS:
+        _SYNC_DEBUGGED_ACTIONS.add(action_key)
+        print("BlenderCFD animation sync: no matching node property paths found.")
+        print(f"  Node tree: {getattr(node_tree, 'name', '<unnamed>')}")
+        print("  Known animatable paths:")
+        for known_path in sorted(property_path_map.keys()):
+            print(f"    {known_path}")
+        print("  Action F-Curve paths:")
+        for fcurve in fcurves:
+            print(f"    {getattr(fcurve, 'data_path', '')} [{int(getattr(fcurve, 'array_index', -1))}]")
+
+
+def sync_all_blendercfd_node_animations(scene=None):
+    """Evaluate all BlenderCFD node-tree animations for the current frame."""
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return
+
+    frame_value = float(getattr(scene, "frame_current", 0))
+    for node_tree in _iter_blendercfd_node_trees():
+        _sync_node_tree_animation(node_tree, frame_value)
+
+
+def _tag_animation_editors_redraw():
+    """Refresh node editors after animation values were applied."""
+    window_manager = _window_manager_from_context()
+    if window_manager is None:
+        return
+
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type in {"NODE_EDITOR", "PROPERTIES"}:
+                area.tag_redraw()
+
+
+@persistent
+def blendercfd_frame_change_post(scene, _depsgraph):
+    """Force BlenderCFD custom node properties to follow their F-curves per frame."""
+    sync_all_blendercfd_node_animations(scene)
+    _tag_animation_editors_redraw()
 
 
 class BlenderCFDDomainNode(bpy.types.Node):
