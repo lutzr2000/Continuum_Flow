@@ -1,6 +1,6 @@
 from numba import cuda
 
-from Solver.Kernel_GPU.Kernel_Config import THREADS_PER_BLOCK_2D, boundary_face_blocks_per_grid
+from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D, boundary_face_blocks_per_grid
 
 
 BC_OUTFLOW = 0

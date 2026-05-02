@@ -1,8 +1,8 @@
 import numpy as np
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.Obstacles as Obstacles
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
+import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 
 
 def upload_simulation_state_to_gpu(simulation_params):
@@ -43,7 +43,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     obstacle_velocity_z_host = np.asarray(obstacle_data["velocity_z"], dtype=precision_dtype)
     source_field_data = simulation_params["source_field_data"]
     if source_field_data.get("is_animated", False):
-        Source_BC.prepare_source_data_for_gpu(source_field_data)
+        source_bc.prepare_source_data_for_gpu(source_field_data)
     source_mask_host = np.asarray(source_field_data["mask"])
     source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
     source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
@@ -161,5 +161,5 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_con
 
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None and source_field_data.get("is_animated", False):
-        Source_BC.update_source_data_gpu(source_field_data, device_state, time_value)
+        source_bc.update_source_data_gpu(source_field_data, device_state, time_value)
         gpu_constants["HAS_SOURCE"] = bool(source_field_data.get("last_has_source", False))

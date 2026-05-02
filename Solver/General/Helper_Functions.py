@@ -3,10 +3,10 @@ import sys
 
 import numpy as np
 
-import Solver.General.Forcing as Forcing
-import Solver.Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
-import Solver.Kernel_GPU.Kernel_Config as Kernel_Config
+import Solver.General.forcing as Forcing
+import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.kernel_config as Kernel_Config
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
@@ -34,6 +34,62 @@ def emit_progress(percent, time_value=None):
         payload["time"] = float(time_value)
     sys.stdout.write(PROGRESS_EVENT_PREFIX + json.dumps(payload) + "\n")
     sys.stdout.flush()
+
+
+_ANIMATED_CONSTANT_DEFAULTS = {
+    "TEMPERATURE_DISSIPATION_RATE": lambda physics_cfg: float(physics_cfg["temperature"]["dissipation"]),
+    "SMOKE_DISSIPATION_RATE": lambda physics_cfg: float(physics_cfg["smoke"]["dissipation"]),
+    "SMOKE_PRODUCTION_RATE": lambda physics_cfg: float(physics_cfg["smoke"].get("production_rate", 1.0)),
+    "FUEL_BURN_RATE": lambda physics_cfg: float(physics_cfg["fuel"]["burn_rate"]),
+    "FUEL_IGNITION_TEMPERATURE": lambda physics_cfg: float(physics_cfg["fuel"]["ignition_temperature"]),
+    "T_REFERENCE": lambda physics_cfg: float(physics_cfg["temperature"]["reference_temperature"]),
+    "BUOANCY_FACTOR": lambda physics_cfg: float(physics_cfg["temperature"]["buoyancy"]),
+    "EXPANSION_RATE": lambda physics_cfg: float(physics_cfg["temperature"]["expansion_rate"]),
+    "VORTICITY": lambda physics_cfg: float(physics_cfg.get("extras", {}).get("vorticity", 0.0)),
+}
+
+
+def _build_runtime_data(domain_cfg, obstacle_entries, source_entries, force_entries):
+    """Build persistent obstacle, source, and force data structures for the solver."""
+    obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
+    source_data = source_bc.build_source_data(domain_cfg, source_entries)
+    force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
+    return obstacle_data, source_data, force_data
+
+
+def _source_temperature_max(source_data):
+    """Return the maximum source temperature across static and animated sources."""
+    source_temperature_max = float(np.max(source_data["temperature"]))
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        source_temperature_max = max(
+            source_temperature_max,
+            float(runtime_entry.get("temperature", 0.0)),
+        )
+    return source_temperature_max
+
+
+def _has_force_data(force_data):
+    """Return whether the exported force data contains any active force contribution."""
+    return bool(
+        np.any(force_data["Fx_base"]) or
+        np.any(force_data["Fy_base"]) or
+        np.any(force_data["Fz_base"]) or
+        np.any(force_data["point_divergence"]) or
+        force_data["turbulence"]["angular_frequencies"].size > 0
+    )
+
+
+def _build_physics_constants(physics_cfg, animation_state):
+    """Build kernel physics constants and apply animated initial overrides."""
+    constants = {
+        constant_name: default_builder(physics_cfg)
+        for constant_name, default_builder in _ANIMATED_CONSTANT_DEFAULTS.items()
+    }
+
+    for constant_name, series in animation_state["constants"].items():
+        constants[constant_name] = float(series["values"][0])
+
+    return constants
 
 
 def build_boundary_config(domain_cfg):
@@ -362,113 +418,95 @@ def estimate_theoretical_force_maxima(gpu_constants, animation_state):
 
 def apply_config(config):
     """Extract kernel settings and persistent data from the exported config."""
+    # Read the exported simulation blocks we need for one solver run.
     simulations = config.get("simulations")
     simulation_cfg = simulations[0]
     meta_cfg = config.get("meta") or {}
-    domain_cfg = simulation_cfg.get("domain")
-    physics_cfg = simulation_cfg.get("physics")
+    settings_cfg = simulation_cfg["settings"]
+    domain_cfg = simulation_cfg["domain"]
+    physics_cfg = simulation_cfg["physics"]
     output_cfg = simulation_cfg.get("outputs", [None])[0]
     obstacle_entries = simulation_cfg.get("obstacles", [])
     source_entries = simulation_cfg.get("sources", [])
     force_entries = simulation_cfg.get("forces", [])
     host_vdb_writer = config.get("_host_vdb_writer")
 
+    # Build persistent runtime data derived from the exported node config.
     bc_config = build_boundary_config(domain_cfg)
     initial_velocity = initial_velocity_from_inflows(bc_config)
-    obstacle_data = Obstacle_BC.build_obstacle_data(domain_cfg, obstacle_entries)
-    source_data = Source_BC.build_source_data(domain_cfg, source_entries)
-    force_data = Forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
-    source_temperature_max = float(np.max(source_data["temperature"]))
-    for runtime_entry in source_data.get("runtime_entries", ()):
-        source_temperature_max = max(
-            source_temperature_max,
-            float(runtime_entry.get("temperature", 0.0)),
-        )
+    obstacle_data, source_data, force_data = _build_runtime_data(
+        domain_cfg,
+        obstacle_entries,
+        source_entries,
+        force_entries,
+    )
+    source_temperature_max = _source_temperature_max(source_data)
+
+    # Resolve boolean feature flags and output/export settings.
     has_source = bool(np.any(source_data["mask"]))
     has_obstacle = bool(np.any(obstacle_data["mask"]))
-    has_force = bool(
-        np.any(force_data["Fx_base"]) or
-        np.any(force_data["Fy_base"]) or
-        np.any(force_data["Fz_base"]) or
-        np.any(force_data["point_divergence"]) or
-        force_data["turbulence"]["angular_frequencies"].size > 0
-    )
+    has_force = _has_force_data(force_data)
     output_performance = build_output_performance_config(output_cfg)
     output_dtype = resolve_output_dtype(output_cfg)
     output_field_config = build_output_field_config(output_cfg)
+
+    # Prepare animated constant overrides before the kernel starts stepping.
     animation_state = build_animation_state(simulation_cfg, dtype=np.float32)
     if animation_state["constant_force"]:
         has_force = True
-    temperature_dissipation_rate = float(physics_cfg["temperature"]["dissipation"])
-    smoke_dissipation_rate = float(physics_cfg["smoke"]["dissipation"])
-    smoke_production_rate = float(physics_cfg["smoke"].get("production_rate", 1.0))
-    fuel_burn_rate = float(physics_cfg["fuel"]["burn_rate"])
-    fuel_ignition_temperature = float(physics_cfg["fuel"]["ignition_temperature"])
-    t_reference = float(physics_cfg["temperature"]["reference_temperature"])
-    buoyancy_factor = float(physics_cfg["temperature"]["buoyancy"])
-    expansion_rate = float(physics_cfg["temperature"]["expansion_rate"])
-    vorticity = float(physics_cfg.get("extras", {}).get("vorticity", 0.0))
+    physics_constants = _build_physics_constants(physics_cfg, animation_state)
 
-    for constant_name, series in animation_state["constants"].items():
-        initial_value = float(series["values"][0])
-        if constant_name == "TEMPERATURE_DISSIPATION_RATE":
-            temperature_dissipation_rate = initial_value
-        elif constant_name == "SMOKE_DISSIPATION_RATE":
-            smoke_dissipation_rate = initial_value
-        elif constant_name == "SMOKE_PRODUCTION_RATE":
-            smoke_production_rate = initial_value
-        elif constant_name == "FUEL_BURN_RATE":
-            fuel_burn_rate = initial_value
-        elif constant_name == "FUEL_IGNITION_TEMPERATURE":
-            fuel_ignition_temperature = initial_value
-        elif constant_name == "T_REFERENCE":
-            t_reference = initial_value
-        elif constant_name == "BUOANCY_FACTOR":
-            buoyancy_factor = initial_value
-        elif constant_name == "EXPANSION_RATE":
-            expansion_rate = initial_value
-        elif constant_name == "VORTICITY":
-            vorticity = initial_value
-
-    return {
+    # Flatten everything into the solver-facing parameter dictionary.
+    physics_params = {
         "RHO": float(physics_cfg["fluid"]["density"]),
         "NU": float(physics_cfg["fluid"]["viscosity"]),
-        "TEMPERATURE_DISSIPATION_RATE": temperature_dissipation_rate,
+        "TEMPERATURE_DISSIPATION_RATE": physics_constants["TEMPERATURE_DISSIPATION_RATE"],
         "TEMPERATURE_PRODUCTION_RATE": 1.0,
-        "SMOKE_DISSIPATION_RATE": smoke_dissipation_rate,
-        "SMOKE_PRODUCTION_RATE": smoke_production_rate,
-        "FUEL_BURN_RATE": fuel_burn_rate,
-        "FUEL_IGNITION_TEMPERATURE": fuel_ignition_temperature,
-        "T_REFERENCE": t_reference,
+        "SMOKE_DISSIPATION_RATE": physics_constants["SMOKE_DISSIPATION_RATE"],
+        "SMOKE_PRODUCTION_RATE": physics_constants["SMOKE_PRODUCTION_RATE"],
+        "FUEL_BURN_RATE": physics_constants["FUEL_BURN_RATE"],
+        "FUEL_IGNITION_TEMPERATURE": physics_constants["FUEL_IGNITION_TEMPERATURE"],
+        "T_REFERENCE": physics_constants["T_REFERENCE"],
         "SOURCE_TEMPERATURE_MAX": source_temperature_max,
-        "BUOANCY_FACTOR": buoyancy_factor,
-        "EXPANSION_RATE": expansion_rate,
-        "VORTICITY": vorticity,
-        "T_MAX": float(simulation_cfg["settings"]["simulation_length"]),
-        "FRAME_START": int(simulation_cfg["settings"].get("start_frame", 0)),
-        "CFL_MAX": float(simulation_cfg["settings"]["cfl"]),
-        "MAX_ITER": int(simulation_cfg["settings"]["iterations"]),
+        "BUOANCY_FACTOR": physics_constants["BUOANCY_FACTOR"],
+        "EXPANSION_RATE": physics_constants["EXPANSION_RATE"],
+        "VORTICITY": physics_constants["VORTICITY"],
+    }
+
+    simulation_params = {
+        "T_MAX": float(settings_cfg["simulation_length"]),
+        "FRAME_START": int(settings_cfg.get("start_frame", 0)),
+        "CFL_MAX": float(settings_cfg["cfl"]),
+        "MAX_ITER": int(settings_cfg["iterations"]),
         "VELOCITY_ADVECTION_SCHEME": str(
-            simulation_cfg["settings"].get(
+            settings_cfg.get(
                 "velocity_advection_scheme",
                 "SECOND_ORDER_UPWIND",
             )
         ),
-        "PRESSURE_SOLVER": str(
-            simulation_cfg["settings"].get("pressure_solver", "jacobi")
-        ),
+        "PRESSURE_SOLVER": str(settings_cfg.get("pressure_solver", "jacobi")),
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
-            simulation_cfg["settings"].get(
+            settings_cfg.get(
                 "max_velocity_increment_factor",
                 Kernel_Config.MAX_VELOCITY_INCREMENT_FACTOR,
             )
         ),
         "PRECISION": np.float32,
         "CPU_COUNT": 1,
+    }
+
+    domain_params = {
         "DELTA": float(domain_cfg["resolution"]),
         "NX": int(domain_cfg["grid"]["nx"]),
         "NY": int(domain_cfg["grid"]["ny"]),
         "NZ": int(domain_cfg["grid"]["nz"]),
+        "BC_CONFIG": bc_config,
+        "INITIAL_U": initial_velocity[0],
+        "INITIAL_V": initial_velocity[1],
+        "INITIAL_W": initial_velocity[2],
+    }
+
+    output_params = {
         "OUTPUT_FPS": int(output_cfg["fps"]),
         "PRINT_FREQUENCY": 100,
         "OUTPUT_TIME_STEP": 1.0 / int(output_cfg["fps"]),
@@ -481,15 +519,14 @@ def apply_config(config):
         "OUTPUT_VARIABLES": collect_output_variables(output_field_config),
         "OUTPUT_BUFFER_VARIABLES": collect_buffer_variables(output_field_config),
         "HOST_VDB_WRITER": host_vdb_writer,
+    }
+
+    runtime_params = {
         "meta": meta_cfg,
         "HAS_SOURCE": has_source,
         "HAS_OBSTACLE": has_obstacle,
         "HAS_FORCE": has_force,
-        "BC_CONFIG": bc_config,
         "ANIMATION_STATE": animation_state,
-        "INITIAL_U": initial_velocity[0],
-        "INITIAL_V": initial_velocity[1],
-        "INITIAL_W": initial_velocity[2],
         "obstacle_data": obstacle_data,
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
@@ -498,6 +535,14 @@ def apply_config(config):
             obstacle_data.get("is_animated", False) or
             source_data.get("is_animated", False)
         ),
+    }
+
+    return {
+        **physics_params,
+        **simulation_params,
+        **domain_params,
+        **output_params,
+        **runtime_params,
     }
 
 

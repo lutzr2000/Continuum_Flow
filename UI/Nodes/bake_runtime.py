@@ -105,7 +105,7 @@ def _run_kernel(config_dict):
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Solver.Kernel_GPU.Kernel as KernelMain; "
+        "import Solver.Kernel_GPU.kernel as KernelMain; "
         "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(

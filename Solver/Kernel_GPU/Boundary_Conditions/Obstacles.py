@@ -3,7 +3,7 @@ import math
 import numpy as np
 from numba import cuda, njit, prange
 
-from Solver.Kernel_GPU.Kernel_Config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
+from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
 
 # -----------------------------------------------------------------------------

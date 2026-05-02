@@ -5,14 +5,14 @@ from pathlib import Path
 import numpy as np
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.Domain_BC as BC
-import Solver.General.Helper_Functions as Helper_Functions
-import Solver.General.Output_Functions as Output_Functions
-import Solver.Kernel_GPU.Update_data as Update_data
-import Solver.Kernel_GPU.Kernel_Config as Kernel_Config
-import Solver.Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
-import Solver.Kernel_GPU.Time_Step as Time_Step
+import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
+import Solver.General.helper_functions as Helper_Functions
+import Solver.General.output_functions as Output_Functions
+import Solver.Kernel_GPU.update_data as Update_data
+import Solver.Kernel_GPU.kernel_config as kernel_config
+import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.time_step as Time_Step
 
 # ===============================
 # Methods
@@ -522,8 +522,8 @@ def pressure_poisson(
         device array: updated pressure field
     """
     if threadsperblock_3d is None:
-        threadsperblock_3d = Kernel_Config.THREADS_PER_BLOCK_3D
-    blockspergrid_3d = Kernel_Config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
+        threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
@@ -809,7 +809,7 @@ def apply_all_BC(
         )
 
     if has_source:
-        u, v, w, T, smoke, fuel = Source_BC.source_bc(
+        u, v, w, T, smoke, fuel = source_bc.source_bc(
             u, v, w, T, smoke, fuel,
             source_mask, source_velocity_mask,
             source_temperature, source_smoke, source_fuel,
@@ -998,7 +998,7 @@ def main(config=None):
         #------------Main time loop-------------------
         print('Start time iteration')
         Helper_Functions.emit_progress(0.0, t)
-        blockspergrid_3d = Kernel_Config.volume_blocks_per_grid(u.shape, Kernel_Config.THREADS_PER_BLOCK_3D)
+        blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, kernel_config.THREADS_PER_BLOCK_3D)
 
         while t < T_MAX:
             if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -1019,7 +1019,7 @@ def main(config=None):
             if turbulence_count > 0:
                 turbulence_cos_coeffs.copy_to_device(np.cos(turbulence_angular_frequencies * t))
                 turbulence_sin_coeffs.copy_to_device(np.sin(turbulence_angular_frequencies * t))
-            update_force_fields[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+            update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                 Fx_base, Fy_base, Fz_base,
                 turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
                 turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
@@ -1031,7 +1031,7 @@ def main(config=None):
                 Fx, Fy, Fz
             )
 
-            buoyancy_approximation[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+            buoyancy_approximation[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                 T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
             )
             cuda.synchronize()
@@ -1049,7 +1049,7 @@ def main(config=None):
 
             if gpu_constants["VORTICITY"] > 0.0:
                 section_start = perf_counter()
-                apply_vorticity_confinement[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+                apply_vorticity_confinement[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                     obstacle_mask, vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude,
                     Fx, Fy, Fz, gpu_constants["DELTA"], gpu_constants["VORTICITY"]
                 )
@@ -1059,13 +1059,13 @@ def main(config=None):
             #------------Velocity-------------------
             section_start = perf_counter()
             if VELOCITY_ADVECTION_SCHEME == "FIRST_ORDER_UPWIND":
-                update_velocity[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+                update_velocity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                     u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
                     gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
                     MAX_VELOCITY_INCREMENT_FACTOR,
                 )
             else:
-                update_velocity_second_order_upwind[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+                update_velocity_second_order_upwind[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                     u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
                     gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
                     MAX_VELOCITY_INCREMENT_FACTOR,
@@ -1079,7 +1079,7 @@ def main(config=None):
 
             #------------Scalars-------------------
             section_start = perf_counter()
-            update_scalar_fields[blockspergrid_3d, Kernel_Config.THREADS_PER_BLOCK_3D](
+            update_scalar_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
                 T, smoke, fuel, u, v, w, dt,
                 temperature_work, smoke_work, fuel_work, flame_work,
                 gpu_constants["DELTA"],
