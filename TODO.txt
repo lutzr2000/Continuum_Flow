@@ -1,7 +1,8 @@
 TODO
 
 Features:
-Make some sliders animatable
+Clean up
+Make some sliders animatable, this is insainly complicated why?
 
 General:
 Build CPU Kernel

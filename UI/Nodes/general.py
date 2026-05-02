@@ -1,9 +1,11 @@
+"""Core BlenderCFD nodes and shared node utilities, including domain, simulation, geometry, source, and obstacle nodes."""
+
 import bpy
 import importlib
 import importlib.util
 import sys
 from pathlib import Path
-from bpy.props import FloatProperty, FloatVectorProperty, IntProperty
+from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.app.handlers import persistent
 
 
@@ -100,6 +102,56 @@ def is_bake_running(context=None):
     if window_manager is None:
         return False
     return bool(window_manager.get(BLENDERCFD_BAKE_RUNNING_KEY, False))
+
+
+class BlenderCFDBaseNode(bpy.types.Node):
+    """Shared poll, lifecycle, and small UI helpers for BlenderCFD nodes."""
+
+    @classmethod
+    def poll(cls, ntree):
+        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+
+    def _sync_node(self):
+        """Keep sockets or other lightweight node state in sync."""
+
+    def init(self, context):
+        self._sync_node()
+
+    def copy(self, node):
+        self._sync_node()
+
+    def update(self):
+        self._sync_node()
+
+    def _set_layout_enabled(self, context, layout):
+        layout.enabled = not is_bake_running(context)
+
+    def _draw_group(self, layout, title, property_names):
+        box = layout.box()
+        box.label(text=title)
+        col = box.column(align=True)
+        for property_name in property_names:
+            col.prop(self, property_name)
+
+
+def ensure_socket(collection, socket_type, name, multi_input=False):
+    """Return a socket, creating it on demand with optional multi-input support."""
+    socket = collection.get(name)
+    if socket is None:
+        socket = collection.new(socket_type, name, use_multi_input=multi_input)
+    if multi_input and hasattr(socket, "link_limit"):
+        socket.link_limit = 0
+    return socket
+
+
+def ensure_geometry_input(node):
+    """Ensure that a node exposes the standard multi-input geometry socket."""
+    return ensure_socket(node.inputs, "NodeSocketGeometry", "Geometry", multi_input=True)
+
+
+def ensure_named_output(node, socket_type, name):
+    """Ensure that a node exposes one named output socket of the given type."""
+    return ensure_socket(node.outputs, socket_type, name)
 
 
 def _active_blendercfd_tree(context):
@@ -257,7 +309,7 @@ def blendercfd_frame_change_post(scene, _depsgraph):
     _tag_animation_editors_redraw()
 
 
-class BlenderCFDDomainNode(bpy.types.Node):
+class BlenderCFDDomainNode(BlenderCFDBaseNode):
     """Node used to define the CFD domain resolution and boundary conditions."""
 
     bl_idname = "BLENDERCFD_DOMAIN_NODE"
@@ -267,50 +319,39 @@ class BlenderCFDDomainNode(bpy.types.Node):
     bl_width_min = 200.0
     bl_width_max = 360.0
 
+    boundary_axes = (
+        ("X Low", "x_low_bc", "x_low_velocity"),
+        ("X High", "x_high_bc", "x_high_velocity"),
+        ("Y Low", "y_low_bc", "y_low_velocity"),
+        ("Y High", "y_high_bc", "y_high_velocity"),
+        ("Z Low", "z_low_bc", "z_low_velocity"),
+        ("Z High", "z_high_bc", "z_high_velocity"),
+    )
     boundary_condition_items = (
         ("WALL", "Wall", "No-slip wall boundary"),
         ("SLIP_WALL", "Slip Wall", "Slip wall boundary"),
         ("OUTFLOW", "Outflow", "Outflow boundary"),
         ("INFLOW", "Inflow", "Inflow boundary with prescribed velocity"),
     )
-    resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.001, unit="LENGTH", description="Grid resolution",options=set())  # type: ignore
-    nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in x",options=set())  # type: ignore
-    ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in y",options=set())  # type: ignore
-    nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in z",options=set()) # type: ignore
-    x_low_bc: bpy.props.EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    x_high_bc: bpy.props.EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    y_low_bc: bpy.props.EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    y_high_bc: bpy.props.EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    z_low_bc: bpy.props.EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    z_high_bc: bpy.props.EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW",options=set())  # type: ignore
-    x_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
-    x_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
-    y_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
-    y_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
-    z_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
-    z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY",options=set())  # type: ignore
+    resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.001, unit="LENGTH", description="Grid resolution", options=set())  # type: ignore
+    nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in x", options=set())  # type: ignore
+    ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in y", options=set())  # type: ignore
+    nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, soft_max=8192, description="Grid cells in z", options=set())  # type: ignore
+    x_low_bc: bpy.props.EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    x_high_bc: bpy.props.EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    y_low_bc: bpy.props.EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    y_high_bc: bpy.props.EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    z_low_bc: bpy.props.EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    z_high_bc: bpy.props.EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    x_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
+    x_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
+    y_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
+    y_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
+    z_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
+    z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
 
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
-
-    def _ensure_output_socket(self, name):
-        socket = self.outputs.get(name)
-        if socket is None:
-            socket = self.outputs.new(BlenderCFDIntSocket.bl_idname, name)
-        return socket
-
-    def _sync_output_socket(self):
-        self._ensure_output_socket("Domain")
-
-    def init(self, context):
-        self._sync_output_socket()
-
-    def copy(self, node):
-        self._sync_output_socket()
-
-    def update(self):
-        self._sync_output_socket()
+    def _sync_node(self):
+        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Domain")
 
     def _draw_boundary_controls(self, layout, label, condition_attr, velocity_attr):
         box = layout.box()
@@ -321,23 +362,17 @@ class BlenderCFDDomainNode(bpy.types.Node):
             box.prop(self, velocity_attr, text="Velocity")
 
     def draw_buttons(self, context, layout):
-        layout.enabled = not is_bake_running(context)
+        self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
-        col.prop(self, "resolution")
-        col.prop(self, "nx")
-        col.prop(self, "ny")
-        col.prop(self, "nz")
+        for property_name in ("resolution", "nx", "ny", "nz"):
+            col.prop(self, property_name)
         layout.separator()
         layout.label(text="Boundary Conditions")
-        self._draw_boundary_controls(layout, "X Low", "x_low_bc", "x_low_velocity")
-        self._draw_boundary_controls(layout, "X High", "x_high_bc", "x_high_velocity")
-        self._draw_boundary_controls(layout, "Y Low", "y_low_bc", "y_low_velocity")
-        self._draw_boundary_controls(layout, "Y High", "y_high_bc", "y_high_velocity")
-        self._draw_boundary_controls(layout, "Z Low", "z_low_bc", "z_low_velocity")
-        self._draw_boundary_controls(layout, "Z High", "z_high_bc", "z_high_velocity")
+        for boundary_args in self.boundary_axes:
+            self._draw_boundary_controls(layout, *boundary_args)
 
 
-class BlenderCFDPhysicsNode(bpy.types.Node):
+class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
     """Node used to store the physical coefficients of the CFD simulation."""
 
     bl_idname = "BLENDERCFD_PHYSICS_NODE"
@@ -346,59 +381,37 @@ class BlenderCFDPhysicsNode(bpy.types.Node):
     bl_width_default = 220.0
     bl_width_min = 200.0
     bl_width_max = 360.0
+    property_groups = (
+        ("Fluid", ("fluid_density", "fluid_viscosity")),
+        ("Temperature", ("temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate")),
+        ("Smoke", ("smoke_dissipation", "smoke_production_rate")),
+        ("Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature")),
+        ("Extras", ("vorticity",)),
+    )
 
-    fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.1, max=10, precision=4, description="Density of the fluid, default is air",options=set())  # type: ignore
-    fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, max=0.1, precision=6, description="Viscosity of the fluid, default is air",options=set())  # type: ignore
-    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=100, description="Rate of temperature dissipation, lower means slower dissipation",options={'ANIMATABLE'})  # type: ignore
-    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up",options={'ANIMATABLE'})  # type: ignore
-    buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=0.1, precision=4, description="Higher values result in quicker rising of air",options={'ANIMATABLE'})  # type: ignore
-    expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=0.1, precision=4, description="Higher values result in more expansion of warm air",options={'ANIMATABLE'})  # type: ignore
-    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.1, min=0.0, max=100.0, precision=4, description="Rate of smoke dissipation, lower means slower dissipation",options={'ANIMATABLE'})  # type: ignore
-    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, max=100.0, precision=4, description="Rate of smoke production due to burning, higher means more production",options={'ANIMATABLE'})   # type: ignore
-    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, max=100.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation",options={'ANIMATABLE'})   # type: ignore
-    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, max=100.0, precision=4, description="How quickly fuel is burned, lower means slower burning",options={'ANIMATABLE'})   # type: ignore
-    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite",options={'ANIMATABLE'})  # type: ignore
-    vorticity: FloatProperty(name="Vorticity", default=1.0, min=0.0, max=5.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl",options={'ANIMATABLE'})  # type: ignore
+    fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.1, max=10, precision=4, description="Density of the fluid, default is air", options=set())  # type: ignore
+    fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, max=0.1, precision=6, description="Viscosity of the fluid, default is air", options=set())  # type: ignore
+    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.1, min=0.0, max=100, description="Rate of temperature dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
+    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up", options={"ANIMATABLE"})  # type: ignore
+    buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, max=0.1, precision=4, description="Higher values result in quicker rising of air", options={"ANIMATABLE"})  # type: ignore
+    expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, max=0.1, precision=4, description="Higher values result in more expansion of warm air", options={"ANIMATABLE"})  # type: ignore
+    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.1, min=0.0, max=100.0, precision=4, description="Rate of smoke dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
+    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, max=100.0, precision=4, description="Rate of smoke production due to burning, higher means more production", options={"ANIMATABLE"})  # type: ignore
+    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, max=100.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
+    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, max=100.0, precision=4, description="How quickly fuel is burned, lower means slower burning", options={"ANIMATABLE"})  # type: ignore
+    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite", options={"ANIMATABLE"})  # type: ignore
+    vorticity: FloatProperty(name="Vorticity", default=1.0, min=0.0, max=5.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
 
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
-
-    def _ensure_output_socket(self):
-        socket = self.outputs.get("Physics")
-        if socket is None:
-            socket = self.outputs.new(BlenderCFDIntSocket.bl_idname, "Physics")
-        return socket
-
-    def _sync_output_socket(self):
-        self._ensure_output_socket()
-
-    def init(self, context):
-        self._sync_output_socket()
-
-    def copy(self, node):
-        self._sync_output_socket()
-
-    def update(self):
-        self._sync_output_socket()
-
-    def _draw_group(self, layout, title, property_names):
-        box = layout.box()
-        box.label(text=title)
-        col = box.column(align=True)
-        for property_name in property_names:
-            col.prop(self, property_name)
+    def _sync_node(self):
+        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Physics")
 
     def draw_buttons(self, context, layout):
-        layout.enabled = not is_bake_running(context)
-        self._draw_group(layout, "Fluid", ("fluid_density", "fluid_viscosity"))
-        self._draw_group(layout, "Temperature", ("temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate"))
-        self._draw_group(layout, "Smoke", ("smoke_dissipation", "smoke_production_rate"))
-        self._draw_group(layout, "Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature"))
-        self._draw_group(layout, "Extras", ("vorticity",))
+        self._set_layout_enabled(context, layout)
+        for title, property_names in self.property_groups:
+            self._draw_group(layout, title, property_names)
 
 
-class BlenderCFDSimulationNode(bpy.types.Node):
+class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     """Node used to collect all simulation-wide settings and input dependencies."""
 
     bl_idname = "BLENDERCFD_SIMULATION_NODE"
@@ -407,11 +420,15 @@ class BlenderCFDSimulationNode(bpy.types.Node):
     bl_width_default = 260.0
     bl_width_min = 240.0
     bl_width_max = 420.0
+    property_groups = (
+        ("Time", ("start_frame", "end_frame", "cfl")),
+        ("Solver", ("iterations", "velocity_advection_scheme")),
+    )
 
-    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation",options=set())  # type: ignore
-    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation",options=set())  # type: ignore
-    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver",options=set())  # type: ignore
-    iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations",options=set())  # type: ignore
+    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
+    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver", options=set())  # type: ignore
+    iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     velocity_advection_scheme: bpy.props.EnumProperty(
         name="",
         items=(
@@ -422,69 +439,98 @@ class BlenderCFDSimulationNode(bpy.types.Node):
         options=set(),
     )  # type: ignore
 
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
-
     def _ensure_input_socket(self, name, *, multi_input=False):
-        socket = self.inputs.get(name)
-        if socket is None:
-            socket = self.inputs.new(
-                BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname,
-                name,
-                use_multi_input=multi_input,
-            )
-        if multi_input and hasattr(socket, "link_limit"):
-            socket.link_limit = 0
-        return socket
+        socket_type = BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname
+        return ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
 
-    def _ensure_output_socket(self):
-        socket = self.outputs.get("Result")
-        if socket is None:
-            socket = self.outputs.new(BlenderCFDResultSocket.bl_idname, "Result")
-        return socket
-
-    def _remove_legacy_socket(self, socket_collection, socket_name):
-        socket = socket_collection.get(socket_name)
-        if socket is not None:
-            socket_collection.remove(socket)
-
-    def _sync_sockets(self):
-        self._remove_legacy_socket(self.inputs, "Reference Frame")
+    def _sync_node(self):
         self._ensure_input_socket("Domain")
         self._ensure_input_socket("Physics")
         self._ensure_input_socket("Obstacles")
         self._ensure_input_socket("Source", multi_input=True)
         self._ensure_input_socket("Forces", multi_input=True)
-        self._ensure_output_socket()
+        ensure_named_output(self, BlenderCFDResultSocket.bl_idname, "Result")
 
     def init(self, context):
         scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
         if scene is not None:
             self.start_frame = int(getattr(scene, "frame_start", self.start_frame))
             self.end_frame = int(getattr(scene, "frame_end", self.end_frame))
-        self._sync_sockets()
-
-    def copy(self, node):
-        self._sync_sockets()
-
-    def update(self):
-        self._sync_sockets()
-
-    def _draw_group(self, layout, title, property_names):
-        box = layout.box()
-        box.label(text=title)
-        col = box.column(align=True)
-        for property_name in property_names:
-            col.prop(self, property_name)
+        self._sync_node()
 
     def draw_buttons(self, context, layout):
-        layout.enabled = not is_bake_running(context)
-        self._draw_group(layout, "Time", ("start_frame", "end_frame", "cfl"))
-        self._draw_group(layout, "Solver", ("iterations", "velocity_advection_scheme"))
+        self._set_layout_enabled(context, layout)
+        for title, property_names in self.property_groups:
+            self._draw_group(layout, title, property_names)
 
 
-class BlenderCFDViewerNode(bpy.types.Node):
+class BlenderCFDSourceNode(BlenderCFDBaseNode):
+    """Node used to define a generic CFD source region and its scalar and velocity targets."""
+
+    bl_idname = "BLENDERCFD_SOURCE_NODE"
+    bl_label = "Source"
+    bl_icon = "LIGHT_SUN"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 360.0
+    scalar_property_names = ("fuel", "smoke", "temperature")
+
+    fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, max=100.0, soft_min=0.0, description="Amount of fuel to spawn", options={"ANIMATABLE"})  # type: ignore
+    smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, max=100.0, soft_min=0.0, description="Amount of smoke to spawn", options={"ANIMATABLE"})  # type: ignore
+    temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, max=2000.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
+    velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
+
+    def _sync_node(self):
+        ensure_geometry_input(self)
+        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Source")
+
+    def draw_buttons(self, context, layout):
+        self._set_layout_enabled(context, layout)
+        col = layout.column(align=True)
+        for property_name in self.scalar_property_names:
+            col.prop(self, property_name)
+
+        velocity_col = layout.column(align=True)
+        velocity_col.label(text="Velocity")
+        velocity_col.prop(self, "velocity", text="")
+
+
+class BlenderCFDGeometryNode(BlenderCFDBaseNode):
+    """Node used to reference a Blender object as geometry inside the CFD graph."""
+
+    bl_idname = "BLENDERCFD_GEOMETRY_NODE"
+    bl_label = "Geometry"
+    bl_icon = "OUTLINER_OB_MESH"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 360.0
+
+    source_object: PointerProperty(name="Object", type=bpy.types.Object)  # type: ignore
+
+    def _sync_node(self):
+        ensure_named_output(self, "NodeSocketGeometry", "Geometry")
+
+    def draw_buttons(self, context, layout):
+        self._set_layout_enabled(context, layout)
+        layout.prop(self, "source_object", text="Object")
+
+
+class BlenderCFDObstacleNode(BlenderCFDBaseNode):
+    """Node used to define obstacle geometry inside the CFD domain."""
+
+    bl_idname = "BLENDERCFD_OBSTACLE_NODE"
+    bl_label = "Obstacle"
+    bl_icon = "CUBE"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 360.0
+
+    def _sync_node(self):
+        ensure_geometry_input(self)
+        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Obstacle")
+
+
+class BlenderCFDViewerNode(BlenderCFDBaseNode):
     """Node used as a lightweight endpoint for inspecting simulation results."""
 
     bl_idname = "BLENDERCFD_VIEWER_NODE"
@@ -494,33 +540,14 @@ class BlenderCFDViewerNode(bpy.types.Node):
     bl_width_min = 160.0
     bl_width_max = 260.0
 
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
-
-    def _ensure_result_input_socket(self):
-        socket = self.inputs.get("Result")
-        if socket is None:
-            socket = self.inputs.new(BlenderCFDResultSocket.bl_idname, "Result")
-        return socket
-
-    def _sync_input_socket(self):
-        self._ensure_result_input_socket()
-
-    def init(self, context):
-        self._sync_input_socket()
-
-    def copy(self, node):
-        self._sync_input_socket()
-
-    def update(self):
-        self._sync_input_socket()
+    def _sync_node(self):
+        ensure_socket(self.inputs, BlenderCFDResultSocket.bl_idname, "Result")
 
     def free(self):
         BlenderCFDViewerModule.disable_domain_preview()
 
     def draw_buttons(self, context, layout):
-        layout.enabled = not is_bake_running(context)
+        self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
         col.operator("blendercfd.viewer_show_domain", text="Show Domain", icon="HIDE_OFF")
         col.operator("blendercfd.viewer_hide_domain", text="Hide Domain", icon="HIDE_ON")
@@ -587,6 +614,9 @@ classes = (
     BlenderCFDDomainNode,
     BlenderCFDPhysicsNode,
     BlenderCFDSimulationNode,
+    BlenderCFDSourceNode,
+    BlenderCFDGeometryNode,
+    BlenderCFDObstacleNode,
     BlenderCFDViewerNode,
     BlenderCFD_OT_add_basic_setup,
 )

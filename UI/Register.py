@@ -89,16 +89,16 @@ node_tree_module = _load_module(("Node_Tree.py", "NodeTree.py"), "blendercfd_nod
 socket_module = _load_module("Sockets.py", "blendercfd_sockets")
 viewer_module = _load_module("Viewer.py", "blendercfd_viewer")
 config_module = _load_module(("Config_Export.py", "Create_Config_Dict.py"), "blendercfd_create_config_dict")
-general_nodes_module = _load_module_from_relative_path(Path("Nodes") / "General_Nodes.py", "blendercfd_general_nodes")
-source_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Source_and_Obstacle_Nodes.py", "blendercfd_source_obstacle_nodes")
-force_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Force_Nodes.py", "blendercfd_force_nodes")
-output_nodes_module = _load_module_from_relative_path(Path("Nodes") / "Output_Nodes.py", "blendercfd_output_nodes")
+general_nodes_module = _load_module_from_relative_path(Path("Nodes") / "general.py", "blendercfd_general_nodes")
+force_nodes_module = _load_module_from_relative_path(Path("Nodes") / "forces.py", "blendercfd_force_nodes")
+output_node_module = _load_module_from_relative_path(Path("Nodes") / "output.py", "blendercfd_output_node")
+bake_runtime_module = _load_module_from_relative_path(Path("Nodes") / "bake_runtime.py", "blendercfd_bake_runtime")
 nodes_module = SimpleNamespace(
     classes=(
         *general_nodes_module.classes,
-        *source_nodes_module.classes,
         *force_nodes_module.classes,
-        *output_nodes_module.classes,
+        *output_node_module.classes,
+        *bake_runtime_module.classes,
     )
 )
 
