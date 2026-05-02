@@ -5,6 +5,8 @@ Make some sliders animatable
 
 General:
 Build CPU Kernel
+Rename and Logo
+Documentation with sphynx
 
 
 

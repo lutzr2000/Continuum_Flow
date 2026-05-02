@@ -6,10 +6,11 @@ import numpy as np
 from numba import cuda
 
 import Kernel_GPU.Boundary_Conditions.Domain_BC as BC
-import Kernel_GPU.Helper_Functions as Helper_Functions
+import General.Helper_Functions as Helper_Functions
+import General.Output_Functions as Output_Functions
+import Kernel_GPU.Update_data as Update_data
 import Kernel_GPU.Kernel_Config as Kernel_Config
 import Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
-import General.Output_Functions as Output_Functions
 import Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
 import Kernel_GPU.Time_Step as Time_Step
 
@@ -831,7 +832,6 @@ def main(config=None):
     CFL_MAX = simulation_params["CFL_MAX"]
     MAX_ITER = simulation_params["MAX_ITER"]
     VELOCITY_ADVECTION_SCHEME = simulation_params["VELOCITY_ADVECTION_SCHEME"]
-    PRESSURE_SOLVER = simulation_params["PRESSURE_SOLVER"]
     MAX_VELOCITY_INCREMENT_FACTOR = simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"]
     DELTA = simulation_params["DELTA"]
     NX = simulation_params["NX"]
@@ -868,7 +868,7 @@ def main(config=None):
     print('Cell count: ', int(NX * NY * NZ))
 
     #------------Fields-------------------
-    device_state, gpu_constants = Helper_Functions.upload_simulation_state_to_gpu(simulation_params)
+    device_state, gpu_constants = Update_data.upload_simulation_state_to_gpu(simulation_params)
 
     u = device_state["u"]
     v = device_state["v"]
@@ -938,7 +938,7 @@ def main(config=None):
 
     #------------Update dynamic masks-------------------
     section_start = perf_counter()
-    Helper_Functions.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, 0.0)
+    Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, 0.0)
     cuda.synchronize()
     section_timings["Dynamic_masks"] += perf_counter() - section_start
 
@@ -1009,7 +1009,7 @@ def main(config=None):
             #------------Update dynamic masks-------------------
             if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
                 section_start = perf_counter()
-                Helper_Functions.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, t)
+                Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, t)
                 cuda.synchronize()
                 section_timings["Dynamic_masks"] += perf_counter() - section_start
 
