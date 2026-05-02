@@ -1,3 +1,5 @@
+"""Core registration entrypoint for BlenderCFD UI classes and node categories."""
+
 import bpy
 import importlib.util
 import sys
@@ -12,7 +14,6 @@ def _load_module(file_names, module_name):
         file_names = (file_names,)
 
     candidate_paths = []
-
     for file_name in file_names:
         if "__file__" in globals():
             candidate_paths.append(Path(__file__).resolve().with_name(file_name))
@@ -21,7 +22,7 @@ def _load_module(file_names, module_name):
         if current_text is not None and current_text.filepath:
             candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().with_name(file_name))
 
-        candidate_paths.append((Path.cwd() / "UI" / file_name).resolve())
+        candidate_paths.append((Path.cwd() / "UI" / "Core" / file_name).resolve())
 
     seen = set()
     for candidate in candidate_paths:
@@ -55,11 +56,11 @@ def _load_module_from_relative_path(relative_path, module_name):
     candidate_paths = []
 
     if "__file__" in globals():
-        candidate_paths.append(Path(__file__).resolve().parent / relative_path)
+        candidate_paths.append(Path(__file__).resolve().parent.parent / relative_path)
 
     current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
     if current_text is not None and current_text.filepath:
-        candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().parent / relative_path)
+        candidate_paths.append(Path(bpy.path.abspath(current_text.filepath)).resolve().parent.parent / relative_path)
 
     candidate_paths.append((Path.cwd() / "UI" / relative_path).resolve())
 
@@ -85,10 +86,10 @@ def _load_module_from_relative_path(relative_path, module_name):
     raise ImportError(f"Keines dieser Module konnte geladen werden: {relative_path}")
 
 
-node_tree_module = _load_module(("Node_Tree.py", "NodeTree.py"), "blendercfd_nodetree")
-socket_module = _load_module("Sockets.py", "blendercfd_sockets")
-viewer_module = _load_module("Viewer.py", "blendercfd_viewer")
-config_module = _load_module(("Config_Export.py", "Create_Config_Dict.py"), "blendercfd_create_config_dict")
+node_tree_module = _load_module("node_tree.py", "blendercfd_nodetree")
+socket_module = _load_module("sockets.py", "blendercfd_sockets")
+viewer_module = _load_module("viewer.py", "blendercfd_viewer")
+config_module = _load_module_from_relative_path("Config_Export.py", "blendercfd_create_config_dict")
 general_nodes_module = _load_module_from_relative_path(Path("Nodes") / "general.py", "blendercfd_general_nodes")
 force_nodes_module = _load_module_from_relative_path(Path("Nodes") / "forces.py", "blendercfd_force_nodes")
 output_node_module = _load_module_from_relative_path(Path("Nodes") / "output.py", "blendercfd_output_node")

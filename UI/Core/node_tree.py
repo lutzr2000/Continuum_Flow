@@ -1,15 +1,15 @@
+"""Core node tree definitions and add-menu categories for BlenderCFD."""
+
 import bpy
 from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
 
 
-# Unique IDs for the custom node tree and its menu categories.
 NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
 NODE_CATEGORIES_ID = "BLENDERCFD_NODE_CATEGORIES"
 
+
 class BlenderCFDNodeTree(bpy.types.NodeTree):
-    """
-    Custom node tree used as the main editor space for BlenderCFD nodes.
-    """
+    """Custom node tree used as the main editor space for BlenderCFD nodes."""
 
     bl_idname = NODE_TREE_ID
     bl_label = "BlenderCFD Nodes"
@@ -17,9 +17,7 @@ class BlenderCFDNodeTree(bpy.types.NodeTree):
 
 
 class BlenderCFDNodeCategory(NodeCategory):
-    """
-    Node category shown in the add menu of the BlenderCFD node tree.
-    """
+    """Node category shown in the add menu of the BlenderCFD node tree."""
 
     @classmethod
     def poll(cls, context):

@@ -54,21 +54,21 @@ def _load_ui_module(module_name, file_names, package_names=()):
 
 _node_tree_module = _load_ui_module(
     "blendercfd_nodetree",
-    ("Node_Tree.py", "NodeTree.py"),
-    (".Node_Tree", "UI.Node_Tree", "Node_Tree", "UI.NodeTree", "NodeTree"),
+    "Core/node_tree.py",
+    (".Core.node_tree", "UI.Core.node_tree", "Core.node_tree"),
 )
 BlenderCFDNodeTree = _node_tree_module.BlenderCFDNodeTree
 
 _sockets_module = _load_ui_module(
     "blendercfd_sockets",
-    "Sockets.py",
-    (".Sockets", "UI.Sockets", "Sockets"),
+    "Core/sockets.py",
+    (".Core.sockets", "UI.Core.sockets", "Core.sockets"),
 )
 
 BlenderCFDViewerModule = _load_ui_module(
     "blendercfd_viewer",
-    "Viewer.py",
-    (".Viewer", "UI.Viewer", "Viewer"),
+    "Core/viewer.py",
+    (".Core.viewer", "UI.Core.viewer", "Core.viewer"),
 )
 
 BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket

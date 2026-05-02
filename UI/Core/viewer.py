@@ -1,3 +1,5 @@
+"""Viewport preview drawing and viewer operators for BlenderCFD."""
+
 import bpy
 import gpu
 import math
@@ -73,17 +75,9 @@ def _domain_center(domain_node):
 
 
 def _domain_origin(domain_node):
-    """
-    Return the world-space coordinate of grid index (0, 0, 0).
-
-    The center of the z_low face lies at the world origin.
-    """
+    """Return the world-space coordinate of grid index (0, 0, 0)."""
     width, depth, _height = _domain_dimensions(domain_node)
-    return (
-        -(width * 0.5),
-        -(depth * 0.5),
-        0.0,
-    )
+    return (-(width * 0.5), -(depth * 0.5), 0.0)
 
 
 def _box_segments(min_corner, max_corner):
@@ -321,7 +315,6 @@ def _force_preview_geometry(force_node):
         domain_node = _linked_domain_from_force(force_node)
         center = _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
         force_vector = (float(force_node.fx), float(force_node.fy), float(force_node.fz))
-        magnitude = _vector_length(force_vector)
         lines = _crosshair_segments(center, preview_scale * 0.18)
         lines.extend(_arrow_segments(center, _vector_scale(force_vector, preview_scale * 0.2)))
         return lines
@@ -355,8 +348,7 @@ def _force_preview_geometry(force_node):
     if node_type == "BLENDERCFD_FORCE_TURBULENCE_NODE":
         domain_node = _linked_domain_from_force(force_node)
         center = _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
-        lines = _turbulence_preview_lines(force_node, center, preview_scale)
-        return lines
+        return _turbulence_preview_lines(force_node, center, preview_scale)
 
     return []
 
@@ -367,16 +359,8 @@ def _build_preview_segments(domain_node):
     resolution = float(domain_node.resolution)
     origin_x, origin_y, origin_z = _domain_origin(domain_node)
 
-    min_corner = (
-        origin_x,
-        origin_y,
-        origin_z,
-    )
-    max_corner = (
-        origin_x + width,
-        origin_y + depth,
-        origin_z + height,
-    )
+    min_corner = (origin_x, origin_y, origin_z)
+    max_corner = (origin_x + width, origin_y + depth, origin_z + height)
 
     domain_lines = _box_segments(min_corner, max_corner)
     cell_lines = _box_segments(
@@ -447,12 +431,7 @@ def enable_domain_preview(domain_node):
 
     _ACTIVE_DOMAIN = domain_node
     if _DRAW_HANDLER is None:
-        _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(
-            _draw_preview,
-            (),
-            "WINDOW",
-            "POST_VIEW",
-        )
+        _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_preview, (), "WINDOW", "POST_VIEW")
     _tag_view3d_redraw()
 
 
@@ -480,12 +459,7 @@ def enable_force_preview():
     global _FORCE_DRAW_HANDLER, _FORCE_TIMER_REGISTERED
 
     if _FORCE_DRAW_HANDLER is None:
-        _FORCE_DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(
-            _draw_force_preview,
-            (),
-            "WINDOW",
-            "POST_VIEW",
-        )
+        _FORCE_DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_force_preview, (), "WINDOW", "POST_VIEW")
     if not _FORCE_TIMER_REGISTERED:
         bpy.app.timers.register(_force_preview_timer, first_interval=0.25)
         _FORCE_TIMER_REGISTERED = True
