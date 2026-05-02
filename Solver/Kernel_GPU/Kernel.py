@@ -5,14 +5,14 @@ from pathlib import Path
 import numpy as np
 from numba import cuda
 
-import Kernel_GPU.Boundary_Conditions.Domain_BC as BC
-import General.Helper_Functions as Helper_Functions
-import General.Output_Functions as Output_Functions
-import Kernel_GPU.Update_data as Update_data
-import Kernel_GPU.Kernel_Config as Kernel_Config
-import Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
-import Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
-import Kernel_GPU.Time_Step as Time_Step
+import Solver.Kernel_GPU.Boundary_Conditions.Domain_BC as BC
+import Solver.General.Helper_Functions as Helper_Functions
+import Solver.General.Output_Functions as Output_Functions
+import Solver.Kernel_GPU.Update_data as Update_data
+import Solver.Kernel_GPU.Kernel_Config as Kernel_Config
+import Solver.Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
+import Solver.Kernel_GPU.Time_Step as Time_Step
 
 # ===============================
 # Methods

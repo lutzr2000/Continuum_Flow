@@ -1,8 +1,8 @@
 import numpy as np
 from numba import cuda
 
-import Kernel_GPU.Boundary_Conditions.Obstacles as Obstacles
-import Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
+import Solver.Kernel_GPU.Boundary_Conditions.Obstacles as Obstacles
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
 
 
 def upload_simulation_state_to_gpu(simulation_params):

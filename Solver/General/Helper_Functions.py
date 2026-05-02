@@ -3,10 +3,10 @@ import sys
 
 import numpy as np
 
-import General.Forcing as Forcing
-import Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
-import Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
-import Kernel_GPU.Kernel_Config as Kernel_Config
+import Solver.General.Forcing as Forcing
+import Solver.Kernel_GPU.Boundary_Conditions.Obstacle_BC as Obstacle_BC
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as Source_BC
+import Solver.Kernel_GPU.Kernel_Config as Kernel_Config
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2

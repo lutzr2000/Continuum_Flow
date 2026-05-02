@@ -81,8 +81,8 @@ def _set_status_progress_values(percent):
 
 def _kernel_directory():
     if "__file__" in globals():
-        return Path(__file__).resolve().parents[2] / "Kernel_GPU"
-    return (Path.cwd() / "Kernel_GPU").resolve()
+        return Path(__file__).resolve().parents[2] / "Solver" / "Kernel_GPU"
+    return (Path.cwd() / "Solver" / "Kernel_GPU").resolve()
 
 
 def _project_root_directory():
@@ -105,7 +105,7 @@ def _run_kernel(config_dict):
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Kernel_GPU.Kernel as KernelMain; "
+        "import Solver.Kernel_GPU.Kernel as KernelMain; "
         "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
