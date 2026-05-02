@@ -219,7 +219,7 @@ def prepare_source_data_for_gpu(source_data):
     return source_data
 
 
-def update_source_data_gpu(source_data, device_state, time_value):
+def update_source_data_gpu(source_data, gpu_fields, time_value):
     """Rebuild dynamic source masks and fields directly on the GPU."""
     if not source_data.get("is_animated", False):
         source_data["last_has_source"] = bool(np.any(source_data["mask"]))
@@ -227,14 +227,14 @@ def update_source_data_gpu(source_data, device_state, time_value):
     if not source_data.get("gpu_ready"):
         prepare_source_data_for_gpu(source_data)
 
-    source_mask = device_state["source_mask"]
-    source_velocity_mask = device_state["source_velocity_mask"]
-    source_temperature = device_state["source_temperature"]
-    source_smoke = device_state["source_smoke"]
-    source_fuel = device_state["source_fuel"]
-    source_velocity_x = device_state["source_velocity_x"]
-    source_velocity_y = device_state["source_velocity_y"]
-    source_velocity_z = device_state["source_velocity_z"]
+    source_mask = gpu_fields["source_mask"]
+    source_velocity_mask = gpu_fields["source_velocity_mask"]
+    source_temperature = gpu_fields["source_temperature"]
+    source_smoke = gpu_fields["source_smoke"]
+    source_fuel = gpu_fields["source_fuel"]
+    source_velocity_x = gpu_fields["source_velocity_x"]
+    source_velocity_y = gpu_fields["source_velocity_y"]
+    source_velocity_z = gpu_fields["source_velocity_z"]
 
     _clear_source_fields_kernel[
         volume_blocks_per_grid(source_mask.shape, THREADS_PER_BLOCK_3D),

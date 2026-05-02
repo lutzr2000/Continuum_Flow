@@ -9,11 +9,13 @@ def upload_simulation_state_to_gpu(simulation_params):
     """
     Allocate the simulation fields on the host and upload persistent arrays to the GPU.
     """
+    # Resolve the shared grid shape and numeric precision once up front.
     precision_dtype = np.dtype(simulation_params["PRECISION"])
     nx = simulation_params["NX"]
     ny = simulation_params["NY"]
     nz = simulation_params["NZ"]
 
+    # Allocate the base host-side simulation fields from the solver config.
     u = np.full((nx, ny, nz), simulation_params["INITIAL_U"], dtype=precision_dtype)
     v = np.full((nx, ny, nz), simulation_params["INITIAL_V"], dtype=precision_dtype)
     w = np.full((nx, ny, nz), simulation_params["INITIAL_W"], dtype=precision_dtype)
@@ -24,6 +26,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     fuel = np.zeros((nx, ny, nz), dtype=precision_dtype)
     flame = np.zeros((nx, ny, nz), dtype=precision_dtype)
 
+    # Prepare persistent force-field inputs that are reused across time steps.
     force_field_data = simulation_params["force_field_data"]
     Fx_base = np.asarray(force_field_data["Fx_base"], dtype=precision_dtype)
     Fy_base = np.asarray(force_field_data["Fy_base"], dtype=precision_dtype)
@@ -34,6 +37,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     point_divergence = np.asarray(force_field_data["point_divergence"], dtype=precision_dtype)
     turbulence_data = force_field_data["turbulence"]
 
+    # Prepare obstacle runtime data and the host arrays mirrored on the GPU.
     obstacle_data = simulation_params.get("obstacle_data", {"mask": simulation_params["obstacle_mask"]})
     if obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
         Obstacles.prepare_dynamic_runtime_for_gpu(obstacle_data["runtime"])
@@ -41,6 +45,8 @@ def upload_simulation_state_to_gpu(simulation_params):
     obstacle_velocity_x_host = np.asarray(obstacle_data["velocity_x"], dtype=precision_dtype)
     obstacle_velocity_y_host = np.asarray(obstacle_data["velocity_y"], dtype=precision_dtype)
     obstacle_velocity_z_host = np.asarray(obstacle_data["velocity_z"], dtype=precision_dtype)
+
+    # Prepare source runtime data and the host arrays mirrored on the GPU.
     source_field_data = simulation_params["source_field_data"]
     if source_field_data.get("is_animated", False):
         source_bc.prepare_source_data_for_gpu(source_field_data)
@@ -53,6 +59,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     source_velocity_y_host = np.asarray(source_field_data["velocity_y"], dtype=precision_dtype)
     source_velocity_z_host = np.asarray(source_field_data["velocity_z"], dtype=precision_dtype)
 
+    # Apply source values to the initial host state before the first GPU upload.
     u[source_velocity_mask_host] = source_velocity_x_host[source_velocity_mask_host]
     v[source_velocity_mask_host] = source_velocity_y_host[source_velocity_mask_host]
     w[source_velocity_mask_host] = source_velocity_z_host[source_velocity_mask_host]
@@ -61,7 +68,8 @@ def upload_simulation_state_to_gpu(simulation_params):
     smoke = np.maximum(smoke, source_smoke_host)
     fuel = np.maximum(fuel, source_fuel_host)
 
-    device_state = {
+    # Upload persistent fields and allocate all work buffers on the device.
+    gpu_fields = {
         "u": cuda.to_device(u),
         "v": cuda.to_device(v),
         "w": cuda.to_device(w),
@@ -113,6 +121,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "velocity_maxima": cuda.device_array(3, dtype=np.float32),
     }
 
+    # Pack scalar constants separately so kernels can access a compact settings block.
     gpu_constants = {
         "RHO": precision_dtype.type(simulation_params["RHO"]),
         "NU": precision_dtype.type(simulation_params["NU"]),
@@ -139,10 +148,10 @@ def upload_simulation_state_to_gpu(simulation_params):
         "HAS_FORCE": simulation_params["HAS_FORCE"],
     }
 
-    return device_state, gpu_constants
+    return gpu_fields, gpu_constants
 
 
-def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, time_value):
+def update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, time_value):
     """Update animated obstacle/source masks on the host and upload them to the GPU."""
     if not simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
         return
@@ -152,14 +161,14 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_con
         Obstacles.update_dynamic_obstacle_data_gpu(
             obstacle_data["runtime"],
             time_value,
-            device_state["obstacle_mask"],
-            device_state["obstacle_velocity_x"],
-            device_state["obstacle_velocity_y"],
-            device_state["obstacle_velocity_z"],
+            gpu_fields["obstacle_mask"],
+            gpu_fields["obstacle_velocity_x"],
+            gpu_fields["obstacle_velocity_y"],
+            gpu_fields["obstacle_velocity_z"],
         )
         gpu_constants["HAS_OBSTACLE"] = bool(obstacle_data["runtime"].get("last_has_obstacle", False))
 
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None and source_field_data.get("is_animated", False):
-        source_bc.update_source_data_gpu(source_field_data, device_state, time_value)
+        source_bc.update_source_data_gpu(source_field_data, gpu_fields, time_value)
         gpu_constants["HAS_SOURCE"] = bool(source_field_data.get("last_has_source", False))

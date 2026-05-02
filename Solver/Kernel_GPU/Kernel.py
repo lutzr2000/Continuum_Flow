@@ -868,62 +868,62 @@ def main(config=None):
     print('Cell count: ', int(NX * NY * NZ))
 
     #------------Fields-------------------
-    device_state, gpu_constants = Update_data.upload_simulation_state_to_gpu(simulation_params)
+    gpu_fields, gpu_constants = Update_data.upload_simulation_state_to_gpu(simulation_params)
 
-    u = device_state["u"]
-    v = device_state["v"]
-    w = device_state["w"]
-    u_work = device_state["u_work"]
-    v_work = device_state["v_work"]
-    w_work = device_state["w_work"]
-    p = device_state["p"]
-    pressure_work = device_state["pressure_work"]
-    pressure_rhs = device_state["pressure_rhs"]
-    T = device_state["T"]
-    temperature_work = device_state["temperature_work"]
-    smoke = device_state["smoke"]
-    smoke_work = device_state["smoke_work"]
-    fuel = device_state["fuel"]
-    fuel_work = device_state["fuel_work"]
-    flame = device_state["flame"]
-    flame_work = device_state["flame_work"]
-    vorticity_x = device_state["vorticity_x"]
-    vorticity_y = device_state["vorticity_y"]
-    vorticity_z = device_state["vorticity_z"]
-    vorticity_magnitude = device_state["vorticity_magnitude"]
-    Fx = device_state["Fx"]
-    Fy = device_state["Fy"]
-    Fz = device_state["Fz"]
-    Fx_base = device_state["Fx_base"]
-    Fy_base = device_state["Fy_base"]
-    Fz_base = device_state["Fz_base"]
-    point_divergence = device_state["point_divergence"]
-    turbulence_Fx_a = device_state["turbulence_Fx_a"]
-    turbulence_Fy_a = device_state["turbulence_Fy_a"]
-    turbulence_Fz_a = device_state["turbulence_Fz_a"]
-    turbulence_Fx_b = device_state["turbulence_Fx_b"]
-    turbulence_Fy_b = device_state["turbulence_Fy_b"]
-    turbulence_Fz_b = device_state["turbulence_Fz_b"]
-    turbulence_cos_coeffs = device_state["turbulence_cos_coeffs"]
-    turbulence_sin_coeffs = device_state["turbulence_sin_coeffs"]
+    u = gpu_fields["u"]
+    v = gpu_fields["v"]
+    w = gpu_fields["w"]
+    u_work = gpu_fields["u_work"]
+    v_work = gpu_fields["v_work"]
+    w_work = gpu_fields["w_work"]
+    p = gpu_fields["p"]
+    pressure_work = gpu_fields["pressure_work"]
+    pressure_rhs = gpu_fields["pressure_rhs"]
+    T = gpu_fields["T"]
+    temperature_work = gpu_fields["temperature_work"]
+    smoke = gpu_fields["smoke"]
+    smoke_work = gpu_fields["smoke_work"]
+    fuel = gpu_fields["fuel"]
+    fuel_work = gpu_fields["fuel_work"]
+    flame = gpu_fields["flame"]
+    flame_work = gpu_fields["flame_work"]
+    vorticity_x = gpu_fields["vorticity_x"]
+    vorticity_y = gpu_fields["vorticity_y"]
+    vorticity_z = gpu_fields["vorticity_z"]
+    vorticity_magnitude = gpu_fields["vorticity_magnitude"]
+    Fx = gpu_fields["Fx"]
+    Fy = gpu_fields["Fy"]
+    Fz = gpu_fields["Fz"]
+    Fx_base = gpu_fields["Fx_base"]
+    Fy_base = gpu_fields["Fy_base"]
+    Fz_base = gpu_fields["Fz_base"]
+    point_divergence = gpu_fields["point_divergence"]
+    turbulence_Fx_a = gpu_fields["turbulence_Fx_a"]
+    turbulence_Fy_a = gpu_fields["turbulence_Fy_a"]
+    turbulence_Fz_a = gpu_fields["turbulence_Fz_a"]
+    turbulence_Fx_b = gpu_fields["turbulence_Fx_b"]
+    turbulence_Fy_b = gpu_fields["turbulence_Fy_b"]
+    turbulence_Fz_b = gpu_fields["turbulence_Fz_b"]
+    turbulence_cos_coeffs = gpu_fields["turbulence_cos_coeffs"]
+    turbulence_sin_coeffs = gpu_fields["turbulence_sin_coeffs"]
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
         dtype=simulation_params["PRECISION"],
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
-    obstacle_mask = device_state["obstacle_mask"]
-    obstacle_velocity_x = device_state["obstacle_velocity_x"]
-    obstacle_velocity_y = device_state["obstacle_velocity_y"]
-    obstacle_velocity_z = device_state["obstacle_velocity_z"]
-    source_mask = device_state["source_mask"]
-    source_velocity_mask = device_state["source_velocity_mask"]
-    source_temperature = device_state["source_temperature"]
-    source_smoke = device_state["source_smoke"]
-    source_fuel = device_state["source_fuel"]
-    source_velocity_x = device_state["source_velocity_x"]
-    source_velocity_y = device_state["source_velocity_y"]
-    source_velocity_z = device_state["source_velocity_z"]
-    velocity_maxima = device_state["velocity_maxima"]
+    obstacle_mask = gpu_fields["obstacle_mask"]
+    obstacle_velocity_x = gpu_fields["obstacle_velocity_x"]
+    obstacle_velocity_y = gpu_fields["obstacle_velocity_y"]
+    obstacle_velocity_z = gpu_fields["obstacle_velocity_z"]
+    source_mask = gpu_fields["source_mask"]
+    source_velocity_mask = gpu_fields["source_velocity_mask"]
+    source_temperature = gpu_fields["source_temperature"]
+    source_smoke = gpu_fields["source_smoke"]
+    source_fuel = gpu_fields["source_fuel"]
+    source_velocity_x = gpu_fields["source_velocity_x"]
+    source_velocity_y = gpu_fields["source_velocity_y"]
+    source_velocity_z = gpu_fields["source_velocity_z"]
+    velocity_maxima = gpu_fields["velocity_maxima"]
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
     device_fields = {
         "u": u,
@@ -938,7 +938,7 @@ def main(config=None):
 
     #------------Update dynamic masks-------------------
     section_start = perf_counter()
-    Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, 0.0)
+    Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, 0.0)
     cuda.synchronize()
     section_timings["Dynamic_masks"] += perf_counter() - section_start
 
@@ -1009,7 +1009,7 @@ def main(config=None):
             #------------Update dynamic masks-------------------
             if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
                 section_start = perf_counter()
-                Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, device_state, gpu_constants, t)
+                Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
                 cuda.synchronize()
                 section_timings["Dynamic_masks"] += perf_counter() - section_start
 
