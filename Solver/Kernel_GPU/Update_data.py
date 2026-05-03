@@ -2,7 +2,7 @@ import numpy as np
 from numba import cuda
 
 import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
 
 
 def upload_simulation_state_to_gpu(simulation_params):

@@ -5,7 +5,7 @@ import numpy as np
 
 import Solver.General.forcing as Forcing
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
 import Solver.Kernel_GPU.kernel_config as Kernel_Config
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")

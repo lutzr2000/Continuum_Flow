@@ -6,12 +6,12 @@ import numpy as np
 from numba import cuda
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.General.helper_functions as Helper_Functions
+import Solver.General.Helper_Functions as Helper_Functions
 import Solver.General.output_functions as Output_Functions
 import Solver.Kernel_GPU.update_data as Update_data
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
 import Solver.Kernel_GPU.time_step as Time_Step
 
 # ===============================

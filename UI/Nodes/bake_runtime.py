@@ -105,7 +105,7 @@ def _run_kernel(config_dict):
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Solver.Kernel_GPU.kernel as KernelMain; "
+        "import Solver.Kernel_GPU.Kernel as KernelMain; "
         "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
@@ -117,8 +117,19 @@ def _run_kernel(config_dict):
         text=True,
         bufsize=1,
     )
-    process.stdin.write(json.dumps(config_dict))
-    process.stdin.close()
+    try:
+        process.stdin.write(json.dumps(config_dict))
+        process.stdin.close()
+    except BrokenPipeError as exc:
+        kernel_output = ""
+        if process.stdout is not None:
+            try:
+                kernel_output = process.stdout.read().strip()
+            except Exception:
+                kernel_output = ""
+        process.wait(timeout=5.0)
+        detail = f" Kernel startup output:\n{kernel_output}" if kernel_output else ""
+        raise RuntimeError(f"Kernel process exited before accepting the bake config.{detail}") from exc
     return process, python_executable
 
 
