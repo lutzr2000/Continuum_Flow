@@ -105,7 +105,7 @@ def _run_kernel(config_dict):
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Solver.Kernel_GPU.Kernel as KernelMain; "
+        "import Solver.Kernel_GPU.kernel as KernelMain; "
         "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(
@@ -181,7 +181,6 @@ def _start_bake_session(config_dict):
     )
     writer_server.start()
     config_dict["_host_vdb_writer"] = writer_server.endpoint()
-    BakeStorage._write_runtime_config_snapshot(config_dict)
     output_queue = queue.Queue()
     try:
         process, python_executable = _run_kernel(config_dict)

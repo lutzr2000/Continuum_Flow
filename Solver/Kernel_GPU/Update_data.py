@@ -1,9 +1,9 @@
 import numpy as np
 from numba import cuda
 
-import Solver.General.Helper_Functions as Helper_Functions
+import Solver.General.helper_functions as helper_functions
 import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 
 
 def upload_simulation_state_to_gpu(simulation_params):
@@ -162,7 +162,7 @@ def update_animated_gpu_constants(simulation_params, gpu_constants, time_value):
 
     for constant_name, series in animation_state.get("constants", {}).items():
         gpu_constants[constant_name] = np.float32(
-            Helper_Functions._interpolate_animation_series(series, time_value)
+            helper_functions._interpolate_animation_series(series, time_value)
         )
 
 
@@ -172,7 +172,7 @@ def _cached_animation_series(container, property_name, dtype):
     if property_name in cache:
         return cache[property_name]
 
-    series = Helper_Functions._animation_series_to_arrays(
+    series = helper_functions._animation_series_to_arrays(
         (container.get("animations") or {}).get(property_name),
         dtype,
     )
@@ -204,25 +204,25 @@ def update_animated_source_force_values(simulation_params, gpu_fields, time_valu
             temperature_series = _cached_animation_series(runtime_entry, "temperature", np.float32)
             if temperature_series is not None:
                 next_temperature = np.float32(
-                    Helper_Functions._interpolate_animation_series(temperature_series, time_value)
+                    helper_functions._interpolate_animation_series(temperature_series, time_value)
                 )
 
             smoke_series = _cached_animation_series(runtime_entry, "smoke", np.float32)
             if smoke_series is not None:
                 next_smoke = np.float32(
-                    Helper_Functions._interpolate_animation_series(smoke_series, time_value)
+                    helper_functions._interpolate_animation_series(smoke_series, time_value)
                 )
 
             fuel_series = _cached_animation_series(runtime_entry, "fuel", np.float32)
             if fuel_series is not None:
                 next_fuel = np.float32(
-                    Helper_Functions._interpolate_animation_series(fuel_series, time_value)
+                    helper_functions._interpolate_animation_series(fuel_series, time_value)
                 )
 
             velocity_series = _cached_animation_series(runtime_entry, "velocity", np.float32)
             if velocity_series is not None:
                 velocity_value = np.asarray(
-                    Helper_Functions._interpolate_animation_series(velocity_series, time_value),
+                    helper_functions._interpolate_animation_series(velocity_series, time_value),
                     dtype=np.float32,
                 ).reshape(-1)
                 if velocity_value.size > 0:
@@ -258,7 +258,7 @@ def update_animated_source_force_values(simulation_params, gpu_fields, time_valu
     animation_state = simulation_params.get("ANIMATION_STATE") or {}
     for axis_name, series in animation_state.get("constant_force", {}).items():
         animated_force[axis_name] = float(
-            Helper_Functions._interpolate_animation_series(series, time_value)
+            helper_functions._interpolate_animation_series(series, time_value)
         )
 
     return animated_force

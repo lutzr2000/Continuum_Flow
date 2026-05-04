@@ -6,13 +6,13 @@ import numpy as np
 from numba import cuda
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.General.Helper_Functions as Helper_Functions
-import Solver.General.output_functions as Output_Functions
-import Solver.Kernel_GPU.Update_data as Update_data
+import Solver.General.helper_functions as helper_functions
+import Solver.General.output_functions as output_functions
+import Solver.Kernel_GPU.update_data as update_data
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
-import Solver.Kernel_GPU.time_step as Time_Step
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.time_step as time_step
 
 # ===============================
 # Methods
@@ -825,7 +825,7 @@ def apply_all_BC(
 def main(config=None):
     #------------Initialise-------------------
     total_start_time = perf_counter()
-    simulation_params = Helper_Functions.apply_config(config)
+    simulation_params = helper_functions.apply_config(config)
     cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
 
     print("################################################################")
@@ -833,7 +833,7 @@ def main(config=None):
     print('Cell count: ', int(simulation_params["NX"] * simulation_params["NY"] * simulation_params["NZ"]))
 
     #------------Fields-------------------
-    gpu_fields, gpu_constants = Update_data.upload_simulation_state_to_gpu(simulation_params)
+    gpu_fields, gpu_constants = update_data.upload_simulation_state_to_gpu(simulation_params)
 
     u = gpu_fields["u"]
     v = gpu_fields["v"]
@@ -902,7 +902,7 @@ def main(config=None):
     }
 
     #------------Update dynamic masks-------------------
-    Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, 0.0)
+    update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, 0.0)
 
     #------------Apply all BCs-------------------
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
@@ -914,13 +914,13 @@ def main(config=None):
     )
 
     t = 0.0
-    Update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
-    animated_force = Update_data.update_animated_source_force_values(
+    update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+    animated_force = update_data.update_animated_source_force_values(
         simulation_params,
         gpu_fields,
         t,
     )
-    fx_max, fy_max, fz_max = Helper_Functions.estimate_theoretical_force_maxima(
+    fx_max, fy_max, fz_max = helper_functions.estimate_theoretical_force_maxima(
         gpu_constants,
         simulation_params["ANIMATION_STATE"],
     )
@@ -932,8 +932,8 @@ def main(config=None):
     cancel_requested = False
 
     #------------Dynamic time step-------------------
-    Time_Step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
-    dt, solver_diverged = Time_Step.compute_new_timestep_gpu(
+    time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+    dt, solver_diverged = time_step.compute_new_timestep_gpu(
         u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], simulation_params["CFL_MAX"],
         max_dt=1.0 / simulation_params["OUTPUT_FPS"],
@@ -945,11 +945,11 @@ def main(config=None):
         next_output_time = 0.0
         output_index = 0
 
-        write_queue, buffer_pool, writer_threads, shared_memory_blocks = Output_Functions.setup_output(
+        write_queue, buffer_pool, writer_threads, shared_memory_blocks = output_functions.setup_output(
             simulation_params["OUTPATH"],
             simulation_params["FRAME_START"],
             simulation_params["OUTPUT_BUFFER_VARIABLES"],
-            Helper_Functions.select_fields(device_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
+            helper_functions.select_fields(device_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
             simulation_params["WRITE_QUEUE_SIZE"],
             simulation_params["OUTPUT_FORWARDER_COUNT"],
             simulation_params["DELTA"],
@@ -959,7 +959,7 @@ def main(config=None):
 
         #------------Main time loop-------------------
         print('Start time iteration')
-        Helper_Functions.emit_progress(0.0, t)
+        helper_functions.emit_progress(0.0, t)
         blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, kernel_config.THREADS_PER_BLOCK_3D)
 
         while t < simulation_params["T_MAX"]:
@@ -970,10 +970,10 @@ def main(config=None):
 
             #------------Update-------------------
             if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
-                Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
+                update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
 
-            Update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
-            animated_force = Update_data.update_animated_source_force_values(
+            update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+            animated_force = update_data.update_animated_source_force_values(
                 simulation_params,
                 gpu_fields,
                 t,
@@ -1070,11 +1070,11 @@ def main(config=None):
             device_fields["flame"] = flame
 
             while t >= next_output_time:
-                Output_Functions.enqueue_device_output(
+                output_functions.enqueue_device_output(
                     write_queue,
                     buffer_pool,
                     simulation_params["OUTPUT_BUFFER_VARIABLES"],
-                    Helper_Functions.select_fields(device_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
+                    helper_functions.select_fields(device_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
                     output_index,
                     t,
                     simulation_params["OUTPUT_FIELD_CONFIG"],
@@ -1082,7 +1082,7 @@ def main(config=None):
 
                 output_index += 1
                 next_output_time += simulation_params["OUTPUT_TIME_STEP"]
-                Helper_Functions.emit_progress(t / simulation_params["T_MAX"] * 100.0, t)
+                helper_functions.emit_progress(t / simulation_params["T_MAX"] * 100.0, t)
 
                 if simulation_params["OUTPUT_STATUS"]:
                     print('#################################################')
@@ -1092,8 +1092,8 @@ def main(config=None):
             #------------Dynamic time step-------------------
             t += dt
 
-            Time_Step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
-            dt_new, solver_diverged = Time_Step.compute_new_timestep_gpu(
+            time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+            dt_new, solver_diverged = time_step.compute_new_timestep_gpu(
                 u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
                 gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], simulation_params["CFL_MAX"],
                 max_dt=1.0 / simulation_params["OUTPUT_FPS"],
@@ -1105,7 +1105,7 @@ def main(config=None):
 
     #------------Empty write queue-------------------
     if write_queue is not None:
-        Output_Functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
+        output_functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
 
     #------------Conclusion-------------------
     if solver_diverged:
@@ -1113,7 +1113,7 @@ def main(config=None):
     elif cancel_requested:
         print('Simulation cancelled after clean shutdown.')
     else:
-        Helper_Functions.emit_progress(100.0, simulation_params["T_MAX"])
+        helper_functions.emit_progress(100.0, simulation_params["T_MAX"])
         print('Simulation finished!')
     total_runtime = perf_counter() - total_start_time
     print(f'Solver runtime: {total_runtime:.3f} s')

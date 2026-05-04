@@ -1,7 +1,6 @@
 TODO
 
 General:
-Make bake start quicker
 Build CPU Kernel
 Rename and Logo
 Documentation with sphynx

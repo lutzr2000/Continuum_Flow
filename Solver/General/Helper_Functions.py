@@ -5,8 +5,8 @@ import numpy as np
 
 import Solver.General.forcing as Forcing
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
-import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
-import Solver.Kernel_GPU.kernel_config as Kernel_Config
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.kernel_config as kernel_config
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
@@ -488,7 +488,7 @@ def apply_config(config):
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
             settings_cfg.get(
                 "max_velocity_increment_factor",
-                Kernel_Config.MAX_VELOCITY_INCREMENT_FACTOR,
+                kernel_config.MAX_VELOCITY_INCREMENT_FACTOR,
             )
         ),
         "PRECISION": np.float32,

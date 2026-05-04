@@ -1,7 +1,6 @@
 """Storage and import helpers for BlenderCFD bake output directories and VDB files."""
 
 import copy
-import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +11,6 @@ import bpy
 _LAST_BAKE_CONFIG_DICT = None
 _BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
 _BAKE_CANCEL_FILENAME = ".blendercfd_cancel"
-_BAKE_CONFIG_SNAPSHOT_FILENAME = "blendercfd_runtime_config.json"
 
 
 def _tag_all_areas_redraw(context=None):
@@ -181,17 +179,6 @@ def _output_directories_from_config(config_dict):
             seen_paths.add(resolved_path)
             output_directories.append(Path(resolved_path))
     return output_directories
-
-
-def _write_runtime_config_snapshot(config_dict):
-    """Write the final runtime config into each prepared bake output directory."""
-    written_paths = []
-    for output_directory in _output_directories_from_config(config_dict):
-        output_directory.mkdir(parents=True, exist_ok=True)
-        snapshot_path = output_directory / _BAKE_CONFIG_SNAPSHOT_FILENAME
-        snapshot_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
-        written_paths.append(snapshot_path)
-    return written_paths
 
 
 def _start_frame_for_output_directory(config_dict, output_directory):
