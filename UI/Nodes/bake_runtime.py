@@ -181,6 +181,7 @@ def _start_bake_session(config_dict):
     )
     writer_server.start()
     config_dict["_host_vdb_writer"] = writer_server.endpoint()
+    BakeStorage._write_runtime_config_snapshot(config_dict)
     output_queue = queue.Queue()
     try:
         process, python_executable = _run_kernel(config_dict)

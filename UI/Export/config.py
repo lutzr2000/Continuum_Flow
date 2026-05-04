@@ -25,6 +25,23 @@ except ImportError:
         spec.loader.exec_module(module)
         GeometryExport = module
 
+try:
+    from ..Nodes import general as GeneralNodes
+except ImportError:
+    try:
+        import general as GeneralNodes
+    except ImportError:
+        if "__file__" in globals():
+            general_nodes_path = Path(__file__).resolve().parents[1] / "Nodes" / "general.py"
+        else:
+            general_nodes_path = (Path.cwd() / "UI" / "Nodes" / "general.py").resolve()
+
+        spec = importlib.util.spec_from_file_location("blendercfd_general_nodes_export", general_nodes_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["blendercfd_general_nodes_export"] = module
+        spec.loader.exec_module(module)
+        GeneralNodes = module
+
 
 NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
 
@@ -48,15 +65,56 @@ def _safe_animation_value(value):
     return float(value)
 
 
+def _animation_times(start_frame, end_frame, fps):
+    """Return the shared simulation time axis derived from the Blender frame range."""
+    return [
+        float(frame - int(start_frame)) / float(fps)
+        for frame in range(int(start_frame), int(end_frame) + 1)
+    ]
+
+
 def _animated_property_names(node):
-    """Return all node property names explicitly marked animatable in the UI."""
+    """Return node property names that are likely intended for animation export."""
     property_names = []
+    seen_names = set()
+
+    # Prefer property names that the custom node classes already expose in the UI.
+    for group in getattr(node, "property_groups", ()):
+        if len(group) < 2:
+            continue
+        for property_name in group[1]:
+            if property_name in seen_names or not hasattr(node, property_name):
+                continue
+            property_names.append(property_name)
+            seen_names.add(property_name)
+
+    for attr_name in ("scalar_property_names", "draw_property_names"):
+        for property_name in getattr(node, attr_name, ()):
+            if property_name in seen_names or not hasattr(node, property_name):
+                continue
+            property_names.append(property_name)
+            seen_names.add(property_name)
+
+    # Fall back to Blender RNA metadata when available.
     for prop in node.bl_rna.properties:
         if prop.identifier == "rna_type" or prop.is_readonly:
             continue
-        if "ANIMATABLE" not in getattr(prop, "options", set()):
+        is_animatable = bool(getattr(prop, "is_animatable", False))
+        if not is_animatable and "ANIMATABLE" not in getattr(prop, "options", set()):
+            continue
+        if prop.identifier in seen_names or not hasattr(node, prop.identifier):
             continue
         property_names.append(prop.identifier)
+        seen_names.add(prop.identifier)
+    return property_names
+
+
+def _animated_node_property_names(node):
+    """Return animatable node property names that have matching F-curves or drivers."""
+    property_names = []
+    for property_name in _animated_property_names(node):
+        if _node_property_is_animated(node, property_name):
+            property_names.append(property_name)
     return property_names
 
 
@@ -70,7 +128,7 @@ def _node_property_is_animated(node, property_name):
     property_path = node.path_from_id(property_name)
     action = getattr(animation_data, "action", None)
     if action is not None:
-        for fcurve in action.fcurves:
+        for fcurve in GeneralNodes._iter_action_fcurves(action):
             if getattr(fcurve, "data_path", "") == property_path:
                 return True
 
@@ -83,14 +141,25 @@ def _node_property_is_animated(node, property_name):
     return False
 
 
-def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
-    """Sample animated node properties once per Blender frame for kernel playback."""
-    animated_properties = [
-        property_name
-        for property_name in _animated_property_names(node)
-        if _node_property_is_animated(node, property_name)
-    ]
-    if not animated_properties:
+def _sync_sampled_custom_node_animations(scene, context=None):
+    """Force BlenderCFD custom node properties to follow their F-curves before sampling."""
+    sync_fn = getattr(GeneralNodes, "sync_all_blendercfd_node_animations", None)
+    if callable(sync_fn):
+        sync_fn(scene)
+
+    view_layer = getattr(context, "view_layer", None) if context is not None else None
+    if view_layer is None:
+        view_layer = getattr(bpy.context, "view_layer", None)
+    if view_layer is not None and hasattr(view_layer, "update"):
+        try:
+            view_layer.update()
+        except Exception:
+            pass
+
+
+def _sample_node_property_series(node, property_names, start_frame, end_frame, context=None):
+    """Sample one set of node properties once per Blender frame."""
+    if not property_names:
         return {}
 
     scene = getattr(context, "scene", None) if context is not None else None
@@ -101,28 +170,57 @@ def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
 
     current_frame = int(getattr(scene, "frame_current", start_frame))
     frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
-    sampled_values = {property_name: [] for property_name in animated_properties}
+    sampled_values = {property_name: [] for property_name in property_names}
 
     try:
         for frame in frame_numbers:
             scene.frame_set(frame)
-            for property_name in animated_properties:
+            _sync_sampled_custom_node_animations(scene, context=context)
+            for property_name in property_names:
                 sampled_values[property_name].append(
                     _safe_animation_value(getattr(node, property_name))
                 )
     finally:
         scene.frame_set(current_frame)
+        _sync_sampled_custom_node_animations(scene, context=context)
+
+    return sampled_values
+
+
+def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
+    """Sample animated node properties once per Blender frame for kernel playback."""
+    animated_properties = _animated_node_property_names(node)
+    if not animated_properties:
+        return {}
+    sampled_values = _sample_node_property_series(
+        node,
+        animated_properties,
+        start_frame,
+        end_frame,
+        context=context,
+    )
 
     return {
         property_name: {
-            "times": [
-                float(frame - int(start_frame)) / float(fps)
-                for frame in frame_numbers
-            ],
+            "times": _animation_times(start_frame, end_frame, fps),
             "values": sampled_values[property_name],
         }
         for property_name in animated_properties
     }
+
+
+def _serialize_animatable_value_series(node, start_frame, end_frame, context=None):
+    """Sample only animatable UI properties that are actually animated."""
+    animated_properties = _animated_node_property_names(node)
+    if not animated_properties:
+        return {}
+    return _sample_node_property_series(
+        node,
+        animated_properties,
+        start_frame,
+        end_frame,
+        context=context,
+    )
 
 
 def _linked_socket_nodes(socket_collection, socket_name, linked_node_attr, expected_idname=None):
@@ -328,6 +426,12 @@ def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
             fps,
             context=context,
         ),
+        "animated_values": _serialize_animatable_value_series(
+            node,
+            start_frame,
+            end_frame,
+            context=context,
+        ),
     }
 
 
@@ -395,6 +499,12 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
             fps,
             context=context,
         ),
+        "animated_values": _serialize_animatable_value_series(
+            node,
+            start_frame,
+            end_frame,
+            context=context,
+        ),
         **geometry_payload,
     }
 
@@ -427,6 +537,12 @@ def _serialize_force_node(node, start_frame, end_frame, fps, context=None):
             start_frame,
             end_frame,
             fps,
+            context=context,
+        ),
+        "animated_values": _serialize_animatable_value_series(
+            node,
+            start_frame,
+            end_frame,
             context=context,
         ),
     }
@@ -495,6 +611,10 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
             "velocity_advection_scheme": str(
                 getattr(simulation_node, "velocity_advection_scheme", "SECOND_ORDER_UPWIND")
             ),
+        },
+        "animation_timeline": {
+            "fps": simulation_fps,
+            "times": _animation_times(start_frame, end_frame, simulation_fps),
         },
         "domain": _serialize_domain_node(domain_nodes[0]) if domain_nodes else None,
         "physics": (

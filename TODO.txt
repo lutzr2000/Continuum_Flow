@@ -1,10 +1,10 @@
 TODO
 
 Features:
-Clean up
 Make some sliders animatable, this is insainly complicated why?
 
 General:
+Make bake start quicker
 Build CPU Kernel
 Rename and Logo
 Documentation with sphynx
