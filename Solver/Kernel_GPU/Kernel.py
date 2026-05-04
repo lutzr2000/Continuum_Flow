@@ -8,7 +8,7 @@ from numba import cuda
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.General.Helper_Functions as Helper_Functions
 import Solver.General.output_functions as Output_Functions
-import Solver.Kernel_GPU.update_data as Update_data
+import Solver.Kernel_GPU.Update_data as Update_data
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
 import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
@@ -914,7 +914,12 @@ def main(config=None):
     )
 
     t = 0.0
-    animated_force = Helper_Functions.update_animated_gpu_constants(simulation_params["ANIMATION_STATE"], gpu_constants, t)
+    Update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+    animated_force = Update_data.update_animated_source_force_values(
+        simulation_params,
+        gpu_fields,
+        t,
+    )
     fx_max, fy_max, fz_max = Helper_Functions.estimate_theoretical_force_maxima(
         gpu_constants,
         simulation_params["ANIMATION_STATE"],
@@ -963,16 +968,18 @@ def main(config=None):
                 print('Bake cancellation requested. Stopping the simulation cleanly...')
                 break
 
-            #------------Update dynamic masks-------------------
+            #------------Update-------------------
             if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
                 Update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
 
-            #------------Forces-------------------
-            animated_force = Helper_Functions.update_animated_gpu_constants(
-                simulation_params["ANIMATION_STATE"],
-                gpu_constants,
+            Update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+            animated_force = Update_data.update_animated_source_force_values(
+                simulation_params,
+                gpu_fields,
                 t,
             )
+
+            #------------Forces-------------------
             if turbulence_count > 0:
                 turbulence_cos_coeffs.copy_to_device(np.cos(turbulence_angular_frequencies * t))
                 turbulence_sin_coeffs.copy_to_device(np.sin(turbulence_angular_frequencies * t))

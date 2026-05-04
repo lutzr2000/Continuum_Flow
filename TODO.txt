@@ -1,8 +1,5 @@
 TODO
 
-Features:
-Make some sliders animatable, this is insainly complicated why?
-
 General:
 Make bake start quicker
 Build CPU Kernel

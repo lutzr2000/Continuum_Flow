@@ -1,6 +1,7 @@
 import numpy as np
 from numba import cuda
 
+import Solver.General.Helper_Functions as Helper_Functions
 import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.Source_BC as source_bc
 
@@ -151,6 +152,118 @@ def upload_simulation_state_to_gpu(simulation_params):
     return gpu_fields, gpu_constants
 
 
+def update_animated_gpu_constants(simulation_params, gpu_constants, time_value):
+    """Update animated scalar solver constants for the current simulation time."""
+    animation_state = simulation_params.get("ANIMATION_STATE")
+    if not animation_state:
+        return
+    if not animation_state.get("enabled", False):
+        return
+
+    for constant_name, series in animation_state.get("constants", {}).items():
+        gpu_constants[constant_name] = np.float32(
+            Helper_Functions._interpolate_animation_series(series, time_value)
+        )
+
+
+def _cached_animation_series(container, property_name, dtype):
+    """Return one cached runtime animation series from an exported animation entry."""
+    cache = container.setdefault("_animation_series_cache", {})
+    if property_name in cache:
+        return cache[property_name]
+
+    series = Helper_Functions._animation_series_to_arrays(
+        (container.get("animations") or {}).get(property_name),
+        dtype,
+    )
+    cache[property_name] = series
+    return series
+
+
+def update_animated_source_force_values(simulation_params, gpu_fields, time_value):
+    """Update animated source targets and animated constant-force values."""
+    source_field_data = simulation_params.get("source_field_data")
+    if source_field_data is not None:
+        source_changed = False
+        for runtime_entry in source_field_data.get("runtime_entries", ()):
+            if "_base_temperature" not in runtime_entry:
+                runtime_entry["_base_temperature"] = np.float32(runtime_entry.get("temperature", 0.0))
+                runtime_entry["_base_smoke"] = np.float32(runtime_entry.get("smoke", 0.0))
+                runtime_entry["_base_fuel"] = np.float32(runtime_entry.get("fuel", 0.0))
+                runtime_entry["_base_velocity_x"] = np.float32(runtime_entry.get("velocity_x", 0.0))
+                runtime_entry["_base_velocity_y"] = np.float32(runtime_entry.get("velocity_y", 0.0))
+                runtime_entry["_base_velocity_z"] = np.float32(runtime_entry.get("velocity_z", 0.0))
+
+            next_temperature = runtime_entry["_base_temperature"]
+            next_smoke = runtime_entry["_base_smoke"]
+            next_fuel = runtime_entry["_base_fuel"]
+            next_velocity_x = runtime_entry["_base_velocity_x"]
+            next_velocity_y = runtime_entry["_base_velocity_y"]
+            next_velocity_z = runtime_entry["_base_velocity_z"]
+
+            temperature_series = _cached_animation_series(runtime_entry, "temperature", np.float32)
+            if temperature_series is not None:
+                next_temperature = np.float32(
+                    Helper_Functions._interpolate_animation_series(temperature_series, time_value)
+                )
+
+            smoke_series = _cached_animation_series(runtime_entry, "smoke", np.float32)
+            if smoke_series is not None:
+                next_smoke = np.float32(
+                    Helper_Functions._interpolate_animation_series(smoke_series, time_value)
+                )
+
+            fuel_series = _cached_animation_series(runtime_entry, "fuel", np.float32)
+            if fuel_series is not None:
+                next_fuel = np.float32(
+                    Helper_Functions._interpolate_animation_series(fuel_series, time_value)
+                )
+
+            velocity_series = _cached_animation_series(runtime_entry, "velocity", np.float32)
+            if velocity_series is not None:
+                velocity_value = np.asarray(
+                    Helper_Functions._interpolate_animation_series(velocity_series, time_value),
+                    dtype=np.float32,
+                ).reshape(-1)
+                if velocity_value.size > 0:
+                    next_velocity_x = np.float32(velocity_value[0])
+                if velocity_value.size > 1:
+                    next_velocity_y = np.float32(velocity_value[1])
+                if velocity_value.size > 2:
+                    next_velocity_z = np.float32(velocity_value[2])
+
+            if (
+                next_temperature != runtime_entry.get("temperature") or
+                next_smoke != runtime_entry.get("smoke") or
+                next_fuel != runtime_entry.get("fuel") or
+                next_velocity_x != runtime_entry.get("velocity_x") or
+                next_velocity_y != runtime_entry.get("velocity_y") or
+                next_velocity_z != runtime_entry.get("velocity_z")
+            ):
+                runtime_entry["temperature"] = next_temperature
+                runtime_entry["smoke"] = next_smoke
+                runtime_entry["fuel"] = next_fuel
+                runtime_entry["velocity_x"] = next_velocity_x
+                runtime_entry["velocity_y"] = next_velocity_y
+                runtime_entry["velocity_z"] = next_velocity_z
+                runtime_entry["has_velocity_target"] = bool(
+                    next_velocity_x != 0.0 or next_velocity_y != 0.0 or next_velocity_z != 0.0
+                )
+                source_changed = True
+
+        if source_changed or source_field_data.get("is_animated", False):
+            source_bc.update_source_data_gpu(source_field_data, gpu_fields, time_value)
+
+    animated_force = {"x": 0.0, "y": 0.0, "z": 0.0}
+    animation_state = simulation_params.get("ANIMATION_STATE") or {}
+    for axis_name, series in animation_state.get("constant_force", {}).items():
+        animated_force[axis_name] = float(
+            Helper_Functions._interpolate_animation_series(series, time_value)
+        )
+
+    return animated_force
+
+
 def update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, time_value):
     """Update animated obstacle/source masks on the host and upload them to the GPU."""
     if not simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
@@ -170,5 +283,4 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_const
 
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None and source_field_data.get("is_animated", False):
-        source_bc.update_source_data_gpu(source_field_data, gpu_fields, time_value)
         gpu_constants["HAS_SOURCE"] = bool(source_field_data.get("last_has_source", False))

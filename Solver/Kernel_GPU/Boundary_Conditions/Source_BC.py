@@ -147,7 +147,9 @@ def build_source_data(domain_cfg, source_entries):
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
-        has_animation = has_animation or bool(source_runtime.get("is_animated", False))
+        has_animation = has_animation or bool(
+            source_runtime.get("is_animated", False) or source_entry.get("animations")
+        )
         source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
@@ -169,6 +171,7 @@ def build_source_data(domain_cfg, source_entries):
                 "velocity_y": velocity_y,
                 "velocity_z": velocity_z,
                 "has_velocity_target": has_velocity_target,
+                "animations": dict(source_entry.get("animations", {})),
             }
         )
 
