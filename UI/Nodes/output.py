@@ -56,8 +56,8 @@ class BlenderCFDOutputNode(bpy.types.Node):
         ("export_flame", "sparse_flame", "flame"),
     )
 
-    fps: IntProperty(name="FPS", default=24, min=1, max=240, soft_min=1, description="Output frame rate", options=set())  # type: ignore
-    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, soft_max=8, description="How many writer processes are launched, usually four give the best performance", options=set())  # type: ignore
+    fps: IntProperty(name="FPS", default=24, min=1, soft_min=1, description="Output frame rate", options=set())  # type: ignore
+    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, description="How many writer processes are launched, usually four give the best performance", options=set())  # type: ignore
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(
