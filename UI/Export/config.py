@@ -603,6 +603,7 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
     return {
         "node_name": simulation_node.name,
         "settings": {
+            "solver_backend": str(getattr(simulation_node, "solver_backend", "GPU")),
             "start_frame": start_frame,
             "end_frame": end_frame,
             "simulation_length": _simulation_length_from_frames(start_frame, end_frame, simulation_fps),

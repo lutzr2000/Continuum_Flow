@@ -61,6 +61,25 @@ _SOLVER_DIVERGENCE_MESSAGES = (
 )
 
 
+def _gpu_solver_available():
+    """Return whether a usable CUDA backend is available in the solver environment."""
+    try:
+        python_executable = _resolve_python_executable()
+        result = subprocess.run(
+            [
+                python_executable,
+                "-c",
+                "from numba import cuda; print(int(cuda.is_available()))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "1"
+    except Exception:
+        return False
+
+
 def _draw_blendercfd_status_progress(header, context):
     layout = header.layout
     layout.separator_spacer()
@@ -79,10 +98,24 @@ def _set_status_progress_values(percent):
     _STATUS_PROGRESS_FACTOR = _STATUS_PROGRESS_PERCENT / 100.0
 
 
-def _kernel_directory():
+def _solver_backend_from_config(config_dict):
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return "CPU"
+    settings = simulations[0].get("settings") or {}
+    backend = str(settings.get("solver_backend", "CPU")).strip().upper()
+    if backend not in {"GPU", "CPU"}:
+        return "CPU"
+    if backend == "GPU" and not _gpu_solver_available():
+        return "CPU"
+    return backend
+
+
+def _kernel_directory(solver_backend="GPU"):
+    kernel_folder = "Kernel_CPU" if str(solver_backend).upper() == "CPU" else "Kernel_GPU"
     if "__file__" in globals():
-        return Path(__file__).resolve().parents[2] / "Solver" / "Kernel_GPU"
-    return (Path.cwd() / "Solver" / "Kernel_GPU").resolve()
+        return Path(__file__).resolve().parents[2] / "Solver" / kernel_folder
+    return (Path.cwd() / "Solver" / kernel_folder).resolve()
 
 
 def _project_root_directory():
@@ -100,12 +133,14 @@ def _resolve_python_executable():
 
 def _run_kernel(config_dict):
     python_executable = _resolve_python_executable()
-    kernel_dir = _kernel_directory()
+    solver_backend = _solver_backend_from_config(config_dict)
+    kernel_dir = _kernel_directory(solver_backend)
     project_root = _project_root_directory()
+    kernel_module = "Solver.Kernel_CPU.kernel" if solver_backend == "CPU" else "Solver.Kernel_GPU.kernel"
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "import Solver.Kernel_GPU.kernel as KernelMain; "
+        f"import {kernel_module} as KernelMain; "
         "KernelMain.main(json.load(sys.stdin))"
     )
     process = subprocess.Popen(

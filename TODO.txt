@@ -2,7 +2,6 @@ TODO
 
 General:
 Check default values and limits in UI (especially vorticity)
-Build CPU Kernel
 Remove unessecary doubling between CPU and GPU kernel
 Rename and Logo
 Documentation with sphynx

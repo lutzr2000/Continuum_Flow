@@ -492,7 +492,6 @@ def apply_config(config):
             )
         ),
         "PRECISION": np.float32,
-        "CPU_COUNT": 1,
     }
 
     domain_params = {

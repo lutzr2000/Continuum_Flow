@@ -3,6 +3,7 @@
 import bpy
 import importlib
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
@@ -14,6 +15,16 @@ def _ui_directory():
     if "__file__" in globals():
         return Path(__file__).resolve().parents[1]
     return (Path.cwd() / "UI").resolve()
+
+
+def _project_root_directory():
+    """Return the BlenderCFD project root directory."""
+    return _ui_directory().parent
+
+
+def _solver_python_executable():
+    """Return the dedicated BlenderCFD solver Python executable."""
+    return (_project_root_directory() / "BlenderCFD_env" / "Scripts" / "python.exe").resolve()
 
 
 def _load_ui_module(module_name, file_names, package_names=()):
@@ -77,6 +88,38 @@ BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
 BLENDERCFD_BAKE_RUNNING_KEY = "blendercfd_bake_running"
 _SYNC_DEBUGGED_ACTIONS = set()
+_GPU_SOLVER_AVAILABLE_CACHE = None
+
+
+def _gpu_solver_available():
+    """Return whether a usable CUDA backend is available in the solver environment."""
+    global _GPU_SOLVER_AVAILABLE_CACHE
+    if _GPU_SOLVER_AVAILABLE_CACHE is not None:
+        return _GPU_SOLVER_AVAILABLE_CACHE
+
+    try:
+        python_executable = _solver_python_executable()
+        if not python_executable.exists():
+            _GPU_SOLVER_AVAILABLE_CACHE = False
+            return _GPU_SOLVER_AVAILABLE_CACHE
+
+        result = subprocess.run(
+            [
+                str(python_executable),
+                "-c",
+                "from numba import cuda; print(int(cuda.is_available()))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        _GPU_SOLVER_AVAILABLE_CACHE = (
+            result.returncode == 0 and
+            result.stdout.strip() == "1"
+        )
+    except Exception:
+        _GPU_SOLVER_AVAILABLE_CACHE = False
+    return _GPU_SOLVER_AVAILABLE_CACHE
 
 
 def _window_manager_from_context(context=None):
@@ -425,6 +468,15 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
         ("Solver", ("iterations", "velocity_advection_scheme")),
     )
 
+    solver_backend: bpy.props.EnumProperty(
+        name="Solver",
+        items=(
+            ("GPU", "GPU", "Use the CUDA GPU solver"),
+            ("CPU", "CPU", "Use the Numba CPU solver"),
+        ),
+        default="CPU",
+        options=set(),
+    )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
     cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver", options=set())  # type: ignore
@@ -460,6 +512,14 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
+        solver_row = layout.row(align=True)
+        cpu_row = solver_row.row(align=True)
+        cpu_row.prop_enum(self, "solver_backend", "CPU")
+        gpu_row = solver_row.row(align=True)
+        gpu_row.enabled = _gpu_solver_available()
+        gpu_row.prop_enum(self, "solver_backend", "GPU")
+        if not _gpu_solver_available() and self.solver_backend == "GPU":
+            self.solver_backend = "CPU"
         for title, property_names in self.property_groups:
             self._draw_group(layout, title, property_names)
 
