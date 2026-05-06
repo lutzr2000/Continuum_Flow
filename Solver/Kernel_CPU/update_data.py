@@ -99,7 +99,6 @@ def upload_simulation_state_to_cpu(simulation_params):
         "v_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "w_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "p": p,
-        "pressure_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "pressure_rhs": np.empty((nx, ny, nz), dtype=precision_dtype),
         "T": T,
         "temperature_work": np.empty((nx, ny, nz), dtype=precision_dtype),

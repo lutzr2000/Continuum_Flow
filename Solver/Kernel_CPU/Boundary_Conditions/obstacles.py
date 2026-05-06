@@ -457,30 +457,6 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
     return state
 
 
-def _region_shape(index_bounds):
-    ix0, ix1, iy0, iy1, iz0, iz1 = index_bounds
-    return (
-        int(ix1 - ix0 + 1),
-        int(iy1 - iy0 + 1),
-        int(iz1 - iz0 + 1),
-    )
-
-
-def _merge_index_bounds(a, b):
-    if a is None:
-        return b
-    if b is None:
-        return a
-    return (
-        min(int(a[0]), int(b[0])),
-        max(int(a[1]), int(b[1])),
-        min(int(a[2]), int(b[2])),
-        max(int(a[3]), int(b[3])),
-        min(int(a[4]), int(b[4])),
-        max(int(a[5]), int(b[5])),
-    )
-
-
 def _voxelize_local(triangles, delta):
     """Voxelize a mesh once in local space for later transform-based sampling."""
     if triangles.size == 0:
@@ -520,7 +496,6 @@ def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_
             "local_bounds_extent": bounds_extent,
             "transform_series": transform_series,
             "dynamic_state": None,
-            "last_gpu_index_bounds": None,
         })
 
     return {

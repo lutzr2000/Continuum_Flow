@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from numba import get_num_threads, njit, prange, set_num_threads
+from numba import njit, prange, set_num_threads
 
 import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
@@ -352,7 +352,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
 
 def pressure_poisson(
-    u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
+    u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
     max_iter=10
 ):
@@ -578,7 +578,7 @@ def _enqueue_host_output(
     write_queue,
     buffer_pool,
     buffered_variables,
-    source_fields,
+    field_map,
     output_index,
     time_value,
     output_field_config,
@@ -586,7 +586,7 @@ def _enqueue_host_output(
     """Copy one CPU output frame into shared memory and enqueue it for writing."""
     fields = buffer_pool.get()
     for variable_name in buffered_variables:
-        np.copyto(fields[variable_name]["array"], source_fields[variable_name])
+        np.copyto(fields[variable_name]["array"], field_map[variable_name])
     write_queue.put((int(output_index), float(time_value), fields, output_field_config))
 
 
@@ -619,7 +619,6 @@ def main(config=None):
     v_work = cpu_fields["v_work"]
     w_work = cpu_fields["w_work"]
     p = cpu_fields["p"]
-    pressure_work = cpu_fields["pressure_work"]
     pressure_rhs = cpu_fields["pressure_rhs"]
     T = cpu_fields["T"]
     temperature_work = cpu_fields["temperature_work"]
@@ -717,7 +716,7 @@ def main(config=None):
             simulation_params["OUTPATH"],
             simulation_params["FRAME_START"],
             simulation_params["OUTPUT_BUFFER_VARIABLES"],
-            helper_functions.select_fields(host_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
+            host_fields,
             simulation_params["WRITE_QUEUE_SIZE"],
             simulation_params["OUTPUT_FORWARDER_COUNT"],
             simulation_params["DELTA"],
@@ -778,7 +777,7 @@ def main(config=None):
             buoyancy_approximation(T, Fz, cpu_constants["BUOANCY_FACTOR"], cpu_constants["T_REFERENCE"])
 
             p = pressure_poisson(
-                u, v, w, p, T, obstacle_mask, pressure_work, pressure_rhs,
+                u, v, w, p, T, obstacle_mask, pressure_rhs,
                 vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
                 cpu_constants["DELTA"], cpu_constants["RHO"], cpu_constants["EXPANSION_RATE"],
                 cpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
@@ -847,7 +846,7 @@ def main(config=None):
                     write_queue,
                     buffer_pool,
                     simulation_params["OUTPUT_BUFFER_VARIABLES"],
-                    helper_functions.select_fields(host_fields, simulation_params["OUTPUT_BUFFER_VARIABLES"]),
+                    host_fields,
                     output_index,
                     t,
                     simulation_params["OUTPUT_FIELD_CONFIG"],
