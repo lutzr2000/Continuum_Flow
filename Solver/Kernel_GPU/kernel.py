@@ -10,7 +10,7 @@ import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
 import Solver.Kernel_GPU.update_data as update_data
 import Solver.Kernel_GPU.kernel_config as kernel_config
-import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as Obstacle_BC
+import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 
@@ -803,7 +803,7 @@ def apply_all_BC(
     u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, bc_config)
 
     if has_obstacle:
-        u, v, w, smoke, fuel, flame = Obstacle_BC.obstacle_bc(
+        u, v, w, smoke, fuel, flame = obstacle_bc.obstacle_bc(
             u, v, w, smoke, fuel, flame,
             obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
         )

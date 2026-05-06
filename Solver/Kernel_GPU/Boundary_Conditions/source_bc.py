@@ -3,7 +3,7 @@ import math
 import numpy as np
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
+import Solver.Kernel_GPU.Boundary_Conditions.obstacles as obstacles
 from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
 
@@ -143,14 +143,14 @@ def build_source_data(domain_cfg, source_entries):
         if not mesh_objects:
             continue
 
-        source_runtime = Obstacles.build_dynamic_runtime(
+        source_runtime = obstacles.build_dynamic_runtime(
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
         has_animation = has_animation or bool(
             source_runtime.get("is_animated", False) or source_entry.get("animations")
         )
-        source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
+        source_mask = obstacles.update_dynamic_mask(source_runtime, 0.0)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
         velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
@@ -217,7 +217,7 @@ def prepare_source_data_for_gpu(source_data):
         source_data["gpu_ready"] = False
         return source_data
     for runtime_entry in source_data.get("runtime_entries", ()):
-        Obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
+        obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
     source_data["gpu_ready"] = True
     return source_data
 
@@ -265,7 +265,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
             if local_mask_device is None:
                 continue
 
-            state = Obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+            state = obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
             if not state["active"]:
                 continue
             ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
@@ -330,7 +330,7 @@ def update_source_data(source_data, time_value):
     velocity_z_field.fill(0.0)
 
     for runtime_entry in source_data.get("runtime_entries", ()):
-        source_mask = Obstacles.update_dynamic_mask(
+        source_mask = obstacles.update_dynamic_mask(
             runtime_entry["runtime"],
             time_value,
             out_mask=runtime_entry["mask"],

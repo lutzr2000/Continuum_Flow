@@ -2,7 +2,7 @@ import numpy as np
 from numba import cuda
 
 import Solver.General.helper_functions as helper_functions
-import Solver.Kernel_GPU.Boundary_Conditions.obstacles as Obstacles
+import Solver.Kernel_GPU.Boundary_Conditions.obstacles as obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 
 
@@ -41,7 +41,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     # Prepare obstacle runtime data and the host arrays mirrored on the GPU.
     obstacle_data = simulation_params.get("obstacle_data", {"mask": simulation_params["obstacle_mask"]})
     if obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
-        Obstacles.prepare_dynamic_runtime_for_gpu(obstacle_data["runtime"])
+        obstacles.prepare_dynamic_runtime_for_gpu(obstacle_data["runtime"])
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
     obstacle_velocity_x_host = np.asarray(obstacle_data["velocity_x"], dtype=precision_dtype)
     obstacle_velocity_y_host = np.asarray(obstacle_data["velocity_y"], dtype=precision_dtype)
@@ -271,7 +271,7 @@ def update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_const
 
     obstacle_data = simulation_params.get("obstacle_data")
     if obstacle_data is not None and obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
-        Obstacles.update_dynamic_obstacle_data_gpu(
+        obstacles.update_dynamic_obstacle_data_gpu(
             obstacle_data["runtime"],
             time_value,
             gpu_fields["obstacle_mask"],

@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-import Solver.Kernel_CPU.Boundary_Conditions.obstacles as Obstacles
+import Solver.Kernel_CPU.Boundary_Conditions.obstacles as obstacles
 
 
 def _combine_exported_obstacles(obstacle_entries):
@@ -55,7 +55,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
     if obstacle_cfg["shape"] == "mesh":
         mesh_cfg = obstacle_cfg.get("mesh", {})
         mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
-        obstacle_runtime = Obstacles.build_dynamic_runtime(
+        obstacle_runtime = obstacles.build_dynamic_runtime(
             nx,
             ny,
             nz,
@@ -65,7 +65,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
             origin_y=origin_y,
             origin_z=origin_z,
         )
-        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = Obstacles.update_dynamic_obstacle_data(
+        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = obstacles.update_dynamic_obstacle_data(
             obstacle_runtime,
             0.0,
         )
@@ -99,7 +99,7 @@ def update_obstacle_mask(obstacle_data, time_value):
     if runtime is None:
         return obstacle_data["mask"]
 
-    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = Obstacles.update_dynamic_obstacle_data(
+    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = obstacles.update_dynamic_obstacle_data(
         runtime,
         time_value,
         out_mask=obstacle_data["mask"],

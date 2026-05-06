@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-import Solver.Kernel_CPU.Boundary_Conditions.obstacles as Obstacles
+import Solver.Kernel_CPU.Boundary_Conditions.obstacles as obstacles
 
 
 @njit(cache=True, parallel=True)
@@ -140,14 +140,14 @@ def build_source_data(domain_cfg, source_entries):
         if not mesh_objects:
             continue
 
-        source_runtime = Obstacles.build_dynamic_runtime(
+        source_runtime = obstacles.build_dynamic_runtime(
             nx, ny, nz, delta, mesh_objects,
             origin_x=origin_x, origin_y=origin_y, origin_z=origin_z,
         )
         has_animation = has_animation or bool(
             source_runtime.get("is_animated", False) or source_entry.get("animations")
         )
-        source_mask = Obstacles.update_dynamic_mask(source_runtime, 0.0)
+        source_mask = obstacles.update_dynamic_mask(source_runtime, 0.0)
 
         velocity = source_entry.get("velocity", (0.0, 0.0, 0.0))
         velocity_x = np.float32(velocity[0] if len(velocity) > 0 else 0.0)
@@ -238,7 +238,7 @@ def update_source_data(source_data, time_value):
         delta = np.float32(runtime["delta"])
 
         for obj in runtime.get("objects", ()):
-            state = Obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+            state = obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
             if not state["active"]:
                 continue
 
