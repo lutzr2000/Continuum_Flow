@@ -251,6 +251,20 @@ def _animation_series_to_arrays(animation_entry, dtype):
     }
 
 
+def _cached_animation_series(container, property_name, dtype):
+    """Return one cached runtime animation series from an exported animation entry."""
+    cache = container.setdefault("_animation_series_cache", {})
+    if property_name in cache:
+        return cache[property_name]
+
+    series = _animation_series_to_arrays(
+        (container.get("animations") or {}).get(property_name),
+        dtype,
+    )
+    cache[property_name] = series
+    return series
+
+
 def build_animation_state(simulation_cfg, dtype=np.float32):
     """Build compact runtime animation data for lightweight kernel updates."""
     dtype = np.dtype(dtype)
@@ -340,27 +354,6 @@ def _interpolate_animation_series(series, time_value):
 
     alpha = (float(time_value) - t0) / (t1 - t0)
     return values[cursor] * (1.0 - alpha) + values[cursor + 1] * alpha
-
-
-def update_animated_gpu_constants(animation_state, gpu_constants, time_value):
-    """Update animated scalar kernel constants and uniform constant-force offsets."""
-    animated_force = {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-    }
-    if not animation_state or not animation_state.get("enabled"):
-        return animated_force
-
-    for constant_name, series in animation_state.get("constants", {}).items():
-        gpu_constants[constant_name] = np.float32(_interpolate_animation_series(series, time_value))
-
-    for axis_name, series in animation_state.get("constant_force", {}).items():
-        animated_force[axis_name] = float(_interpolate_animation_series(series, time_value))
-
-    return animated_force
-
-
 def _series_max_abs(series):
     """Return the maximum absolute value of one sampled linear animation series."""
     if not series:

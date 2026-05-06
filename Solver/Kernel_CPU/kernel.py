@@ -9,6 +9,7 @@ from numba import njit, prange, set_num_threads
 
 import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
+import Solver.General.update_data as general_update_data
 import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_CPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
@@ -688,7 +689,7 @@ def main(config=None):
     )
 
     t = 0.0
-    update_data.update_animated_cpu_constants(simulation_params, cpu_constants, t)
+    general_update_data.update_animated_constants(simulation_params, cpu_constants, t)
     animated_force = update_data.update_animated_source_force_values(simulation_params, cpu_fields, t)
     fx_max, fy_max, fz_max = helper_functions.estimate_theoretical_force_maxima(
         cpu_constants,
@@ -748,7 +749,7 @@ def main(config=None):
                 source_velocity_y = cpu_fields["source_velocity_y"]
                 source_velocity_z = cpu_fields["source_velocity_z"]
 
-            update_data.update_animated_cpu_constants(simulation_params, cpu_constants, t)
+            general_update_data.update_animated_constants(simulation_params, cpu_constants, t)
             animated_force = update_data.update_animated_source_force_values(simulation_params, cpu_fields, t)
             source_mask = cpu_fields["source_mask"]
             source_velocity_mask = cpu_fields["source_velocity_mask"]

@@ -2,6 +2,94 @@ import numpy as np
 from numba import njit, prange
 
 
+def combine_exported_obstacles(obstacle_entries):
+    """Merge exported obstacle nodes into one kernel obstacle configuration."""
+    mesh_objects = []
+    for obstacle_entry in obstacle_entries:
+        if obstacle_entry.get("shape") != "mesh":
+            continue
+        mesh_cfg = obstacle_entry.get("mesh", {})
+        mesh_objects.extend(mesh_cfg.get("objects", ()))
+
+    if mesh_objects:
+        return {
+            "shape": "mesh",
+            "solid": True,
+            "mesh": {
+                "objects": mesh_objects,
+            },
+        }
+
+    return {
+        "shape": "empty",
+        "solid": False,
+        "mesh": {
+            "objects": [],
+        },
+    }
+
+
+def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
+    """
+    Build the voxel obstacle mask from exported obstacle nodes.
+
+    The backend module is responsible for the obstacle runtime and dynamic
+    obstacle sampling implementation.
+    """
+    obstacle_cfg = combine_exported_obstacles(obstacle_entries)
+    nx = int(domain_cfg["grid"]["nx"])
+    ny = int(domain_cfg["grid"]["ny"])
+    nz = int(domain_cfg["grid"]["nz"])
+    delta = float(domain_cfg["resolution"])
+    origin_x = -0.5 * nx * delta
+    origin_y = -0.5 * ny * delta
+    origin_z = 0.0
+
+    zero_velocity_x = np.zeros((nx, ny, nz), dtype=np.float32)
+    zero_velocity_y = np.zeros((nx, ny, nz), dtype=np.float32)
+    zero_velocity_z = np.zeros((nx, ny, nz), dtype=np.float32)
+
+    if obstacle_cfg["shape"] == "mesh":
+        mesh_cfg = obstacle_cfg.get("mesh", {})
+        mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
+        obstacle_runtime = obstacles_backend.build_dynamic_runtime(
+            nx,
+            ny,
+            nz,
+            delta,
+            mesh_objects,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            origin_z=origin_z,
+        )
+        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = obstacles_backend.update_dynamic_obstacle_data(
+            obstacle_runtime,
+            0.0,
+        )
+        return {
+            "config": obstacle_cfg,
+            "mask": obstacle_mask,
+            "velocity_x": obstacle_velocity_x,
+            "velocity_y": obstacle_velocity_y,
+            "velocity_z": obstacle_velocity_z,
+            "runtime": obstacle_runtime,
+            "is_animated": bool(obstacle_runtime.get("is_animated", False)),
+        }
+
+    if obstacle_cfg["shape"] == "empty":
+        return {
+            "config": obstacle_cfg,
+            "mask": np.zeros((nx, ny, nz), dtype=np.bool_),
+            "velocity_x": zero_velocity_x,
+            "velocity_y": zero_velocity_y,
+            "velocity_z": zero_velocity_z,
+            "runtime": None,
+            "is_animated": False,
+        }
+
+    raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
+
+
 # -----------------------------------------------------------------------------
 # Small numba kernels
 # -----------------------------------------------------------------------------
@@ -164,6 +252,7 @@ def _sample_obstacle_data_backwards(
             out_vx[i, j, k] = rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
             out_vy[i, j, k] = rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
             out_vz[i, j, k] = rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
+
 
 # -----------------------------------------------------------------------------
 # Geometry helpers
@@ -455,6 +544,30 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
 
     obj["dynamic_state"] = state
     return state
+
+
+def _region_shape(index_bounds):
+    ix0, ix1, iy0, iy1, iz0, iz1 = index_bounds
+    return (
+        int(ix1 - ix0 + 1),
+        int(iy1 - iy0 + 1),
+        int(iz1 - iz0 + 1),
+    )
+
+
+def _merge_index_bounds(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return (
+        min(int(a[0]), int(b[0])),
+        max(int(a[1]), int(b[1])),
+        min(int(a[2]), int(b[2])),
+        max(int(a[3]), int(b[3])),
+        min(int(a[4]), int(b[4])),
+        max(int(a[5]), int(b[5])),
+    )
 
 
 def _voxelize_local(triangles, delta):

@@ -1,9 +1,6 @@
 TODO
 
-General:
 Check default values and limits in UI (especially vorticity)
-Remove unessecary doubling between CPU and GPU kernel
-Remove unessecary stuff in CPU that got copied from GPU
 Rename and Logo
 Documentation with sphynx
 

@@ -8,6 +8,7 @@ from numba import cuda
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
+import Solver.General.update_data as general_update_data
 import Solver.Kernel_GPU.update_data as update_data
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
@@ -914,7 +915,7 @@ def main(config=None):
     )
 
     t = 0.0
-    update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+    general_update_data.update_animated_constants(simulation_params, gpu_constants, t)
     animated_force = update_data.update_animated_source_force_values(
         simulation_params,
         gpu_fields,
@@ -972,7 +973,7 @@ def main(config=None):
             if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
                 update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
 
-            update_data.update_animated_gpu_constants(simulation_params, gpu_constants, t)
+            general_update_data.update_animated_constants(simulation_params, gpu_constants, t)
             animated_force = update_data.update_animated_source_force_values(
                 simulation_params,
                 gpu_fields,
