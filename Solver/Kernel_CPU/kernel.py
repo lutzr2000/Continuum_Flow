@@ -352,6 +352,13 @@ def _pressure_poisson_apply_neumann_bcs(p):
             p[i, j, nz - 1] = p[i, j, nz - 2]
 
 
+def _pressure_poisson_make_rhs_compatible(b):
+    """
+    Remove the global mean from the pressure RHS for the Neumann pressure solve.
+    """
+    b -= np.mean(b, dtype=np.float64)
+
+
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
@@ -362,6 +369,11 @@ def pressure_poisson(
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
+    # The pressure solve uses Neumann boundaries, so the discrete RHS must have
+    # zero mean; removing the average keeps the Poisson problem compatible.
+    # The general issue is otherwise that the absolute value of pressure is unedfined
+    # without dirichlet conditions
+    _pressure_poisson_make_rhs_compatible(b)
 
     for _ in range(max_iter):
         _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, 0)

@@ -23,6 +23,8 @@ warnings.filterwarnings(
     category=CudaNumbaPerformanceWarning,
 )
 
+_pressure_rhs_sum = cuda.reduce(lambda a, b: a + b)
+
 # ===============================
 # Methods
 # ===============================
@@ -497,6 +499,18 @@ def _pressure_poisson_apply_neumann_bcs(p):
         p[i, j, k] = p[i, j, nz - 2]
 
 
+@cuda.jit(cache=True)
+def _subtract_scalar_from_field(field, scalar):
+    """Subtract one scalar value from every cell of a 3D field on the GPU."""
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = field.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    field[i, j, k] -= scalar
+
+
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
@@ -538,6 +552,12 @@ def pressure_poisson(
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
+    # The pressure solve uses Neumann boundaries, so the discrete RHS must have
+    # zero mean; removing the average keeps the Poisson problem compatible.
+    # The general issue is otherwise that the absolute value of pressure is unedfined
+    # without dirichlet conditions
+    b_mean = _pressure_rhs_sum(b.reshape(b.size), size=b.size) / b.size
+    _subtract_scalar_from_field[blockspergrid_3d, threadsperblock_3d](b, b_mean)
 
     p_old = p
 
