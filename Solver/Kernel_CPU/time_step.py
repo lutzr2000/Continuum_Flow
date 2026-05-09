@@ -34,6 +34,9 @@ def compute_new_timestep_cpu(
     maxima[2] = abs_w_max
 
     solver_diverged = bool(
+        math.isnan(float(abs_u_max)) or
+        math.isnan(float(abs_v_max)) or
+        math.isnan(float(abs_w_max)) or
         math.isinf(float(abs_u_max)) or
         math.isinf(float(abs_v_max)) or
         math.isinf(float(abs_w_max))
@@ -57,5 +60,8 @@ def compute_new_timestep_cpu(
     dt = min(dt_conv, dt_diff, dt_forcing)
     if max_dt is not None:
         dt = min(dt, float(max_dt))
+
+    if math.isnan(float(dt)) or math.isinf(float(dt)) or float(dt) < 1.0e-7:
+        return 0.0, True
 
     return dt, False

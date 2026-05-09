@@ -116,6 +116,9 @@ def compute_new_timestep_gpu(
 
     abs_u_max, abs_v_max, abs_w_max = maxima.copy_to_host()
     solver_diverged = bool(
+        np.isnan(abs_u_max) or
+        np.isnan(abs_v_max) or
+        np.isnan(abs_w_max) or
         np.isinf(abs_u_max) or
         np.isinf(abs_v_max) or
         np.isinf(abs_w_max)
@@ -140,5 +143,8 @@ def compute_new_timestep_gpu(
     dt = min(dt_conv, dt_diff, dt_forcing)
     if max_dt is not None:
         dt = min(dt, float(max_dt))
+
+    if np.isnan(dt) or np.isinf(dt) or float(dt) < 1.0e-7:
+        return 0.0, True
 
     return dt, False

@@ -388,6 +388,32 @@ def _animation_series_to_arrays(animation_entry, dtype):
     }
 
 
+def _merge_scalar_animation_series(existing_times, existing_values, new_times, new_values, dtype):
+    """Merge two scalar animation series onto one shared monotonic time axis."""
+    dtype = np.dtype(dtype)
+    existing_times = np.asarray(existing_times, dtype=np.float32)
+    existing_values = np.asarray(existing_values, dtype=dtype)
+    new_times = np.asarray(new_times, dtype=np.float32)
+    new_values = np.asarray(new_values, dtype=dtype)
+
+    if existing_times.size == 0:
+        return (
+            np.ascontiguousarray(new_times),
+            np.ascontiguousarray(new_values, dtype=dtype),
+        )
+    if new_times.size == 0:
+        return (
+            np.ascontiguousarray(existing_times),
+            np.ascontiguousarray(existing_values, dtype=dtype),
+        )
+
+    merged_times = np.unique(np.concatenate((existing_times, new_times)).astype(np.float32, copy=False))
+    merged_existing = np.interp(merged_times, existing_times, existing_values)
+    merged_new = np.interp(merged_times, new_times, new_values)
+    merged_values = np.asarray(merged_existing + merged_new, dtype=dtype)
+    return np.ascontiguousarray(merged_times), np.ascontiguousarray(merged_values, dtype=dtype)
+
+
 def _cached_animation_series(container, property_name, dtype):
     """Return one cached runtime animation series from an exported animation entry."""
     cache = container.setdefault("_animation_series_cache", {})
@@ -443,7 +469,33 @@ def build_animation_state(simulation_cfg, dtype=np.float32):
                 combined_force_times = series["times"].copy()
             if combined_force_values[axis_name] is None:
                 combined_force_values[axis_name] = np.zeros_like(series["values"], dtype=dtype)
-            combined_force_values[axis_name] += series["values"]
+                combined_force_values[axis_name] = np.ascontiguousarray(combined_force_values[axis_name])
+            if (
+                combined_force_times.shape != series["times"].shape or
+                not np.array_equal(combined_force_times, series["times"])
+            ):
+                merged_times, merged_values = _merge_scalar_animation_series(
+                    combined_force_times,
+                    combined_force_values[axis_name],
+                    series["times"],
+                    series["values"],
+                    dtype,
+                )
+                if merged_times.shape != combined_force_times.shape or not np.array_equal(merged_times, combined_force_times):
+                    for existing_axis_name, existing_values in combined_force_values.items():
+                        if existing_values is None or existing_axis_name == axis_name:
+                            continue
+                        combined_force_values[existing_axis_name] = np.asarray(
+                            np.interp(merged_times, combined_force_times, existing_values),
+                            dtype=dtype,
+                        )
+                    combined_force_times = merged_times
+                combined_force_values[axis_name] = merged_values
+            else:
+                combined_force_values[axis_name] = np.asarray(
+                    combined_force_values[axis_name] + series["values"],
+                    dtype=dtype,
+                )
             animation_state["enabled"] = True
 
     if combined_force_times is not None:

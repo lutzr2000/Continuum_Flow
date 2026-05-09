@@ -287,32 +287,45 @@ def writer_thread_func(
     writer_socket = None
     writer_file = None
     try:
-        writer_socket = socket.create_connection(
-            (host_writer_endpoint['host'], int(host_writer_endpoint['port']))
-        )
-        writer_file = writer_socket.makefile('rwb')
-
         while True:
             item = write_queue.get()
-            if item is None:
-                writer_file.write(b'__QUIT__\n')
-                writer_file.flush()
-                writer_file.close()
-                write_queue.task_done()
-                break
-
-            output_idx, time_value, fields, output_field_config = item
-            frame_idx = int(frame_start) + int(output_idx)
-            vdb_output_path = os.path.join(outpath, f'frame_{frame_idx:06d}.vdb')
-            writer_payload = create_writer_payload(fields, output_field_config, vdb_output_path, time_value, delta)
-
+            frame_idx = None
             try:
+                if item is None:
+                    if writer_file is not None and not writer_file.closed:
+                        writer_file.write(b'__QUIT__\n')
+                        writer_file.flush()
+                        writer_file.close()
+                        writer_file = None
+                    break
+
+                output_idx, time_value, fields, output_field_config = item
+                frame_idx = int(frame_start) + int(output_idx)
+                vdb_output_path = os.path.join(outpath, f'frame_{frame_idx:06d}.vdb')
+                writer_payload = create_writer_payload(fields, output_field_config, vdb_output_path, time_value, delta)
+
+                if writer_file is None or writer_file.closed:
+                    writer_socket = socket.create_connection(
+                        (host_writer_endpoint['host'], int(host_writer_endpoint['port']))
+                    )
+                    writer_file = writer_socket.makefile('rwb')
+
                 _send_payload_to_host_writer(writer_file, writer_payload)
             except Exception as exc:
-                print(f'VDB write failed for frame {frame_idx}: {exc}')
-
-            buffer_pool.put(fields)
-            write_queue.task_done()
+                if frame_idx is None:
+                    print(f'VDB writer thread connection shutdown failed: {exc}')
+                else:
+                    print(f'VDB write failed for frame {frame_idx}: {exc}')
+                if writer_file is not None and not writer_file.closed:
+                    writer_file.close()
+                writer_file = None
+                if writer_socket is not None:
+                    writer_socket.close()
+                writer_socket = None
+            finally:
+                if item is not None:
+                    buffer_pool.put(fields)
+                write_queue.task_done()
     finally:
         if writer_file is not None and not writer_file.closed:
             writer_file.close()

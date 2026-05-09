@@ -121,6 +121,34 @@ class BlenderCFDOutputNode(bpy.types.Node):
         sparse_row.enabled = bool(getattr(self, export_attr))
         sparse_row.prop(self, sparse_attr, text="sparse")
 
+    def _linked_simulation_node(self):
+        socket = self.inputs.get("Result")
+        if socket is None or not socket.is_linked:
+            return None
+
+        for link in socket.links:
+            simulation_node = getattr(link, "from_node", None)
+            if simulation_node is None:
+                continue
+            if getattr(simulation_node, "bl_idname", "") == "BLENDERCFD_SIMULATION_NODE":
+                return simulation_node
+        return None
+
+    def _bake_disable_reason(self):
+        simulation_node = self._linked_simulation_node()
+        if simulation_node is None:
+            return "Bake disabled: output is not connected to a simulation"
+
+        domain_socket = simulation_node.inputs.get("Domain")
+        if domain_socket is None or not domain_socket.is_linked:
+            return "Bake disabled: simulation has no domain node"
+
+        physics_socket = simulation_node.inputs.get("Physics")
+        if physics_socket is None or not physics_socket.is_linked:
+            return "Bake disabled: simulation has no physics node"
+
+        return None
+
     def draw_buttons(self, context, layout):
         layout.enabled = not is_bake_running(context)
         layout.prop(self, "fps")
@@ -136,10 +164,17 @@ class BlenderCFDOutputNode(bpy.types.Node):
         resolved_output_path = bpy.path.abspath(self.output_path) if self.output_path else ""
         button_is_free_bake = bool(resolved_output_path) and BakeStorage._output_directory_has_vdbs(resolved_output_path)
         has_invalid_links = tree_has_invalid_links(getattr(self, "id_data", None))
+        bake_disable_reason = self._bake_disable_reason()
         if has_invalid_links:
             layout.label(text="Bake disabled: invalid socket connection", icon="ERROR")
+        elif bake_disable_reason is not None:
+            layout.label(text=bake_disable_reason, icon="ERROR")
         button_row = layout.row()
-        button_row.enabled = (not is_bake_running(context)) and not has_invalid_links
+        button_row.enabled = (
+            (not is_bake_running(context)) and
+            not has_invalid_links and
+            bake_disable_reason is None
+        )
         operator = button_row.operator(
             BakeRuntime.BlenderCFD_OT_bake.bl_idname,
             text="Free Bake" if button_is_free_bake else "Bake",

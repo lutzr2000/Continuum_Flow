@@ -1,6 +1,5 @@
 TODO
 
-find bugs in general
 Nake solver installable
 Rename
 Logo: ???
