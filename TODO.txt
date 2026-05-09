@@ -1,7 +1,5 @@
 TODO
 
-fix crash when ctrl+z or sometimes entering values
-hide domain when hiding overlays in blender
 find bugs in general
 Nake solver installable
 Rename

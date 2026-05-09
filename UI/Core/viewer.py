@@ -7,7 +7,7 @@ from gpu_extras.batch import batch_for_shader
 
 
 _DRAW_HANDLER = None
-_ACTIVE_DOMAIN = None
+_ACTIVE_DOMAIN_REF = None
 _FORCE_DRAW_HANDLER = None
 _FORCE_TIMER_REGISTERED = False
 _FORCE_COLOR = (0.45, 0.65, 0.95, 1.0)
@@ -32,6 +32,38 @@ def _tag_view3d_redraw():
         for area in screen.areas:
             if area.type == "VIEW_3D":
                 area.tag_redraw()
+
+
+def _view3d_overlays_visible():
+    """Return whether overlays are enabled in the currently drawing 3D view."""
+    space_data = getattr(bpy.context, "space_data", None)
+    if space_data is None or getattr(space_data, "type", "") != "VIEW_3D":
+        return True
+    overlay = getattr(space_data, "overlay", None)
+    if overlay is None:
+        return True
+    return bool(getattr(overlay, "show_overlays", True))
+
+
+def _domain_node_reference(domain_node):
+    """Return a stable reference for one domain node across redraws and undo."""
+    node_tree = getattr(domain_node, "id_data", None)
+    if node_tree is None:
+        return None
+    return {
+        "node_tree_name": str(getattr(node_tree, "name", "")),
+        "node_name": str(getattr(domain_node, "name", "")),
+    }
+
+
+def _resolve_domain_reference(domain_reference):
+    """Resolve one stored domain-node reference back to a live node object."""
+    if not domain_reference:
+        return None
+    node_tree = bpy.data.node_groups.get(domain_reference.get("node_tree_name", ""))
+    if node_tree is None:
+        return None
+    return node_tree.nodes.get(domain_reference.get("node_name", ""))
 
 
 def _domain_dimensions(domain_node):
@@ -376,12 +408,15 @@ def _build_preview_segments(domain_node):
 
 def _draw_preview():
     """Draw the active domain preview in the 3D viewport."""
-    if not _is_valid_domain_node(_ACTIVE_DOMAIN):
+    active_domain = _resolve_domain_reference(_ACTIVE_DOMAIN_REF)
+    if not _is_valid_domain_node(active_domain):
         disable_domain_preview()
+        return
+    if not _view3d_overlays_visible():
         return
 
     try:
-        domain_lines, cell_lines = _build_preview_segments(_ACTIVE_DOMAIN)
+        domain_lines, cell_lines = _build_preview_segments(active_domain)
     except Exception:
         disable_domain_preview()
         return
@@ -427,9 +462,9 @@ def _draw_force_preview():
 
 def enable_domain_preview(domain_node):
     """Enable the preview for the given domain node."""
-    global _DRAW_HANDLER, _ACTIVE_DOMAIN
+    global _DRAW_HANDLER, _ACTIVE_DOMAIN_REF
 
-    _ACTIVE_DOMAIN = domain_node
+    _ACTIVE_DOMAIN_REF = _domain_node_reference(domain_node)
     if _DRAW_HANDLER is None:
         _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_preview, (), "WINDOW", "POST_VIEW")
     _tag_view3d_redraw()
@@ -437,9 +472,9 @@ def enable_domain_preview(domain_node):
 
 def disable_domain_preview():
     """Disable any active domain preview."""
-    global _DRAW_HANDLER, _ACTIVE_DOMAIN
+    global _DRAW_HANDLER, _ACTIVE_DOMAIN_REF
 
-    _ACTIVE_DOMAIN = None
+    _ACTIVE_DOMAIN_REF = None
     if _DRAW_HANDLER is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLER, "WINDOW")
         _DRAW_HANDLER = None
