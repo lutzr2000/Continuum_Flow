@@ -2,6 +2,7 @@ import ctypes
 import json
 import os
 import sys
+from ctypes import wintypes
 
 import numpy as np
 try:
@@ -114,8 +115,8 @@ def _sample_process_memory_usage():
 def _get_windows_process_memory_counters():
     class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
         _fields_ = [
-            ("cb", ctypes.c_ulong),
-            ("PageFaultCount", ctypes.c_ulong),
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
             ("PeakWorkingSetSize", ctypes.c_size_t),
             ("WorkingSetSize", ctypes.c_size_t),
             ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
@@ -127,24 +128,36 @@ def _get_windows_process_memory_counters():
             ("PrivateUsage", ctypes.c_size_t),
         ]
 
+    psapi = ctypes.WinDLL("psapi")
+    kernel32 = ctypes.WinDLL("kernel32")
+    get_process_memory_info = psapi.GetProcessMemoryInfo
+    get_process_memory_info.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    get_process_memory_info.restype = wintypes.BOOL
+
+    get_current_process = kernel32.GetCurrentProcess
+    get_current_process.argtypes = []
+    get_current_process.restype = wintypes.HANDLE
+
     counters = PROCESS_MEMORY_COUNTERS_EX()
     counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-    get_process_memory_info = ctypes.windll.psapi.GetProcessMemoryInfo
-    process_handle = ctypes.windll.kernel32.GetCurrentProcess()
+    process_handle = get_current_process()
     success = get_process_memory_info(process_handle, ctypes.byref(counters), counters.cb)
     if not success:
         return None
 
     memory_status = ctypes.c_ulonglong()
-    kernel32 = ctypes.windll.kernel32
-    if hasattr(kernel32, "GetPhysicallyInstalledSystemMemory"):
-        success = kernel32.GetPhysicallyInstalledSystemMemory(ctypes.byref(memory_status))
-        if success:
-            total_bytes = int(memory_status.value) * 1024
-        else:
-            total_bytes = None
-    else:
+    get_physical_memory = getattr(kernel32, "GetPhysicallyInstalledSystemMemory", None)
+    if get_physical_memory is None:
         total_bytes = None
+    else:
+        get_physical_memory.argtypes = [ctypes.POINTER(ctypes.c_ulonglong)]
+        get_physical_memory.restype = wintypes.BOOL
+        success = get_physical_memory(ctypes.byref(memory_status))
+        total_bytes = int(memory_status.value) * 1024 if success else None
 
     return int(counters.WorkingSetSize), total_bytes
 

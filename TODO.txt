@@ -1,9 +1,10 @@
 TODO
 
-Add to bar estimated remaining time?
-fix crash when ctrl+z
+fix crash when ctrl+z or sometimes entering values
+hide domain when hiding overlays in blender
+find bugs in general
 Nake solver installable
-Rename: Continuum Flow (CFlow)
+Rename
 Logo: ???
 Documentation with sphynx
 Testing

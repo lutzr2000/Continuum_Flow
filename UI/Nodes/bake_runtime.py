@@ -9,6 +9,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 import bpy
 import blendercfd_general_nodes as GeneralNodes
@@ -54,6 +55,8 @@ set_bake_running = GeneralNodes.set_bake_running
 PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
+_STATUS_PROGRESS_ETA = ""
+_STATUS_PROGRESS_ETA_PLACEHOLDER = "Remaining: 00:00:00"
 _ACTIVE_BAKE_OPERATOR = None
 _SOLVER_DIVERGENCE_MESSAGES = (
     "solver divergence",
@@ -84,18 +87,31 @@ def _draw_blendercfd_status_progress(header, context):
     layout = header.layout
     layout.separator_spacer()
     layout.label(text="BlenderCFD Bake:")
-    row = layout.row()
-    row.ui_units_x = 10
-    row.progress(factor=_STATUS_PROGRESS_FACTOR, text=f"{_STATUS_PROGRESS_PERCENT:.1f}%", type="BAR")
+    row = layout.row(align=True)
+    row.ui_units_x = 20
+    split = row.split(factor=0.65, align=True)
+    progress_row = split.row(align=True)
+    progress_row.progress(factor=_STATUS_PROGRESS_FACTOR, text=f"{_STATUS_PROGRESS_PERCENT:.1f}%", type="BAR")
+    eta_row = split.row(align=True)
+    eta_row.ui_units_x = 7
+    eta_row.label(text=_STATUS_PROGRESS_ETA or _STATUS_PROGRESS_ETA_PLACEHOLDER)
     row = layout.row(align=True)
     row.operator("blendercfd.cancel_bake", text="", icon="PANEL_CLOSE", emboss=False)
     layout.separator_spacer()
 
 
-def _set_status_progress_values(percent):
-    global _STATUS_PROGRESS_PERCENT, _STATUS_PROGRESS_FACTOR
+def _set_status_progress_values(percent, eta_text=""):
+    global _STATUS_PROGRESS_PERCENT, _STATUS_PROGRESS_FACTOR, _STATUS_PROGRESS_ETA
     _STATUS_PROGRESS_PERCENT = max(0.0, min(100.0, float(percent)))
     _STATUS_PROGRESS_FACTOR = _STATUS_PROGRESS_PERCENT / 100.0
+    _STATUS_PROGRESS_ETA = str(eta_text or "")
+
+
+def _format_eta_seconds(seconds_remaining):
+    total_seconds = max(0, int(round(float(seconds_remaining))))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"Remaining: {hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def _solver_backend_from_config(config_dict):
@@ -256,6 +272,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     _window_manager = None
     _workspace = None
     _cancel_requested = False
+    _bake_started_at = None
 
     def _drain_kernel_output(self):
         output_queue = self._session["output_queue"]
@@ -269,12 +286,21 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                 if percent is not None:
                     self._progress_percent = percent
                     self._progress_factor = percent / 100.0
-                    _set_status_progress_values(percent)
+                    _set_status_progress_values(percent, self._progress_eta_text(percent))
                 divergence_message = _solver_divergence_message_from_line(payload)
                 if divergence_message is not None:
                     self._solver_divergence_message = divergence_message
             elif event_type == "error":
                 self._reader_error = payload
+
+    def _progress_eta_text(self, percent):
+        if self._bake_started_at is None or percent <= 0.0 or percent >= 100.0:
+            return ""
+        elapsed_seconds = perf_counter() - self._bake_started_at
+        if elapsed_seconds <= 0.0:
+            return ""
+        remaining_seconds = elapsed_seconds * (100.0 - percent) / percent
+        return _format_eta_seconds(remaining_seconds)
 
     def _set_status_progress(self, context):
         if self._workspace is None:
@@ -308,6 +334,8 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
+        self._bake_started_at = None
+        _set_status_progress_values(0.0, "")
         self._clear_status_progress(context)
         self._window_manager = None
         if self._session is not None:
@@ -472,12 +500,13 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._output_tail = []
         self._progress_percent = 0.0
         self._progress_factor = 0.0
-        _set_status_progress_values(0.0)
+        _set_status_progress_values(0.0, "")
         self._reader_error = None
         self._solver_divergence_message = None
         self._window_manager = context.window_manager
         self._workspace = context.workspace
         self._cancel_requested = False
+        self._bake_started_at = perf_counter()
         _ACTIVE_BAKE_OPERATOR = self
         self._set_status_progress(context)
         self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
