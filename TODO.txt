@@ -1,8 +1,12 @@
 TODO
 
-Check default values and limits in UI (especially vorticity)
-Rename and Logo
+Add to bar estimated remaining time?
+fix crash when ctrl+z
+Nake solver installable
+Rename: Continuum Flow (CFlow)
+Logo: ???
 Documentation with sphynx
+Testing
 
 
 

@@ -1,7 +1,6 @@
 from time import perf_counter
 
 import math
-import os
 from pathlib import Path
 
 import numpy as np
@@ -593,6 +592,7 @@ def _enqueue_host_output(
 
 def main(config=None):
     total_start_time = perf_counter()
+    memory_tracker = helper_functions.MemoryUsageTracker("RAM", helper_functions._sample_process_memory_usage)
     simulation_params = helper_functions.apply_config(config)
     if config is not None:
         simulations = config.get("simulations") or []
@@ -612,6 +612,7 @@ def main(config=None):
     set_num_threads(cpu_count)
 
     cpu_fields, cpu_constants = update_data.upload_simulation_state_to_cpu(simulation_params)
+    memory_tracker.sample()
 
     u = cpu_fields["u"]
     v = cpu_fields["v"]
@@ -679,6 +680,7 @@ def main(config=None):
     }
 
     update_data.update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_constants, 0.0)
+    memory_tracker.sample()
 
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
@@ -727,6 +729,7 @@ def main(config=None):
 
         print("Start time iteration")
         helper_functions.emit_progress(0.0, t)
+        memory_tracker.sample()
 
         while t < simulation_params["T_MAX"]:
             if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -869,6 +872,7 @@ def main(config=None):
                 cpu_constants["RHO"], cpu_constants["DELTA"], cpu_constants["NU"], simulation_params["CFL_MAX"],
                 max_dt=1.0 / simulation_params["OUTPUT_FPS"],
             )
+            memory_tracker.sample()
             if solver_diverged:
                 print("ERROR: The solver diverged, stopping the simulation!")
                 break
@@ -884,6 +888,8 @@ def main(config=None):
     else:
         helper_functions.emit_progress(100.0, simulation_params["T_MAX"])
         print("Simulation finished!")
+    memory_tracker.sample()
+    memory_tracker.print_summary()
     total_runtime = perf_counter() - total_start_time
     print(f"Solver runtime: {total_runtime:.3f} s")
     print("################################################################")

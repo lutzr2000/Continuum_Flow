@@ -11,6 +11,7 @@ mesh = general_obstacles.mesh
 build_dynamic_runtime = general_obstacles.build_dynamic_runtime
 update_dynamic_mask = general_obstacles.update_dynamic_mask
 update_dynamic_obstacle_data = general_obstacles.update_dynamic_obstacle_data
+_resolve_dynamic_object_state = general_obstacles._resolve_dynamic_object_state
 
 
 @cuda.jit(cache=True)

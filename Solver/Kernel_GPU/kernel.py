@@ -2,8 +2,10 @@ from time import perf_counter
 
 import math
 from pathlib import Path
+import warnings
 import numpy as np
 from numba import cuda
+from numba.cuda.core.errors import NumbaPerformanceWarning as CudaNumbaPerformanceWarning
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.General.helper_functions as helper_functions
@@ -14,6 +16,12 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"Grid size .* will likely result in GPU under-utilization due to low occupancy\.",
+    category=CudaNumbaPerformanceWarning,
+)
 
 # ===============================
 # Methods
@@ -826,6 +834,7 @@ def apply_all_BC(
 def main(config=None):
     #------------Initialise-------------------
     total_start_time = perf_counter()
+    memory_tracker = helper_functions.MemoryUsageTracker("VRAM", helper_functions._sample_gpu_memory_usage)
     simulation_params = helper_functions.apply_config(config)
     cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
 
@@ -835,6 +844,7 @@ def main(config=None):
 
     #------------Fields-------------------
     gpu_fields, gpu_constants = update_data.upload_simulation_state_to_gpu(simulation_params)
+    memory_tracker.sample()
 
     u = gpu_fields["u"]
     v = gpu_fields["v"]
@@ -904,6 +914,7 @@ def main(config=None):
 
     #------------Update dynamic masks-------------------
     update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, 0.0)
+    memory_tracker.sample()
 
     #------------Apply all BCs-------------------
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
@@ -962,6 +973,7 @@ def main(config=None):
         print('Start time iteration')
         helper_functions.emit_progress(0.0, t)
         blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, kernel_config.THREADS_PER_BLOCK_3D)
+        memory_tracker.sample()
 
         while t < simulation_params["T_MAX"]:
             if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -1099,6 +1111,7 @@ def main(config=None):
                 gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], simulation_params["CFL_MAX"],
                 max_dt=1.0 / simulation_params["OUTPUT_FPS"],
             )
+            memory_tracker.sample()
             if solver_diverged:
                 print('ERROR: The solver diverged, stopping the simulation!')
                 break
@@ -1116,6 +1129,8 @@ def main(config=None):
     else:
         helper_functions.emit_progress(100.0, simulation_params["T_MAX"])
         print('Simulation finished!')
+    memory_tracker.sample()
+    memory_tracker.print_summary()
     total_runtime = perf_counter() - total_start_time
     print(f'Solver runtime: {total_runtime:.3f} s')
     print("################################################################")

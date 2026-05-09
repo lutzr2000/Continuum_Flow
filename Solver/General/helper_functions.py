@@ -1,12 +1,23 @@
+import ctypes
 import json
+import os
 import sys
 
 import numpy as np
+try:
+    from numba import cuda
+except ImportError:
+    cuda = None
 
 import Solver.General.forcing as forcing
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.kernel_config as kernel_config
+
+try:
+    import resource
+except ImportError:
+    resource = None
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
@@ -23,6 +34,119 @@ PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
     "fuel_ignition_temperature": "FUEL_IGNITION_TEMPERATURE",
     "vorticity": "VORTICITY",
 }
+
+
+class MemoryUsageTracker:
+    """Track sampled solver memory usage and report average and peak values."""
+
+    def __init__(self, label, sample_func):
+        self.label = label
+        self._sample_func = sample_func
+        self._sample_count = 0
+        self._usage_sum = 0
+        self._peak_usage = 0
+        self._capacity_bytes = None
+
+    def sample(self):
+        usage_bytes, capacity_bytes = self._sample_func()
+        if usage_bytes is None:
+            return
+        self._sample_count += 1
+        self._usage_sum += int(usage_bytes)
+        self._peak_usage = max(self._peak_usage, int(usage_bytes))
+        if capacity_bytes is not None:
+            self._capacity_bytes = int(capacity_bytes)
+
+    def print_summary(self):
+        if self._sample_count <= 0:
+            print(f"{self.label} usage: unavailable")
+            return
+        average_usage = self._usage_sum / self._sample_count
+        print(
+            f"Average {self.label} usage: "
+            f"{_format_bytes(average_usage)}{_format_percentage(average_usage, self._capacity_bytes)}"
+        )
+        print(
+            f"Max {self.label} usage: "
+            f"{_format_bytes(self._peak_usage)}{_format_percentage(self._peak_usage, self._capacity_bytes)}"
+        )
+
+
+def _format_bytes(byte_count):
+    return f"{float(byte_count) / (1024.0 * 1024.0):.2f} MiB"
+
+
+def _format_percentage(usage_bytes, capacity_bytes):
+    if not capacity_bytes:
+        return ""
+    return f" ({100.0 * float(usage_bytes) / float(capacity_bytes):.1f}% of total)"
+
+
+def _sample_gpu_memory_usage():
+    if cuda is None:
+        return None, None
+    try:
+        free_bytes, total_bytes = cuda.current_context().get_memory_info()
+    except Exception:
+        return None, None
+    return int(total_bytes - free_bytes), int(total_bytes)
+
+
+def _sample_process_memory_usage():
+    if os.name == "nt":
+        counters = _get_windows_process_memory_counters()
+        if counters is not None:
+            usage_bytes, capacity_bytes = counters
+            usage_bytes = int(usage_bytes)
+            capacity_bytes = None if capacity_bytes is None else int(capacity_bytes)
+            return usage_bytes, capacity_bytes
+        return None, None
+
+    if resource is None:
+        return None, None
+
+    rss_value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return rss_value, None
+    return rss_value * 1024, None
+
+
+def _get_windows_process_memory_counters():
+    class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_ulong),
+            ("PageFaultCount", ctypes.c_ulong),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+    counters = PROCESS_MEMORY_COUNTERS_EX()
+    counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+    get_process_memory_info = ctypes.windll.psapi.GetProcessMemoryInfo
+    process_handle = ctypes.windll.kernel32.GetCurrentProcess()
+    success = get_process_memory_info(process_handle, ctypes.byref(counters), counters.cb)
+    if not success:
+        return None
+
+    memory_status = ctypes.c_ulonglong()
+    kernel32 = ctypes.windll.kernel32
+    if hasattr(kernel32, "GetPhysicallyInstalledSystemMemory"):
+        success = kernel32.GetPhysicallyInstalledSystemMemory(ctypes.byref(memory_status))
+        if success:
+            total_bytes = int(memory_status.value) * 1024
+        else:
+            total_bytes = None
+    else:
+        total_bytes = None
+
+    return int(counters.WorkingSetSize), total_bytes
 
 
 def emit_progress(percent, time_value=None):
