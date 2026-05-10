@@ -1,4 +1,4 @@
-"""Core BlenderCFD nodes and shared node utilities, including domain, simulation, geometry, source, and obstacle nodes."""
+"""Core Continuum Flow nodes and shared node utilities, including domain, simulation, geometry, source, and obstacle nodes."""
 
 import bpy
 import importlib
@@ -9,6 +9,14 @@ from pathlib import Path
 from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.app.handlers import persistent
 
+MODULE_NAME_ALIASES = {
+    "continuum_flow_nodetree": ("blendercfd_nodetree",),
+    "continuum_flow_sockets": ("blendercfd_sockets",),
+    "continuum_flow_viewer": ("blendercfd_viewer",),
+}
+CONTINUUM_FLOW_BAKE_RUNNING_KEY = "continuum_flow_bake_running"
+LEGACY_BAKE_RUNNING_KEY = "blendercfd_bake_running"
+
 
 def _ui_directory():
     """Return the root UI directory."""
@@ -18,13 +26,28 @@ def _ui_directory():
 
 
 def _project_root_directory():
-    """Return the BlenderCFD project root directory."""
+    """Return the Continuum Flow project root directory."""
     return _ui_directory().parent
 
 
 def _solver_python_executable():
-    """Return the dedicated BlenderCFD solver Python executable."""
-    return (_project_root_directory() / "BlenderCFD_env" / "Scripts" / "python.exe").resolve()
+    """Return the dedicated Continuum Flow solver Python executable."""
+    project_root = _project_root_directory()
+    candidate_paths = (
+        project_root / "Continuum_Flow_env" / "Scripts" / "python.exe",
+        project_root / "BlenderCFD_env" / "Scripts" / "python.exe",
+    )
+    for candidate_path in candidate_paths:
+        if candidate_path.exists():
+            return candidate_path.resolve()
+    return candidate_paths[0].resolve()
+
+
+def _register_module_aliases(module, module_name):
+    """Expose a loaded module under both the new and legacy import names."""
+    sys.modules[module_name] = module
+    for alias in MODULE_NAME_ALIASES.get(module_name, ()):
+        sys.modules[alias] = module
 
 
 def _load_ui_module(module_name, file_names, package_names=()):
@@ -55,7 +78,7 @@ def _load_ui_module(module_name, file_names, package_names=()):
             continue
 
         module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        _register_module_aliases(module, module_name)
         spec.loader.exec_module(module)
         return module
 
@@ -64,20 +87,20 @@ def _load_ui_module(module_name, file_names, package_names=()):
 
 
 _node_tree_module = _load_ui_module(
-    "blendercfd_nodetree",
+    "continuum_flow_nodetree",
     "Core/node_tree.py",
     (".Core.node_tree", "UI.Core.node_tree", "Core.node_tree"),
 )
 BlenderCFDNodeTree = _node_tree_module.BlenderCFDNodeTree
 
 _sockets_module = _load_ui_module(
-    "blendercfd_sockets",
+    "continuum_flow_sockets",
     "Core/sockets.py",
     (".Core.sockets", "UI.Core.sockets", "Core.sockets"),
 )
 
 BlenderCFDViewerModule = _load_ui_module(
-    "blendercfd_viewer",
+    "continuum_flow_viewer",
     "Core/viewer.py",
     (".Core.viewer", "UI.Core.viewer", "Core.viewer"),
 )
@@ -86,7 +109,6 @@ BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket
 BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
 BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
 BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
-BLENDERCFD_BAKE_RUNNING_KEY = "blendercfd_bake_running"
 _SYNC_DEBUGGED_ACTIONS = set()
 _GPU_SOLVER_AVAILABLE_CACHE = None
 
@@ -128,27 +150,32 @@ def _window_manager_from_context(context=None):
 
 
 def set_bake_running(is_running, context=None):
-    """Store whether BlenderCFD currently has a bake running."""
+    """Store whether Continuum Flow currently has a bake running."""
     window_manager = _window_manager_from_context(context)
     if window_manager is None:
         return
 
     if is_running:
-        window_manager[BLENDERCFD_BAKE_RUNNING_KEY] = True
+        window_manager[CONTINUUM_FLOW_BAKE_RUNNING_KEY] = True
+        window_manager[LEGACY_BAKE_RUNNING_KEY] = True
     else:
-        window_manager.pop(BLENDERCFD_BAKE_RUNNING_KEY, None)
+        window_manager.pop(CONTINUUM_FLOW_BAKE_RUNNING_KEY, None)
+        window_manager.pop(LEGACY_BAKE_RUNNING_KEY, None)
 
 
 def is_bake_running(context=None):
-    """Return whether BlenderCFD currently has a bake running."""
+    """Return whether Continuum Flow currently has a bake running."""
     window_manager = _window_manager_from_context(context)
     if window_manager is None:
         return False
-    return bool(window_manager.get(BLENDERCFD_BAKE_RUNNING_KEY, False))
+    return bool(
+        window_manager.get(CONTINUUM_FLOW_BAKE_RUNNING_KEY, False) or
+        window_manager.get(LEGACY_BAKE_RUNNING_KEY, False)
+    )
 
 
 class BlenderCFDBaseNode(bpy.types.Node):
-    """Shared poll, lifecycle, and small UI helpers for BlenderCFD nodes."""
+    """Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes."""
 
     @classmethod
     def poll(cls, ntree):
@@ -198,7 +225,7 @@ def ensure_named_output(node, socket_type, name):
 
 
 def _active_blendercfd_tree(context):
-    """Return the active BlenderCFD node tree from the current editor context."""
+    """Return the active Continuum Flow node tree from the current editor context."""
     space_data = getattr(context, "space_data", None)
     if space_data is None or getattr(space_data, "tree_type", "") != BlenderCFDNodeTree.bl_idname:
         return None
@@ -215,7 +242,7 @@ def _node_cursor_location(context):
 
 
 def _iter_blendercfd_node_trees():
-    """Yield all BlenderCFD node trees in the current file."""
+    """Yield all Continuum Flow node trees in the current file."""
     for node_tree in bpy.data.node_groups:
         if getattr(node_tree, "bl_idname", "") == BlenderCFDNodeTree.bl_idname:
             yield node_tree
@@ -238,7 +265,7 @@ def _set_node_property_component(node, property_name, value, array_index):
 
 
 def _iter_keyframeable_node_properties(node_tree):
-    """Yield writable BlenderCFD node properties that expose a valid RNA path."""
+    """Yield writable Continuum Flow node properties that expose a valid RNA path."""
     for node in getattr(node_tree, "nodes", ()):
         for prop in node.bl_rna.properties:
             if prop.identifier == "rna_type" or prop.is_readonly:
@@ -272,7 +299,7 @@ def _iter_action_fcurves(action):
 
 
 def _sync_node_tree_animation(node_tree, frame_value):
-    """Evaluate one BlenderCFD node-tree action and push values onto node properties."""
+    """Evaluate one Continuum Flow node-tree action and push values onto node properties."""
     animation_data = getattr(node_tree, "animation_data", None)
     action = getattr(animation_data, "action", None)
     if action is None:
@@ -308,7 +335,7 @@ def _sync_node_tree_animation(node_tree, frame_value):
     action_key = str(getattr(action, "name_full", getattr(action, "name", "")))
     if not matched_any_curve and action_key not in _SYNC_DEBUGGED_ACTIONS:
         _SYNC_DEBUGGED_ACTIONS.add(action_key)
-        print("BlenderCFD animation sync: no matching node property paths found.")
+        print("Continuum Flow animation sync: no matching node property paths found.")
         print(f"  Node tree: {getattr(node_tree, 'name', '<unnamed>')}")
         print("  Known animatable paths:")
         for known_path in sorted(property_path_map.keys()):
@@ -319,7 +346,7 @@ def _sync_node_tree_animation(node_tree, frame_value):
 
 
 def sync_all_blendercfd_node_animations(scene=None):
-    """Evaluate all BlenderCFD node-tree animations for the current frame."""
+    """Evaluate all Continuum Flow node-tree animations for the current frame."""
     if scene is None:
         scene = getattr(bpy.context, "scene", None)
     if scene is None:
@@ -347,7 +374,7 @@ def _tag_animation_editors_redraw():
 
 @persistent
 def blendercfd_frame_change_post(scene, _depsgraph):
-    """Force BlenderCFD custom node properties to follow their F-curves per frame."""
+    """Force Continuum Flow custom node properties to follow their F-curves per frame."""
     sync_all_blendercfd_node_animations(scene)
     _tag_animation_editors_redraw()
 
@@ -614,10 +641,10 @@ class BlenderCFDViewerNode(BlenderCFDBaseNode):
 
 
 class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
-    """Add a ready-to-use BlenderCFD starter setup with the core nodes linked."""
+    """Add a ready-to-use Continuum Flow starter setup with the core nodes linked."""
 
     bl_idname = "blendercfd.add_basic_setup"
-    bl_label = "Add Basic BlenderCFD Setup"
+    bl_label = "Add Basic Continuum Flow Setup"
     bl_description = "Create a starter setup with Domain, Physics, Simulation, Viewer, and Output already connected"
 
     @classmethod
@@ -627,7 +654,7 @@ class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
     def execute(self, context):
         node_tree = _active_blendercfd_tree(context)
         if node_tree is None:
-            self.report({"ERROR"}, "Open a BlenderCFD node tree first.")
+            self.report({"ERROR"}, "Open a Continuum Flow node tree first.")
             return {"CANCELLED"}
 
         cursor_x, cursor_y = _node_cursor_location(context)
@@ -680,3 +707,20 @@ classes = (
     BlenderCFDViewerNode,
     BlenderCFD_OT_add_basic_setup,
 )
+
+ContinuumFlowNodeTree = BlenderCFDNodeTree
+ContinuumFlowForceSocket = BlenderCFDForceSocket
+ContinuumFlowIntSocket = BlenderCFDIntSocket
+ContinuumFlowLinkSocket = BlenderCFDLinkSocket
+ContinuumFlowResultSocket = BlenderCFDResultSocket
+ContinuumFlowBaseNode = BlenderCFDBaseNode
+ContinuumFlowDomainNode = BlenderCFDDomainNode
+ContinuumFlowPhysicsNode = BlenderCFDPhysicsNode
+ContinuumFlowSimulationNode = BlenderCFDSimulationNode
+ContinuumFlowSourceNode = BlenderCFDSourceNode
+ContinuumFlowGeometryNode = BlenderCFDGeometryNode
+ContinuumFlowObstacleNode = BlenderCFDObstacleNode
+ContinuumFlowViewerNode = BlenderCFDViewerNode
+ContinuumFlow_OT_add_basic_setup = BlenderCFD_OT_add_basic_setup
+sync_all_continuum_flow_node_animations = sync_all_blendercfd_node_animations
+continuum_flow_frame_change_post = blendercfd_frame_change_post

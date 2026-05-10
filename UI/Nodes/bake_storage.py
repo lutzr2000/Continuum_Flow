@@ -1,4 +1,4 @@
-"""Storage and import helpers for BlenderCFD bake output directories and VDB files."""
+"""Storage and import helpers for Continuum Flow bake output directories and VDB files."""
 
 import copy
 import shutil
@@ -9,8 +9,14 @@ import bpy
 
 
 _LAST_BAKE_CONFIG_DICT = None
-_BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
-_BAKE_CANCEL_FILENAME = ".blendercfd_cancel"
+_BAKE_OUTPUT_DIRECTORY_PREFIX = ".continuum_flow_bake_"
+_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX = ".blendercfd_bake_"
+_BAKE_CANCEL_FILENAME = ".continuum_flow_cancel"
+_LEGACY_BAKE_CANCEL_FILENAME = ".blendercfd_cancel"
+_AUTO_IMPORT_KEY = "continuum_flow_auto_import"
+_LEGACY_AUTO_IMPORT_KEY = "blendercfd_auto_import"
+_OUTPUT_PATH_KEY = "continuum_flow_output_path"
+_LEGACY_OUTPUT_PATH_KEY = "blendercfd_output_path"
 
 
 def _tag_all_areas_redraw(context=None):
@@ -49,7 +55,10 @@ def _iter_output_directory_vdb_files(output_directory):
     for child_directory in sorted(output_directory.iterdir()):
         if not child_directory.is_dir():
             continue
-        if not child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+        if not (
+            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or
+            child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
+        ):
             continue
         for vdb_file in sorted(child_directory.glob("*.vdb")):
             if vdb_file.is_file():
@@ -76,7 +85,7 @@ def _path_is_same_or_within_directory(path_value, directory):
 
 def _display_output_directory_name(output_directory):
     output_directory = Path(output_directory)
-    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
         return output_directory.parent.name or output_directory.name
     return output_directory.name
 
@@ -238,9 +247,11 @@ def _volume_data_matches_output_directory(volume_data, output_directory):
 def _object_matches_output_directory(volume_object, output_directory):
     if volume_object.type != "VOLUME":
         return False
-    if volume_object.get("blendercfd_output_path") == str(output_directory):
+    if volume_object.get(_OUTPUT_PATH_KEY) == str(output_directory):
         return True
-    if volume_object.get("blendercfd_auto_import"):
+    if volume_object.get(_LEGACY_OUTPUT_PATH_KEY) == str(output_directory):
+        return True
+    if volume_object.get(_AUTO_IMPORT_KEY) or volume_object.get(_LEGACY_AUTO_IMPORT_KEY):
         return _volume_data_matches_output_directory(volume_object.data, output_directory)
     return False
 
@@ -282,7 +293,7 @@ def _delete_baked_vdb_files(output_directory):
 
 
 def _remove_empty_bake_subdirectories(output_directory):
-    """Remove empty BlenderCFD bake subdirectories below one base output directory."""
+    """Remove empty Continuum Flow bake subdirectories below one base output directory."""
     output_directory = Path(output_directory).resolve()
     if not output_directory.exists() or not output_directory.is_dir():
         return 0
@@ -291,7 +302,10 @@ def _remove_empty_bake_subdirectories(output_directory):
     for child_directory in sorted(output_directory.iterdir(), reverse=True):
         if not child_directory.is_dir():
             continue
-        if not child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+        if not (
+            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or
+            child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
+        ):
             continue
         try:
             child_directory.rmdir()
@@ -305,7 +319,7 @@ def _remove_bake_output_directory(output_directory):
     output_directory = Path(output_directory).resolve()
     if not output_directory.exists() or not output_directory.is_dir():
         return
-    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX):
+    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
         shutil.rmtree(output_directory, ignore_errors=True)
 
 
@@ -371,9 +385,11 @@ def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
         if imported_object.type != "VOLUME":
             continue
         _apply_imported_volume_sequence_settings(imported_object.data, start_frame, len(vdb_files))
-        imported_object.name = f"BlenderCFD {_display_output_directory_name(output_directory)}"
-        imported_object["blendercfd_auto_import"] = True
-        imported_object["blendercfd_output_path"] = str(output_directory)
+        imported_object.name = f"Continuum Flow {_display_output_directory_name(output_directory)}"
+        imported_object[_AUTO_IMPORT_KEY] = True
+        imported_object[_LEGACY_AUTO_IMPORT_KEY] = True
+        imported_object[_OUTPUT_PATH_KEY] = str(output_directory)
+        imported_object[_LEGACY_OUTPUT_PATH_KEY] = str(output_directory)
     return len([obj for obj in imported_objects if obj.type == "VOLUME"])
 
 

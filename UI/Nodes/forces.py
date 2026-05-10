@@ -1,7 +1,10 @@
-"""BlenderCFD force nodes with shared socket and UI behavior."""
+"""Continuum Flow force nodes with shared socket and UI behavior."""
 
 import bpy
-import blendercfd_general_nodes as GeneralNodes
+try:
+    import continuum_flow_general_nodes as GeneralNodes
+except ImportError:
+    import blendercfd_general_nodes as GeneralNodes
 from bpy.props import FloatProperty, FloatVectorProperty
 
 BlenderCFDForceSocket = GeneralNodes.BlenderCFDForceSocket

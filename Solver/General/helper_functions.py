@@ -22,7 +22,8 @@ except ImportError:
 
 BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
-PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
+PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
+LEGACY_PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 SPARSE_MASK_FIELDS = ("smoke", "flame")
 PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
     "temperature_dissipation": "TEMPERATURE_DISSIPATION_RATE",
@@ -458,7 +459,7 @@ def build_animation_state(simulation_cfg, dtype=np.float32):
         "fz": "z",
     }
     for force_cfg in simulation_cfg.get("forces", ()):
-        if force_cfg.get("node_type") != "BLENDERCFD_FORCE_CONSTANT_NODE":
+        if force_cfg.get("node_type") not in {"BLENDERCFD_FORCE_CONSTANT_NODE", "CONTINUUM_FLOW_FORCE_CONSTANT_NODE"}:
             continue
         animations = force_cfg.get("animations", {})
         for property_name, axis_name in force_property_to_axis.items():

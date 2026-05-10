@@ -1,4 +1,4 @@
-"""Runtime helpers and operators for starting, monitoring, and cancelling BlenderCFD bakes."""
+"""Runtime helpers and operators for starting, monitoring, and cancelling Continuum Flow bakes."""
 
 import importlib.util
 import json
@@ -12,14 +12,21 @@ from pathlib import Path
 from time import perf_counter
 
 import bpy
-import blendercfd_general_nodes as GeneralNodes
+try:
+    import continuum_flow_general_nodes as GeneralNodes
+except ImportError:
+    import blendercfd_general_nodes as GeneralNodes
 from bpy.props import StringProperty
 
 
-def _load_sibling_module(module_name, file_name):
-    module = sys.modules.get(module_name)
-    if module is not None:
-        return module
+def _load_sibling_module(module_name, file_name, legacy_names=()):
+    for known_name in (module_name, *legacy_names):
+        module = sys.modules.get(known_name)
+        if module is not None:
+            sys.modules[module_name] = module
+            for legacy_name in legacy_names:
+                sys.modules[legacy_name] = module
+            return module
 
     if "__file__" in globals():
         module_path = Path(__file__).resolve().with_name(file_name)
@@ -32,19 +39,25 @@ def _load_sibling_module(module_name, file_name):
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    for legacy_name in legacy_names:
+        sys.modules[legacy_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-BakeStorage = _load_sibling_module("blendercfd_bake_storage", "bake_storage.py")
+BakeStorage = _load_sibling_module(
+    "continuum_flow_bake_storage",
+    "bake_storage.py",
+    legacy_names=("blendercfd_bake_storage",),
+)
 
 BlenderCFDConfigModule = GeneralNodes._load_ui_module(
-    "blendercfd_create_config_dict",
+    "continuum_flow_create_config_dict",
     str(Path("Export") / "config.py"),
     (".Export.config", "UI.Export.config", "Export.config"),
 )
 BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
-    "blendercfd_host_writer",
+    "continuum_flow_host_writer",
     "Bake/writer_manager.py",
     (".Bake.writer_manager", "UI.Bake.writer_manager", "Bake.writer_manager"),
 )
@@ -52,7 +65,8 @@ BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
 tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links
 set_bake_running = GeneralNodes.set_bake_running
 
-PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
+PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
+LEGACY_PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
 _STATUS_PROGRESS_ETA = ""
@@ -86,7 +100,7 @@ def _gpu_solver_available():
 def _draw_blendercfd_status_progress(header, context):
     layout = header.layout
     layout.separator_spacer()
-    layout.label(text="BlenderCFD Bake:")
+    layout.label(text="Continuum Flow Bake:")
     row = layout.row(align=True)
     row.ui_units_x = 20
     split = row.split(factor=0.65, align=True)
@@ -141,10 +155,14 @@ def _project_root_directory():
 
 
 def _resolve_python_executable():
-    python_executable = _project_root_directory() / "BlenderCFD_env" / "Scripts" / "python.exe"
-    if not python_executable.exists():
-        raise FileNotFoundError(f"Python executable not found: {python_executable}")
-    return str(python_executable)
+    candidate_paths = (
+        _project_root_directory() / "Continuum_Flow_env" / "Scripts" / "python.exe",
+        _project_root_directory() / "BlenderCFD_env" / "Scripts" / "python.exe",
+    )
+    for candidate_path in candidate_paths:
+        if candidate_path.exists():
+            return str(candidate_path)
+    raise FileNotFoundError(f"Python executable not found: {candidate_paths[0]}")
 
 
 def _run_kernel(config_dict):
@@ -188,9 +206,10 @@ def _handle_kernel_output_line(line, output_tail):
     output_tail.append(line.rstrip())
     if len(output_tail) > 40:
         del output_tail[0]
-    if line.startswith(PROGRESS_EVENT_PREFIX):
+    if line.startswith(PROGRESS_EVENT_PREFIX) or line.startswith(LEGACY_PROGRESS_EVENT_PREFIX):
         try:
-            payload = json.loads(line[len(PROGRESS_EVENT_PREFIX):])
+            prefix = PROGRESS_EVENT_PREFIX if line.startswith(PROGRESS_EVENT_PREFIX) else LEGACY_PROGRESS_EVENT_PREFIX
+            payload = json.loads(line[len(prefix):])
             return max(0.0, min(100.0, float(payload.get("percent", 0.0))))
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
@@ -257,8 +276,8 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     """Operator that exports the active node tree config and starts the kernel."""
 
     bl_idname = "blendercfd.bake"
-    bl_label = "Bake BlenderCFD"
-    bl_description = "Start the BlenderCFD bake process"
+    bl_label = "Bake Continuum Flow"
+    bl_description = "Start the Continuum Flow bake process"
     output_path_hint: StringProperty(default="", options={"SKIP_SAVE"})  # type: ignore
 
     _timer = None
@@ -419,12 +438,12 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             if imported_count > 0:
                 self.report(
                     {"WARNING"},
-                    f"BlenderCFD bake cancelled. Imported {imported_count} VDB volume(s) up to that point.",
+                    f"Continuum Flow bake cancelled. Imported {imported_count} VDB volume(s) up to that point.",
                 )
             elif missing_directories:
-                self.report({"WARNING"}, "BlenderCFD bake cancelled. No VDB output directory was found.")
+                self.report({"WARNING"}, "Continuum Flow bake cancelled. No VDB output directory was found.")
             else:
-                self.report({"WARNING"}, "BlenderCFD bake cancelled. No VDB files were found to import.")
+                self.report({"WARNING"}, "Continuum Flow bake cancelled. No VDB files were found to import.")
             return {"FINISHED"}
         if imported_count > 0:
             self.report({"INFO"}, f"Bake finished. Imported {imported_count} VDB volume(s).")
@@ -515,16 +534,16 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
 
 
 class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
-    """Cancel the currently running BlenderCFD bake from the status bar."""
+    """Cancel the currently running Continuum Flow bake from the status bar."""
 
     bl_idname = "blendercfd.cancel_bake"
-    bl_label = "Cancel BlenderCFD Bake"
-    bl_description = "Cancel the currently running BlenderCFD bake"
+    bl_label = "Cancel Continuum Flow Bake"
+    bl_description = "Cancel the currently running Continuum Flow bake"
 
     def execute(self, context):
         active_operator = _ACTIVE_BAKE_OPERATOR
         if active_operator is None or active_operator._session is None:
-            self.report({"WARNING"}, "No BlenderCFD bake is currently running.")
+            self.report({"WARNING"}, "No Continuum Flow bake is currently running.")
             return {"CANCELLED"}
         active_operator._request_cancel()
         active_operator._tag_status_bar_redraw(context)

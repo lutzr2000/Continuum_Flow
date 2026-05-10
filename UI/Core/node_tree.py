@@ -1,4 +1,4 @@
-"""Core node tree definitions and add-menu categories for BlenderCFD."""
+"""Core node tree definitions and add-menu categories for Continuum Flow."""
 
 import bpy
 from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
@@ -9,15 +9,15 @@ NODE_CATEGORIES_ID = "BLENDERCFD_NODE_CATEGORIES"
 
 
 class BlenderCFDNodeTree(bpy.types.NodeTree):
-    """Custom node tree used as the main editor space for BlenderCFD nodes."""
+    """Custom node tree used as the main editor space for Continuum Flow nodes."""
 
     bl_idname = NODE_TREE_ID
-    bl_label = "BlenderCFD Nodes"
+    bl_label = "Continuum Flow Nodes"
     bl_icon = "FORCE_TURBULENCE"
 
 
 class BlenderCFDNodeCategory(NodeCategory):
-    """Node category shown in the add menu of the BlenderCFD node tree."""
+    """Node category shown in the add menu of the Continuum Flow node tree."""
 
     @classmethod
     def poll(cls, context):
@@ -27,11 +27,11 @@ class BlenderCFDNodeCategory(NodeCategory):
 
 
 def build_node_categories():
-    """Build the add menu categories for all registered BlenderCFD nodes."""
+    """Build the add menu categories for all registered Continuum Flow nodes."""
     return [
         BlenderCFDNodeCategory(
             "BLENDERCFD_NODES",
-            "Blender CFD",
+            "Continuum Flow",
             items=[
                 NodeItem("BLENDERCFD_DOMAIN_NODE"),
                 NodeItem("BLENDERCFD_GEOMETRY_NODE"),
@@ -60,7 +60,7 @@ def build_node_categories():
                 NodeItemCustom(
                     draw=lambda _item, layout, _context: layout.operator(
                         "blendercfd.add_basic_setup",
-                        text="Basic Simulation Setup",
+                        text="Basic Continuum Flow Setup",
                         icon="FORCE_TURBULENCE",
                     ),
                 ),

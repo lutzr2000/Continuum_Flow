@@ -1,4 +1,4 @@
-"""Serialize evaluated Blender geometry nodes into triangle data for BlenderCFD."""
+"""Serialize evaluated Blender geometry nodes into triangle data for Continuum Flow."""
 
 from __future__ import annotations
 

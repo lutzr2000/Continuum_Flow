@@ -1,4 +1,4 @@
-"""Viewport preview drawing and viewer operators for BlenderCFD."""
+"""Viewport preview drawing and viewer operators for Continuum Flow."""
 
 import bpy
 import gpu
@@ -298,7 +298,7 @@ def _linked_domain_from_force(force_node):
 
 
 def _active_force_node():
-    """Return the currently active BlenderCFD force node from any node editor."""
+    """Return the currently active Continuum Flow force node from any node editor."""
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
         return None
@@ -549,7 +549,7 @@ class BlenderCFD_OT_viewer_show_domain(bpy.types.Operator):
 
     bl_idname = "blendercfd.viewer_show_domain"
     bl_label = "Show Domain Preview"
-    bl_description = "Draw the linked CFD domain as a viewport preview"
+    bl_description = "Draw the linked Continuum Flow domain as a viewport preview"
 
     def execute(self, context):
         node = getattr(context, "node", None)
@@ -572,7 +572,7 @@ class BlenderCFD_OT_viewer_hide_domain(bpy.types.Operator):
 
     bl_idname = "blendercfd.viewer_hide_domain"
     bl_label = "Hide Domain Preview"
-    bl_description = "Remove the CFD domain preview from the viewport"
+    bl_description = "Remove the Continuum Flow domain preview from the viewport"
 
     def execute(self, context):
         disable_domain_preview()

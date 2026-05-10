@@ -1,10 +1,28 @@
-"""Core registration entrypoint for BlenderCFD UI classes and node categories."""
+"""Core registration entrypoint for Continuum Flow UI classes and node categories."""
 
 import bpy
 import importlib.util
 import sys
 from pathlib import Path
 from nodeitems_utils import register_node_categories, unregister_node_categories
+
+MODULE_NAME_ALIASES = {
+    "continuum_flow_nodetree": ("blendercfd_nodetree",),
+    "continuum_flow_sockets": ("blendercfd_sockets",),
+    "continuum_flow_viewer": ("blendercfd_viewer",),
+    "continuum_flow_create_config_dict": ("blendercfd_create_config_dict",),
+    "continuum_flow_general_nodes": ("blendercfd_general_nodes",),
+    "continuum_flow_force_nodes": ("blendercfd_force_nodes",),
+    "continuum_flow_output_node": ("blendercfd_output_node",),
+    "continuum_flow_bake_runtime": ("blendercfd_bake_runtime",),
+}
+
+
+def _register_module_aliases(module, module_name):
+    """Expose one loaded module under both the new and legacy import names."""
+    sys.modules[module_name] = module
+    for alias in MODULE_NAME_ALIASES.get(module_name, ()):
+        sys.modules[alias] = module
 
 
 def _candidate_core_paths(file_names):
@@ -50,7 +68,7 @@ def _load_module_from_candidates(candidate_paths, module_name, readable_name):
             continue
 
         module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        _register_module_aliases(module, module_name)
         spec.loader.exec_module(module)
         return module
 
@@ -90,14 +108,14 @@ def _load_module_from_relative_path(relative_path, module_name):
 
 
 MODULES = {
-    "node_tree": _load_module("node_tree.py", "blendercfd_nodetree"),
-    "sockets": _load_module("sockets.py", "blendercfd_sockets"),
-    "viewer": _load_module("viewer.py", "blendercfd_viewer"),
-    "config": _load_module_from_relative_path(Path("Export") / "config.py", "blendercfd_create_config_dict"),
-    "general_nodes": _load_module_from_relative_path(Path("Nodes") / "general.py", "blendercfd_general_nodes"),
-    "force_nodes": _load_module_from_relative_path(Path("Nodes") / "forces.py", "blendercfd_force_nodes"),
-    "output_node": _load_module_from_relative_path(Path("Nodes") / "output.py", "blendercfd_output_node"),
-    "bake_runtime": _load_module_from_relative_path(Path("Nodes") / "bake_runtime.py", "blendercfd_bake_runtime"),
+    "node_tree": _load_module("node_tree.py", "continuum_flow_nodetree"),
+    "sockets": _load_module("sockets.py", "continuum_flow_sockets"),
+    "viewer": _load_module("viewer.py", "continuum_flow_viewer"),
+    "config": _load_module_from_relative_path(Path("Export") / "config.py", "continuum_flow_create_config_dict"),
+    "general_nodes": _load_module_from_relative_path(Path("Nodes") / "general.py", "continuum_flow_general_nodes"),
+    "force_nodes": _load_module_from_relative_path(Path("Nodes") / "forces.py", "continuum_flow_force_nodes"),
+    "output_node": _load_module_from_relative_path(Path("Nodes") / "output.py", "continuum_flow_output_node"),
+    "bake_runtime": _load_module_from_relative_path(Path("Nodes") / "bake_runtime.py", "continuum_flow_bake_runtime"),
 }
 NODE_CLASSES = (
     *MODULES["general_nodes"].classes,
@@ -108,15 +126,15 @@ NODE_CLASSES = (
 
 
 def _remove_blendercfd_frame_change_handlers():
-    """Remove stale BlenderCFD frame-change handlers from previous reloads."""
+    """Remove stale Continuum Flow frame-change handlers from previous reloads."""
     handlers = bpy.app.handlers.frame_change_post
     kept_handlers = []
     for handler in handlers:
         handler_name = getattr(handler, "__name__", "")
         handler_module = getattr(handler, "__module__", "")
-        if handler_name == "blendercfd_frame_change_post":
+        if handler_name in {"blendercfd_frame_change_post", "continuum_flow_frame_change_post"}:
             continue
-        if "blendercfd_general_nodes" in handler_module:
+        if "blendercfd_general_nodes" in handler_module or "continuum_flow_general_nodes" in handler_module:
             continue
         kept_handlers.append(handler)
 
@@ -163,16 +181,24 @@ def register():
         MODULES["node_tree"].NODE_CATEGORIES_ID,
         MODULES["node_tree"].build_node_categories(),
     )
-    frame_change_handler = getattr(MODULES["general_nodes"], "blendercfd_frame_change_post", None)
+    frame_change_handler = getattr(
+        MODULES["general_nodes"],
+        "continuum_flow_frame_change_post",
+        getattr(MODULES["general_nodes"], "blendercfd_frame_change_post", None),
+    )
     if frame_change_handler is not None:
         bpy.app.handlers.frame_change_post.append(frame_change_handler)
-    sync_animations = getattr(MODULES["general_nodes"], "sync_all_blendercfd_node_animations", None)
+    sync_animations = getattr(
+        MODULES["general_nodes"],
+        "sync_all_continuum_flow_node_animations",
+        getattr(MODULES["general_nodes"], "sync_all_blendercfd_node_animations", None),
+    )
     if callable(sync_animations):
         sync_animations(getattr(bpy.context, "scene", None))
 
 
 def unregister():
-    """Unregister menu categories and all BlenderCFD UI classes."""
+    """Unregister menu categories and all Continuum Flow UI classes."""
     _remove_blendercfd_frame_change_handlers()
 
     try:

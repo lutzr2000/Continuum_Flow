@@ -1,18 +1,25 @@
-"""UI node definition for BlenderCFD output settings and the bake/free-bake button."""
+"""UI node definition for Continuum Flow output settings and the bake/free-bake button."""
 
 import importlib.util
 import sys
 from pathlib import Path
 
 import bpy
-import blendercfd_general_nodes as GeneralNodes
+try:
+    import continuum_flow_general_nodes as GeneralNodes
+except ImportError:
+    import blendercfd_general_nodes as GeneralNodes
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
 
-def _load_sibling_module(module_name, file_name):
-    module = sys.modules.get(module_name)
-    if module is not None:
-        return module
+def _load_sibling_module(module_name, file_name, legacy_names=()):
+    for known_name in (module_name, *legacy_names):
+        module = sys.modules.get(known_name)
+        if module is not None:
+            sys.modules[module_name] = module
+            for legacy_name in legacy_names:
+                sys.modules[legacy_name] = module
+            return module
 
     if "__file__" in globals():
         module_path = Path(__file__).resolve().with_name(file_name)
@@ -25,12 +32,22 @@ def _load_sibling_module(module_name, file_name):
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    for legacy_name in legacy_names:
+        sys.modules[legacy_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-BakeRuntime = _load_sibling_module("blendercfd_bake_runtime", "bake_runtime.py")
-BakeStorage = _load_sibling_module("blendercfd_bake_storage", "bake_storage.py")
+BakeRuntime = _load_sibling_module(
+    "continuum_flow_bake_runtime",
+    "bake_runtime.py",
+    legacy_names=("blendercfd_bake_runtime",),
+)
+BakeStorage = _load_sibling_module(
+    "continuum_flow_bake_storage",
+    "bake_storage.py",
+    legacy_names=("blendercfd_bake_storage",),
+)
 
 BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
 BlenderCFDResultSocket = GeneralNodes.BlenderCFDResultSocket

@@ -1,4 +1,4 @@
-"""Build and export BlenderCFD simulation config dictionaries from the node tree."""
+"""Build and export Continuum Flow simulation config dictionaries from the node tree."""
 
 import json
 import importlib.util
@@ -19,8 +19,9 @@ except ImportError:
         else:
             geometry_export_path = (Path.cwd() / "UI" / "Export" / "geometry.py").resolve()
 
-        spec = importlib.util.spec_from_file_location("blendercfd_geometry_export", geometry_export_path)
+        spec = importlib.util.spec_from_file_location("continuum_flow_geometry_export", geometry_export_path)
         module = importlib.util.module_from_spec(spec)
+        sys.modules["continuum_flow_geometry_export"] = module
         sys.modules["blendercfd_geometry_export"] = module
         spec.loader.exec_module(module)
         GeometryExport = module
@@ -36,8 +37,9 @@ except ImportError:
         else:
             general_nodes_path = (Path.cwd() / "UI" / "Nodes" / "general.py").resolve()
 
-        spec = importlib.util.spec_from_file_location("blendercfd_general_nodes_export", general_nodes_path)
+        spec = importlib.util.spec_from_file_location("continuum_flow_general_nodes_export", general_nodes_path)
         module = importlib.util.module_from_spec(spec)
+        sys.modules["continuum_flow_general_nodes_export"] = module
         sys.modules["blendercfd_general_nodes_export"] = module
         spec.loader.exec_module(module)
         GeneralNodes = module
@@ -142,8 +144,12 @@ def _node_property_is_animated(node, property_name):
 
 
 def _sync_sampled_custom_node_animations(scene, context=None):
-    """Force BlenderCFD custom node properties to follow their F-curves before sampling."""
-    sync_fn = getattr(GeneralNodes, "sync_all_blendercfd_node_animations", None)
+    """Force Continuum Flow custom node properties to follow their F-curves before sampling."""
+    sync_fn = getattr(
+        GeneralNodes,
+        "sync_all_continuum_flow_node_animations",
+        getattr(GeneralNodes, "sync_all_blendercfd_node_animations", None),
+    )
     if callable(sync_fn):
         sync_fn(scene)
 
@@ -683,7 +689,7 @@ def _collect_tree_geometry_nodes(node_tree):
 
 
 def _resolve_node_tree(context=None):
-    """Resolve the active BlenderCFD node tree or fall back to the first one."""
+    """Resolve the active Continuum Flow node tree or fall back to the first one."""
     if context is not None:
         space_data = getattr(context, "space_data", None)
         edit_tree = getattr(space_data, "edit_tree", None)
@@ -711,10 +717,10 @@ def _resolve_export_directory(simulation_entries):
 
 
 def build_config_dict(context=None, geometry_storage_dir=None):
-    """Evaluate the BlenderCFD node tree and return a grouped config dict."""
+    """Evaluate the Continuum Flow node tree and return a grouped config dict."""
     node_tree = _resolve_node_tree(context)
     if node_tree is None:
-        raise RuntimeError("No BlenderCFD node tree found.")
+        raise RuntimeError("No Continuum Flow node tree found.")
 
     simulation_nodes = [
         node
@@ -754,11 +760,11 @@ def export_config_dict(context=None):
 
 
 class BlenderCFD_OT_export_config_dict(bpy.types.Operator):
-    """Export the evaluated BlenderCFD node tree to JSON."""
+    """Export the evaluated Continuum Flow node tree to JSON."""
 
     bl_idname = "blendercfd.export_config_dict"
     bl_label = "Export Config Dict"
-    bl_description = "Evaluate the BlenderCFD node tree and write a JSON config file"
+    bl_description = "Evaluate the Continuum Flow node tree and write a JSON config file"
 
     def execute(self, context):
         try:

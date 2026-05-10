@@ -1,4 +1,4 @@
-"""Core BlenderCFD socket types and link validation helpers."""
+"""Core Continuum Flow socket types and link validation helpers."""
 
 import bpy
 from bpy.props import IntProperty
@@ -70,10 +70,10 @@ def tree_has_invalid_links(node_tree):
 
 
 class BlenderCFDIntSocket(bpy.types.NodeSocket):
-    """Integer socket used by BlenderCFD nodes to expose bounded scalar values."""
+    """Integer socket used by Continuum Flow nodes to expose bounded scalar values."""
 
     bl_idname = "BLENDERCFD_INT_SOCKET"
-    bl_label = "BlenderCFD Integer"
+    bl_label = "Continuum Flow Integer"
 
     value: IntProperty(  # type: ignore
         name="Value",
@@ -99,10 +99,10 @@ class BlenderCFDIntSocket(bpy.types.NodeSocket):
 
 
 class BlenderCFDLinkSocket(bpy.types.NodeSocket):
-    """Generic link socket used to connect logical BlenderCFD node outputs."""
+    """Generic link socket used to connect logical Continuum Flow node outputs."""
 
     bl_idname = "BLENDERCFD_LINK_SOCKET"
-    bl_label = "BlenderCFD Link"
+    bl_label = "Continuum Flow Link"
 
     def draw(self, context, layout, node, text):
         """Draw the socket label in the node editor."""
@@ -116,10 +116,10 @@ class BlenderCFDLinkSocket(bpy.types.NodeSocket):
 
 
 class BlenderCFDForceSocket(bpy.types.NodeSocket):
-    """Dedicated socket used for force-related links in the BlenderCFD graph."""
+    """Dedicated socket used for force-related links in the Continuum Flow graph."""
 
     bl_idname = "BLENDERCFD_FORCE_SOCKET"
-    bl_label = "BlenderCFD Force"
+    bl_label = "Continuum Flow Force"
 
     def draw(self, context, layout, node, text):
         """Draw the socket label in the node editor."""
@@ -136,7 +136,7 @@ class BlenderCFDResultSocket(bpy.types.NodeSocket):
     """Result socket used by the simulation node to expose the final output link."""
 
     bl_idname = "BLENDERCFD_RESULT_SOCKET"
-    bl_label = "BlenderCFD Result"
+    bl_label = "Continuum Flow Result"
 
     def draw(self, context, layout, node, text):
         """Draw the socket label in the node editor."""
