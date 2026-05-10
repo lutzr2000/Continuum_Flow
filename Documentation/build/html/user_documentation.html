@@ -10,7 +10,7 @@
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
-    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=3efdb7d2" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=ac6f6140" />
     
     
 
@@ -248,6 +248,10 @@
 <p>Mention node tree preset here</p>
 <section id="simulation">
 <h3>Simulation<a class="headerlink" href="#simulation" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/simulation_node.jpg"><img alt="_images/simulation_node.jpg" class="block-image-left" src="_images/simulation_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This is the core node of every simulation. It controls the frame range for your simulation and general sovler parameters.</p>
 <dl class="simple">
 <dt>CPU/GPU</dt><dd><p>Lets you choose if you want to simulate on CPU or GPU. Only Nvidia GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.</p>
@@ -256,7 +260,7 @@
 </dd>
 <dt>End Frame</dt><dd><p>The frame at which the simulation ends.</p>
 </dd>
-<dt>CFL</dt><dd><p>This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time step which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your solver divergese go lower. The maximum value is one.</p>
+<dt>CFL</dt><dd><p>This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your simulation diverges go lower. The maximum value is one.</p>
 </dd>
 <dt>Itterations</dt><dd><p>Number of pressure itterations. Usually the default of four is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.</p>
 </dd>
@@ -266,6 +270,10 @@
 </section>
 <section id="domain">
 <h3>Domain<a class="headerlink" href="#domain" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/domain_node.jpg"><img alt="_images/domain_node.jpg" class="block-image-left" src="_images/domain_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This node controls the size and resolution of your simulation domain. The domain is the area in which the simulation takes place.</p>
 <dl class="simple">
 <dt>Resolution</dt><dd><p>The grid size used in the simulation. The grid size is the same in every direction.</p>
@@ -286,6 +294,10 @@ Wall: wall with friction</p>
 </section>
 <section id="physics">
 <h3>Physics<a class="headerlink" href="#physics" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/physics_node.jpg"><img alt="_images/physics_node.jpg" class="block-image-left" src="_images/physics_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This node controls the general physics parameters of the simulation.</p>
 <dl class="simple">
 <dt>Fluid Density</dt><dd><p>The density of the fluid. By default this is the density of air at room temperature.</p>
@@ -316,6 +328,10 @@ Wall: wall with friction</p>
 </section>
 <section id="viewer">
 <h3>Viewer<a class="headerlink" href="#viewer" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/viewer_node.jpg"><img alt="_images/viewer_node.jpg" class="block-image-left" src="_images/viewer_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This node lets you view the simulation domain in the viewprt.</p>
 <dl class="simple">
 <dt>Show Domain</dt><dd><p>Shows the domain.</p>
@@ -326,6 +342,10 @@ Wall: wall with friction</p>
 </section>
 <section id="output">
 <h3>Output<a class="headerlink" href="#output" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/output_node.jpg"><img alt="_images/output_node.jpg" class="block-image-left" src="_images/output_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This node lets you specify the output of your simulation. It is worth paying some attention here, since simulations can create large amounts of data. Only save what you really need.</p>
 <dl class="simple">
 <dt>FPS</dt><dd><p>The frame rate at which data is saved. Defaults to your scene frame rate.</p>
@@ -345,10 +365,18 @@ Free Bake: Deletes the baked data</p>
 </section>
 <section id="obstacle">
 <h3>Obstacle<a class="headerlink" href="#obstacle" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/obstacle_node.jpg"><img alt="_images/obstacle_node.jpg" class="block-image-left" src="_images/obstacle_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>This node turns geometry into an obstacle. It expects geometry node as input and accepts multiple inputs.</p>
 </section>
 <section id="source">
 <h3>Source<a class="headerlink" href="#source" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/source_node.jpg"><img alt="_images/source_node.jpg" class="block-image-left" src="_images/source_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects geometry node as input and accepts multiple inputs.</p>
 <dl class="simple">
 <dt>Fuel</dt><dd><p>How much fuels is spawned.</p>
@@ -363,19 +391,39 @@ Free Bake: Deletes the baked data</p>
 </section>
 <section id="geometry">
 <h3>Geometry<a class="headerlink" href="#geometry" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/geometry_node.jpg"><img alt="_images/geometry_node.jpg" class="block-image-left" src="_images/geometry_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 <p>Simple node that lets you pick geometry. Can be plugged into the source or obstacle node.</p>
 </section>
 <section id="force-constant">
 <h3>Force-Constant<a class="headerlink" href="#force-constant" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/force_constant_node.jpg"><img alt="_images/force_constant_node.jpg" class="block-image-left" src="_images/force_constant_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 </section>
 <section id="force-turbulence">
 <h3>Force-Turbulence<a class="headerlink" href="#force-turbulence" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/force_turbulence_node.jpg"><img alt="_images/force_turbulence_node.jpg" class="block-image-left" src="_images/force_turbulence_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 </section>
 <section id="force-swirl">
 <h3>Force-Swirl<a class="headerlink" href="#force-swirl" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/force_swirl_node.jpg"><img alt="_images/force_swirl_node.jpg" class="block-image-left" src="_images/force_swirl_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 </section>
 <section id="force-point">
 <h3>Force-Point<a class="headerlink" href="#force-point" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/force_point_node.jpg"><img alt="_images/force_point_node.jpg" class="block-image-left" src="_images/force_point_node.jpg" style="width: 300px;" />
+</a>
+</figure>
 </section>
 </section>
 </section>

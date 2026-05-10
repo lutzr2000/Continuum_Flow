@@ -17,6 +17,10 @@ Mention node tree preset here
 Simulation
 ~~~~~~~~~~
 
+.. figure:: ../images/simulation_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 This is the core node of every simulation. It controls the frame range for your simulation and general sovler parameters.
 
 CPU/GPU
@@ -29,7 +33,7 @@ End Frame
     The frame at which the simulation ends.
 
 CFL
-    This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time step which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your solver divergese go lower. The maximum value is one.
+    This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your simulation diverges go lower. The maximum value is one.
 
 Itterations
     Number of pressure itterations. Usually the default of four is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.
@@ -40,6 +44,10 @@ Scheme
 
 Domain
 ~~~~~~
+
+.. figure:: ../images/domain_node.jpg
+   :class: block-image-left
+   :width: 300px
 
 This node controls the size and resolution of your simulation domain. The domain is the area in which the simulation takes place.
 
@@ -65,6 +73,10 @@ Boundary Conditions
 
 Physics
 ~~~~~~~
+
+.. figure:: ../images/physics_node.jpg
+   :class: block-image-left
+   :width: 300px
 
 This node controls the general physics parameters of the simulation.
 
@@ -108,6 +120,10 @@ Vorticity
 Viewer
 ~~~~~~
 
+.. figure:: ../images/viewer_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 This node lets you view the simulation domain in the viewprt.
 
 Show Domain
@@ -119,6 +135,10 @@ Hide Domain
 
 Output
 ~~~~~~
+
+.. figure:: ../images/output_node.jpg
+   :class: block-image-left
+   :width: 300px
 
 This node lets you specify the output of your simulation. It is worth paying some attention here, since simulations can create large amounts of data. Only save what you really need.
 
@@ -145,11 +165,19 @@ Bake/Free Bake
 Obstacle
 ~~~~~~~~
 
+.. figure:: ../images/obstacle_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 This node turns geometry into an obstacle. It expects geometry node as input and accepts multiple inputs.
 
 
 Source
 ~~~~~~
+
+.. figure:: ../images/source_node.jpg
+   :class: block-image-left
+   :width: 300px
 
 The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects geometry node as input and accepts multiple inputs. 
 
@@ -169,17 +197,37 @@ Velocity
 Geometry
 ~~~~~~~~
 
+.. figure:: ../images/geometry_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 Simple node that lets you pick geometry. Can be plugged into the source or obstacle node.
 
 
 Force-Constant
 ~~~~~~~~~~~~~~
 
+.. figure:: ../images/force_constant_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 Force-Turbulence
 ~~~~~~~~~~~~~~~~
+
+.. figure:: ../images/force_turbulence_node.jpg
+   :class: block-image-left
+   :width: 300px
 
 Force-Swirl
 ~~~~~~~~~~~
 
+.. figure:: ../images/force_swirl_node.jpg
+   :class: block-image-left
+   :width: 300px
+
 Force-Point
 ~~~~~~~~~~~
+
+.. figure:: ../images/force_point_node.jpg
+   :class: block-image-left
+   :width: 300px

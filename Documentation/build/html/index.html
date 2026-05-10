@@ -10,7 +10,7 @@
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
-    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=3efdb7d2" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=ac6f6140" />
     
     
 
@@ -238,8 +238,8 @@
         <article role="main" id="furo-main-content">
           <section id="continuum-flow">
 <h1>Continuum Flow<a class="headerlink" href="#continuum-flow" title="Link to this heading">¶</a></h1>
-<p>Continuum Flow is an extension for Blender that provides a new tool chain for simulating fire, smoke and air in general. The main goal of this project was to A: build a workflow that is more intuitive to use compared to Blenders native solver and B: provides more compute performance when simulating. While the former can be subjective and the software is build to the taste of myself, the performance can be measured and is compared in section <a class="reference internal" href="performance.html#performance-section"><span class="std std-ref">Performance</span></a>. Continuum Flow is somewhere between 2-20 times faster than Blenders native solver, depending on the usage pf CPU or GPU and the general simulation settings. Continuum Flow can run on CPU and GPU, even though only Nvidia GPUs are supported. The simulation definition is done via a custom node tree oriented at comercial software like EmberGen.</p>
-<p>At this point i want to point out that large parts of the code was written with the support of AI. Additionally it is absolutly necessary to mention Dr. Zhengtao Gao, on whoms great learning course (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) the basis of this solver is build.</p>
+<p>Continuum Flow is an extension for Blender that provides a new tool chain for simulating fire, smoke and air in general. The main goal of this project was to A: build a workflow that is more intuitive to use compared to Blenders native solver and B: provides more compute performance when simulating. While the former can be subjective and the software is build to the taste of myself, the performance can be measured and is compared in section <a class="reference internal" href="performance.html#performance-section"><span class="std std-ref">Performance</span></a>. Continuum Flow is somewhere between 2-20 times faster than Blenders native solver, depending on the usage of CPU or GPU and the general simulation settings. Continuum Flow can run on CPU and GPU, even though only Nvidia GPUs are supported. The simulation definition is done via a custom node tree oriented at commercial software like EmberGen.</p>
+<p>At this point i want to point out that large parts of the code was written with the support of AI. I made this solver as a hobby project and i am not an experienced developer. Bugs in this code are inevitable, please feel free to report them on GitHub. Additionally it is absolutly necessary to mention Dr. Zhengtao Gao, on whoms great learning course (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) the basis of this solver is build.</p>
 <p>In <a class="reference internal" href="install.html"><span class="doc">Installation</span></a> the installation of Continuum Flow is explained. The <a class="reference internal" href="user_documentation.html"><span class="doc">User Documentation</span></a> explains the workflow and the functions of each custom node. The <a class="reference internal" href="solver_theory.html"><span class="doc">Solver Theory</span></a> chapter explains the mathematical theory behind the solver and the <a class="reference internal" href="performance.html"><span class="doc">Performance</span></a> chapter contains a performance evaluation. Lastly, the <a class="reference internal" href="examples.html"><span class="doc">Examples</span></a> chapter contains short explanations for every example file provided.</p>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Documentation</span></p>
@@ -255,8 +255,16 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#core-concepts">Core Concepts</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#numerical-pipeline">Numerical Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#governing-equations">Governing Equations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#finite-difference-discretization">Finite-Difference Discretization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#advection-and-upwind-schemes">Advection and Upwind Schemes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#pressure-solve-and-enforcing-incompressibility">Pressure Solve and Enforcing Incompressibility</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#buoyancy">Buoyancy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#thermal-expansion">Thermal Expansion</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#vorticity">Vorticity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#scalar-fields-temperature-smoke-and-fuel">Scalar Fields: Temperature, Smoke and Fuel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#solution-procedure">Solution Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#boundary-conditions-and-practical-notes">Boundary Conditions and Practical Notes</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a><ul>
