@@ -13,7 +13,7 @@ class BlenderCFDNodeTree(bpy.types.NodeTree):
 
     bl_idname = NODE_TREE_ID
     bl_label = "BlenderCFD Nodes"
-    bl_icon = "NODETREE"
+    bl_icon = "FORCE_TURBULENCE"
 
 
 class BlenderCFDNodeCategory(NodeCategory):
@@ -61,7 +61,7 @@ def build_node_categories():
                     draw=lambda _item, layout, _context: layout.operator(
                         "blendercfd.add_basic_setup",
                         text="Basic Simulation Setup",
-                        icon="NODETREE",
+                        icon="FORCE_TURBULENCE",
                     ),
                 ),
             ],
