@@ -1,7 +1,6 @@
 TODO
 
 Nake solver installable
-Rename ContinuumFlow
 Documentation with sphynx
 Testing
 
