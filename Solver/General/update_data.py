@@ -90,8 +90,14 @@ def build_initial_host_state(
     w[source_velocity_mask_host] = source_velocity_z_host[source_velocity_mask_host]
 
     T = np.maximum(T, source_temperature_host)
-    smoke = np.maximum(smoke, source_smoke_host)
-    fuel = np.maximum(fuel, source_fuel_host)
+    smoke = np.minimum(
+        np.maximum(smoke, source_smoke_host),
+        precision_dtype.type(100.0),
+    )
+    fuel = np.minimum(
+        np.maximum(fuel, source_fuel_host),
+        precision_dtype.type(100.0),
+    )
 
     return {
         "precision_dtype": precision_dtype,
@@ -132,6 +138,7 @@ def build_solver_constants(simulation_params, precision_dtype, force_field_data)
         "SMOKE_PRODUCTION_RATE": precision_dtype.type(simulation_params["SMOKE_PRODUCTION_RATE"]),
         "FUEL_BURN_RATE": precision_dtype.type(simulation_params["FUEL_BURN_RATE"]),
         "FUEL_IGNITION_TEMPERATURE": precision_dtype.type(simulation_params["FUEL_IGNITION_TEMPERATURE"]),
+        "MINIMUM_OXYGEN_CONCENTRATION": precision_dtype.type(simulation_params["MINIMUM_OXYGEN_CONCENTRATION"]),
         "T_REFERENCE": precision_dtype.type(simulation_params["T_REFERENCE"]),
         "SOURCE_TEMPERATURE_MAX": precision_dtype.type(simulation_params["SOURCE_TEMPERATURE_MAX"]),
         "BUOANCY_FACTOR": precision_dtype.type(simulation_params["BUOANCY_FACTOR"]),

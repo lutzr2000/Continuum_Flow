@@ -220,8 +220,8 @@ def _source_bc_kernel_cpu(
             w_flat[idx] = source_velocity_z_flat[idx]
 
         source_temperature_value = source_temperature_flat[idx]
-        source_smoke_value = source_smoke_flat[idx]
-        source_fuel_value = source_fuel_flat[idx]
+        source_smoke_value = min(source_smoke_flat[idx], 100.0)
+        source_fuel_value = min(source_fuel_flat[idx], 100.0)
 
         if T_flat[idx] < source_temperature_value:
             T_flat[idx] = source_temperature_value

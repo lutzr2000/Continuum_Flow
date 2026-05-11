@@ -2,6 +2,7 @@ TODO
 
 Make solver installable
 Better Explosion model ? Maybe better combustion, fire and combustion usually only where there is a good mixture of oxigen and fuel
+fake simple oxigen field as suggested by ChatGPT in https://chatgpt.com/c/6a01f8cc-9b18-838a-b890-29c748488361
 Documentation with sphynx
 Testing
 

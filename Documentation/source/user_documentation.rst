@@ -113,6 +113,9 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
+**Minimum Oxygen Concentration**
+    Minimum oxygen concentration required for fuel to burn. Oxygen concentration is approximated as 100 % minus the local smoke concentration, so higher smoke concentration leaves less oxygen available for combustion.
+
 **Vorticity**
     Amount of extra vorticity in the simulation. Zero is physically accurate, but usually a small extra amount looks better.
     
@@ -179,16 +182,16 @@ Source
    :class: block-image-left
    :width: 300px
 
-The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects geometry node as input and accepts multiple inputs. 
+The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
 
-**Fuel**
-    How much fuels is spawned.
+**Fuel Concentration**
+    Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.
 
-**Smoke**
-    How much smoke is spawned.
+**Smoke Concentration**
+    Smoke concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.
 
 **Temperature**
-    Temperature that is spawned within the source.
+    Temperature spawned within the source.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.

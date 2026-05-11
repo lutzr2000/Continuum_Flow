@@ -455,7 +455,7 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
         ("Fluid", ("fluid_density", "fluid_viscosity")),
         ("Temperature", ("temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate")),
         ("Smoke", ("smoke_dissipation", "smoke_production_rate")),
-        ("Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature")),
+        ("Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature", "minimum_oxygen_concentration")),
         ("Extras", ("vorticity",)),
     )
 
@@ -470,6 +470,7 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
     fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.001, min=0.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
     fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, precision=4, description="How quickly fuel is burned, lower means slower burning", options={"ANIMATABLE"})  # type: ignore
     fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite", options={"ANIMATABLE"})  # type: ignore
+    minimum_oxygen_concentration: FloatProperty(name="Minimum Oxygen Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Minimum oxygen concentration required for fuel to burn", options={"ANIMATABLE"})  # type: ignore
     vorticity: FloatProperty(name="Vorticity", default=0.1, min=0.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
@@ -566,8 +567,8 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
         ("LOCAL", "Local Space", "Apply the source velocity in each linked object's local coordinates"),
     )
 
-    fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, soft_min=0.0, description="Amount of fuel to spawn", options={"ANIMATABLE"})  # type: ignore
-    smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, soft_min=0.0, description="Amount of smoke to spawn", options={"ANIMATABLE"})  # type: ignore
+    fuel: FloatProperty(name="Fuel Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Fuel concentration to spawn in percent", options={"ANIMATABLE"})  # type: ignore
+    smoke: FloatProperty(name="Smoke Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Smoke concentration to spawn in percent", options={"ANIMATABLE"})  # type: ignore
     temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
     velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore

@@ -319,8 +319,8 @@ def _source_bc_kernel(
         return
 
     source_temperature_value = source_temperature[i, j, k]
-    source_smoke_value = source_smoke[i, j, k]
-    source_fuel_value = source_fuel[i, j, k]
+    source_smoke_value = min(source_smoke[i, j, k], 100.0)
+    source_fuel_value = min(source_fuel[i, j, k], 100.0)
 
     if source_velocity_mask[i, j, k]:
         u[i, j, k] = source_velocity_x[i, j, k]

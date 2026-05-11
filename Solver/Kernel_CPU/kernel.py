@@ -472,7 +472,7 @@ def update_scalar_fields(
     T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
     delta, temperature_dissipation_rate, temperature_production_rate,
     smoke_dissipation_rate, smoke_production_rate,
-    fuel_burn_rate, fuel_ignition_temperature, t_reference
+    fuel_burn_rate, fuel_ignition_temperature, minimum_oxygen_concentration, t_reference
 ):
     """Update transported scalar fields and write a continuous flame intensity."""
     nx, ny, nz = u.shape
@@ -540,7 +540,9 @@ def update_scalar_fields(
                 smoke_convection = dt_over_delta * (uijk * smoke_dx + vijk * smoke_dy + wijk * smoke_dz)
                 fuel_convection = dt_over_delta * (uijk * fuel_dx + vijk * fuel_dy + wijk * fuel_dz)
 
-                if T_center > fuel_ignition_temperature:
+                oxygen_center = 100.0 - smoke_center
+
+                if T_center > fuel_ignition_temperature and fuel_center > 0.0 and oxygen_center >= minimum_oxygen_concentration:
                     fuel_source = -fuel_burn_rate * fuel_center
                 else:
                     fuel_source = 0.0
@@ -556,8 +558,8 @@ def update_scalar_fields(
                 fuel_updated = fuel_center - fuel_convection + dt * fuel_source
 
                 T_out[i, j, k] = max(T_updated, 0.0)
-                smoke_out[i, j, k] = max(smoke_updated, 0.0)
-                fuel_out[i, j, k] = max(fuel_updated, 0.0)
+                smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
+                fuel_out[i, j, k] = min(max(fuel_updated, 0.0), 100.0)
                 flame_out[i, j, k] = max(-fuel_source, 0.0)
 
 
@@ -833,6 +835,7 @@ def main(config=None):
                 cpu_constants["SMOKE_PRODUCTION_RATE"],
                 cpu_constants["FUEL_BURN_RATE"],
                 cpu_constants["FUEL_IGNITION_TEMPERATURE"],
+                cpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
                 cpu_constants["T_REFERENCE"],
             )
 
