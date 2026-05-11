@@ -71,6 +71,7 @@ _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
 _STATUS_PROGRESS_ETA = ""
 _STATUS_PROGRESS_ETA_PLACEHOLDER = "Remaining: 00:00:00"
+_STATUS_PROGRESS_ETA_DELAY_SECONDS = 2.0
 _ACTIVE_BAKE_OPERATOR = None
 _SOLVER_DIVERGENCE_MESSAGES = (
     "solver divergence",
@@ -321,7 +322,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         if self._bake_started_at is None or percent <= 0.0 or percent >= 100.0:
             return ""
         elapsed_seconds = perf_counter() - self._bake_started_at
-        if elapsed_seconds <= 0.0:
+        if elapsed_seconds < _STATUS_PROGRESS_ETA_DELAY_SECONDS:
             return ""
         remaining_seconds = elapsed_seconds * (100.0 - percent) / percent
         return _format_eta_seconds(remaining_seconds)
