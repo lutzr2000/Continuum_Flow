@@ -213,6 +213,7 @@ def _has_force_data(force_data):
         np.any(force_data["Fy_base"]) or
         np.any(force_data["Fz_base"]) or
         np.any(force_data["point_divergence"]) or
+        force_data.get("point_force_entries") or
         force_data["turbulence"]["angular_frequencies"].size > 0
     )
 
@@ -499,6 +500,13 @@ def build_animation_state(simulation_cfg, dtype=np.float32):
                 )
             animation_state["enabled"] = True
 
+    for force_cfg in simulation_cfg.get("forces", ()):
+        if force_cfg.get("node_type") not in forcing.POINT_FORCE_NODE_TYPES:
+            continue
+        animations = force_cfg.get("animations", {})
+        if any(name in animations for name in ("strength", "origin", "radius")):
+            animation_state["enabled"] = True
+
     if combined_force_times is not None:
         for axis_name in ("x", "y", "z"):
             values = combined_force_values[axis_name]
@@ -636,6 +644,8 @@ def apply_config(config):
     # Prepare animated constant overrides before the kernel starts stepping.
     animation_state = build_animation_state(simulation_cfg, dtype=np.float32)
     if animation_state["constant_force"]:
+        has_force = True
+    if force_data.get("point_force_entries"):
         has_force = True
     physics_constants = _build_physics_constants(physics_cfg, animation_state)
 

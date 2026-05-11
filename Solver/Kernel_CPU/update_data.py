@@ -115,6 +115,10 @@ def _update_cpu_source_data(source_field_data, _cpu_fields, time_value):
     source_bc.update_source_data(source_field_data, time_value)
 
 
+def _sync_cpu_force_fields(force_field_data, cpu_fields):
+    cpu_fields["point_divergence"] = force_field_data["point_divergence"]
+
+
 def update_animated_source_force_values(simulation_params, cpu_fields, time_value):
     """Update animated source targets and animated constant-force values."""
     return general_update_data.update_animated_source_force_values(
@@ -123,6 +127,7 @@ def update_animated_source_force_values(simulation_params, cpu_fields, time_valu
         time_value,
         source_updater=_update_cpu_source_data,
         source_sync=_sync_cpu_source_fields,
+        force_updater=_sync_cpu_force_fields,
     )
 
 

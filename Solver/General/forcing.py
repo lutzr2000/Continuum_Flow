@@ -1,6 +1,51 @@
 import hashlib
 import numpy as np
 
+POINT_FORCE_NODE_TYPES = {
+    "BLENDERCFD_FORCE_POINT_NODE",
+    "CONTINUUM_FLOW_FORCE_POINT_NODE",
+}
+
+
+def _point_divergence_weight(shape, delta, origin, radius):
+    """Return the normalized Gaussian support weight for one point divergence."""
+    radius = max(float(radius), 1.0e-6)
+    origin_x = -0.5 * shape[0] * delta
+    origin_y = -0.5 * shape[1] * delta
+    origin_z = 0.0
+    x = origin_x + np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
+    y = origin_y + np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
+    z = origin_z + np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
+
+    dx = x - float(origin[0])
+    dy = y - float(origin[1])
+    dz = z - float(origin[2])
+    distance2 = dx * dx + dy * dy + dz * dz
+    weight = np.exp(-distance2 / (radius * radius))
+    weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta ** 3)
+    return weight, weight_integral
+
+
+def build_point_divergence_field(shape, delta, strength, origin, radius, dtype, out=None):
+    """Build or overwrite one point-divergence field from one point-force setup."""
+    dtype = np.dtype(dtype)
+    if out is None:
+        out = np.zeros(shape, dtype=dtype)
+    else:
+        out.fill(0.0)
+
+    strength = float(strength)
+    if abs(strength) <= 1.0e-12:
+        return out
+
+    weight, weight_integral = _point_divergence_weight(shape, delta, origin, radius)
+    if weight_integral <= 1.0e-12:
+        return out
+
+    divergence_rate = (strength / weight_integral) * weight
+    out[...] = divergence_rate.astype(dtype, copy=False)
+    return out
+
 
 def forcing_constant(force_state, force_cfg, dtype):
     """
@@ -29,31 +74,22 @@ def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
     resolution changes. Positive strength expands locally, negative strength
     contracts locally.
     """
-    strength = float(force_cfg.get("strength", 0.0))
-    origin = force_cfg.get("origin", (0.0, 0.0, 0.0))
-    radius = max(float(force_cfg.get("radius", 1.0)), 1.0e-6)
-    if abs(strength) <= 1.0e-12:
-        return
+    build_point_divergence_field(
+        shape,
+        delta,
+        force_cfg.get("strength", 0.0),
+        force_cfg.get("origin", (0.0, 0.0, 0.0)),
+        force_cfg.get("radius", 1.0),
+        dtype,
+        out=force_state.setdefault("_point_divergence_work", np.zeros(shape, dtype=np.dtype(dtype))),
+    )
+    force_state["point_divergence"] += force_state["_point_divergence_work"]
 
-    origin_x = -0.5 * shape[0] * delta
-    origin_y = -0.5 * shape[1] * delta
-    origin_z = 0.0
-    x = origin_x + np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
-    y = origin_y + np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
-    z = origin_z + np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
 
-    dx = x - float(origin[0])
-    dy = y - float(origin[1])
-    dz = z - float(origin[2])
-    distance2 = dx * dx + dy * dy + dz * dz
-    weight = np.exp(-distance2 / (radius * radius))
-    weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta ** 3)
-    if weight_integral <= 1.0e-12:
-        return
-
-    # Convert the user strength into a resolution-independent divergence rate density.
-    divergence_rate = (strength / weight_integral) * weight
-    force_state["point_divergence"] += divergence_rate.astype(dtype, copy=False)
+def _has_point_force_animation(force_cfg):
+    """Return whether one point force has animated values that affect divergence."""
+    animations = force_cfg.get("animations") or {}
+    return any(name in animations for name in ("strength", "origin", "radius"))
 
 
 def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
@@ -232,6 +268,8 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fy_base": np.zeros(shape, dtype=dtype),
         "Fz_base": np.zeros(shape, dtype=dtype),
         "point_divergence": np.zeros(shape, dtype=dtype),
+        "_point_divergence_work": np.zeros(shape, dtype=dtype),
+        "point_force_entries": [],
         "turbulence": {
             "Fx_a": [],
             "Fy_a": [],
@@ -252,8 +290,20 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
             forcing_constant(force_state, force_cfg, dtype)
         elif node_type in {"BLENDERCFD_FORCE_SWIRL_NODE", "CONTINUUM_FLOW_FORCE_SWIRL_NODE"}:
             forcing_swirl(force_state, shape, delta, force_cfg, dtype)
-        elif node_type in {"BLENDERCFD_FORCE_POINT_NODE", "CONTINUUM_FLOW_FORCE_POINT_NODE"}:
-            forcing_point_divergence(force_state, shape, delta, force_cfg, dtype)
+        elif node_type in POINT_FORCE_NODE_TYPES:
+            if _has_point_force_animation(force_cfg):
+                force_state["point_force_entries"].append(
+                    {
+                        "node_name": force_cfg.get("node_name", ""),
+                        "node_type": node_type,
+                        "strength": np.float32(force_cfg.get("strength", 0.0)),
+                        "origin": np.asarray(force_cfg.get("origin", (0.0, 0.0, 0.0)), dtype=np.float32),
+                        "radius": np.float32(force_cfg.get("radius", 1.0)),
+                        "animations": dict(force_cfg.get("animations", {})),
+                    }
+                )
+            else:
+                forcing_point_divergence(force_state, shape, delta, force_cfg, dtype)
 
     #------------Pack turbulence arrays-------------------
     turbulence = {}
@@ -308,6 +358,8 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "Fy": fy_initial,
         "Fz": fz_initial,
         "point_divergence": force_state["point_divergence"],
+        "point_divergence_base": force_state["point_divergence"].copy(),
+        "point_force_entries": force_state["point_force_entries"],
         "turbulence": turbulence,
         "max_abs": (
             static_max["x"] + dynamic_max["x"],

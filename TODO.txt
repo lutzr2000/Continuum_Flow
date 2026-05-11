@@ -1,6 +1,7 @@
 TODO
 
 Make solver installable
+Better Explosion model ? Maybe better combustion, fire and combustion usually only where there is a good mixture of oxigen and fuel
 Documentation with sphynx
 Testing
 

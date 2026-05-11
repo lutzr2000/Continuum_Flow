@@ -1,5 +1,6 @@
 import numpy as np
 
+import Solver.General.forcing as forcing
 import Solver.General.helper_functions as helper_functions
 
 
@@ -167,6 +168,7 @@ def update_animated_source_force_values(
     time_value,
     source_updater,
     source_sync=None,
+    force_updater=None,
 ):
     """Update animated source targets and animated constant-force values."""
     source_field_data = simulation_params.get("source_field_data")
@@ -242,6 +244,75 @@ def update_animated_source_force_values(
             source_updater(source_field_data, solver_fields, time_value)
             if source_sync is not None:
                 source_sync(source_field_data, solver_fields)
+
+    force_field_data = simulation_params.get("force_field_data")
+    if force_field_data is not None and force_field_data.get("point_force_entries"):
+        point_divergence = np.asarray(force_field_data["point_divergence"])
+        point_divergence[...] = np.asarray(force_field_data["point_divergence_base"])
+
+        for runtime_entry in force_field_data.get("point_force_entries", ()):
+            if "_base_strength" not in runtime_entry:
+                runtime_entry["_base_strength"] = np.float32(runtime_entry.get("strength", 0.0))
+                runtime_entry["_base_origin"] = np.asarray(
+                    runtime_entry.get("origin", (0.0, 0.0, 0.0)),
+                    dtype=np.float32,
+                )
+                runtime_entry["_base_radius"] = np.float32(runtime_entry.get("radius", 1.0))
+
+            next_strength = runtime_entry["_base_strength"]
+            next_origin = np.asarray(runtime_entry["_base_origin"], dtype=np.float32).copy()
+            next_radius = runtime_entry["_base_radius"]
+
+            strength_series = helper_functions._cached_animation_series(runtime_entry, "strength", np.float32)
+            if strength_series is not None:
+                next_strength = np.float32(
+                    helper_functions._interpolate_animation_series(strength_series, time_value)
+                )
+
+            origin_series = helper_functions._cached_animation_series(runtime_entry, "origin", np.float32)
+            if origin_series is not None:
+                origin_value = np.asarray(
+                    helper_functions._interpolate_animation_series(origin_series, time_value),
+                    dtype=np.float32,
+                ).reshape(-1)
+                if origin_value.size > 0:
+                    next_origin[0] = origin_value[0]
+                if origin_value.size > 1:
+                    next_origin[1] = origin_value[1]
+                if origin_value.size > 2:
+                    next_origin[2] = origin_value[2]
+
+            radius_series = helper_functions._cached_animation_series(runtime_entry, "radius", np.float32)
+            if radius_series is not None:
+                next_radius = np.float32(
+                    helper_functions._interpolate_animation_series(radius_series, time_value)
+                )
+
+            if (
+                next_strength != runtime_entry.get("strength") or
+                next_radius != runtime_entry.get("radius") or
+                not np.array_equal(next_origin, np.asarray(runtime_entry.get("origin"), dtype=np.float32))
+            ):
+                runtime_entry["strength"] = next_strength
+                runtime_entry["origin"] = next_origin
+                runtime_entry["radius"] = next_radius
+
+            forcing.build_point_divergence_field(
+                point_divergence.shape,
+                simulation_params["DELTA"],
+                next_strength,
+                next_origin,
+                next_radius,
+                point_divergence.dtype,
+                out=force_field_data.setdefault(
+                    "_point_divergence_work",
+                    np.zeros(point_divergence.shape, dtype=point_divergence.dtype),
+                ),
+            )
+            point_divergence += force_field_data["_point_divergence_work"]
+
+        if force_updater is not None:
+            force_updater(force_field_data, solver_fields)
 
     animated_force = {"x": 0.0, "y": 0.0, "z": 0.0}
     animation_state = simulation_params.get("ANIMATION_STATE") or {}
