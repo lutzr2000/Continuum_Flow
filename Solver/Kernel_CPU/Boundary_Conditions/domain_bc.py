@@ -25,7 +25,7 @@ BC_TYPE_TO_MODE = {
 
 @njit(cache=True, parallel=True)
 def _apply_face_bc_numba(
-    u, v, w, p, T,
+    u, v, w, p, T, smoke, fuel,
     axis, side_index, bc_mode,
     u_value, v_value, w_value,
     temp_value, use_temp,
@@ -50,9 +50,11 @@ def _apply_face_bc_numba(
             neighbor_u = u[src_i, j, k]
             neighbor_v = v[src_i, j, k]
             neighbor_w = w[src_i, j, k]
+            neighbor_smoke = smoke[src_i, j, k]
+            neighbor_fuel = fuel[src_i, j, k]
 
             if bc_mode == BC_OUTFLOW:
-                u[i, j, k] = neighbor_u
+                u[i, j, k] = min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
                 v[i, j, k] = neighbor_v
                 w[i, j, k] = neighbor_w
             elif bc_mode == BC_INFLOW:
@@ -70,6 +72,8 @@ def _apply_face_bc_numba(
 
             p[i, j, k] = p[src_i, j, k]
             T[i, j, k] = temp_value if use_temp else T[src_i, j, k]
+            smoke[i, j, k] = neighbor_smoke
+            fuel[i, j, k] = neighbor_fuel
         return
 
     if axis == 1:
@@ -84,10 +88,12 @@ def _apply_face_bc_numba(
             neighbor_u = u[i, src_j, k]
             neighbor_v = v[i, src_j, k]
             neighbor_w = w[i, src_j, k]
+            neighbor_smoke = smoke[i, src_j, k]
+            neighbor_fuel = fuel[i, src_j, k]
 
             if bc_mode == BC_OUTFLOW:
                 u[i, j, k] = neighbor_u
-                v[i, j, k] = neighbor_v
+                v[i, j, k] = min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
                 w[i, j, k] = neighbor_w
             elif bc_mode == BC_INFLOW:
                 u[i, j, k] = u_value
@@ -104,6 +110,8 @@ def _apply_face_bc_numba(
 
             p[i, j, k] = p[i, src_j, k]
             T[i, j, k] = temp_value if use_temp else T[i, src_j, k]
+            smoke[i, j, k] = neighbor_smoke
+            fuel[i, j, k] = neighbor_fuel
         return
 
     k = 0 if side_index == 0 else nz - 1
@@ -117,11 +125,13 @@ def _apply_face_bc_numba(
         neighbor_u = u[i, j, src_k]
         neighbor_v = v[i, j, src_k]
         neighbor_w = w[i, j, src_k]
+        neighbor_smoke = smoke[i, j, src_k]
+        neighbor_fuel = fuel[i, j, src_k]
 
         if bc_mode == BC_OUTFLOW:
             u[i, j, k] = neighbor_u
             v[i, j, k] = neighbor_v
-            w[i, j, k] = neighbor_w
+            w[i, j, k] = min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
         elif bc_mode == BC_INFLOW:
             u[i, j, k] = u_value
             v[i, j, k] = v_value
@@ -137,10 +147,12 @@ def _apply_face_bc_numba(
 
         p[i, j, k] = p[i, j, src_k]
         T[i, j, k] = temp_value if use_temp else T[i, j, src_k]
+        smoke[i, j, k] = neighbor_smoke
+        fuel[i, j, k] = neighbor_fuel
 
 
 def _apply_face_bc(
-    u, v, w, p, T,
+    u, v, w, p, T, smoke, fuel,
     side, bc_mode,
     u_value=0.0, v_value=0.0, w_value=0.0,
     temp_value=None,
@@ -148,16 +160,16 @@ def _apply_face_bc(
     """Dispatch one CPU boundary update to the compiled Numba face kernel."""
     axis, side_index = SIDE_TO_AXIS_AND_INDEX[side]
     _apply_face_bc_numba(
-        u, v, w, p, T,
+        u, v, w, p, T, smoke, fuel,
         axis, side_index, bc_mode,
         u_value, v_value, w_value,
         0.0 if temp_value is None else temp_value,
         temp_value is not None,
     )
-    return u, v, w, p, T
+    return u, v, w, p, T, smoke, fuel
 
 
-def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None):
+def inflow_bc(u, v, w, p, T, smoke, fuel, side, u_inflow, v_inflow, w_inflow, t_inflow=None):
     """
     Apply inflow boundary conditions to one side of the domain on the CPU.
 
@@ -166,7 +178,7 @@ def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None):
     value or a Neumann condition when no temperature is specified.
     """
     return _apply_face_bc(
-        u, v, w, p, T,
+        u, v, w, p, T, smoke, fuel,
         side,
         BC_INFLOW,
         u_value=u_inflow,
@@ -176,7 +188,7 @@ def inflow_bc(u, v, w, p, T, side, u_inflow, v_inflow, w_inflow, t_inflow=None):
     )
 
 
-def outflow_bc(u, v, w, p, T, side):
+def outflow_bc(u, v, w, p, T, smoke, fuel, side):
     """
     Apply outflow boundary conditions to one side of the domain on the CPU.
 
@@ -184,13 +196,13 @@ def outflow_bc(u, v, w, p, T, side):
     copied from the adjacent interior cells.
     """
     return _apply_face_bc(
-        u, v, w, p, T,
+        u, v, w, p, T, smoke, fuel,
         side,
         BC_OUTFLOW,
     )
 
 
-def slip_wall_bc(u, v, w, p, T, side, t_wall=None):
+def slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
     """
     Apply slip-wall boundary conditions to one side of the domain on the CPU.
 
@@ -199,14 +211,14 @@ def slip_wall_bc(u, v, w, p, T, side, t_wall=None):
     a homogeneous Neumann condition.
     """
     return _apply_face_bc(
-        u, v, w, p, T,
+        u, v, w, p, T, smoke, fuel,
         side,
         BC_SLIP_WALL,
         temp_value=t_wall,
     )
 
 
-def no_slip_wall_bc(u, v, w, p, T, side, t_wall=None):
+def no_slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
     """
     Apply no-slip wall boundary conditions to one side of the domain on the CPU.
 
@@ -215,14 +227,14 @@ def no_slip_wall_bc(u, v, w, p, T, side, t_wall=None):
     interior or fixed to a prescribed wall value.
     """
     return _apply_face_bc(
-        u, v, w, p, T,
+        u, v, w, p, T, smoke, fuel,
         side,
         BC_NO_SLIP_WALL,
         temp_value=t_wall,
     )
 
 
-def apply_all_BC(u, v, w, p, T, bc_config):
+def apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config):
     """
     Apply all configured domain boundary conditions to the CPU field state.
 
@@ -237,8 +249,8 @@ def apply_all_BC(u, v, w, p, T, bc_config):
 
         temperature = bc.get("T", bc.get("temperature"))
         if bc_mode == BC_INFLOW:
-            u, v, w, p, T = inflow_bc(
-                u, v, w, p, T,
+            u, v, w, p, T, smoke, fuel = inflow_bc(
+                u, v, w, p, T, smoke, fuel,
                 side,
                 bc.get("u", 0.0),
                 bc.get("v", 0.0),
@@ -246,10 +258,14 @@ def apply_all_BC(u, v, w, p, T, bc_config):
                 temperature,
             )
         elif bc_mode == BC_OUTFLOW:
-            u, v, w, p, T = outflow_bc(u, v, w, p, T, side)
+            u, v, w, p, T, smoke, fuel = outflow_bc(u, v, w, p, T, smoke, fuel, side)
         elif bc_mode == BC_NO_SLIP_WALL:
-            u, v, w, p, T = no_slip_wall_bc(u, v, w, p, T, side, temperature)
+            u, v, w, p, T, smoke, fuel = no_slip_wall_bc(
+                u, v, w, p, T, smoke, fuel, side, temperature
+            )
         else:
-            u, v, w, p, T = slip_wall_bc(u, v, w, p, T, side, temperature)
+            u, v, w, p, T, smoke, fuel = slip_wall_bc(
+                u, v, w, p, T, smoke, fuel, side, temperature
+            )
 
-    return u, v, w, p, T
+    return u, v, w, p, T, smoke, fuel

@@ -829,7 +829,7 @@ def apply_all_BC(
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
     """
-    u, v, w, p, T = BC.apply_all_BC(u, v, w, p, T, bc_config)
+    u, v, w, p, T, smoke, fuel = BC.apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config)
 
     if has_obstacle:
         u, v, w, smoke, fuel, flame = obstacle_bc.obstacle_bc(

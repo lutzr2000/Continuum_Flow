@@ -6,7 +6,7 @@ Continuum Flow is an extension for Blender that provides a new tool chain for si
 At this point i want to point out that large parts of the code was written with the support of AI. I made this solver as a hobby project and i am not an experienced developer. Bugs in this code are inevitable, please feel free to report them on GitHub. Additionally it is absolutly necessary to mention Dr. Zhengtao Gao, on whoms great learning course (https://drzgan.github.io/Python_CFD/intro.html) the basis of this solver is build. 
 
 
-In :doc:`Installation <install>` the installation of Continuum Flow is explained. The :doc:`User Documentation <user_documentation>` explains the workflow and the functions of each custom node. The :doc:`Solver Theory <solver_theory>` chapter explains the mathematical theory behind the solver and the :doc:`Performance <performance>` chapter contains a performance evaluation. Lastly, the :doc:`Examples <examples>` chapter contains short explanations for every example file provided.
+In :doc:`Installation <install>` the installation of Continuum Flow is explained. The :doc:`User Documentation <user_documentation>` explains the workflow and the functions of each custom node. :doc:`Custom Geometry Nodes <custom_geo_nodes>` explains the usage of Blenders native geometry node setups that can be used for post processing the simulation result. The :doc:`Solver Theory <solver_theory>` chapter explains the mathematical theory behind the solver and the :doc:`Performance <performance>` chapter contains a performance evaluation. Lastly, the :doc:`Examples <examples>` chapter contains short explanations for every example file provided.
 
 
 .. toctree::
