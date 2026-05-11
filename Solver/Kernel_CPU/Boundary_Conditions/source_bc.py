@@ -151,6 +151,11 @@ def update_source_data(source_data, time_value):
                 continue
 
             any_source = True
+            resolved_velocity = general_sources.resolve_runtime_entry_velocity(
+                runtime_entry,
+                time_value,
+                obstacles,
+            )
             ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
             base_origin = obj["local_origin"]
             _sample_source_entry_cpu(
@@ -172,9 +177,9 @@ def update_source_data(source_data, time_value):
                 np.float32(runtime_entry["smoke"]),
                 np.float32(runtime_entry["fuel"]),
                 bool(runtime_entry["has_velocity_target"]),
-                np.float32(runtime_entry["velocity_x"]),
-                np.float32(runtime_entry["velocity_y"]),
-                np.float32(runtime_entry["velocity_z"]),
+                np.float32(resolved_velocity[0]),
+                np.float32(resolved_velocity[1]),
+                np.float32(resolved_velocity[2]),
             )
 
     source_data["last_has_source"] = bool(any_source)

@@ -6,7 +6,7 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.app.handlers import persistent
 
 MODULE_NAME_ALIASES = {
@@ -561,10 +561,15 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
     bl_width_min = 200.0
     bl_width_max = 360.0
     scalar_property_names = ("fuel", "smoke", "temperature")
+    velocity_space_items = (
+        ("WORLD", "World Space", "Apply the source velocity in world coordinates"),
+        ("LOCAL", "Local Space", "Apply the source velocity in each linked object's local coordinates"),
+    )
 
     fuel: FloatProperty(name="Fuel", default=0.0, min=0.0, soft_min=0.0, description="Amount of fuel to spawn", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke", default=0.0, min=0.0, soft_min=0.0, description="Amount of smoke to spawn", options={"ANIMATABLE"})  # type: ignore
     temperature: FloatProperty(name="Temperature", default=0.0, min=0.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
+    velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
@@ -579,6 +584,7 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
 
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
+        velocity_col.prop(self, "velocity_space", text="Space")
         velocity_col.prop(self, "velocity", text="")
 
 

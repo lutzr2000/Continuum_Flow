@@ -497,6 +497,7 @@ def _serialize_source_node(node, start_frame, end_frame, fps, context=None, geom
         "fuel": float(node.fuel),
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
+        "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": _safe_float_vector(node.velocity),
         "animations": _serialize_node_animations(
             node,

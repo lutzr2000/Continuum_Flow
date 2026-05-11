@@ -179,6 +179,11 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
             ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
 
             any_source = True
+            resolved_velocity = general_sources.resolve_runtime_entry_velocity(
+                runtime_entry,
+                time_value,
+                obstacles,
+            )
             inv = state["inv"]
             sx = int(ix1 - ix0 + 1)
             sy = int(iy1 - iy0 + 1)
@@ -208,9 +213,9 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
                 np.float32(runtime_entry["smoke"]),
                 np.float32(runtime_entry["fuel"]),
                 bool(runtime_entry["has_velocity_target"]),
-                np.float32(runtime_entry["velocity_x"]),
-                np.float32(runtime_entry["velocity_y"]),
-                np.float32(runtime_entry["velocity_z"]),
+                np.float32(resolved_velocity[0]),
+                np.float32(resolved_velocity[1]),
+                np.float32(resolved_velocity[2]),
             )
 
     source_data["last_has_source"] = bool(any_source)
@@ -246,6 +251,11 @@ def update_source_data(source_data, time_value):
         if not np.any(source_mask):
             continue
 
+        resolved_velocity = general_sources.resolve_runtime_entry_velocity(
+            runtime_entry,
+            time_value,
+            obstacles,
+        )
         source_active_mask |= source_mask
         temperature_field[source_mask] = np.maximum(
             temperature_field[source_mask],
@@ -262,9 +272,9 @@ def update_source_data(source_data, time_value):
 
         if runtime_entry["has_velocity_target"]:
             velocity_active_mask[source_mask] = True
-            velocity_x_field[source_mask] = runtime_entry["velocity_x"]
-            velocity_y_field[source_mask] = runtime_entry["velocity_y"]
-            velocity_z_field[source_mask] = runtime_entry["velocity_z"]
+            velocity_x_field[source_mask] = resolved_velocity[0]
+            velocity_y_field[source_mask] = resolved_velocity[1]
+            velocity_z_field[source_mask] = resolved_velocity[2]
 
     return source_data
 

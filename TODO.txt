@@ -1,6 +1,7 @@
 TODO
 
-Nake solver installable
+Make solver installable
+Spawn bake result always at same origin as domain
 Documentation with sphynx
 Testing
 

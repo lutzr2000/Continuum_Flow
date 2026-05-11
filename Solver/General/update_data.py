@@ -177,9 +177,9 @@ def update_animated_source_force_values(
                 runtime_entry["_base_temperature"] = np.float32(runtime_entry.get("temperature", 0.0))
                 runtime_entry["_base_smoke"] = np.float32(runtime_entry.get("smoke", 0.0))
                 runtime_entry["_base_fuel"] = np.float32(runtime_entry.get("fuel", 0.0))
-                runtime_entry["_base_velocity_x"] = np.float32(runtime_entry.get("velocity_x", 0.0))
-                runtime_entry["_base_velocity_y"] = np.float32(runtime_entry.get("velocity_y", 0.0))
-                runtime_entry["_base_velocity_z"] = np.float32(runtime_entry.get("velocity_z", 0.0))
+                runtime_entry["_base_velocity_x"] = np.float32(runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x", 0.0)))
+                runtime_entry["_base_velocity_y"] = np.float32(runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y", 0.0)))
+                runtime_entry["_base_velocity_z"] = np.float32(runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z", 0.0)))
 
             next_temperature = runtime_entry["_base_temperature"]
             next_smoke = runtime_entry["_base_smoke"]
@@ -223,16 +223,16 @@ def update_animated_source_force_values(
                 next_temperature != runtime_entry.get("temperature") or
                 next_smoke != runtime_entry.get("smoke") or
                 next_fuel != runtime_entry.get("fuel") or
-                next_velocity_x != runtime_entry.get("velocity_x") or
-                next_velocity_y != runtime_entry.get("velocity_y") or
-                next_velocity_z != runtime_entry.get("velocity_z")
+                next_velocity_x != runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x")) or
+                next_velocity_y != runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y")) or
+                next_velocity_z != runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z"))
             ):
                 runtime_entry["temperature"] = next_temperature
                 runtime_entry["smoke"] = next_smoke
                 runtime_entry["fuel"] = next_fuel
-                runtime_entry["velocity_x"] = next_velocity_x
-                runtime_entry["velocity_y"] = next_velocity_y
-                runtime_entry["velocity_z"] = next_velocity_z
+                runtime_entry["authored_velocity_x"] = next_velocity_x
+                runtime_entry["authored_velocity_y"] = next_velocity_y
+                runtime_entry["authored_velocity_z"] = next_velocity_z
                 runtime_entry["has_velocity_target"] = bool(
                     next_velocity_x != 0.0 or next_velocity_y != 0.0 or next_velocity_z != 0.0
                 )
