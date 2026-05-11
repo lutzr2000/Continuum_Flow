@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 
 _LAST_BAKE_CONFIG_DICT = None
@@ -372,12 +373,21 @@ def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
     _remove_previous_baked_volume(output_directory)
     existing_objects = set(bpy.data.objects)
     first_file = vdb_files[0]
-    bpy.ops.object.volume_import(
-        filepath=str(first_file),
-        directory=str(output_directory),
-        files=[{"name": vdb_file.name} for vdb_file in vdb_files],
-        use_sequence_detection=True,
-    )
+    scene = getattr(bpy.context, "scene", None)
+    cursor = getattr(scene, "cursor", None) if scene is not None else None
+    previous_cursor_location = tuple(cursor.location) if cursor is not None else None
+    try:
+        if cursor is not None:
+            cursor.location = (0.0, 0.0, 0.0)
+        bpy.ops.object.volume_import(
+            filepath=str(first_file),
+            directory=str(output_directory),
+            files=[{"name": vdb_file.name} for vdb_file in vdb_files],
+            use_sequence_detection=True,
+        )
+    finally:
+        if cursor is not None and previous_cursor_location is not None:
+            cursor.location = previous_cursor_location
     imported_objects = [obj for obj in bpy.data.objects if obj not in existing_objects]
     if not imported_objects and bpy.context.object is not None:
         imported_objects = [bpy.context.object]
@@ -385,6 +395,8 @@ def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
         if imported_object.type != "VOLUME":
             continue
         _apply_imported_volume_sequence_settings(imported_object.data, start_frame, len(vdb_files))
+        imported_object.location = (0.0, 0.0, 0.0)
+        imported_object.matrix_world = Matrix.Identity(4)
         imported_object.name = f"Continuum Flow {_display_output_directory_name(output_directory)}"
         imported_object[_AUTO_IMPORT_KEY] = True
         imported_object[_LEGACY_AUTO_IMPORT_KEY] = True

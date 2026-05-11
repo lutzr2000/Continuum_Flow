@@ -1,7 +1,7 @@
 TODO
 
 Make solver installable
-Spawn bake result always at same origin as domain
+live update (not live react)
 Documentation with sphynx
 Testing
 
