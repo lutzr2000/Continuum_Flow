@@ -474,7 +474,7 @@ def update_scalar_fields(
     smoke_dissipation_rate, smoke_production_rate,
     fuel_burn_rate, fuel_ignition_temperature, t_reference
 ):
-    """Update temperature, smoke and fuel in one CPU transport sweep."""
+    """Update transported scalar fields and write a continuous flame intensity."""
     nx, ny, nz = u.shape
     dt_over_delta = dt / delta
 
@@ -558,7 +558,7 @@ def update_scalar_fields(
                 T_out[i, j, k] = max(T_updated, 0.0)
                 smoke_out[i, j, k] = max(smoke_updated, 0.0)
                 fuel_out[i, j, k] = max(fuel_updated, 0.0)
-                flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
+                flame_out[i, j, k] = max(-fuel_source, 0.0)
 
 
 def apply_all_BC(

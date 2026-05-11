@@ -707,8 +707,8 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     updates temperature, smoke and fuel in one GPU transport sweep.
 
     Convection is evaluated with first-order upwinding and the source terms
-    model fuel ignition, temperature release and smoke production. A flame
-    indicator is written alongside the updated scalar fields.
+    model fuel ignition, temperature release and smoke production. A continuous
+    flame intensity field is written alongside the updated scalar fields.
 
     Args:
         T (device array): temperature field
@@ -721,7 +721,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
         T_out (device array): output array for updated temperature
         smoke_out (device array): output array for updated smoke density
         fuel_out (device array): output array for updated fuel density
-        flame_out (device array): output array for the flame indicator
+        flame_out (device array): output array for the flame intensity
         delta (float): grid spacing
         temperature_dissipation_rate (float): temperature dissipation coefficient
         temperature_production_rate (float): temperature production coefficient
@@ -816,7 +816,7 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     T_out[i, j, k] = max(T_updated, 0.0)
     smoke_out[i, j, k] = max(smoke_updated, 0.0)
     fuel_out[i, j, k] = max(fuel_updated, 0.0)
-    flame_out[i, j, k] = 1.0 if fuel_source < 0.0 else 0.0
+    flame_out[i, j, k] = max(-fuel_source, 0.0)
 
 
 def apply_all_BC(
