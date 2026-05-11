@@ -1,6 +1,7 @@
 """Worker process that receives JSON payloads and writes OpenVDB output files."""
 
 import json
+import os
 import sys
 from multiprocessing import shared_memory
 
@@ -134,6 +135,7 @@ def _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask):
 def write_vdb(payload):
     """Create one VDB file from field data stored in shared memory."""
     output_vdb_path = payload["output_path"]
+    temporary_output_path = f"{output_vdb_path}.tmp"
     grids = []
     open_shared_memory = []
 
@@ -157,9 +159,15 @@ def write_vdb(payload):
             grid.transform = _grid_transform_from_payload(payload, tuple(grid_info["shape"]))
             grids.append(grid)
 
-        openvdb.write(output_vdb_path, grids=grids)
+        openvdb.write(temporary_output_path, grids=grids)
+        os.replace(temporary_output_path, output_vdb_path)
 
     finally:
+        try:
+            if os.path.exists(temporary_output_path):
+                os.remove(temporary_output_path)
+        except OSError:
+            pass
         for shm in open_shared_memory:
             shm.close()
 

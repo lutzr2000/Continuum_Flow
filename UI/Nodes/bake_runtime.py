@@ -286,6 +286,11 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     _output_tail = None
     _progress_percent = 0.0
     _progress_factor = 0.0
+    _live_preview_state = None
+    _live_preview_enabled = False
+    _live_preview_interval = None
+    _next_live_preview_sync_at = 0.0
+    _live_preview_warning_reported = False
     _reader_error = None
     _solver_divergence_message = None
     _window_manager = None
@@ -354,6 +359,11 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         self._bake_started_at = None
+        self._live_preview_state = None
+        self._live_preview_enabled = False
+        self._live_preview_interval = None
+        self._next_live_preview_sync_at = 0.0
+        self._live_preview_warning_reported = False
         _set_status_progress_values(0.0, "")
         self._clear_status_progress(context)
         self._window_manager = None
@@ -401,6 +411,25 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._set_status_progress(context)
         process = self._session["process"]
         return_code = process.poll()
+        if (
+            return_code is None and
+            self._live_preview_enabled and
+            self._live_preview_interval is not None and
+            perf_counter() >= self._next_live_preview_sync_at
+        ):
+            try:
+                BakeStorage._refresh_live_preview(
+                    self._config_dict,
+                    context=context,
+                    state=self._live_preview_state,
+                )
+            except Exception as exc:
+                if not self._live_preview_warning_reported:
+                    self.report({"WARNING"}, f"Live preview was disabled after a refresh failed: {exc}")
+                    self._live_preview_warning_reported = True
+                self._live_preview_enabled = False
+            finally:
+                self._next_live_preview_sync_at = perf_counter() + float(self._live_preview_interval)
         if return_code is None:
             return {"RUNNING_MODAL"}
         self._drain_kernel_output()
@@ -526,9 +555,17 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._workspace = context.workspace
         self._cancel_requested = False
         self._bake_started_at = perf_counter()
+        self._live_preview_state = {}
+        self._live_preview_interval = BakeStorage._live_preview_refresh_interval(self._config_dict)
+        self._live_preview_enabled = self._live_preview_interval is not None
+        self._next_live_preview_sync_at = perf_counter()
+        self._live_preview_warning_reported = False
         _ACTIVE_BAKE_OPERATOR = self
         self._set_status_progress(context)
-        self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+        timer_interval = 0.1
+        if self._live_preview_interval is not None:
+            timer_interval = min(timer_interval, float(self._live_preview_interval))
+        self._timer = context.window_manager.event_timer_add(timer_interval, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 

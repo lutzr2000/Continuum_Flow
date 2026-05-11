@@ -126,11 +126,11 @@ Viewer
 
 This node lets you view the simulation domain in the viewprt.
 
-Show Domain
-    Shows the domain.
+Show/Hide Domain
+    Shows or hides the domain.
 
-Hide Domain
-    Hides the domain.   
+Live Preview
+    When activated the simulation can be seen in the viewport while simulating.  
 
 
 Output

@@ -6,7 +6,7 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.app.handlers import persistent
 
 MODULE_NAME_ALIASES = {
@@ -632,18 +632,25 @@ class BlenderCFDViewerNode(BlenderCFDBaseNode):
     bl_width_default = 180.0
     bl_width_min = 160.0
     bl_width_max = 260.0
+    domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
+    live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
 
     def _sync_node(self):
         ensure_socket(self.inputs, BlenderCFDResultSocket.bl_idname, "Result")
 
     def free(self):
+        self.domain_preview_active = False
         BlenderCFDViewerModule.disable_domain_preview()
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
-        col.operator("blendercfd.viewer_show_domain", text="Show Domain", icon="HIDE_OFF")
-        col.operator("blendercfd.viewer_hide_domain", text="Hide Domain", icon="HIDE_ON")
+        col.operator(
+            "blendercfd.viewer_toggle_domain",
+            text="Hide Domain" if bool(self.domain_preview_active) else "Show Domain",
+            icon="HIDE_ON" if bool(self.domain_preview_active) else "HIDE_OFF",
+        )
+        col.prop(self, "live_preview")
 
 
 class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):

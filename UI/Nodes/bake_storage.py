@@ -331,6 +331,18 @@ def _refresh_after_bake_cleanup(context):
     _tag_all_areas_redraw(context)
 
 
+def _refresh_after_live_preview_update(context=None, frame_value=None):
+    scene = getattr(context, "scene", None) if context is not None else None
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is not None and frame_value is not None:
+        try:
+            scene.frame_set(int(frame_value))
+        except Exception:
+            pass
+    _tag_all_areas_redraw(context)
+
+
 def _free_bake(context, config_dict=None, output_directories=None):
     cleanup_directories = []
     seen_paths = set()
@@ -365,44 +377,165 @@ def _apply_imported_volume_sequence_settings(volume_data, start_frame, frame_cou
     volume_data.is_sequence = True
     volume_data.frame_duration = max(1, int(frame_count))
     volume_data.frame_start = int(start_frame)
+    if hasattr(volume_data, "frame_offset"):
+        volume_data.frame_offset = 0
     if hasattr(volume_data, "sequence_mode"):
         volume_data.sequence_mode = "CLIP"
 
 
-def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
-    _remove_previous_baked_volume(output_directory)
-    existing_objects = set(bpy.data.objects)
-    first_file = vdb_files[0]
+def _managed_volume_display_name(output_directory):
+    return f"Continuum Flow {_display_output_directory_name(output_directory)}"
+
+
+def _apply_imported_volume_object_settings(volume_object, output_directory):
+    if volume_object is None or volume_object.type != "VOLUME":
+        return
+    volume_object.location = (0.0, 0.0, 0.0)
+    volume_object.matrix_world = Matrix.Identity(4)
+    volume_object.name = _managed_volume_display_name(output_directory)
+    volume_object[_AUTO_IMPORT_KEY] = True
+    volume_object[_LEGACY_AUTO_IMPORT_KEY] = True
+    volume_object[_OUTPUT_PATH_KEY] = str(output_directory)
+    volume_object[_LEGACY_OUTPUT_PATH_KEY] = str(output_directory)
+
+
+def _volume_collection_for_import():
+    context_collection = getattr(bpy.context, "collection", None)
+    if context_collection is not None:
+        return context_collection
     scene = getattr(bpy.context, "scene", None)
-    cursor = getattr(scene, "cursor", None) if scene is not None else None
-    previous_cursor_location = tuple(cursor.location) if cursor is not None else None
-    try:
-        if cursor is not None:
-            cursor.location = (0.0, 0.0, 0.0)
-        bpy.ops.object.volume_import(
-            filepath=str(first_file),
-            directory=str(output_directory),
-            files=[{"name": vdb_file.name} for vdb_file in vdb_files],
-            use_sequence_detection=True,
-        )
-    finally:
-        if cursor is not None and previous_cursor_location is not None:
-            cursor.location = previous_cursor_location
-    imported_objects = [obj for obj in bpy.data.objects if obj not in existing_objects]
-    if not imported_objects and bpy.context.object is not None:
-        imported_objects = [bpy.context.object]
-    for imported_object in imported_objects:
-        if imported_object.type != "VOLUME":
+    if scene is not None:
+        return getattr(scene, "collection", None)
+    return None
+
+
+def _reload_volume_data(volume_data):
+    if volume_data is None:
+        return
+    reload_method = getattr(volume_data, "reload", None)
+    if callable(reload_method):
+        reload_method()
+        return
+    grids = getattr(volume_data, "grids", None)
+    load_method = getattr(grids, "load", None)
+    if callable(load_method):
+        load_method()
+
+
+def _managed_volume_objects(output_directory):
+    output_directory = Path(output_directory).resolve()
+    return [
+        volume_object
+        for volume_object in bpy.data.objects
+        if _object_matches_output_directory(volume_object, output_directory)
+    ]
+
+
+def _refresh_imported_vdb_sequence(output_directory, vdb_files, start_frame):
+    first_file = vdb_files[0]
+    for imported_object in _managed_volume_objects(output_directory):
+        if imported_object.type != "VOLUME" or imported_object.data is None:
             continue
         _apply_imported_volume_sequence_settings(imported_object.data, start_frame, len(vdb_files))
-        imported_object.location = (0.0, 0.0, 0.0)
-        imported_object.matrix_world = Matrix.Identity(4)
-        imported_object.name = f"Continuum Flow {_display_output_directory_name(output_directory)}"
-        imported_object[_AUTO_IMPORT_KEY] = True
-        imported_object[_LEGACY_AUTO_IMPORT_KEY] = True
-        imported_object[_OUTPUT_PATH_KEY] = str(output_directory)
-        imported_object[_LEGACY_OUTPUT_PATH_KEY] = str(output_directory)
-    return len([obj for obj in imported_objects if obj.type == "VOLUME"])
+        imported_object.data.filepath = str(first_file)
+        _reload_volume_data(imported_object.data)
+        _apply_imported_volume_object_settings(imported_object, output_directory)
+        return 1
+    return 0
+
+
+def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
+    _remove_previous_baked_volume(output_directory)
+    first_file = vdb_files[0]
+    volume_name = _managed_volume_display_name(output_directory)
+    volume_data = bpy.data.volumes.new(volume_name)
+    volume_object = None
+    try:
+        volume_data.filepath = str(first_file)
+        _apply_imported_volume_sequence_settings(volume_data, start_frame, len(vdb_files))
+        _reload_volume_data(volume_data)
+        volume_object = bpy.data.objects.new(volume_name, volume_data)
+        _apply_imported_volume_object_settings(volume_object, output_directory)
+        target_collection = _volume_collection_for_import()
+        if target_collection is None:
+            raise RuntimeError("No active Blender collection is available for the imported volume.")
+        target_collection.objects.link(volume_object)
+        return 1
+    except Exception:
+        if volume_object is not None:
+            try:
+                bpy.data.objects.remove(volume_object)
+            except Exception:
+                pass
+        try:
+            bpy.data.volumes.remove(volume_data)
+        except Exception:
+            pass
+        raise
+
+
+def _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame):
+    refreshed_count = _refresh_imported_vdb_sequence(output_directory, vdb_files, start_frame)
+    if refreshed_count > 0:
+        return refreshed_count
+    return _import_baked_vdb_sequence(output_directory, vdb_files, start_frame)
+
+
+def _iter_live_preview_output_entries(config_dict):
+    for simulation_cfg in config_dict.get("simulations", ()):
+        viewers = simulation_cfg.get("viewers", ())
+        if not viewers:
+            continue
+        if not any(bool(viewer_cfg.get("live_preview", True)) for viewer_cfg in viewers):
+            continue
+        settings = simulation_cfg.get("settings", {})
+        start_frame = int(settings.get("start_frame", 1))
+        for output_cfg in simulation_cfg.get("outputs", ()):
+            output_path = output_cfg.get("output_path", "")
+            if not output_path:
+                continue
+            yield Path(output_path).resolve(), start_frame, output_cfg
+
+
+def _live_preview_refresh_interval(config_dict, default_fps=24):
+    intervals = []
+    for _output_directory, _start_frame, output_cfg in _iter_live_preview_output_entries(config_dict):
+        try:
+            output_fps = max(1.0, float(output_cfg.get("fps", default_fps)))
+        except (TypeError, ValueError):
+            output_fps = float(default_fps)
+        intervals.append(1.0 / output_fps)
+    if not intervals:
+        return None
+    return min(intervals)
+
+
+def _refresh_live_preview(config_dict, context=None, state=None):
+    preview_state = state if isinstance(state, dict) else {}
+    refreshed_count = 0
+    latest_frame = None
+
+    for output_directory, start_frame, _output_cfg in _iter_live_preview_output_entries(config_dict):
+        if not output_directory.exists():
+            continue
+        vdb_files = _baked_vdb_files(output_directory)
+        frame_count = len(vdb_files)
+        if frame_count <= 0:
+            continue
+
+        output_key = str(output_directory)
+        previous_frame_count = int((preview_state.get(output_key) or {}).get("frame_count", 0))
+        if frame_count <= previous_frame_count:
+            continue
+
+        refreshed_count += _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame)
+        preview_state[output_key] = {"frame_count": frame_count}
+        current_latest_frame = int(start_frame) + frame_count - 1
+        latest_frame = current_latest_frame if latest_frame is None else max(latest_frame, current_latest_frame)
+
+    if refreshed_count > 0:
+        _refresh_after_live_preview_update(context=context, frame_value=latest_frame)
+    return refreshed_count
 
 
 def _import_baked_vdbs(config_dict):
@@ -416,5 +549,5 @@ def _import_baked_vdbs(config_dict):
         if not vdb_files:
             continue
         start_frame = _start_frame_for_output_directory(config_dict, output_directory)
-        imported_count += _import_baked_vdb_sequence(output_directory, vdb_files, start_frame)
+        imported_count += _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame)
     return imported_count, missing_directories

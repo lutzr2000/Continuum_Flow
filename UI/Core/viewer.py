@@ -34,6 +34,21 @@ def _tag_view3d_redraw():
                 area.tag_redraw()
 
 
+def _tag_viewer_ui_redraw():
+    """Request a redraw for node editors and properties so viewer buttons update immediately."""
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
+
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type in {"NODE_EDITOR", "PROPERTIES"}:
+                area.tag_redraw()
+
+
 def _view3d_overlays_visible():
     """Return whether overlays are enabled in the currently drawing 3D view."""
     space_data = getattr(bpy.context, "space_data", None)
@@ -467,7 +482,9 @@ def enable_domain_preview(domain_node):
     _ACTIVE_DOMAIN_REF = _domain_node_reference(domain_node)
     if _DRAW_HANDLER is None:
         _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_preview, (), "WINDOW", "POST_VIEW")
+    _set_all_viewer_preview_flags(active=True)
     _tag_view3d_redraw()
+    _tag_viewer_ui_redraw()
 
 
 def disable_domain_preview():
@@ -478,7 +495,43 @@ def disable_domain_preview():
     if _DRAW_HANDLER is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLER, "WINDOW")
         _DRAW_HANDLER = None
+    _set_all_viewer_preview_flags(active=False)
     _tag_view3d_redraw()
+    _tag_viewer_ui_redraw()
+
+
+def domain_preview_enabled(domain_node=None):
+    """Return whether a domain preview is active, optionally for one specific domain node."""
+    active_domain = _resolve_domain_reference(_ACTIVE_DOMAIN_REF)
+    if active_domain is None:
+        return False
+    if domain_node is None:
+        return True
+    active_reference = _domain_node_reference(active_domain)
+    target_reference = _domain_node_reference(domain_node)
+    return bool(active_reference and target_reference and active_reference == target_reference)
+
+
+def viewer_domain_preview_enabled(viewer_node):
+    """Return whether the given viewer node currently controls the active domain preview."""
+    if viewer_node is None:
+        return False
+    domain_node = _linked_domain_from_viewer(viewer_node)
+    if domain_node is None:
+        return False
+    return domain_preview_enabled(domain_node)
+
+
+def _set_all_viewer_preview_flags(active=False):
+    """Synchronise the domain-preview toggle text across all viewer nodes."""
+    for node_tree in bpy.data.node_groups:
+        for node in getattr(node_tree, "nodes", ()):
+            if getattr(node, "bl_idname", "") != "BLENDERCFD_VIEWER_NODE":
+                continue
+            try:
+                node.domain_preview_active = bool(active and viewer_domain_preview_enabled(node))
+            except Exception:
+                pass
 
 
 def _force_preview_timer():
@@ -544,12 +597,12 @@ def _linked_domain_from_viewer(node):
     return None
 
 
-class BlenderCFD_OT_viewer_show_domain(bpy.types.Operator):
-    """Show the linked domain in the 3D viewport."""
+class BlenderCFD_OT_viewer_toggle_domain(bpy.types.Operator):
+    """Toggle the linked domain preview in the 3D viewport."""
 
-    bl_idname = "blendercfd.viewer_show_domain"
-    bl_label = "Show Domain Preview"
-    bl_description = "Draw the linked Continuum Flow domain as a viewport preview"
+    bl_idname = "blendercfd.viewer_toggle_domain"
+    bl_label = "Toggle Domain Preview"
+    bl_description = "Toggle the linked Continuum Flow domain viewport preview"
 
     def execute(self, context):
         node = getattr(context, "node", None)
@@ -562,25 +615,15 @@ class BlenderCFD_OT_viewer_show_domain(bpy.types.Operator):
             self.report({"ERROR"}, "Connect Domain -> Simulation -> Viewer first.")
             return {"CANCELLED"}
 
-        enable_domain_preview(domain_node)
-        self.report({"INFO"}, "Domain preview enabled.")
-        return {"FINISHED"}
-
-
-class BlenderCFD_OT_viewer_hide_domain(bpy.types.Operator):
-    """Hide the active domain preview."""
-
-    bl_idname = "blendercfd.viewer_hide_domain"
-    bl_label = "Hide Domain Preview"
-    bl_description = "Remove the Continuum Flow domain preview from the viewport"
-
-    def execute(self, context):
-        disable_domain_preview()
-        self.report({"INFO"}, "Domain preview disabled.")
+        if domain_preview_enabled(domain_node):
+            disable_domain_preview()
+            self.report({"INFO"}, "Domain preview disabled.")
+        else:
+            enable_domain_preview(domain_node)
+            self.report({"INFO"}, "Domain preview enabled.")
         return {"FINISHED"}
 
 
 classes = (
-    BlenderCFD_OT_viewer_show_domain,
-    BlenderCFD_OT_viewer_hide_domain,
+    BlenderCFD_OT_viewer_toggle_domain,
 )

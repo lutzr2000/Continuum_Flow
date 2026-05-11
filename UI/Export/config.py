@@ -590,6 +590,7 @@ def _serialize_viewer_node(node):
     """Serialize one viewer node."""
     return {
         "node_name": node.name,
+        "live_preview": bool(getattr(node, "live_preview", True)),
     }
 
 
