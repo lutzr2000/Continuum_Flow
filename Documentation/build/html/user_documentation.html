@@ -323,6 +323,8 @@ Wall: wall with friction</p>
 </dd>
 <dt><strong>Fuel Ignition Temperature</strong></dt><dd><p>If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.</p>
 </dd>
+<dt><strong>Minimum Oxygen Concentration</strong></dt><dd><p>Minimum oxygen concentration required for fuel to burn. Oxygen concentration is approximated as 100 % minus the local smoke concentration, so higher smoke concentration leaves less oxygen available for combustion.</p>
+</dd>
 <dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Zero is physically accurate, but usually a small extra amount looks better.</p>
 </dd>
 </dl>
@@ -378,13 +380,13 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/source_node.jpg"><img alt="_images/source_node.jpg" class="block-image-left" src="_images/source_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects geometry node as input and accepts multiple inputs.</p>
+<p>The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.</p>
 <dl class="simple">
-<dt><strong>Fuel</strong></dt><dd><p>How much fuels is spawned.</p>
+<dt><strong>Fuel Concentration</strong></dt><dd><p>Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
 </dd>
-<dt><strong>Smoke</strong></dt><dd><p>How much smoke is spawned.</p>
+<dt><strong>Smoke Concentration</strong></dt><dd><p>Smoke concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
 </dd>
-<dt><strong>Temperature</strong></dt><dd><p>Temperature that is spawned within the source.</p>
+<dt><strong>Temperature</strong></dt><dd><p>Temperature spawned within the source.</p>
 </dd>
 <dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>
