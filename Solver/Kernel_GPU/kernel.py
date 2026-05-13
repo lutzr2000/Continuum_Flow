@@ -535,7 +535,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
 
 def pressure_poisson(
-    u, v, w, p, T, obstacle_mask, p_work, b, omega_x, omega_y, omega_z, omega_magnitude,
+    u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
     max_iter=10, threadsperblock_3d=None
 ):
@@ -550,7 +550,6 @@ def pressure_poisson(
         p (device array): pressure field
         T (device array): temperature field
         obstacle_mask (device array): boolean obstacle mask used to zero solid vorticity
-        p_work (device array): work array for the pressure iteration
         b (device array): work array for the pressure equation right hand side
         omega_x (device array): work array for the x-component of vorticity
         omega_y (device array): work array for the y-component of vorticity
@@ -905,7 +904,6 @@ def main(config=None):
     v_work = gpu_fields["v_work"]
     w_work = gpu_fields["w_work"]
     p = gpu_fields["p"]
-    pressure_work = gpu_fields["pressure_work"]
     pressure_rhs = gpu_fields["pressure_rhs"]
     T = gpu_fields["T"]
     temperature_work = gpu_fields["temperature_work"]
@@ -1103,7 +1101,7 @@ def main(config=None):
             #------------Pressure-------------------
             section_start = perf_counter()
             p = pressure_poisson(
-                u, v, w, p, T, obstacle_mask, pressure_work, pressure_rhs,
+                u, v, w, p, T, obstacle_mask, pressure_rhs,
                 vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
                 gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
                 gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"]
