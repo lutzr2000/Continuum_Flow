@@ -1,7 +1,7 @@
 TODO
 
 Make solver installable
-Reduce VRAM usage?
+time gpu solver more detailed again it needs more performance
 Documentation with sphynx
 Testing
 
