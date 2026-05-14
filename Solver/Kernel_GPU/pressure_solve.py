@@ -98,20 +98,21 @@ def pressure_equation_right_side(
     omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
 @cuda.jit(cache=True)
-def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
+def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor):
     """
-    Perform one in-place red-black Gauss-Seidel color pass of the 3D pressure
-    Poisson equation on the GPU.
+    Perform one in-place red-black SOR color pass of the 3D pressure Poisson
+    equation on the GPU.
 
     Only interior cells whose `(i + j + k) % 2` matches `parity` are updated in
-    this launch. The complementary color is expected to be updated by a second
-    launch in the same iteration.
+    this launch. Each update first computes the red-black Gauss-Seidel value and
+    then applies the SOR relaxation increment in place.
 
     Args:
         p (device array): pressure field updated in place
         b (device array): right hand side of the pressure Poisson equation
         delta (float): grid spacing
         parity (int): `0` for red cells, `1` for black cells
+        relaxation_factor (float): SOR relaxation factor, typically in `(1, 2)`
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = p.shape
@@ -127,12 +128,14 @@ def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
         return
 
     delta2 = delta * delta
-    p[i, j, k] = (
+    gauss_seidel_value = (
         p[i + 1, j, k] + p[i - 1, j, k] +
         p[i, j + 1, k] + p[i, j - 1, k] +
         p[i, j, k + 1] + p[i, j, k - 1] -
         delta2 * b[i, j, k]
     ) / 6.0
+    p_old = p[i, j, k]
+    p[i, j, k] = p_old + relaxation_factor * (gauss_seidel_value - p_old)
 
 
 @cuda.jit(cache=True)
@@ -146,11 +149,11 @@ def _pressure_poisson_fix_reference_pressure(p, ref_i, ref_j, ref_k):
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, threadsperblock_3d=None
+    max_iter=10, threadsperblock_3d=None, relaxation_factor=1.7
 ):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
-    Jacobi iterations and Neumann boundary conditions.
+    red-black SOR iterations and Neumann boundary conditions.
 
     Args:
         u (device array): x-velocity field
@@ -171,7 +174,7 @@ def pressure_poisson(
         expansion_rate (float): thermal expansion coupling
         t_reference (float): reference temperature
         max_iter (int): number of pressure iterations
-        pressure_solver (str): `jacobi` or `red_black_gauss_seidel` / `rbgs`
+        relaxation_factor (float): SOR relaxation factor used on the GPU
     Returns:
         device array: updated pressure field
     """
@@ -190,8 +193,15 @@ def pressure_poisson(
     p_old = p
 
     for _ in range(max_iter):
-        _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 0)
-        _pressure_poisson_red_black_gauss_seidel_step[blockspergrid_3d, threadsperblock_3d](p_old, b, delta, 1)
+        _pressure_poisson_red_black_sor_step[blockspergrid_3d, threadsperblock_3d](
+            p_old, b, delta, 0, relaxation_factor
+        )
+        BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
+        _pressure_poisson_fix_reference_pressure[1, 1](p_old, ref_i, ref_j, ref_k)
+        _pressure_poisson_red_black_sor_step[blockspergrid_3d, threadsperblock_3d](
+            p_old, b, delta, 1, relaxation_factor
+        )
+        BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
         _pressure_poisson_fix_reference_pressure[1, 1](p_old, ref_i, ref_j, ref_k)
         
     BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
