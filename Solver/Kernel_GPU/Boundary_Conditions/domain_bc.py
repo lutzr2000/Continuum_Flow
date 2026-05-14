@@ -18,6 +18,42 @@ SIDE_TO_AXIS_AND_INDEX = {
 }
 
 
+@cuda.jit(cache=True)
+def _pressure_poisson_apply_neumann_bcs(p):
+    """
+    applies the hard-coded zero-gradient pressure boundary conditions on all
+    six domain faces on the GPU.
+
+    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
+    meaning the pressure at the boundary is copied from the adjacent interior
+    cell. This kernel writes the boundary values after each Jacobi iteration so
+    the next iteration starts from a pressure field with valid boundary values.
+
+    Args:
+        p (device array): pressure field whose domain boundaries will be updated
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if i == 0:
+        p[i, j, k] = p[1, j, k]
+    elif i == nx - 1:
+        p[i, j, k] = p[nx - 2, j, k]
+
+    if j == 0:
+        p[i, j, k] = p[i, 1, k]
+    elif j == ny - 1:
+        p[i, j, k] = p[i, ny - 2, k]
+
+    if k == 0:
+        p[i, j, k] = p[i, j, 1]
+    elif k == nz - 1:
+        p[i, j, k] = p[i, j, nz - 2]
+
+
 @cuda.jit(device=True)
 def _apply_face_state(
     u, v, w, p, T, smoke, fuel,
