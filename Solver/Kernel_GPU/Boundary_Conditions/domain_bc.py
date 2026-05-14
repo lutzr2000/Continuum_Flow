@@ -1,6 +1,6 @@
 from numba import cuda
 
-from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D, boundary_face_blocks_per_grid
+from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D
 
 
 BC_OUTFLOW = 0
@@ -101,194 +101,140 @@ def _apply_face_state(
 @cuda.jit
 def _domain_bc_kernel(
     u, v, w, p, T, smoke, fuel,
-    axis, side_index, bc_mode,
-    u_value, v_value, w_value,
-    temp_value, use_temp,
+    x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,
+    x_high_mode, x_high_u, x_high_v, x_high_w, x_high_temp, x_high_use_temp,
+    y_low_mode, y_low_u, y_low_v, y_low_w, y_low_temp, y_low_use_temp,
+    y_high_mode, y_high_u, y_high_v, y_high_w, y_high_temp, y_high_use_temp,
+    z_low_mode, z_low_u, z_low_v, z_low_w, z_low_temp, z_low_use_temp,
+    z_high_mode, z_high_u, z_high_v, z_high_w, z_high_temp, z_high_use_temp,
 ):
     """
-    Apply one domain boundary condition on one selected face of the simulation.
+    Apply all configured domain face boundary conditions in one 3D launch.
 
-    The kernel handles all supported domain BC types. Pressure always uses a
-    homogeneous Neumann condition and temperature uses either a fixed value or
-    a homogeneous Neumann condition depending on ``use_temp``.
+    One thread owns one boundary cell and sequentially applies every matching
+    face condition for corners and edges in the same fixed side order.
     """
-    a, b = cuda.grid(2)
+    i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
 
-    if axis == 0:
-        if a >= ny or b >= nz:
-            return
-        i = 0 if side_index == 0 else nx - 1
-        src_i = 1 if side_index == 0 else nx - 2
-        _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, a, b,
-            src_i, a, b,
-            axis, side_index,
-            bc_mode,
-            u_value, v_value, w_value,
-            temp_value, use_temp,
-        )
+    if i >= nx or j >= ny or k >= nz:
         return
 
-    if axis == 1:
-        if a >= nx or b >= nz:
-            return
-        j = 0 if side_index == 0 else ny - 1
-        src_j = 1 if side_index == 0 else ny - 2
-        _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            a, j, b,
-            a, src_j, b,
-            axis, side_index,
-            bc_mode,
-            u_value, v_value, w_value,
-            temp_value, use_temp,
-        )
+    if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
         return
 
-    if axis == 2:
-        if a >= nx or b >= ny:
-            return
-        k = 0 if side_index == 0 else nz - 1
-        src_k = 1 if side_index == 0 else nz - 2
+    if i == 0:
         _apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            a, b, k,
-            a, b, src_k,
-            axis, side_index,
-            bc_mode,
-            u_value, v_value, w_value,
-            temp_value, use_temp,
+            i, j, k,
+            1, j, k,
+            0, 0,
+            x_low_mode,
+            x_low_u, x_low_v, x_low_w,
+            x_low_temp, x_low_use_temp,
+        )
+    elif i == nx - 1:
+        _apply_face_state(
+            u, v, w, p, T, smoke, fuel,
+            i, j, k,
+            nx - 2, j, k,
+            0, 1,
+            x_high_mode,
+            x_high_u, x_high_v, x_high_w,
+            x_high_temp, x_high_use_temp,
         )
 
+    if j == 0:
+        _apply_face_state(
+            u, v, w, p, T, smoke, fuel,
+            i, j, k,
+            i, 1, k,
+            1, 0,
+            y_low_mode,
+            y_low_u, y_low_v, y_low_w,
+            y_low_temp, y_low_use_temp,
+        )
+    elif j == ny - 1:
+        _apply_face_state(
+            u, v, w, p, T, smoke, fuel,
+            i, j, k,
+            i, ny - 2, k,
+            1, 1,
+            y_high_mode,
+            y_high_u, y_high_v, y_high_w,
+            y_high_temp, y_high_use_temp,
+        )
 
-def _launch_face_bc(
-    u, v, w, p, T, smoke, fuel,
-    side, bc_mode,
-    u_value=0.0, v_value=0.0, w_value=0.0,
-    temp_value=None,
-    threadsperblock=None,
-):
-    """Launch the shared domain-face BC kernel with readable host-side defaults."""
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_2D
-
-    axis, side_index = SIDE_TO_AXIS_AND_INDEX[side]
-    blockspergrid = boundary_face_blocks_per_grid(u.shape, axis, threadsperblock)
-    _domain_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, p, T, smoke, fuel,
-        axis, side_index, bc_mode,
-        u_value, v_value, w_value,
-        0.0 if temp_value is None else temp_value,
-        temp_value is not None,
-    )
-    return u, v, w, p, T, smoke, fuel
-
-
-def inflow_bc(
-    u, v, w, p, T, smoke, fuel,
-    side, u_inflow, v_inflow, w_inflow, t_inflow=None, threadsperblock=None
-):
-    """
-    Apply inflow boundary conditions to one side of the domain on the GPU.
-
-    Velocity is fixed to the prescribed inflow values, pressure receives a
-    homogeneous Neumann condition and temperature uses either a fixed inflow
-    value or a Neumann condition when no temperature is specified.
-    """
-    return _launch_face_bc(
-        u, v, w, p, T, smoke, fuel,
-        side,
-        BC_INFLOW,
-        u_value=u_inflow,
-        v_value=v_inflow,
-        w_value=w_inflow,
-        temp_value=t_inflow,
-        threadsperblock=threadsperblock,
-    )
-
-
-def outflow_bc(u, v, w, p, T, smoke, fuel, side, threadsperblock=None):
-    """
-    Apply outflow boundary conditions to one side of the domain on the GPU.
-
-    All fields use homogeneous Neumann conditions so their boundary values are
-    copied from the adjacent interior cells.
-    """
-    return _launch_face_bc(
-        u, v, w, p, T, smoke, fuel,
-        side,
-        BC_OUTFLOW,
-        threadsperblock=threadsperblock,
-    )
-
-
-def slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None, threadsperblock=None):
-    """
-    Apply slip-wall boundary conditions to one side of the domain on the GPU.
-
-    The velocity component normal to the wall is forced to zero, tangential
-    components receive homogeneous Neumann conditions and pressure always uses
-    a homogeneous Neumann condition.
-    """
-    return _launch_face_bc(
-        u, v, w, p, T, smoke, fuel,
-        side,
-        BC_SLIP_WALL,
-        temp_value=t_wall,
-        threadsperblock=threadsperblock,
-    )
-
-
-def no_slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None, threadsperblock=None):
-    """
-    Apply no-slip wall boundary conditions to one side of the domain on the GPU.
-
-    All three velocity components are forced to zero at the wall, pressure uses
-    a homogeneous Neumann condition and temperature is either copied from the
-    interior or fixed to a prescribed wall value.
-    """
-    return _launch_face_bc(
-        u, v, w, p, T, smoke, fuel,
-        side,
-        BC_NO_SLIP_WALL,
-        temp_value=t_wall,
-        threadsperblock=threadsperblock,
-    )
+    if k == 0:
+        _apply_face_state(
+            u, v, w, p, T, smoke, fuel,
+            i, j, k,
+            i, j, 1,
+            2, 0,
+            z_low_mode,
+            z_low_u, z_low_v, z_low_w,
+            z_low_temp, z_low_use_temp,
+        )
+    elif k == nz - 1:
+        _apply_face_state(
+            u, v, w, p, T, smoke, fuel,
+            i, j, k,
+            i, j, nz - 2,
+            2, 1,
+            z_high_mode,
+            z_high_u, z_high_v, z_high_w,
+            z_high_temp, z_high_use_temp,
+        )
 
 
 def apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config):
     """
     Apply all configured domain boundary conditions to the GPU field state.
 
-    The function iterates over the configured faces and dispatches the matching
-    boundary mode for INFLOW, OUTFLOW, SLIP_WALL and WALL.
+    All six domain faces are packed into scalar launch arguments and applied in
+    one GPU kernel to reduce launch overhead.
     """
-    for side, bc in bc_config.items():
+    face_args = {}
+    for side in SIDE_TO_AXIS_AND_INDEX:
+        bc = bc_config[side]
         bc_type = bc["type"]
         temperature = bc.get("T", bc.get("temperature"))
 
         if bc_type == "OUTFLOW":
-            u, v, w, p, T, smoke, fuel = outflow_bc(u, v, w, p, T, smoke, fuel, side)
+            bc_mode = BC_OUTFLOW
         elif bc_type == "INFLOW":
-            u, v, w, p, T, smoke, fuel = inflow_bc(
-                u, v, w, p, T, smoke, fuel,
-                side,
-                bc.get("u", 0.0),
-                bc.get("v", 0.0),
-                bc.get("w", 0.0),
-                temperature,
-            )
+            bc_mode = BC_INFLOW
         elif bc_type == "WALL":
-            u, v, w, p, T, smoke, fuel = no_slip_wall_bc(
-                u, v, w, p, T, smoke, fuel, side, temperature
-            )
+            bc_mode = BC_NO_SLIP_WALL
         elif bc_type == "SLIP_WALL":
-            u, v, w, p, T, smoke, fuel = slip_wall_bc(
-                u, v, w, p, T, smoke, fuel, side, temperature
-            )
+            bc_mode = BC_SLIP_WALL
         else:
             raise ValueError(f"Unknown boundary condition '{bc_type}' for side '{side}'")
+
+        face_args[side] = (
+            bc_mode,
+            float(bc.get("u", 0.0)),
+            float(bc.get("v", 0.0)),
+            float(bc.get("w", 0.0)),
+            0.0 if temperature is None else float(temperature),
+            temperature is not None,
+        )
+
+    threadsperblock = (THREADS_PER_BLOCK_2D[0], THREADS_PER_BLOCK_2D[0], THREADS_PER_BLOCK_2D[1])
+    blockspergrid = (
+        (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (u.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (u.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+    )
+
+    _domain_bc_kernel[blockspergrid, threadsperblock](
+        u, v, w, p, T, smoke, fuel,
+        *face_args["x_low"],
+        *face_args["x_high"],
+        *face_args["y_low"],
+        *face_args["y_high"],
+        *face_args["z_low"],
+        *face_args["z_high"],
+    )
 
     return u, v, w, p, T, smoke, fuel
