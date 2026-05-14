@@ -138,14 +138,6 @@ def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor)
     p[i, j, k] = p_old + relaxation_factor * (gauss_seidel_value - p_old)
 
 
-@cuda.jit(cache=True)
-def _pressure_poisson_fix_reference_pressure(p, ref_i, ref_j, ref_k):
-    """Pin one interior pressure cell to zero to remove the Neumann nullspace."""
-    if cuda.grid(1) != 0:
-        return
-    p[ref_i, ref_j, ref_k] = 0.0
-
-
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
@@ -181,10 +173,6 @@ def pressure_poisson(
     if threadsperblock_3d is None:
         threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
-    nx, ny, nz = p.shape
-    ref_i = min(max(nx // 2, 1), nx - 2)
-    ref_j = min(max(ny // 2, 1), ny - 2)
-    ref_k = min(max(nz // 2, 1), nz - 2)
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
@@ -197,13 +185,10 @@ def pressure_poisson(
             p_old, b, delta, 0, relaxation_factor
         )
         BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
-        _pressure_poisson_fix_reference_pressure[1, 1](p_old, ref_i, ref_j, ref_k)
         _pressure_poisson_red_black_sor_step[blockspergrid_3d, threadsperblock_3d](
             p_old, b, delta, 1, relaxation_factor
         )
         BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
-        _pressure_poisson_fix_reference_pressure[1, 1](p_old, ref_i, ref_j, ref_k)
         
     BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
-    _pressure_poisson_fix_reference_pressure[1, 1](p_old, ref_i, ref_j, ref_k)
     return p_old

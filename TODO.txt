@@ -1,12 +1,11 @@
 TODO
 
+clean up recent code adds
 Make solver installable
-
-pressure Chebyshev-Jacobi?
-implement semi lagrangian as optional, auto switch max cfl when user selects that
-maybe semi lagrangian with many (or variable) backtrace steps? like 4 steps back or whatever?
-
+auto switch max cfl when user switches advection scheme
+speed up launch of code some stuff takes a too long there
 Update CPU to GPU state
+Geometry nodes domain edge fade
 Documentation with sphynx
 Testing
 
