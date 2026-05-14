@@ -507,13 +507,14 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
-    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=1.0, soft_max=1, description="CFL condition for the solver", options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=10.0, soft_max=10, description="CFL condition for the solver", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     velocity_advection_scheme: bpy.props.EnumProperty(
         name="",
         items=(
             ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster"),
             ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower"),
+            ("SEMI_LAGRANGIAN", "Semi-Lagrangian", "very stable, more diffusive, allows larger timesteps"),
         ),
         default="FIRST_ORDER_UPWIND",
         options=set(),

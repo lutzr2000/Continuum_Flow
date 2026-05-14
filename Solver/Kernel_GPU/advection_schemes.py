@@ -1,6 +1,73 @@
 from numba import cuda
 
 
+@cuda.jit(device=True, inline=True)
+def _clamp(value, lower, upper):
+    if value < lower:
+        return lower
+    if value > upper:
+        return upper
+    return value
+
+
+@cuda.jit(device=True, inline=True)
+def _sample_trilinear(field, x, y, z):
+    nx, ny, nz = field.shape
+
+    x = _clamp(x, 0.0, float(nx - 1))
+    y = _clamp(y, 0.0, float(ny - 1))
+    z = _clamp(z, 0.0, float(nz - 1))
+
+    x0 = int(x)
+    y0 = int(y)
+    z0 = int(z)
+
+    x1 = min(x0 + 1, nx - 1)
+    y1 = min(y0 + 1, ny - 1)
+    z1 = min(z0 + 1, nz - 1)
+
+    tx = x - x0
+    ty = y - y0
+    tz = z - z0
+
+    c000 = field[x0, y0, z0]
+    c100 = field[x1, y0, z0]
+    c010 = field[x0, y1, z0]
+    c110 = field[x1, y1, z0]
+    c001 = field[x0, y0, z1]
+    c101 = field[x1, y0, z1]
+    c011 = field[x0, y1, z1]
+    c111 = field[x1, y1, z1]
+
+    c00 = c000 + tx * (c100 - c000)
+    c10 = c010 + tx * (c110 - c010)
+    c01 = c001 + tx * (c101 - c001)
+    c11 = c011 + tx * (c111 - c011)
+
+    c0 = c00 + ty * (c10 - c00)
+    c1 = c01 + ty * (c11 - c01)
+    return c0 + tz * (c1 - c0)
+
+
+@cuda.jit(device=True, inline=True)
+def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
+    substep_dt = dt_over_delta * 0.25
+    x_pos = x_start
+    y_pos = y_start
+    z_pos = z_start
+
+    for _ in range(2):
+        u_sample = _sample_trilinear(u, x_pos, y_pos, z_pos)
+        v_sample = _sample_trilinear(v, x_pos, y_pos, z_pos)
+        w_sample = _sample_trilinear(w, x_pos, y_pos, z_pos)
+
+        x_pos -= substep_dt * u_sample
+        y_pos -= substep_dt * v_sample
+        z_pos -= substep_dt * w_sample
+
+    return x_pos, y_pos, z_pos
+
+
 @cuda.jit(cache=True)
 def update_velocity(
     u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
@@ -296,6 +363,76 @@ def update_velocity_second_order_upwind(
     u_raw = u_center - convection_x - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
     v_raw = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
     w_raw = w_center - convection_z - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
+
+    max_increment = max_velocity_increment_factor * delta / dt
+    du = min(max(u_raw - u_center, -max_increment), max_increment)
+    dv = min(max(v_raw - v_center, -max_increment), max_increment)
+    dw = min(max(w_raw - w_center, -max_increment), max_increment)
+
+    un[i, j, k] = u_center + du
+    vn[i, j, k] = v_center + dv
+    wn[i, j, k] = w_center + dw
+
+
+@cuda.jit(cache=True)
+def update_velocity_semi_lagrangian(
+    u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
+    max_velocity_increment_factor
+):
+    """
+    CUDA kernel that updates velocity with semi-Lagrangian advection.
+
+    The velocity at each cell is backtraced through the old velocity field and
+    reconstructed with trilinear interpolation. Pressure, diffusion and body
+    forces are then applied explicitly at the current cell.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = u.shape
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
+    dt_over_delta = dt / delta
+    pressure_coeff = dt / (2.0 * rho * delta)
+    diffusion_coeff = nu * dt / (delta * delta)
+    force_coeff = dt / rho
+
+    u_center = u[i, j, k]
+    v_center = v[i, j, k]
+    w_center = w[i, j, k]
+
+    x_depart, y_depart, z_depart = _backtrace_position(
+        u, v, w,
+        float(i), float(j), float(k),
+        dt_over_delta,
+    )
+
+    advected_u = _sample_trilinear(u, x_depart, y_depart, z_depart)
+    advected_v = _sample_trilinear(v, x_depart, y_depart, z_depart)
+    advected_w = _sample_trilinear(w, x_depart, y_depart, z_depart)
+
+    diffusion_x = diffusion_coeff * (
+        (u[i + 1, j, k] - 2.0 * u_center + u[i - 1, j, k]) +
+        (u[i, j + 1, k] - 2.0 * u_center + u[i, j - 1, k]) +
+        (u[i, j, k + 1] - 2.0 * u_center + u[i, j, k - 1])
+    )
+    diffusion_y = diffusion_coeff * (
+        (v[i + 1, j, k] - 2.0 * v_center + v[i - 1, j, k]) +
+        (v[i, j + 1, k] - 2.0 * v_center + v[i, j - 1, k]) +
+        (v[i, j, k + 1] - 2.0 * v_center + v[i, j, k - 1])
+    )
+    diffusion_z = diffusion_coeff * (
+        (w[i + 1, j, k] - 2.0 * w_center + w[i - 1, j, k]) +
+        (w[i, j + 1, k] - 2.0 * w_center + w[i, j - 1, k]) +
+        (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
+    )
+
+    pressure_gradient_x = pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    pressure_gradient_y = pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+
+    u_raw = advected_u - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
+    v_raw = advected_v - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
+    w_raw = advected_w - pressure_gradient_z + diffusion_z + force_coeff * Fz[i, j, k]
 
     max_increment = max_velocity_increment_factor * delta / dt
     du = min(max(u_raw - u_center, -max_increment), max_increment)

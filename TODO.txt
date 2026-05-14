@@ -2,9 +2,9 @@ TODO
 
 Make solver installable
 
-pressure multigrid?
+pressure Chebyshev-Jacobi?
 implement semi lagrangian as optional, auto switch max cfl when user selects that
-maybe tom lagrangian with many (or variable) backtrace steps? like 4 steps back or whatever?
+maybe semi lagrangian with many (or variable) backtrace steps? like 4 steps back or whatever?
 
 Update CPU to GPU state
 Documentation with sphynx

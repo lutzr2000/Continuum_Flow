@@ -25,6 +25,73 @@ warnings.filterwarnings(
     category=CudaNumbaPerformanceWarning,
 )
 
+
+@cuda.jit(device=True, inline=True)
+def _clamp(value, lower, upper):
+    if value < lower:
+        return lower
+    if value > upper:
+        return upper
+    return value
+
+
+@cuda.jit(device=True, inline=True)
+def _sample_trilinear(field, x, y, z):
+    nx, ny, nz = field.shape
+
+    x = _clamp(x, 0.0, float(nx - 1))
+    y = _clamp(y, 0.0, float(ny - 1))
+    z = _clamp(z, 0.0, float(nz - 1))
+
+    x0 = int(x)
+    y0 = int(y)
+    z0 = int(z)
+
+    x1 = min(x0 + 1, nx - 1)
+    y1 = min(y0 + 1, ny - 1)
+    z1 = min(z0 + 1, nz - 1)
+
+    tx = x - x0
+    ty = y - y0
+    tz = z - z0
+
+    c000 = field[x0, y0, z0]
+    c100 = field[x1, y0, z0]
+    c010 = field[x0, y1, z0]
+    c110 = field[x1, y1, z0]
+    c001 = field[x0, y0, z1]
+    c101 = field[x1, y0, z1]
+    c011 = field[x0, y1, z1]
+    c111 = field[x1, y1, z1]
+
+    c00 = c000 + tx * (c100 - c000)
+    c10 = c010 + tx * (c110 - c010)
+    c01 = c001 + tx * (c101 - c001)
+    c11 = c011 + tx * (c111 - c011)
+
+    c0 = c00 + ty * (c10 - c00)
+    c1 = c01 + ty * (c11 - c01)
+    return c0 + tz * (c1 - c0)
+
+
+@cuda.jit(device=True, inline=True)
+def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
+    substep_dt = dt_over_delta * 0.25
+    x_pos = x_start
+    y_pos = y_start
+    z_pos = z_start
+
+    for _ in range(4):
+        u_sample = _sample_trilinear(u, x_pos, y_pos, z_pos)
+        v_sample = _sample_trilinear(v, x_pos, y_pos, z_pos)
+        w_sample = _sample_trilinear(w, x_pos, y_pos, z_pos)
+
+        x_pos -= substep_dt * u_sample
+        y_pos -= substep_dt * v_sample
+        z_pos -= substep_dt * w_sample
+
+    return x_pos, y_pos, z_pos
+
 # ===============================
 # Methods
 # ===============================
@@ -275,6 +342,65 @@ def update_scalar_fields(T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out
     T_updated = T_center - temp_convection + dt * temperature_source
     smoke_updated = smoke_center - smoke_convection + dt * smoke_source
     fuel_updated = fuel_center - fuel_convection + dt * fuel_source
+
+    T_out[i, j, k] = max(T_updated, 0.0)
+    smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
+    fuel_out[i, j, k] = min(max(fuel_updated, 0.0), 100.0)
+    flame_out[i, j, k] = max(-fuel_source, 0.0)
+
+
+@cuda.jit(cache=True)
+def update_scalar_fields_semi_lagrangian(
+    T, smoke, fuel, u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
+    delta, temperature_dissipation_rate, temperature_production_rate,
+    smoke_dissipation_rate, smoke_production_rate,
+    fuel_burn_rate, fuel_ignition_temperature, minimum_oxygen_concentration, t_reference
+):
+    """
+    Update temperature, smoke and fuel with semi-Lagrangian advection on the GPU.
+
+    Scalars are backtraced through the current velocity field and reconstructed
+    with trilinear interpolation before the combustion and dissipation source
+    terms are applied.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = u.shape
+
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
+    dt_over_delta = dt / delta
+
+    x_depart, y_depart, z_depart = _backtrace_position(
+        u, v, w,
+        float(i), float(j), float(k),
+        dt_over_delta,
+    )
+
+    T_advected = _sample_trilinear(T, x_depart, y_depart, z_depart)
+    smoke_advected = _sample_trilinear(smoke, x_depart, y_depart, z_depart)
+    fuel_advected = _sample_trilinear(fuel, x_depart, y_depart, z_depart)
+
+    oxygen_center = 100.0 - smoke_advected
+
+    if (
+        T_advected > fuel_ignition_temperature and
+        fuel_advected > 0.0 and
+        oxygen_center >= minimum_oxygen_concentration
+    ):
+        fuel_source = -fuel_burn_rate * fuel_advected
+    else:
+        fuel_source = 0.0
+
+    temperature_source = (
+        -temperature_dissipation_rate * (T_advected - t_reference) +
+        temperature_production_rate * (-fuel_source)
+    )
+    smoke_source = smoke_production_rate * (-fuel_source) - smoke_dissipation_rate * smoke_advected
+
+    T_updated = T_advected + dt * temperature_source
+    smoke_updated = smoke_advected + dt * smoke_source
+    fuel_updated = fuel_advected + dt * fuel_source
 
     T_out[i, j, k] = max(T_updated, 0.0)
     smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
@@ -613,8 +739,14 @@ def _run_time_step(state, blockspergrid_3d):
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         )
-    else:
+    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SECOND_ORDER_UPWIND":
         advection_schemes.update_velocity_second_order_upwind[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
+            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
+            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+        )
+    else:
+        advection_schemes.update_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
@@ -628,19 +760,34 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Scalar update-------------------
     section_start = perf_counter()
-    update_scalar_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-        T, smoke, fuel, u, v, w, dt,
-        temperature_work, smoke_work, fuel_work, flame_work,
-        gpu_constants["DELTA"],
-        gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
-        gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
-        gpu_constants["SMOKE_DISSIPATION_RATE"],
-        gpu_constants["SMOKE_PRODUCTION_RATE"],
-        gpu_constants["FUEL_BURN_RATE"],
-        gpu_constants["FUEL_IGNITION_TEMPERATURE"],
-        gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
-        gpu_constants["T_REFERENCE"],
-    )
+    if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SEMI_LAGRANGIAN":
+        update_scalar_fields_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            T, smoke, fuel, u, v, w, dt,
+            temperature_work, smoke_work, fuel_work, flame_work,
+            gpu_constants["DELTA"],
+            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
+            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
+            gpu_constants["SMOKE_DISSIPATION_RATE"],
+            gpu_constants["SMOKE_PRODUCTION_RATE"],
+            gpu_constants["FUEL_BURN_RATE"],
+            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
+            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
+            gpu_constants["T_REFERENCE"],
+        )
+    else:
+        update_scalar_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            T, smoke, fuel, u, v, w, dt,
+            temperature_work, smoke_work, fuel_work, flame_work,
+            gpu_constants["DELTA"],
+            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
+            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
+            gpu_constants["SMOKE_DISSIPATION_RATE"],
+            gpu_constants["SMOKE_PRODUCTION_RATE"],
+            gpu_constants["FUEL_BURN_RATE"],
+            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
+            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
+            gpu_constants["T_REFERENCE"],
+        )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
 
