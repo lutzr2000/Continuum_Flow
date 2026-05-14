@@ -1,7 +1,15 @@
 TODO
 
 Make solver installable
-time gpu solver more detailed again it needs more performance
+
+in compute dt when finding v_max, why do that seperatly, i can also find v_max in update_velocity when going through the field anyway?
+pressure multigrid?
+pressure substract b_mean but compute faster as last time?
+implement semi lagrangian as optional, auto switch max cfl when user selects that
+maybe tom lagrangian with many (or variable) backtrace steps? like 4 steps back or whatever?
+split main in sub functions for readability
+put advection schemes in sperate file?
+
 Documentation with sphynx
 Testing
 

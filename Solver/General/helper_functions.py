@@ -75,6 +75,41 @@ class MemoryUsageTracker:
         )
 
 
+def _record_timing(stats, name, elapsed):
+    """Accumulate wall-clock timings for one named solver section."""
+    entry = stats.get(name)
+    if entry is None:
+        stats[name] = {"total": float(elapsed), "count": 1}
+        return
+    entry["total"] += float(elapsed)
+    entry["count"] += 1
+
+
+def _print_timing_summary(stats, total_runtime, step_count, output_frame_count):
+    """Print a compact timing table for the recorded GPU solver sections."""
+    measured_total = sum(entry["total"] for entry in stats.values())
+
+    print("Timing summary:")
+    print(f"  Sim steps: {int(step_count)}")
+    print(f"  Output frames enqueued: {int(output_frame_count)}")
+    print(f"  Measured section total: {measured_total:.3f} s")
+    print(f"  Solver wall time: {total_runtime:.3f} s")
+
+    if not stats:
+        print("  No timing sections were recorded.")
+        return
+
+    for name, entry in sorted(stats.items(), key=lambda item: item[1]["total"], reverse=True):
+        total = entry["total"]
+        count = entry["count"]
+        avg_ms = (1000.0 * total / count) if count > 0 else 0.0
+        share = (100.0 * total / total_runtime) if total_runtime > 0.0 else 0.0
+        print(
+            f"  {name:<28} total={total:8.3f} s  "
+            f"calls={count:6d}  avg={avg_ms:8.3f} ms  share={share:6.2f}%"
+        )
+
+
 def _format_bytes(byte_count):
     return f"{float(byte_count) / (1024.0 * 1024.0):.2f} MiB"
 

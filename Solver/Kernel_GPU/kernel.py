@@ -23,43 +23,6 @@ warnings.filterwarnings(
     category=CudaNumbaPerformanceWarning,
 )
 
-_pressure_rhs_sum = cuda.reduce(lambda a, b: a + b)
-
-
-def _record_timing(stats, name, elapsed):
-    """Accumulate wall-clock timings for one named solver section."""
-    entry = stats.get(name)
-    if entry is None:
-        stats[name] = {"total": float(elapsed), "count": 1}
-        return
-    entry["total"] += float(elapsed)
-    entry["count"] += 1
-
-
-def _print_timing_summary(stats, total_runtime, step_count, output_frame_count):
-    """Print a compact timing table for the recorded GPU solver sections."""
-    measured_total = sum(entry["total"] for entry in stats.values())
-
-    print("Timing summary:")
-    print(f"  Sim steps: {int(step_count)}")
-    print(f"  Output frames enqueued: {int(output_frame_count)}")
-    print(f"  Measured section total: {measured_total:.3f} s")
-    print(f"  Solver wall time: {total_runtime:.3f} s")
-
-    if not stats:
-        print("  No timing sections were recorded.")
-        return
-
-    for name, entry in sorted(stats.items(), key=lambda item: item[1]["total"], reverse=True):
-        total = entry["total"]
-        count = entry["count"]
-        avg_ms = (1000.0 * total / count) if count > 0 else 0.0
-        share = (100.0 * total / total_runtime) if total_runtime > 0.0 else 0.0
-        print(
-            f"  {name:<28} total={total:8.3f} s  "
-            f"calls={count:6d}  avg={avg_ms:8.3f} ms  share={share:6.2f}%"
-        )
-
 # ===============================
 # Methods
 # ===============================
@@ -881,7 +844,7 @@ def main(config=None):
     memory_tracker = helper_functions.MemoryUsageTracker("VRAM", helper_functions._sample_gpu_memory_usage)
     simulation_params = helper_functions.apply_config(config)
     cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
-    _record_timing(timing_stats, "init_config", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_config", perf_counter() - section_start)
 
     print("################################################################")
     print('Initialise')
@@ -891,11 +854,11 @@ def main(config=None):
     section_start = perf_counter()
     gpu_fields, gpu_constants = update_data.upload_simulation_state_to_gpu(simulation_params)
     cuda.synchronize()
-    _record_timing(timing_stats, "init_upload_fields", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_upload_fields", perf_counter() - section_start)
 
     section_start = perf_counter()
     memory_tracker.sample()
-    _record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
 
     u = gpu_fields["u"]
     v = gpu_fields["v"]
@@ -904,7 +867,6 @@ def main(config=None):
     v_work = gpu_fields["v_work"]
     w_work = gpu_fields["w_work"]
     p = gpu_fields["p"]
-    pressure_rhs = gpu_fields["pressure_rhs"]
     T = gpu_fields["T"]
     temperature_work = gpu_fields["temperature_work"]
     smoke = gpu_fields["smoke"]
@@ -913,43 +875,11 @@ def main(config=None):
     fuel_work = gpu_fields["fuel_work"]
     flame = gpu_fields["flame"]
     flame_work = gpu_fields["flame_work"]
-    vorticity_x = gpu_fields["vorticity_x"]
-    vorticity_y = gpu_fields["vorticity_y"]
-    vorticity_z = gpu_fields["vorticity_z"]
-    vorticity_magnitude = gpu_fields["vorticity_magnitude"]
-    Fx = gpu_fields["Fx"]
-    Fy = gpu_fields["Fy"]
-    Fz = gpu_fields["Fz"]
-    Fx_base = gpu_fields["Fx_base"]
-    Fy_base = gpu_fields["Fy_base"]
-    Fz_base = gpu_fields["Fz_base"]
-    point_divergence = gpu_fields["point_divergence"]
-    turbulence_Fx_a = gpu_fields["turbulence_Fx_a"]
-    turbulence_Fy_a = gpu_fields["turbulence_Fy_a"]
-    turbulence_Fz_a = gpu_fields["turbulence_Fz_a"]
-    turbulence_Fx_b = gpu_fields["turbulence_Fx_b"]
-    turbulence_Fy_b = gpu_fields["turbulence_Fy_b"]
-    turbulence_Fz_b = gpu_fields["turbulence_Fz_b"]
-    turbulence_cos_coeffs = gpu_fields["turbulence_cos_coeffs"]
-    turbulence_sin_coeffs = gpu_fields["turbulence_sin_coeffs"]
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
         dtype=simulation_params["PRECISION"],
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
-    obstacle_mask = gpu_fields["obstacle_mask"]
-    obstacle_velocity_x = gpu_fields["obstacle_velocity_x"]
-    obstacle_velocity_y = gpu_fields["obstacle_velocity_y"]
-    obstacle_velocity_z = gpu_fields["obstacle_velocity_z"]
-    source_mask = gpu_fields["source_mask"]
-    source_velocity_mask = gpu_fields["source_velocity_mask"]
-    source_temperature = gpu_fields["source_temperature"]
-    source_smoke = gpu_fields["source_smoke"]
-    source_fuel = gpu_fields["source_fuel"]
-    source_velocity_x = gpu_fields["source_velocity_x"]
-    source_velocity_y = gpu_fields["source_velocity_y"]
-    source_velocity_z = gpu_fields["source_velocity_z"]
-    velocity_maxima = gpu_fields["velocity_maxima"]
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
     device_fields = {
         "u": u,
@@ -966,23 +896,34 @@ def main(config=None):
     section_start = perf_counter()
     update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, 0.0)
     cuda.synchronize()
-    _record_timing(timing_stats, "init_dynamic_boundaries", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_dynamic_boundaries", perf_counter() - section_start)
 
     section_start = perf_counter()
     memory_tracker.sample()
-    _record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
 
     #------------Apply all BCs-------------------
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
         simulation_params["BC_CONFIG"],
-        gpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
-        gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
-        source_velocity_x, source_velocity_y, source_velocity_z,
+        gpu_constants["HAS_OBSTACLE"],
+        gpu_fields["obstacle_mask"],
+        gpu_fields["obstacle_velocity_x"],
+        gpu_fields["obstacle_velocity_y"],
+        gpu_fields["obstacle_velocity_z"],
+        gpu_constants["HAS_SOURCE"],
+        gpu_fields["source_mask"],
+        gpu_fields["source_velocity_mask"],
+        gpu_fields["source_temperature"],
+        gpu_fields["source_smoke"],
+        gpu_fields["source_fuel"],
+        gpu_fields["source_velocity_x"],
+        gpu_fields["source_velocity_y"],
+        gpu_fields["source_velocity_z"],
     )
     cuda.synchronize()
-    _record_timing(timing_stats, "init_apply_bc", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_apply_bc", perf_counter() - section_start)
 
     t = 0.0
     section_start = perf_counter()
@@ -996,7 +937,7 @@ def main(config=None):
         gpu_constants,
         simulation_params["ANIMATION_STATE"],
     )
-    _record_timing(timing_stats, "init_animated_state", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_animated_state", perf_counter() - section_start)
 
     write_queue = None
     writer_threads = None
@@ -1006,14 +947,14 @@ def main(config=None):
 
     #------------Dynamic time step-------------------
     section_start = perf_counter()
-    time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+    time_step.reset_velocity_maxima(gpu_fields["velocity_maxima"], velocity_maxima_host_zeros)
     dt, solver_diverged = time_step.compute_new_timestep_gpu(
-        u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
+        u, v, w, gpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
         gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], simulation_params["CFL_MAX"],
         max_dt=1.0 / simulation_params["OUTPUT_FPS"],
     )
     cuda.synchronize()
-    _record_timing(timing_stats, "init_timestep", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_timestep", perf_counter() - section_start)
 
     if solver_diverged:
         print('ERROR: The solver diverged before output setup, stopping the simulation!')
@@ -1034,7 +975,7 @@ def main(config=None):
             simulation_params["HOST_VDB_WRITER"],
             storage_dtype=simulation_params["OUTPUT_DTYPE"],
         )
-        _record_timing(timing_stats, "init_output_setup", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "init_output_setup", perf_counter() - section_start)
 
         #------------Main time loop-------------------
         print('Start time iteration')
@@ -1043,7 +984,7 @@ def main(config=None):
 
         section_start = perf_counter()
         memory_tracker.sample()
-        _record_timing(timing_stats, "loop_memory_sample", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "loop_memory_sample", perf_counter() - section_start)
 
         while t < simulation_params["T_MAX"]:
             step_start = perf_counter()
@@ -1057,7 +998,7 @@ def main(config=None):
                 section_start = perf_counter()
                 update_data.update_dynamic_boundary_data_on_gpu(simulation_params, gpu_fields, gpu_constants, t)
                 cuda.synchronize()
-                _record_timing(timing_stats, "loop_dynamic_boundaries", perf_counter() - section_start)
+                helper_functions._record_timing(timing_stats, "loop_dynamic_boundaries", perf_counter() - section_start)
 
             section_start = perf_counter()
             general_update_data.update_animated_constants(simulation_params, gpu_constants, t)
@@ -1066,74 +1007,82 @@ def main(config=None):
                 gpu_fields,
                 t,
             )
-            _record_timing(timing_stats, "loop_animated_state", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_animated_state", perf_counter() - section_start)
 
             #------------Forces-------------------
             if turbulence_count > 0:
                 section_start = perf_counter()
-                turbulence_cos_coeffs.copy_to_device(np.cos(turbulence_angular_frequencies * t))
-                turbulence_sin_coeffs.copy_to_device(np.sin(turbulence_angular_frequencies * t))
+                gpu_fields["turbulence_cos_coeffs"].copy_to_device(np.cos(turbulence_angular_frequencies * t))
+                gpu_fields["turbulence_sin_coeffs"].copy_to_device(np.sin(turbulence_angular_frequencies * t))
                 cuda.synchronize()
-                _record_timing(timing_stats, "loop_turbulence_upload", perf_counter() - section_start)
+                helper_functions._record_timing(timing_stats, "loop_turbulence_upload", perf_counter() - section_start)
 
             section_start = perf_counter()
             update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-                Fx_base, Fy_base, Fz_base,
-                turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
-                turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
-                turbulence_cos_coeffs, turbulence_sin_coeffs,
+                gpu_fields["Fx_base"], gpu_fields["Fy_base"], gpu_fields["Fz_base"],
+                gpu_fields["turbulence_Fx_a"], gpu_fields["turbulence_Fy_a"], gpu_fields["turbulence_Fz_a"],
+                gpu_fields["turbulence_Fx_b"], gpu_fields["turbulence_Fy_b"], gpu_fields["turbulence_Fz_b"],
+                gpu_fields["turbulence_cos_coeffs"], gpu_fields["turbulence_sin_coeffs"],
                 turbulence_count,
                 np.float32(animated_force["x"]),
                 np.float32(animated_force["y"]),
                 np.float32(animated_force["z"]),
-                Fx, Fy, Fz
+                gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"]
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_force_fields", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_force_fields", perf_counter() - section_start)
 
             section_start = perf_counter()
             buoyancy_approximation[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-                T, Fz, gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
+                T, gpu_fields["Fz"], gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
 
             #------------Pressure-------------------
             section_start = perf_counter()
             p = pressure_poisson(
-                u, v, w, p, T, obstacle_mask, pressure_rhs,
-                vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude, dt, point_divergence,
+                u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
+                gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"], dt, gpu_fields["point_divergence"],
                 gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
                 gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"]
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)
 
             if gpu_constants["VORTICITY"] > 0.0:
                 section_start = perf_counter()
                 apply_vorticity_confinement[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-                    obstacle_mask, vorticity_x, vorticity_y, vorticity_z, vorticity_magnitude,
-                    Fx, Fy, Fz, gpu_constants["DELTA"], gpu_constants["VORTICITY"]
+                    gpu_fields["obstacle_mask"],
+                    gpu_fields["vorticity_x"],
+                    gpu_fields["vorticity_y"],
+                    gpu_fields["vorticity_z"],
+                    gpu_fields["vorticity_magnitude"],
+                    gpu_fields["Fx"],
+                    gpu_fields["Fy"],
+                    gpu_fields["Fz"],
+                    gpu_constants["DELTA"],
+                    gpu_constants["VORTICITY"]
                 )
                 cuda.synchronize()
-                _record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
+                helper_functions._record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
             #------------Velocity-------------------
             section_start = perf_counter()
             if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "FIRST_ORDER_UPWIND":
                 update_velocity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-                    u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
+                    u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
                     gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
                     simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
                 )
             else:
                 update_velocity_second_order_upwind[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-                    u, v, w, p, dt, Fx, Fy, Fz, u_work, v_work, w_work,
+                    u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
                     gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
                     simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
                 )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
 
             u, u_work = u_work, u
             v, v_work = v_work, v
@@ -1155,7 +1104,7 @@ def main(config=None):
                 gpu_constants["T_REFERENCE"],
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
 
             #------------Swap-------------------
             T, temperature_work = temperature_work, T
@@ -1168,12 +1117,23 @@ def main(config=None):
             u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
                 u, v, w, p, T, smoke, fuel, flame,
                 simulation_params["BC_CONFIG"],
-                gpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
-                gpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
-                source_velocity_x, source_velocity_y, source_velocity_z,
+                gpu_constants["HAS_OBSTACLE"],
+                gpu_fields["obstacle_mask"],
+                gpu_fields["obstacle_velocity_x"],
+                gpu_fields["obstacle_velocity_y"],
+                gpu_fields["obstacle_velocity_z"],
+                gpu_constants["HAS_SOURCE"],
+                gpu_fields["source_mask"],
+                gpu_fields["source_velocity_mask"],
+                gpu_fields["source_temperature"],
+                gpu_fields["source_smoke"],
+                gpu_fields["source_fuel"],
+                gpu_fields["source_velocity_x"],
+                gpu_fields["source_velocity_y"],
+                gpu_fields["source_velocity_z"],
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_apply_bc", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_apply_bc", perf_counter() - section_start)
 
             #------------Output-------------------
             device_fields["u"] = u
@@ -1206,24 +1166,24 @@ def main(config=None):
                     print('#################################################')
                     print(f'Simulation time {t} sec')
                     print(f'Current dt: {np.round(dt, 5)}')
-            _record_timing(timing_stats, "loop_output", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_output", perf_counter() - section_start)
 
             #------------Dynamic time step-------------------
             t += dt
 
             section_start = perf_counter()
-            time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+            time_step.reset_velocity_maxima(gpu_fields["velocity_maxima"], velocity_maxima_host_zeros)
             dt_new, solver_diverged = time_step.compute_new_timestep_gpu(
-                u, v, w, velocity_maxima, fx_max, fy_max, fz_max,
+                u, v, w, gpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
                 gpu_constants["RHO"], gpu_constants["DELTA"], gpu_constants["NU"], simulation_params["CFL_MAX"],
                 max_dt=1.0 / simulation_params["OUTPUT_FPS"],
             )
             cuda.synchronize()
-            _record_timing(timing_stats, "loop_timestep", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_timestep", perf_counter() - section_start)
 
             section_start = perf_counter()
             memory_tracker.sample()
-            _record_timing(timing_stats, "loop_memory_sample", perf_counter() - section_start)
+            helper_functions._record_timing(timing_stats, "loop_memory_sample", perf_counter() - section_start)
 
             if solver_diverged:
                 print('ERROR: The solver diverged, stopping the simulation!')
@@ -1231,13 +1191,13 @@ def main(config=None):
 
             dt = dt_new
             step_count += 1
-            _record_timing(timing_stats, "loop_total", perf_counter() - step_start)
+            helper_functions._record_timing(timing_stats, "loop_total", perf_counter() - step_start)
 
     #------------Empty write queue-------------------
     if write_queue is not None:
         section_start = perf_counter()
         output_functions.shutdown_output(write_queue, writer_threads, shared_memory_blocks)
-        _record_timing(timing_stats, "shutdown_output", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "shutdown_output", perf_counter() - section_start)
 
     #------------Conclusion-------------------
     if solver_diverged:
@@ -1250,10 +1210,10 @@ def main(config=None):
 
     section_start = perf_counter()
     memory_tracker.sample()
-    _record_timing(timing_stats, "final_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "final_memory_sample", perf_counter() - section_start)
     memory_tracker.print_summary()
 
     total_runtime = perf_counter() - total_start_time
-    _print_timing_summary(timing_stats, total_runtime, step_count, output_frame_count)
+    helper_functions._print_timing_summary(timing_stats, total_runtime, step_count, output_frame_count)
     print(f'Solver runtime: {total_runtime:.3f} s')
     print("################################################################")
