@@ -12,13 +12,8 @@ def _clamp(value, lower, upper):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_trilinear(field, x, y, z, nx, ny, nz):
-    """
-    Sample one scalar field at fractional grid coordinates with trilinear interpolation.
-
-    The sample position is clamped to the valid array extent before the eight
-    surrounding cell values are blended.
-    """
+def _prepare_trilinear_coords(x, y, z, nx, ny, nz):
+    """Clamp one sample position and derive the surrounding cell coordinates."""
     if x < 0.0:
         x = 0.0
     elif x > nx - 1:
@@ -53,6 +48,12 @@ def _sample_trilinear(field, x, y, z, nx, ny, nz):
     ty = y - y0
     tz = z - z0
 
+    return x0, y0, z0, x1, y1, z1, tx, ty, tz
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_trilinear_inner(field, x0, y0, z0, x1, y1, z1, tx, ty, tz):
+    """Blend one scalar field from precomputed trilinear coordinates."""
     c000 = field[x0, y0, z0]
     c100 = field[x1, y0, z0]
     c010 = field[x0, y1, z0]
@@ -73,6 +74,29 @@ def _sample_trilinear(field, x, y, z, nx, ny, nz):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
+def _sample_trilinear(field, x, y, z, nx, ny, nz):
+    """
+    Sample one scalar field at fractional grid coordinates with trilinear interpolation.
+
+    The sample position is clamped to the valid array extent before the eight
+    surrounding cell values are blended.
+    """
+    x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
+    return _sample_trilinear_inner(field, x0, y0, z0, x1, y1, z1, tx, ty, tz)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_trilinear_vec3(field_x, field_y, field_z, x, y, z, nx, ny, nz):
+    """Sample three scalar fields at one position while reusing the same coordinates."""
+    x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
+
+    sample_x = _sample_trilinear_inner(field_x, x0, y0, z0, x1, y1, z1, tx, ty, tz)
+    sample_y = _sample_trilinear_inner(field_y, x0, y0, z0, x1, y1, z1, tx, ty, tz)
+    sample_z = _sample_trilinear_inner(field_z, x0, y0, z0, x1, y1, z1, tx, ty, tz)
+    return sample_x, sample_y, sample_z
+
+
+@cuda.jit(device=True, inline=True, cache=True)
 def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, ny, nz):
     """
     Backtrace one particle position through the velocity field with two substeps.
@@ -86,9 +110,7 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, n
     z_pos = z_start
 
     for _ in range(3):
-        u_sample = _sample_trilinear(u, x_pos, y_pos, z_pos, nx, ny, nz)
-        v_sample = _sample_trilinear(v, x_pos, y_pos, z_pos, nx, ny, nz)
-        w_sample = _sample_trilinear(w, x_pos, y_pos, z_pos, nx, ny, nz)
+        u_sample, v_sample, w_sample = _sample_trilinear_vec3(u, v, w, x_pos, y_pos, z_pos, nx, ny, nz)
 
         x_pos -= substep_dt * u_sample
         y_pos -= substep_dt * v_sample
@@ -104,26 +126,42 @@ def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, n
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_cell_extrema(field, x, y, z):
+def _sample_cell_extrema(field, x, y, z, nx, ny, nz):
     """
     Return the minimum and maximum corner values of the cell surrounding a sample point.
 
     MacCormack uses these bounds as a limiter so the corrected value stays
     inside the local source range and avoids new extrema.
     """
-    nx, ny, nz = field.shape
+    if x < 0.0:
+        x = 0.0
+    elif x > nx - 1:
+        x = nx - 1.0
 
-    x = _clamp(x, 0.0, float(nx - 1))
-    y = _clamp(y, 0.0, float(ny - 1))
-    z = _clamp(z, 0.0, float(nz - 1))
+    if y < 0.0:
+        y = 0.0
+    elif y > ny - 1:
+        y = ny - 1.0
+
+    if z < 0.0:
+        z = 0.0
+    elif z > nz - 1:
+        z = nz - 1.0
 
     x0 = int(x)
     y0 = int(y)
     z0 = int(z)
 
-    x1 = min(x0 + 1, nx - 1)
-    y1 = min(y0 + 1, ny - 1)
-    z1 = min(z0 + 1, nz - 1)
+    x1 = x0 + 1
+    y1 = y0 + 1
+    z1 = z0 + 1
+
+    if x1 >= nx:
+        x1 = nx - 1
+    if y1 >= ny:
+        y1 = ny - 1
+    if z1 >= nz:
+        z1 = nz - 1
 
     c000 = field[x0, y0, z0]
     c100 = field[x1, y0, z0]
@@ -205,17 +243,19 @@ def update_velocity_maccormack(
     advected_v = predictor_v[i, j, k]
     advected_w = predictor_w[i, j, k]
 
-    reverse_u = _sample_trilinear(predictor_u, x_forward, y_forward, z_forward, nx, ny, nz)
-    reverse_v = _sample_trilinear(predictor_v, x_forward, y_forward, z_forward, nx, ny, nz)
-    reverse_w = _sample_trilinear(predictor_w, x_forward, y_forward, z_forward, nx, ny, nz)
+    reverse_u, reverse_v, reverse_w = _sample_trilinear_vec3(
+        predictor_u, predictor_v, predictor_w,
+        x_forward, y_forward, z_forward,
+        nx, ny, nz,
+    )
 
     corrected_u = advected_u + maccormack_factor * (u_center - reverse_u)
     corrected_v = advected_v + maccormack_factor * (v_center - reverse_v)
     corrected_w = advected_w + maccormack_factor * (w_center - reverse_w)
 
-    u_lower, u_upper = _sample_cell_extrema(u, x_depart, y_depart, z_depart)
-    v_lower, v_upper = _sample_cell_extrema(v, x_depart, y_depart, z_depart)
-    w_lower, w_upper = _sample_cell_extrema(w, x_depart, y_depart, z_depart)
+    u_lower, u_upper = _sample_cell_extrema(u, x_depart, y_depart, z_depart, nx, ny, nz)
+    v_lower, v_upper = _sample_cell_extrema(v, x_depart, y_depart, z_depart, nx, ny, nz)
+    w_lower, w_upper = _sample_cell_extrema(w, x_depart, y_depart, z_depart, nx, ny, nz)
 
     corrected_u = _clamp(corrected_u, u_lower, u_upper)
     corrected_v = _clamp(corrected_v, v_lower, v_upper)

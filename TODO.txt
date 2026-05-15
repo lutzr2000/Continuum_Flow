@@ -5,10 +5,9 @@ Make solver installable
 Geometry nodes domain edge fade
 
 Solver: 
-make init config faster
-make sample trilinear faster
 Testing
 Update CPU to GPU state
+time CPU
 
 Documentation:
 finish docu in general
