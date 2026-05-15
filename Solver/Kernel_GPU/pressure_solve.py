@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 from numba import cuda
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
@@ -41,6 +42,7 @@ def pressure_equation_right_side(
         i < 1 or j < 1 or k < 1 or
         i >= nx - 1 or j >= ny - 1 or k >= nz - 1
     ):
+        b[i, j, k] = 0.0
         omega_x[i, j, k] = 0.0
         omega_y[i, j, k] = 0.0
         omega_z[i, j, k] = 0.0
@@ -88,6 +90,60 @@ def pressure_equation_right_side(
     omega_y[i, j, k] = wy
     omega_z[i, j, k] = wz
     omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
+
+
+@cuda.jit(cache=True)
+def _sum_rhs_kernel(b, rhs_sum):
+    """
+    Accumulate the zero-boundary RHS into one scalar sum on the GPU.
+
+    This cached kernel is intentionally simple and avoids the more complex
+    reduction pattern that triggered CUDA code-library serialization issues.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = b.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    cuda.atomic.add(rhs_sum, 0, b[i, j, k])
+
+
+@cuda.jit(cache=True)
+def _subtract_rhs_mean_kernel(b, rhs_mean):
+    """Subtract the interior RHS mean from interior cells only."""
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = b.shape
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1
+    ):
+        return
+
+    b[i, j, k] -= rhs_mean
+
+
+def _remove_rhs_mean(b, threadsperblock_3d):
+    """
+    Enforce the Neumann compatibility condition by removing the RHS mean.
+
+    The expensive sum is reduced on the GPU into a small partial buffer; only
+    those block sums are transferred to the host for the final scalar sum.
+    """
+    nx, ny, nz = b.shape
+    interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
+    rhs_sum = cuda.to_device(np.zeros(1, dtype=np.float32))
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, threadsperblock_3d)
+
+    _sum_rhs_kernel[blockspergrid_3d, threadsperblock_3d](b, rhs_sum)
+
+    rhs_mean = float(rhs_sum.copy_to_host()[0]) / float(interior_cell_count)
+    if abs(rhs_mean) <= 1.0e-12:
+        return
+
+    _subtract_rhs_mean_kernel[blockspergrid_3d, threadsperblock_3d](b, rhs_mean)
+
 
 @cuda.jit(cache=True)
 def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor):
@@ -196,6 +252,7 @@ def pressure_poisson(
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
+    _remove_rhs_mean(b, threadsperblock_3d)
     p_old = p
 
     for _ in range(max_iter):
