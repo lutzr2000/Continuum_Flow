@@ -87,12 +87,9 @@ def _record_timing(stats, name, elapsed):
 
 def _print_timing_summary(stats, total_runtime, step_count, output_frame_count):
     """Print a compact timing table for the recorded solver sections."""
-    measured_total = sum(entry["total"] for entry in stats.values())
-
     print("Timing summary:")
     print(f"  Sim steps: {int(step_count)}")
     print(f"  Output frames enqueued: {int(output_frame_count)}")
-    print(f"  Measured section total: {measured_total:.3f} s")
     print(f"  Solver wall time: {total_runtime:.3f} s")
 
     if not stats:
@@ -710,7 +707,6 @@ def apply_config(config):
         "CFL_MAX": float(settings_cfg["cfl"]),
         "MAX_ITER": int(settings_cfg["iterations"]),
         "MACCORMACK_FACTOR": float(settings_cfg.get("maccormack_factor", 0.25)),
-        "PRESSURE_SOLVER": str(settings_cfg.get("pressure_solver", "jacobi")),
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
             settings_cfg.get(
                 "max_velocity_increment_factor",

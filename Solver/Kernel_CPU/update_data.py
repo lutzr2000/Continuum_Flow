@@ -18,8 +18,9 @@ def upload_simulation_state_to_cpu(simulation_params):
     """
     Allocate the persistent CPU solver fields and work buffers.
 
-    The setup mirrors the GPU state layout closely so the solver loop can stay
-    structurally similar between CPU and GPU backends.
+    The CPU solver now follows the same MacCormack-based predictor/corrector
+    pipeline as the GPU backend, so the predictor buffers are required here as
+    real working state rather than compatibility-only padding.
     """
     host_state = general_update_data.build_initial_host_state(simulation_params)
     precision_dtype = host_state["precision_dtype"]
@@ -28,7 +29,7 @@ def upload_simulation_state_to_cpu(simulation_params):
     turbulence_data = host_state["turbulence_data"]
 
     cpu_fields = {
-        # Primary velocity state and scratch buffers.
+        # Primary velocity state, corrected output buffers and predictor buffers.
         "u": host_state["u"],
         "v": host_state["v"],
         "w": host_state["w"],
@@ -43,7 +44,7 @@ def upload_simulation_state_to_cpu(simulation_params):
         "p": host_state["p"],
         "pressure_rhs": np.empty((nx, ny, nz), dtype=precision_dtype),
 
-        # Advected scalar fields and their work buffers.
+        # Scalar state, corrected output buffers and predictor buffers.
         "T": host_state["T"],
         "temperature_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "temperature_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),

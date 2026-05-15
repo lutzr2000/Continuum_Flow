@@ -152,6 +152,18 @@ def _enqueue_host_output(
     write_queue.put((int(output_index), float(time_value), fields, output_field_config))
 
 
+def _sync_host_field_views(host_fields, cpu_fields):
+    """Point the exported host-field map at the current primary CPU arrays."""
+    host_fields["u"] = cpu_fields["u"]
+    host_fields["v"] = cpu_fields["v"]
+    host_fields["w"] = cpu_fields["w"]
+    host_fields["p"] = cpu_fields["p"]
+    host_fields["T"] = cpu_fields["T"]
+    host_fields["smoke"] = cpu_fields["smoke"]
+    host_fields["fuel"] = cpu_fields["fuel"]
+    host_fields["flame"] = cpu_fields["flame"]
+
+
 def _initialise_solver(config):
     """Initialise the CPU solver state before the first simulation step."""
     total_start_time = perf_counter()
@@ -187,43 +199,14 @@ def _initialise_solver(config):
     memory_tracker.sample()
     helper_functions._record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
 
-    u = cpu_fields["u"]
-    v = cpu_fields["v"]
-    w = cpu_fields["w"]
-    u_work = cpu_fields["u_work"]
-    v_work = cpu_fields["v_work"]
-    w_work = cpu_fields["w_work"]
-    u_tmp = cpu_fields["u_tmp"]
-    v_tmp = cpu_fields["v_tmp"]
-    w_tmp = cpu_fields["w_tmp"]
-    p = cpu_fields["p"]
-    T = cpu_fields["T"]
-    temperature_work = cpu_fields["temperature_work"]
-    temperature_tmp = cpu_fields["temperature_tmp"]
-    smoke = cpu_fields["smoke"]
-    smoke_work = cpu_fields["smoke_work"]
-    smoke_tmp = cpu_fields["smoke_tmp"]
-    fuel = cpu_fields["fuel"]
-    fuel_work = cpu_fields["fuel_work"]
-    fuel_tmp = cpu_fields["fuel_tmp"]
-    flame = cpu_fields["flame"]
-    flame_work = cpu_fields["flame_work"]
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
         dtype=simulation_params["PRECISION"],
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
 
-    host_fields = {
-        "u": u,
-        "v": v,
-        "w": w,
-        "p": p,
-        "T": T,
-        "smoke": smoke,
-        "fuel": fuel,
-        "flame": flame,
-    }
+    host_fields = {}
+    _sync_host_field_views(host_fields, cpu_fields)
 
     section_start = perf_counter()
     update_data.update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_constants, 0.0)
@@ -235,7 +218,8 @@ def _initialise_solver(config):
 
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        u, v, w, p, T, smoke, fuel, flame,
+        cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["p"],
+        cpu_fields["T"], cpu_fields["smoke"], cpu_fields["fuel"], cpu_fields["flame"],
         0.0,
         simulation_params["BC_CONFIG"],
         cpu_constants["HAS_OBSTACLE"],
@@ -253,7 +237,16 @@ def _initialise_solver(config):
         cpu_fields["source_velocity_y"],
         cpu_fields["source_velocity_z"],
     )
-    helper_functions._record_timing(timing_stats, "init_apply_bc", perf_counter() - section_start)
+    cpu_fields["u"] = u
+    cpu_fields["v"] = v
+    cpu_fields["w"] = w
+    cpu_fields["p"] = p
+    cpu_fields["T"] = T
+    cpu_fields["smoke"] = smoke
+    cpu_fields["fuel"] = fuel
+    cpu_fields["flame"] = flame
+    _sync_host_field_views(host_fields, cpu_fields)
+    helper_functions._record_timing(timing_stats, "init_apply_boundaries", perf_counter() - section_start)
 
     t = 0.0
     section_start = perf_counter()
@@ -277,7 +270,7 @@ def _initialise_solver(config):
 
     section_start = perf_counter()
     dt, solver_diverged = time_step.compute_new_timestep_cpu(
-        u, v, w, cpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
+        cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
         cpu_constants["RHO"], cpu_constants["DELTA"], cpu_constants["NU"], simulation_params["CFL_MAX"],
         max_dt=1.0 / simulation_params["OUTPUT_FPS"],
     )
@@ -293,27 +286,6 @@ def _initialise_solver(config):
         "cancel_flag_path": cancel_flag_path,
         "cpu_fields": cpu_fields,
         "cpu_constants": cpu_constants,
-        "u": u,
-        "v": v,
-        "w": w,
-        "u_work": u_work,
-        "v_work": v_work,
-        "w_work": w_work,
-        "u_tmp": u_tmp,
-        "v_tmp": v_tmp,
-        "w_tmp": w_tmp,
-        "p": p,
-        "T": T,
-        "temperature_work": temperature_work,
-        "temperature_tmp": temperature_tmp,
-        "smoke": smoke,
-        "smoke_work": smoke_work,
-        "smoke_tmp": smoke_tmp,
-        "fuel": fuel,
-        "fuel_work": fuel_work,
-        "fuel_tmp": fuel_tmp,
-        "flame": flame,
-        "flame_work": flame_work,
         "turbulence_angular_frequencies": turbulence_angular_frequencies,
         "turbulence_count": turbulence_count,
         "host_fields": host_fields,
@@ -340,27 +312,27 @@ def _run_time_step(state):
     turbulence_angular_frequencies = state["turbulence_angular_frequencies"]
     turbulence_count = state["turbulence_count"]
 
-    u = state["u"]
-    v = state["v"]
-    w = state["w"]
-    u_work = state["u_work"]
-    v_work = state["v_work"]
-    w_work = state["w_work"]
-    u_tmp = state["u_tmp"]
-    v_tmp = state["v_tmp"]
-    w_tmp = state["w_tmp"]
-    p = state["p"]
-    T = state["T"]
-    temperature_work = state["temperature_work"]
-    temperature_tmp = state["temperature_tmp"]
-    smoke = state["smoke"]
-    smoke_work = state["smoke_work"]
-    smoke_tmp = state["smoke_tmp"]
-    fuel = state["fuel"]
-    fuel_work = state["fuel_work"]
-    fuel_tmp = state["fuel_tmp"]
-    flame = state["flame"]
-    flame_work = state["flame_work"]
+    u = cpu_fields["u"]
+    v = cpu_fields["v"]
+    w = cpu_fields["w"]
+    u_work = cpu_fields["u_work"]
+    v_work = cpu_fields["v_work"]
+    w_work = cpu_fields["w_work"]
+    u_tmp = cpu_fields["u_tmp"]
+    v_tmp = cpu_fields["v_tmp"]
+    w_tmp = cpu_fields["w_tmp"]
+    p = cpu_fields["p"]
+    T = cpu_fields["T"]
+    temperature_work = cpu_fields["temperature_work"]
+    temperature_tmp = cpu_fields["temperature_tmp"]
+    smoke = cpu_fields["smoke"]
+    smoke_work = cpu_fields["smoke_work"]
+    smoke_tmp = cpu_fields["smoke_tmp"]
+    fuel = cpu_fields["fuel"]
+    fuel_work = cpu_fields["fuel_work"]
+    fuel_tmp = cpu_fields["fuel_tmp"]
+    flame = cpu_fields["flame"]
+    flame_work = cpu_fields["flame_work"]
     t = state["t"]
     dt = state["dt"]
 
@@ -382,7 +354,7 @@ def _run_time_step(state):
         section_start = perf_counter()
         cpu_fields["turbulence_cos_coeffs"][:] = np.cos(turbulence_angular_frequencies * t)
         cpu_fields["turbulence_sin_coeffs"][:] = np.sin(turbulence_angular_frequencies * t)
-        helper_functions._record_timing(timing_stats, "loop_turbulence_upload", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "loop_turbulence_coefficients", perf_counter() - section_start)
 
     section_start = perf_counter()
     update_force_fields(
@@ -468,7 +440,7 @@ def _run_time_step(state):
         apply_source_velocity=True,
         apply_source_scalars=False,
     )
-    helper_functions._record_timing(timing_stats, "loop_velocity_bc_predictor", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_velocity", perf_counter() - section_start)
 
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
@@ -507,7 +479,7 @@ def _run_time_step(state):
         cpu_fields["source_velocity_y"],
         cpu_fields["source_velocity_z"],
     )
-    helper_functions._record_timing(timing_stats, "loop_velocity_bc_projected", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)
 
     section_start = perf_counter()
     scalar_update.predict_scalar_fields_maccormack(
@@ -559,41 +531,32 @@ def _run_time_step(state):
         apply_source_velocity=False,
         apply_source_scalars=True,
     )
-    helper_functions._record_timing(timing_stats, "loop_apply_bc", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_scalars", perf_counter() - section_start)
 
-    state["host_fields"]["u"] = u
-    state["host_fields"]["v"] = v
-    state["host_fields"]["w"] = w
-    state["host_fields"]["p"] = p
-    state["host_fields"]["T"] = T
-    state["host_fields"]["smoke"] = smoke
-    state["host_fields"]["fuel"] = fuel
-    state["host_fields"]["flame"] = flame
+    cpu_fields["u"] = u
+    cpu_fields["v"] = v
+    cpu_fields["w"] = w
+    cpu_fields["u_work"] = u_work
+    cpu_fields["v_work"] = v_work
+    cpu_fields["w_work"] = w_work
+    cpu_fields["u_tmp"] = u_tmp
+    cpu_fields["v_tmp"] = v_tmp
+    cpu_fields["w_tmp"] = w_tmp
+    cpu_fields["p"] = p
+    cpu_fields["T"] = T
+    cpu_fields["temperature_work"] = temperature_work
+    cpu_fields["temperature_tmp"] = temperature_tmp
+    cpu_fields["smoke"] = smoke
+    cpu_fields["smoke_work"] = smoke_work
+    cpu_fields["smoke_tmp"] = smoke_tmp
+    cpu_fields["fuel"] = fuel
+    cpu_fields["fuel_work"] = fuel_work
+    cpu_fields["fuel_tmp"] = fuel_tmp
+    cpu_fields["flame"] = flame
+    cpu_fields["flame_work"] = flame_work
 
-    state.update({
-        "u": u,
-        "v": v,
-        "w": w,
-        "u_work": u_work,
-        "v_work": v_work,
-        "w_work": w_work,
-        "u_tmp": u_tmp,
-        "v_tmp": v_tmp,
-        "w_tmp": w_tmp,
-        "p": p,
-        "T": T,
-        "temperature_work": temperature_work,
-        "temperature_tmp": temperature_tmp,
-        "smoke": smoke,
-        "smoke_work": smoke_work,
-        "smoke_tmp": smoke_tmp,
-        "fuel": fuel,
-        "fuel_work": fuel_work,
-        "fuel_tmp": fuel_tmp,
-        "flame": flame,
-        "flame_work": flame_work,
-        "animated_force": animated_force,
-    })
+    _sync_host_field_views(state["host_fields"], cpu_fields)
+    state["animated_force"] = animated_force
     return state
 
 
@@ -667,9 +630,9 @@ def main(config=None):
 
             section_start = perf_counter()
             dt_new, state["solver_diverged"] = time_step.compute_new_timestep_cpu(
-                state["u"],
-                state["v"],
-                state["w"],
+                state["cpu_fields"]["u"],
+                state["cpu_fields"]["v"],
+                state["cpu_fields"]["w"],
                 state["cpu_fields"]["velocity_maxima"],
                 state["fx_max"],
                 state["fy_max"],

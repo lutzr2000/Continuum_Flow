@@ -303,7 +303,7 @@ def _initialise_solver(config):
         gpu_fields["source_velocity_z"],
     )
     cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "init_apply_bc", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "init_apply_boundaries", perf_counter() - section_start)
 
     #------------Initial animated state-------------------
     t = 0.0
@@ -455,7 +455,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["turbulence_cos_coeffs"].copy_to_device(np.cos(turbulence_angular_frequencies * t))
         gpu_fields["turbulence_sin_coeffs"].copy_to_device(np.sin(turbulence_angular_frequencies * t))
         cuda.synchronize()
-        helper_functions._record_timing(timing_stats, "loop_turbulence_upload", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "loop_turbulence_coefficients", perf_counter() - section_start)
 
     section_start = perf_counter()
     update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
@@ -552,7 +552,7 @@ def _run_time_step(state, blockspergrid_3d):
         apply_source_scalars=False,
     )
     cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "loop_velocity_bc_predictor", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_velocity", perf_counter() - section_start)
 
     #------------Pressure solve-------------------
     section_start = perf_counter()
@@ -596,7 +596,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["source_velocity_z"],
     )
     cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "loop_velocity_bc_projected", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)
 
     #------------Scalar update-------------------
     section_start = perf_counter()
@@ -653,7 +653,7 @@ def _run_time_step(state, blockspergrid_3d):
         apply_source_scalars=True,
     )
     cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "loop_apply_bc", perf_counter() - section_start)
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_scalars", perf_counter() - section_start)
 
     #------------Publish current fields-------------------
     device_fields["u"] = u

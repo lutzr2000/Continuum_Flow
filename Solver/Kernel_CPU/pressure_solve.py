@@ -3,6 +3,8 @@ import math
 import numpy as np
 from numba import njit, prange
 
+import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
+
 
 @njit(cache=True, parallel=True, fastmath=True)
 def pressure_equation_right_side(
@@ -64,44 +66,19 @@ def pressure_equation_right_side(
                 omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
 
-@njit(cache=True, parallel=True, fastmath=True)
-def _sum_rhs_kernel(b, rhs_sum):
-    """Accumulate the RHS into one scalar sum on the CPU."""
-    nx, ny, nz = b.shape
-    total = 0.0
-    for i in prange(nx):
-        local_sum = 0.0
-        for j in range(ny):
-            for k in range(nz):
-                local_sum += b[i, j, k]
-        total += local_sum
-    rhs_sum[0] = total
-
-
-@njit(cache=True, parallel=True, fastmath=True)
-def _subtract_rhs_mean_kernel(b, rhs_mean):
-    """Subtract the interior RHS mean from interior cells only."""
-    nx, ny, nz = b.shape
-    for i in prange(1, nx - 1):
-        for j in range(1, ny - 1):
-            for k in range(1, nz - 1):
-                b[i, j, k] -= rhs_mean
-
-
-def _remove_rhs_mean(b, threadsperblock_3d=None):
+def _remove_rhs_mean(b):
     """
     Enforce the Neumann compatibility condition by removing the RHS mean.
     """
-    nx, ny, nz = b.shape
-    interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
-    rhs_sum = np.zeros(1, dtype=b.dtype)
-    _sum_rhs_kernel(b, rhs_sum)
+    interior = b[1:-1, 1:-1, 1:-1]
+    if interior.size == 0:
+        return
 
-    rhs_mean = float(rhs_sum[0]) / float(interior_cell_count)
+    rhs_mean = float(np.mean(interior, dtype=np.float64))
     if abs(rhs_mean) <= 1.0e-12:
         return
 
-    _subtract_rhs_mean_kernel(b, rhs_mean)
+    interior -= rhs_mean
 
 
 @njit(cache=True, parallel=True, fastmath=True)
@@ -128,27 +105,6 @@ def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor)
                 p[i, j, k] = p_old + relaxation_factor * (gauss_seidel_value - p_old)
 
 
-@njit(cache=True, fastmath=True)
-def _pressure_poisson_apply_neumann_bcs(p):
-    """Apply zero-gradient pressure boundary conditions on all six domain faces."""
-    nx, ny, nz = p.shape
-
-    for j in range(ny):
-        for k in range(nz):
-            p[0, j, k] = p[1, j, k]
-            p[nx - 1, j, k] = p[nx - 2, j, k]
-
-    for i in range(nx):
-        for k in range(nz):
-            p[i, 0, k] = p[i, 1, k]
-            p[i, ny - 1, k] = p[i, ny - 2, k]
-
-    for i in range(nx):
-        for j in range(ny):
-            p[i, j, 0] = p[i, j, 1]
-            p[i, j, nz - 1] = p[i, j, nz - 2]
-
-
 @njit(cache=True, parallel=True, fastmath=True)
 def _project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
     """
@@ -171,7 +127,7 @@ def _project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, threadsperblock_3d=None, relaxation_factor=1
+    max_iter=10, relaxation_factor=1
 ):
     """
     Host-side CPU pressure Poisson solve matching the GPU-side API.
@@ -180,20 +136,20 @@ def pressure_poisson(
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
-    _remove_rhs_mean(b, threadsperblock_3d)
+    _remove_rhs_mean(b)
     p_old = p
 
     for _ in range(max_iter):
         _pressure_poisson_red_black_sor_step(p_old, b, delta, 0, relaxation_factor)
-        _pressure_poisson_apply_neumann_bcs(p_old)
+        BC._pressure_poisson_apply_neumann_bcs(p_old)
         _pressure_poisson_red_black_sor_step(p_old, b, delta, 1, relaxation_factor)
-        _pressure_poisson_apply_neumann_bcs(p_old)
+        BC._pressure_poisson_apply_neumann_bcs(p_old)
 
-    _pressure_poisson_apply_neumann_bcs(p_old)
+    BC._pressure_poisson_apply_neumann_bcs(p_old)
     return p_old
 
 
-def project_velocity(u, v, w, p, obstacle_mask, dt, delta, rho, threadsperblock_3d=None):
+def project_velocity(u, v, w, p, obstacle_mask, dt, delta, rho):
     """Project one intermediate velocity field with the solved pressure."""
     _project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho)
     return u, v, w
