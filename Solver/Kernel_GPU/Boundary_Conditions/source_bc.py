@@ -286,6 +286,8 @@ def _source_bc_kernel(
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
     dt,
+    apply_velocity,
+    apply_scalars,
 ):
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
@@ -324,15 +326,16 @@ def _source_bc_kernel(
     source_smoke_rate = 10.0 * source_smoke[i, j, k]
     source_fuel_rate = 10.0 * source_fuel[i, j, k]
 
-    if source_velocity_mask[i, j, k]:
+    if apply_velocity and source_velocity_mask[i, j, k]:
         u[i, j, k] = source_velocity_x[i, j, k]
         v[i, j, k] = source_velocity_y[i, j, k]
         w[i, j, k] = source_velocity_z[i, j, k]
 
-    if T[i, j, k] < source_temperature_value:
-        T[i, j, k] = source_temperature_value
-    smoke[i, j, k] = min(max(smoke[i, j, k] + dt * source_smoke_rate, 0.0), 100.0)
-    fuel[i, j, k] = min(max(fuel[i, j, k] + dt * source_fuel_rate, 0.0), 100.0)
+    if apply_scalars:
+        if T[i, j, k] < source_temperature_value:
+            T[i, j, k] = source_temperature_value
+        smoke[i, j, k] = min(max(smoke[i, j, k] + dt * source_smoke_rate, 0.0), 100.0)
+        fuel[i, j, k] = min(max(fuel[i, j, k] + dt * source_fuel_rate, 0.0), 100.0)
 
 
 def source_bc(
@@ -341,13 +344,16 @@ def source_bc(
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
     dt,
+    apply_velocity=True,
+    apply_scalars=True,
     threadsperblock=None,
 ):
     """
     applies all source boundary conditions to the GPU field state.
 
-    Velocity is imposed directly, temperature remains a minimum target and
-    smoke/fuel are injected as dt-scaled emission rates inside active cells.
+    Velocity can be imposed directly and scalar source terms can be injected
+    independently so the caller can project source-driven velocity before the
+    final scalar/source pass.
 
     Args:
         u (device array): x-velocity field
@@ -364,6 +370,9 @@ def source_bc(
         source_velocity_x (device array): source x-velocity targets
         source_velocity_y (device array): source y-velocity targets
         source_velocity_z (device array): source z-velocity targets
+        apply_velocity (bool, optional): whether to impose source velocity targets
+        apply_scalars (bool, optional): whether to apply source temperature,
+            smoke and fuel targets
         threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
     Returns:
         tuple: updated velocity, temperature, smoke and fuel fields
@@ -379,5 +388,7 @@ def source_bc(
         source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
         dt,
+        apply_velocity,
+        apply_scalars,
     )
     return u, v, w, T, smoke, fuel

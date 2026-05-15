@@ -145,7 +145,7 @@ def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w,
 @cuda.jit(cache=True)
 def update_velocity(
     u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor
+    max_velocity_increment_factor, pressure_scale
 ):
     """
     CUDA kernel that updates all three velocity components based on the
@@ -169,6 +169,7 @@ def update_velocity(
         nu (float): kinematic viscosity
         max_velocity_increment_factor (float): maximum allowed per-step velocity
             change relative to delta / dt
+        pressure_scale (float): scales the explicit pressure-gradient term
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
@@ -269,9 +270,9 @@ def update_velocity(
     )
 
     #------------Pressure-------------------
-    pressure_gradient_x = pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-    pressure_gradient_y = pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-    pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+    pressure_gradient_x = pressure_scale * pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    pressure_gradient_y = pressure_scale * pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    pressure_gradient_z = pressure_scale * pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
     #------------Update-------------------
     u_raw = u_center - convection_x - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
@@ -291,7 +292,7 @@ def update_velocity(
 @cuda.jit(cache=True)
 def update_velocity_second_order_upwind(
     u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor
+    max_velocity_increment_factor, pressure_scale
 ):
     """
     CUDA kernel that updates all three velocity components based on the
@@ -315,6 +316,7 @@ def update_velocity_second_order_upwind(
         nu (float): kinematic viscosity
         max_velocity_increment_factor (float): maximum allowed per-step velocity
             change relative to delta / dt
+        pressure_scale (float): scales the explicit pressure-gradient term
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = u.shape
@@ -430,9 +432,9 @@ def update_velocity_second_order_upwind(
         (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
     )
 
-    pressure_gradient_x = pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-    pressure_gradient_y = pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-    pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+    pressure_gradient_x = pressure_scale * pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    pressure_gradient_y = pressure_scale * pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    pressure_gradient_z = pressure_scale * pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
     u_raw = u_center - convection_x - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
     v_raw = v_center - convection_y - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
@@ -451,7 +453,7 @@ def update_velocity_second_order_upwind(
 @cuda.jit(cache=True)
 def update_velocity_semi_lagrangian(
     u, v, w, p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor
+    max_velocity_increment_factor, pressure_scale
 ):
     """
     CUDA kernel that updates velocity with semi-Lagrangian advection.
@@ -500,9 +502,9 @@ def update_velocity_semi_lagrangian(
         (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
     )
 
-    pressure_gradient_x = pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-    pressure_gradient_y = pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-    pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+    pressure_gradient_x = pressure_scale * pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    pressure_gradient_y = pressure_scale * pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    pressure_gradient_z = pressure_scale * pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
     u_raw = advected_u - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
     v_raw = advected_v - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]
@@ -522,7 +524,7 @@ def update_velocity_semi_lagrangian(
 def update_velocity_maccormack(
     u, v, w, predictor_u, predictor_v, predictor_w,
     p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor
+    max_velocity_increment_factor, pressure_scale
 ):
     """
     CUDA kernel that updates velocity with a MacCormack-corrected
@@ -594,9 +596,9 @@ def update_velocity_maccormack(
         (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
     )
 
-    pressure_gradient_x = pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-    pressure_gradient_y = pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-    pressure_gradient_z = pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+    pressure_gradient_x = pressure_scale * pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    pressure_gradient_y = pressure_scale * pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    pressure_gradient_z = pressure_scale * pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
     u_raw = corrected_u - pressure_gradient_x + diffusion_x + force_coeff * Fx[i, j, k]
     v_raw = corrected_v - pressure_gradient_y + diffusion_y + force_coeff * Fy[i, j, k]

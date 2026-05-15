@@ -166,6 +166,8 @@ def apply_all_BC(
     has_obstacle, obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
     has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
+    apply_source_velocity=True,
+    apply_source_scalars=True,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -185,6 +187,8 @@ def apply_all_BC(
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
             dt,
+            apply_velocity=apply_source_velocity,
+            apply_scalars=apply_source_scalars,
         )
     return u, v, w, p, T, smoke, fuel, flame
 
@@ -475,18 +479,17 @@ def _run_time_step(state, blockspergrid_3d):
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
 
-    #------------Pressure solve-------------------
-    section_start = perf_counter()
-    p = pressure_solve.pressure_poisson(
-        u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
-        gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"], dt, gpu_fields["point_divergence"],
-        gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
-        gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"]
-    )
-    cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)
-
     if gpu_constants["VORTICITY"] > 0.0:
+        section_start = perf_counter()
+        pressure_solve.pressure_equation_right_side[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            u, v, w, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
+            gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"],
+            dt, gpu_fields["point_divergence"], gpu_constants["DELTA"], gpu_constants["RHO"],
+            gpu_constants["EXPANSION_RATE"], gpu_constants["T_REFERENCE"]
+        )
+        cuda.synchronize()
+        helper_functions._record_timing(timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start)
+
         section_start = perf_counter()
         apply_vorticity_confinement[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             gpu_fields["obstacle_mask"],
@@ -503,6 +506,7 @@ def _run_time_step(state, blockspergrid_3d):
         cuda.synchronize()
         helper_functions._record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
+    #------------Pressure solve-------------------
     #------------Velocity update-------------------
     section_start = perf_counter()
     if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "FIRST_ORDER_UPWIND":
@@ -510,12 +514,14 @@ def _run_time_step(state, blockspergrid_3d):
             u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+            np.float32(0.0),
         )
     elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SECOND_ORDER_UPWIND":
         advection_schemes.update_velocity_second_order_upwind[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+            np.float32(0.0),
         )
     elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "MACCORMACK":
         advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
@@ -526,12 +532,14 @@ def _run_time_step(state, blockspergrid_3d):
             p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+            np.float32(0.0),
         )
     else:
         advection_schemes.update_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+            np.float32(0.0),
         )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
@@ -539,6 +547,76 @@ def _run_time_step(state, blockspergrid_3d):
     u, u_work = u_work, u
     v, v_work = v_work, v
     w, w_work = w_work, w
+
+    #------------Velocity boundary conditions and source predictor-------------------
+    section_start = perf_counter()
+    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+        u, v, w, p, T, smoke, fuel, flame,
+        dt,
+        simulation_params["BC_CONFIG"],
+        gpu_constants["HAS_OBSTACLE"],
+        gpu_fields["obstacle_mask"],
+        gpu_fields["obstacle_velocity_x"],
+        gpu_fields["obstacle_velocity_y"],
+        gpu_fields["obstacle_velocity_z"],
+        gpu_constants["HAS_SOURCE"],
+        gpu_fields["source_mask"],
+        gpu_fields["source_velocity_mask"],
+        gpu_fields["source_temperature"],
+        gpu_fields["source_smoke"],
+        gpu_fields["source_fuel"],
+        gpu_fields["source_velocity_x"],
+        gpu_fields["source_velocity_y"],
+        gpu_fields["source_velocity_z"],
+        apply_source_velocity=True,
+        apply_source_scalars=False,
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(timing_stats, "loop_velocity_bc_predictor", perf_counter() - section_start)
+
+    #------------Pressure solve-------------------
+    section_start = perf_counter()
+    p = pressure_solve.pressure_poisson(
+        u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
+        gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"], dt, gpu_fields["point_divergence"],
+        gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
+        gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"]
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)
+
+    #------------Velocity projection-------------------
+    section_start = perf_counter()
+    u, v, w = pressure_solve.project_velocity(
+        u, v, w, p, gpu_fields["obstacle_mask"], dt,
+        gpu_constants["DELTA"], gpu_constants["RHO"]
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(timing_stats, "loop_projection", perf_counter() - section_start)
+
+    #------------Velocity boundary restore after projection-------------------
+    section_start = perf_counter()
+    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+        u, v, w, p, T, smoke, fuel, flame,
+        dt,
+        simulation_params["BC_CONFIG"],
+        gpu_constants["HAS_OBSTACLE"],
+        gpu_fields["obstacle_mask"],
+        gpu_fields["obstacle_velocity_x"],
+        gpu_fields["obstacle_velocity_y"],
+        gpu_fields["obstacle_velocity_z"],
+        False,
+        gpu_fields["source_mask"],
+        gpu_fields["source_velocity_mask"],
+        gpu_fields["source_temperature"],
+        gpu_fields["source_smoke"],
+        gpu_fields["source_fuel"],
+        gpu_fields["source_velocity_x"],
+        gpu_fields["source_velocity_y"],
+        gpu_fields["source_velocity_z"],
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(timing_stats, "loop_velocity_bc_projected", perf_counter() - section_start)
 
     #------------Scalar update-------------------
     section_start = perf_counter()
@@ -618,6 +696,8 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["source_velocity_x"],
         gpu_fields["source_velocity_y"],
         gpu_fields["source_velocity_z"],
+        apply_source_velocity=False,
+        apply_source_scalars=True,
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_apply_bc", perf_counter() - section_start)

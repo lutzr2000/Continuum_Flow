@@ -138,6 +138,32 @@ def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor)
     p[i, j, k] = p_old + relaxation_factor * (gauss_seidel_value - p_old)
 
 
+@cuda.jit(cache=True)
+def _project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
+    """
+    Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
+
+    Obstacle cells are skipped because their wall velocities are restored by the
+    obstacle boundary conditions after the projection pass.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = u.shape
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1
+    ):
+        return
+
+    if obstacle_mask[i, j, k]:
+        return
+
+    pressure_coeff = dt / (2.0 * rho * delta)
+    u[i, j, k] -= pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+    v[i, j, k] -= pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+    w[i, j, k] -= pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+
+
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
@@ -192,3 +218,15 @@ def pressure_poisson(
         
     BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](p_old)
     return p_old
+
+
+def project_velocity(u, v, w, p, obstacle_mask, dt, delta, rho, threadsperblock_3d=None):
+    """Project one intermediate velocity field with the solved pressure."""
+    if threadsperblock_3d is None:
+        threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
+
+    _project_velocity_kernel[blockspergrid_3d, threadsperblock_3d](
+        u, v, w, p, obstacle_mask, dt, delta, rho
+    )
+    return u, v, w
