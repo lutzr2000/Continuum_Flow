@@ -3,6 +3,7 @@ TODO
 General:
 Make solver installable
 Geometry nodes domain edge fade
+viewer hide show domain is broken
 
 Solver: 
 Testing

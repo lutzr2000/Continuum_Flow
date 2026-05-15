@@ -74,15 +74,20 @@ def _sample_trilinear_inner(field, x0, y0, z0, x1, y1, z1, tx, ty, tz):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_trilinear(field, x, y, z, nx, ny, nz):
-    """
-    Sample one scalar field at fractional grid coordinates with trilinear interpolation.
+def _sample_cell_extrema_inner(field, x0, y0, z0, x1, y1, z1):
+    """Return the corner-value range for one cell from precomputed coordinates."""
+    c000 = field[x0, y0, z0]
+    c100 = field[x1, y0, z0]
+    c010 = field[x0, y1, z0]
+    c110 = field[x1, y1, z0]
+    c001 = field[x0, y0, z1]
+    c101 = field[x1, y0, z1]
+    c011 = field[x0, y1, z1]
+    c111 = field[x1, y1, z1]
 
-    The sample position is clamped to the valid array extent before the eight
-    surrounding cell values are blended.
-    """
-    x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
-    return _sample_trilinear_inner(field, x0, y0, z0, x1, y1, z1, tx, ty, tz)
+    lower = min(min(min(c000, c100), min(c010, c110)), min(min(c001, c101), min(c011, c111)))
+    upper = max(max(max(c000, c100), max(c010, c110)), max(max(c001, c101), max(c011, c111)))
+    return lower, upper
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -125,58 +130,6 @@ def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, n
     return _backtrace_position(u, v, w, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz)
 
 
-@cuda.jit(device=True, inline=True, cache=True)
-def _sample_cell_extrema(field, x, y, z, nx, ny, nz):
-    """
-    Return the minimum and maximum corner values of the cell surrounding a sample point.
-
-    MacCormack uses these bounds as a limiter so the corrected value stays
-    inside the local source range and avoids new extrema.
-    """
-    if x < 0.0:
-        x = 0.0
-    elif x > nx - 1:
-        x = nx - 1.0
-
-    if y < 0.0:
-        y = 0.0
-    elif y > ny - 1:
-        y = ny - 1.0
-
-    if z < 0.0:
-        z = 0.0
-    elif z > nz - 1:
-        z = nz - 1.0
-
-    x0 = int(x)
-    y0 = int(y)
-    z0 = int(z)
-
-    x1 = x0 + 1
-    y1 = y0 + 1
-    z1 = z0 + 1
-
-    if x1 >= nx:
-        x1 = nx - 1
-    if y1 >= ny:
-        y1 = ny - 1
-    if z1 >= nz:
-        z1 = nz - 1
-
-    c000 = field[x0, y0, z0]
-    c100 = field[x1, y0, z0]
-    c010 = field[x0, y1, z0]
-    c110 = field[x1, y1, z0]
-    c001 = field[x0, y0, z1]
-    c101 = field[x1, y0, z1]
-    c011 = field[x0, y1, z1]
-    c111 = field[x1, y1, z1]
-
-    lower = min(min(min(c000, c100), min(c010, c110)), min(min(c001, c101), min(c011, c111)))
-    upper = max(max(max(c000, c100), max(c010, c110)), max(max(c001, c101), max(c011, c111)))
-    return lower, upper
-
-
 @cuda.jit(cache=True)
 def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w, dt, delta):
     """Backtrace the velocity field once and store the purely advected values."""
@@ -192,9 +145,11 @@ def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w,
         nx, ny, nz,
     )
 
-    advected_u[i, j, k] = _sample_trilinear(u, x_depart, y_depart, z_depart, nx, ny, nz)
-    advected_v[i, j, k] = _sample_trilinear(v, x_depart, y_depart, z_depart, nx, ny, nz)
-    advected_w[i, j, k] = _sample_trilinear(w, x_depart, y_depart, z_depart, nx, ny, nz)
+    advected_u[i, j, k], advected_v[i, j, k], advected_w[i, j, k] = _sample_trilinear_vec3(
+        u, v, w,
+        x_depart, y_depart, z_depart,
+        nx, ny, nz,
+    )
 
 
 @cuda.jit(cache=True)
@@ -253,9 +208,10 @@ def update_velocity_maccormack(
     corrected_v = advected_v + maccormack_factor * (v_center - reverse_v)
     corrected_w = advected_w + maccormack_factor * (w_center - reverse_w)
 
-    u_lower, u_upper = _sample_cell_extrema(u, x_depart, y_depart, z_depart, nx, ny, nz)
-    v_lower, v_upper = _sample_cell_extrema(v, x_depart, y_depart, z_depart, nx, ny, nz)
-    w_lower, w_upper = _sample_cell_extrema(w, x_depart, y_depart, z_depart, nx, ny, nz)
+    x0, y0, z0, x1, y1, z1, _, _, _ = _prepare_trilinear_coords(x_depart, y_depart, z_depart, nx, ny, nz)
+    u_lower, u_upper = _sample_cell_extrema_inner(u, x0, y0, z0, x1, y1, z1)
+    v_lower, v_upper = _sample_cell_extrema_inner(v, x0, y0, z0, x1, y1, z1)
+    w_lower, w_upper = _sample_cell_extrema_inner(w, x0, y0, z0, x1, y1, z1)
 
     corrected_u = _clamp(corrected_u, u_lower, u_upper)
     corrected_v = _clamp(corrected_v, v_lower, v_upper)

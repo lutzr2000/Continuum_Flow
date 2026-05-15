@@ -82,9 +82,12 @@ def update_scalar_fields_maccormack(
     smoke_corrected = smoke_advected + maccormack_factor * (smoke[i, j, k] - smoke_reverse)
     fuel_corrected = fuel_advected + maccormack_factor * (fuel[i, j, k] - fuel_reverse)
 
-    T_lower, T_upper = advection_schemes._sample_cell_extrema(T, x_depart, y_depart, z_depart, nx, ny, nz)
-    smoke_lower, smoke_upper = advection_schemes._sample_cell_extrema(smoke, x_depart, y_depart, z_depart, nx, ny, nz)
-    fuel_lower, fuel_upper = advection_schemes._sample_cell_extrema(fuel, x_depart, y_depart, z_depart, nx, ny, nz)
+    x0, y0, z0, x1, y1, z1, _, _, _ = advection_schemes._prepare_trilinear_coords(
+        x_depart, y_depart, z_depart, nx, ny, nz
+    )
+    T_lower, T_upper = advection_schemes._sample_cell_extrema_inner(T, x0, y0, z0, x1, y1, z1)
+    smoke_lower, smoke_upper = advection_schemes._sample_cell_extrema_inner(smoke, x0, y0, z0, x1, y1, z1)
+    fuel_lower, fuel_upper = advection_schemes._sample_cell_extrema_inner(fuel, x0, y0, z0, x1, y1, z1)
 
     T_corrected = advection_schemes._clamp(T_corrected, T_lower, T_upper)
     smoke_corrected = advection_schemes._clamp(smoke_corrected, smoke_lower, smoke_upper)
