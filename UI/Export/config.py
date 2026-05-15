@@ -272,10 +272,10 @@ def _resolve_simulation_output_fps(simulation_node, context=None):
 
 
 def _simulation_length_from_frames(start_frame, end_frame, fps):
-    """Convert an exported frame range to kernel simulation seconds."""
+    """Convert an inclusive exported frame range to kernel simulation seconds."""
     if end_frame <= start_frame:
         raise ValueError("Simulation end frame must be greater than the start frame.")
-    return float(end_frame - start_frame) / float(fps)
+    return float((end_frame - start_frame) + 1) / float(fps)
 
 
 def _linked_geometry_nodes(node):

@@ -479,6 +479,7 @@ def _run_time_step(state, blockspergrid_3d):
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
 
+    #------------Vorticity-------------------
     if gpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
         pressure_solve.pressure_equation_right_side[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
@@ -506,7 +507,6 @@ def _run_time_step(state, blockspergrid_3d):
         cuda.synchronize()
         helper_functions._record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
-    #------------Pressure solve-------------------
     #------------Velocity update-------------------
     section_start = perf_counter()
     advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
@@ -523,11 +523,12 @@ def _run_time_step(state, blockspergrid_3d):
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
 
+    #------------Velocity swap-------------------
     u, u_work = u_work, u
     v, v_work = v_work, v
     w, w_work = w_work, w
 
-    #------------Velocity boundary conditions and source predictor-------------------
+    #------------BC-------------------
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
@@ -573,7 +574,7 @@ def _run_time_step(state, blockspergrid_3d):
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_projection", perf_counter() - section_start)
 
-    #------------Velocity boundary restore after projection-------------------
+    #------------BC-------------------
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
@@ -622,6 +623,7 @@ def _run_time_step(state, blockspergrid_3d):
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
 
+    #------------Swap-------------------
     T, temperature_work = temperature_work, T
     smoke, smoke_work = smoke_work, smoke
     fuel, fuel_work = fuel_work, fuel
@@ -707,121 +709,115 @@ def main(config=None):
     #------------Initialise-------------------
     state = _initialise_solver(config)
 
-    if state["solver_diverged"]:
-        print('ERROR: The solver diverged before output setup, stopping the simulation!')
-    else:
-        #------------Prepare output-------------------
-        section_start = perf_counter()
-        write_queue, buffer_pool, writer_threads, shared_memory_blocks = output_functions.setup_output(
-            state["simulation_params"]["OUTPATH"],
-            state["simulation_params"]["FRAME_START"],
-            state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
-            helper_functions.select_fields(
-                state["device_fields"],
-                state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
-            ),
-            state["simulation_params"]["WRITE_QUEUE_SIZE"],
-            state["simulation_params"]["OUTPUT_FORWARDER_COUNT"],
-            state["simulation_params"]["DELTA"],
-            state["simulation_params"]["HOST_VDB_WRITER"],
-            storage_dtype=state["simulation_params"]["OUTPUT_DTYPE"],
-        )
-        state["write_queue"] = write_queue
-        state["writer_threads"] = writer_threads
-        state["shared_memory_blocks"] = shared_memory_blocks
-        helper_functions._record_timing(state["timing_stats"], "init_output_setup", perf_counter() - section_start)
+    #------------Prepare output-------------------
+    section_start = perf_counter()
 
-        print('Start time iteration')
-        helper_functions.emit_progress(0.0, state["t"])
-        blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-            state["u"].shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
+    write_queue, buffer_pool, writer_threads, shared_memory_blocks = output_functions.setup_output(
+        state["simulation_params"]["OUTPATH"],
+        state["simulation_params"]["FRAME_START"],
+        state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
+        helper_functions.select_fields(
+            state["device_fields"],
+            state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],),
+        state["simulation_params"]["WRITE_QUEUE_SIZE"],
+        state["simulation_params"]["OUTPUT_FORWARDER_COUNT"],
+        state["simulation_params"]["DELTA"],
+        state["simulation_params"]["HOST_VDB_WRITER"],
+        storage_dtype=state["simulation_params"]["OUTPUT_DTYPE"],
+    )
+
+    state["write_queue"] = write_queue
+    state["writer_threads"] = writer_threads
+    state["shared_memory_blocks"] = shared_memory_blocks
+
+    helper_functions._record_timing(state["timing_stats"], "init_output_setup", perf_counter() - section_start)
+
+    print('Start time iteration')
+    helper_functions.emit_progress(0.0, state["t"])
+
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(state["u"].shape,kernel_config.THREADS_PER_BLOCK_3D,)
+
+    section_start = perf_counter()
+    state["memory_tracker"].sample()
+    helper_functions._record_timing(state["timing_stats"], "loop_memory_sample", perf_counter() - section_start)
+
+    #------------Time iteration-------------------
+    next_output_time = 0.0
+    output_index = 0
+
+    while state["t"] < state["simulation_params"]["T_MAX"]:
+        step_start = perf_counter()
+        if state["cancel_flag_path"] and Path(state["cancel_flag_path"]).exists():
+            state["cancel_requested"] = True
+            print('Bake cancellation requested. Stopping the simulation cleanly...')
+            break
+
+        #------------One solver step-------------------
+        state = _run_time_step(state, blockspergrid_3d)
+
+        #------------Output-------------------
+        section_start = perf_counter()
+        while state["t"] >= next_output_time:
+            output_functions.enqueue_device_output(
+                write_queue,
+                buffer_pool,
+                state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
+                helper_functions.select_fields(
+                    state["device_fields"],
+                    state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
+                ),
+                output_index,
+                state["t"],
+                state["simulation_params"]["OUTPUT_FIELD_CONFIG"],
+            )
+
+            output_index += 1
+            state["output_frame_count"] += 1
+            next_output_time += state["simulation_params"]["OUTPUT_TIME_STEP"]
+            helper_functions.emit_progress(
+                state["t"] / state["simulation_params"]["T_MAX"] * 100.0,
+                state["t"],
+            )
+            
+        helper_functions._record_timing(state["timing_stats"], "loop_output", perf_counter() - section_start)
+
+        #------------Adaptive timestep-------------------
+        state["t"] += state["dt"]
+
+        section_start = perf_counter()
+        time_step.reset_velocity_maxima(
+            state["gpu_fields"]["velocity_maxima"],
+            state["velocity_maxima_host_zeros"])
+        
+        dt_new, state["solver_diverged"] = time_step.compute_new_timestep_gpu(
+            state["u"],
+            state["v"],
+            state["w"],
+            state["gpu_fields"]["velocity_maxima"],
+            state["fx_max"],
+            state["fy_max"],
+            state["fz_max"],
+            state["gpu_constants"]["RHO"],
+            state["gpu_constants"]["DELTA"],
+            state["gpu_constants"]["NU"],
+            state["simulation_params"]["CFL_MAX"],
+            max_dt=1.0 / state["simulation_params"]["OUTPUT_FPS"],
         )
+
+        cuda.synchronize()
+        helper_functions._record_timing(state["timing_stats"], "loop_timestep", perf_counter() - section_start)
 
         section_start = perf_counter()
         state["memory_tracker"].sample()
         helper_functions._record_timing(state["timing_stats"], "loop_memory_sample", perf_counter() - section_start)
 
-        #------------Time iteration-------------------
-        next_output_time = 0.0
-        output_index = 0
+        if state["solver_diverged"]:
+            print('ERROR: The solver diverged, stopping the simulation!')
+            break
 
-        while state["t"] < state["simulation_params"]["T_MAX"]:
-            step_start = perf_counter()
-            if state["cancel_flag_path"] and Path(state["cancel_flag_path"]).exists():
-                state["cancel_requested"] = True
-                print('Bake cancellation requested. Stopping the simulation cleanly...')
-                break
-
-            #------------One solver step-------------------
-            state = _run_time_step(state, blockspergrid_3d)
-
-            #------------Output-------------------
-            section_start = perf_counter()
-            while state["t"] >= next_output_time:
-                output_functions.enqueue_device_output(
-                    write_queue,
-                    buffer_pool,
-                    state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
-                    helper_functions.select_fields(
-                        state["device_fields"],
-                        state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
-                    ),
-                    output_index,
-                    state["t"],
-                    state["simulation_params"]["OUTPUT_FIELD_CONFIG"],
-                )
-
-                output_index += 1
-                state["output_frame_count"] += 1
-                next_output_time += state["simulation_params"]["OUTPUT_TIME_STEP"]
-                helper_functions.emit_progress(
-                    state["t"] / state["simulation_params"]["T_MAX"] * 100.0,
-                    state["t"],
-                )
-
-                if state["simulation_params"]["OUTPUT_STATUS"]:
-                    print('#################################################')
-                    print(f'Simulation time {state["t"]} sec')
-                    print(f'Current dt: {np.round(state["dt"], 5)}')
-            helper_functions._record_timing(state["timing_stats"], "loop_output", perf_counter() - section_start)
-
-            #------------Adaptive timestep-------------------
-            state["t"] += state["dt"]
-
-            section_start = perf_counter()
-            time_step.reset_velocity_maxima(
-                state["gpu_fields"]["velocity_maxima"],
-                state["velocity_maxima_host_zeros"],
-            )
-            dt_new, state["solver_diverged"] = time_step.compute_new_timestep_gpu(
-                state["u"],
-                state["v"],
-                state["w"],
-                state["gpu_fields"]["velocity_maxima"],
-                state["fx_max"],
-                state["fy_max"],
-                state["fz_max"],
-                state["gpu_constants"]["RHO"],
-                state["gpu_constants"]["DELTA"],
-                state["gpu_constants"]["NU"],
-                state["simulation_params"]["CFL_MAX"],
-                max_dt=1.0 / state["simulation_params"]["OUTPUT_FPS"],
-            )
-            cuda.synchronize()
-            helper_functions._record_timing(state["timing_stats"], "loop_timestep", perf_counter() - section_start)
-
-            section_start = perf_counter()
-            state["memory_tracker"].sample()
-            helper_functions._record_timing(state["timing_stats"], "loop_memory_sample", perf_counter() - section_start)
-
-            if state["solver_diverged"]:
-                print('ERROR: The solver diverged, stopping the simulation!')
-                break
-
-            state["dt"] = dt_new
-            state["step_count"] += 1
-            helper_functions._record_timing(state["timing_stats"], "loop_total", perf_counter() - step_start)
+        state["dt"] = dt_new
+        state["step_count"] += 1
+        helper_functions._record_timing(state["timing_stats"], "loop_total", perf_counter() - step_start)
 
     #------------Shutdown output-------------------
     if state["write_queue"] is not None:

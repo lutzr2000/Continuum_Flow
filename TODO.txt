@@ -3,12 +3,12 @@ TODO
 General:
 Make solver installable
 Geometry nodes domain edge fade
+
+Solver: 
+make init config faster
+make sample trilinear faster
 Testing
 Update CPU to GPU state
-the end frame should still be simulated
-
-Forces:
-turbulence force needs to be divergence free
 
 Documentation:
 finish docu in general
