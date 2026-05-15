@@ -568,9 +568,9 @@ def update_velocity_maccormack(
     reverse_v = _sample_trilinear(predictor_v, x_forward, y_forward, z_forward)
     reverse_w = _sample_trilinear(predictor_w, x_forward, y_forward, z_forward)
 
-    corrected_u = advected_u + 0.5 * (u_center - reverse_u)
-    corrected_v = advected_v + 0.5 * (v_center - reverse_v)
-    corrected_w = advected_w + 0.5 * (w_center - reverse_w)
+    corrected_u = advected_u + 0.25 * (u_center - reverse_u)
+    corrected_v = advected_v + 0.25 * (v_center - reverse_v)
+    corrected_w = advected_w + 0.25 * (w_center - reverse_w)
 
     u_lower, u_upper = _sample_cell_extrema(u, x_depart, y_depart, z_depart)
     v_lower, v_upper = _sample_cell_extrema(v, x_depart, y_depart, z_depart)

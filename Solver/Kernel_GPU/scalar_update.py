@@ -257,9 +257,9 @@ def update_scalar_fields_maccormack(
     smoke_reverse = advection_schemes._sample_trilinear(predictor_smoke, x_forward, y_forward, z_forward)
     fuel_reverse = advection_schemes._sample_trilinear(predictor_fuel, x_forward, y_forward, z_forward)
 
-    T_corrected = T_advected + 0.5 * (T[i, j, k] - T_reverse)
-    smoke_corrected = smoke_advected + 0.5 * (smoke[i, j, k] - smoke_reverse)
-    fuel_corrected = fuel_advected + 0.5 * (fuel[i, j, k] - fuel_reverse)
+    T_corrected = T_advected + 0.25 * (T[i, j, k] - T_reverse)
+    smoke_corrected = smoke_advected + 0.25 * (smoke[i, j, k] - smoke_reverse)
+    fuel_corrected = fuel_advected + 0.25 * (fuel[i, j, k] - fuel_reverse)
 
     T_lower, T_upper = advection_schemes._sample_cell_extrema(T, x_depart, y_depart, z_depart)
     smoke_lower, smoke_upper = advection_schemes._sample_cell_extrema(smoke, x_depart, y_depart, z_depart)

@@ -5,14 +5,14 @@ Make solver installable
 Geometry nodes domain edge fade
 Testing
 Update CPU to GPU state
+the end frame should still be simulated
 
 Forces:
 turbulence force needs to be divergence free
 
 Schemes:
+remove first order upwind and semi lagrangian
 MacCormack and Semi lagrangian are sometimes less stable with smaller CFL, thats not good
-Pressure solve needs to become better
-solver needs to become more stable
 auto switch max cfl when user switches advection scheme
 
 Documentation:
