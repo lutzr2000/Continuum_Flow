@@ -141,7 +141,7 @@ def _pressure_poisson_red_black_sor_step(p, b, delta, parity, relaxation_factor)
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, threadsperblock_3d=None, relaxation_factor=1.7
+    max_iter=10, threadsperblock_3d=None, relaxation_factor=1
 ):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,

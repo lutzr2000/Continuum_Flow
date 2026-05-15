@@ -512,9 +512,10 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     velocity_advection_scheme: bpy.props.EnumProperty(
         name="",
         items=(
-            ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster"),
-            ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower"),
-            ("SEMI_LAGRANGIAN", "Semi-Lagrangian", "very stable, more diffusive, allows larger timesteps"),
+            ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster, CFL < 1"),
+            ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower, CFL < 1"),
+            ("SEMI_LAGRANGIAN", "Semi-Lagrangian", "stable, less swirly, allows larger timesteps, CFL can be > 1"),
+            ("MACCORMACK", "MacCormack", "less stable, more swirly, allows larger timesteps, CFL can be > 1"),
         ),
         default="FIRST_ORDER_UPWIND",
         options=set(),

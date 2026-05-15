@@ -1,13 +1,24 @@
 TODO
 
+General:
 Make solver installable
-auto switch max cfl when user switches advection scheme
-Update CPU to GPU state
-performance compare in campfire, drift and rising smoke
-documentation best practices or tips section
 Geometry nodes domain edge fade
-Documentation with sphynx
 Testing
+Update CPU to GPU state
 
+Forces:
+turbulence force needs to be divergence free
+
+Schemes:
+MacCormack and Semi lagrangian are sometimes less stable with smaller CFL, thats not good
+Pressure solve needs to become better
+solver needs to become more stable
+auto switch max cfl when user switches advection scheme
+
+Documentation:
+finish docu in general
+documentation best practices or tips section
+compare same cases with different schemes, once with settings all the same, once with settings adjusted best for each scheme
+performance compare in campfire, drift and rising smoke
 
 

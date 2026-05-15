@@ -38,6 +38,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "u_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "v_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "w_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "u_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "v_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "w_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
 
         # Pressure solve state.
         "p": cuda.to_device(host_state["p"]),
@@ -46,10 +49,13 @@ def upload_simulation_state_to_gpu(simulation_params):
         # Advected scalar fields and their work buffers.
         "T": cuda.to_device(host_state["T"]),
         "temperature_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "temperature_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "smoke": cuda.to_device(host_state["smoke"]),
         "smoke_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "smoke_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "fuel": cuda.to_device(host_state["fuel"]),
         "fuel_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "fuel_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "flame": cuda.to_device(host_state["flame"]),
         "flame_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
 

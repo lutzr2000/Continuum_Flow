@@ -233,13 +233,19 @@ def _initialise_solver(config):
     u_work = gpu_fields["u_work"]
     v_work = gpu_fields["v_work"]
     w_work = gpu_fields["w_work"]
+    u_tmp = gpu_fields["u_tmp"]
+    v_tmp = gpu_fields["v_tmp"]
+    w_tmp = gpu_fields["w_tmp"]
     p = gpu_fields["p"]
     T = gpu_fields["T"]
     temperature_work = gpu_fields["temperature_work"]
+    temperature_tmp = gpu_fields["temperature_tmp"]
     smoke = gpu_fields["smoke"]
     smoke_work = gpu_fields["smoke_work"]
+    smoke_tmp = gpu_fields["smoke_tmp"]
     fuel = gpu_fields["fuel"]
     fuel_work = gpu_fields["fuel_work"]
+    fuel_tmp = gpu_fields["fuel_tmp"]
     flame = gpu_fields["flame"]
     flame_work = gpu_fields["flame_work"]
     turbulence_angular_frequencies = np.asarray(
@@ -340,13 +346,19 @@ def _initialise_solver(config):
         "u_work": u_work,
         "v_work": v_work,
         "w_work": w_work,
+        "u_tmp": u_tmp,
+        "v_tmp": v_tmp,
+        "w_tmp": w_tmp,
         "p": p,
         "T": T,
         "temperature_work": temperature_work,
+        "temperature_tmp": temperature_tmp,
         "smoke": smoke,
         "smoke_work": smoke_work,
+        "smoke_tmp": smoke_tmp,
         "fuel": fuel,
         "fuel_work": fuel_work,
+        "fuel_tmp": fuel_tmp,
         "flame": flame,
         "flame_work": flame_work,
         "turbulence_angular_frequencies": turbulence_angular_frequencies,
@@ -396,13 +408,19 @@ def _run_time_step(state, blockspergrid_3d):
     u_work = state["u_work"]
     v_work = state["v_work"]
     w_work = state["w_work"]
+    u_tmp = state["u_tmp"]
+    v_tmp = state["v_tmp"]
+    w_tmp = state["w_tmp"]
     p = state["p"]
     T = state["T"]
     temperature_work = state["temperature_work"]
+    temperature_tmp = state["temperature_tmp"]
     smoke = state["smoke"]
     smoke_work = state["smoke_work"]
+    smoke_tmp = state["smoke_tmp"]
     fuel = state["fuel"]
     fuel_work = state["fuel_work"]
+    fuel_tmp = state["fuel_tmp"]
     flame = state["flame"]
     flame_work = state["flame_work"]
     t = state["t"]
@@ -496,6 +514,16 @@ def _run_time_step(state, blockspergrid_3d):
             gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
             simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         )
+    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "MACCORMACK":
+        advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
+        )
+        advection_schemes.update_velocity_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            u, v, w, u_tmp, v_tmp, w_tmp,
+            p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
+            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
+            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+        )
     else:
         advection_schemes.update_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
@@ -514,6 +542,26 @@ def _run_time_step(state, blockspergrid_3d):
     if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SEMI_LAGRANGIAN":
         scalar_update.update_scalar_fields_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             T, smoke, fuel, u, v, w, dt,
+            temperature_work, smoke_work, fuel_work, flame_work,
+            gpu_constants["DELTA"],
+            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
+            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
+            gpu_constants["SMOKE_DISSIPATION_RATE"],
+            gpu_constants["SMOKE_PRODUCTION_RATE"],
+            gpu_constants["FUEL_BURN_RATE"],
+            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
+            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
+            gpu_constants["T_REFERENCE"],
+        )
+    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "MACCORMACK":
+        scalar_update.advect_scalar_fields_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            T, smoke, fuel, u, v, w, dt,
+            temperature_tmp, smoke_tmp, fuel_tmp,
+            gpu_constants["DELTA"],
+        )
+        scalar_update.update_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
+            u, v, w, dt,
             temperature_work, smoke_work, fuel_work, flame_work,
             gpu_constants["DELTA"],
             gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
@@ -587,13 +635,19 @@ def _run_time_step(state, blockspergrid_3d):
         "u_work": u_work,
         "v_work": v_work,
         "w_work": w_work,
+        "u_tmp": u_tmp,
+        "v_tmp": v_tmp,
+        "w_tmp": w_tmp,
         "p": p,
         "T": T,
         "temperature_work": temperature_work,
+        "temperature_tmp": temperature_tmp,
         "smoke": smoke,
         "smoke_work": smoke_work,
+        "smoke_tmp": smoke_tmp,
         "fuel": fuel,
         "fuel_work": fuel_work,
+        "fuel_tmp": fuel_tmp,
         "flame": flame,
         "flame_work": flame_work,
     })
