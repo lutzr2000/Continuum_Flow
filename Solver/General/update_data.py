@@ -90,15 +90,6 @@ def build_initial_host_state(
     w[source_velocity_mask_host] = source_velocity_z_host[source_velocity_mask_host]
 
     T = np.maximum(T, source_temperature_host)
-    smoke = np.minimum(
-        np.maximum(smoke, source_smoke_host),
-        precision_dtype.type(100.0),
-    )
-    fuel = np.minimum(
-        np.maximum(fuel, source_fuel_host),
-        precision_dtype.type(100.0),
-    )
-
     return {
         "precision_dtype": precision_dtype,
         "shape": (nx, ny, nz),

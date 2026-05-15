@@ -674,6 +674,7 @@ def update_scalar_fields(
 
 def apply_all_BC(
     u, v, w, p, T, smoke, fuel, flame,
+    dt,
     bc_config,
     has_obstacle, obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
     has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
@@ -694,6 +695,7 @@ def apply_all_BC(
             source_mask, source_velocity_mask,
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
+            dt,
         )
     return u, v, w, p, T, smoke, fuel, flame
 
@@ -808,6 +810,7 @@ def main(config=None):
 
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
+        0.0,
         simulation_params["BC_CONFIG"],
         cpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
         cpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
@@ -961,6 +964,7 @@ def main(config=None):
 
             u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
                 u, v, w, p, T, smoke, fuel, flame,
+                dt,
                 simulation_params["BC_CONFIG"],
                 cpu_constants["HAS_OBSTACLE"], obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
                 cpu_constants["HAS_SOURCE"], source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,

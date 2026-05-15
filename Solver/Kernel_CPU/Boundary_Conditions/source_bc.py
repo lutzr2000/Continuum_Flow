@@ -192,8 +192,9 @@ def _source_bc_kernel_cpu(
     source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
+    dt,
 ):
-    """Clamp active source cells to their persistent CPU source target fields."""
+    """Apply source velocity/temperature and inject smoke/fuel rates on the CPU."""
     total_size = source_mask.size
     u_flat = u.reshape(total_size)
     v_flat = v.reshape(total_size)
@@ -220,15 +221,15 @@ def _source_bc_kernel_cpu(
             w_flat[idx] = source_velocity_z_flat[idx]
 
         source_temperature_value = source_temperature_flat[idx]
-        source_smoke_value = min(source_smoke_flat[idx], 100.0)
-        source_fuel_value = min(source_fuel_flat[idx], 100.0)
+        # Boost authored source rates so the emitted volume reads denser visually.
+        source_smoke_rate = 10.0 * source_smoke_flat[idx]
+        source_fuel_rate = 10.0 * source_fuel_flat[idx]
 
         if T_flat[idx] < source_temperature_value:
             T_flat[idx] = source_temperature_value
-        if smoke_flat[idx] < source_smoke_value:
-            smoke_flat[idx] = source_smoke_value
-        if fuel_flat[idx] < source_fuel_value:
-            fuel_flat[idx] = source_fuel_value
+
+        smoke_flat[idx] = min(max(smoke_flat[idx] + dt * source_smoke_rate, 0.0), 100.0)
+        fuel_flat[idx] = min(max(fuel_flat[idx] + dt * source_fuel_rate, 0.0), 100.0)
 
 
 def source_bc(
@@ -236,12 +237,13 @@ def source_bc(
     source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
+    dt,
 ):
     """
     Apply all source boundary conditions to the CPU field state.
 
-    Velocity is imposed directly and temperature, smoke and fuel are clamped to
-    their persistent source target values inside active source cells.
+    Velocity is imposed directly, temperature remains a minimum target and
+    smoke/fuel are injected as dt-scaled emission rates inside active cells.
     """
     if source_mask.size == 0 or not np.any(source_mask):
         return u, v, w, T, smoke, fuel
@@ -251,5 +253,6 @@ def source_bc(
         source_mask, source_velocity_mask,
         source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
+        dt,
     )
     return u, v, w, T, smoke, fuel

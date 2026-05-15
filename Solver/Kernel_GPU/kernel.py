@@ -161,6 +161,7 @@ def apply_vorticity_confinement(
 
 def apply_all_BC(
     u, v, w, p, T, smoke, fuel, flame,
+    dt,
     bc_config,
     has_obstacle, obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
     has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
@@ -183,6 +184,7 @@ def apply_all_BC(
             source_mask, source_velocity_mask,
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
+            dt,
         )
     return u, v, w, p, T, smoke, fuel, flame
 
@@ -279,6 +281,7 @@ def _initialise_solver(config):
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
+        0.0,
         simulation_params["BC_CONFIG"],
         gpu_constants["HAS_OBSTACLE"],
         gpu_fields["obstacle_mask"],
@@ -599,6 +602,7 @@ def _run_time_step(state, blockspergrid_3d):
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
         u, v, w, p, T, smoke, fuel, flame,
+        dt,
         simulation_params["BC_CONFIG"],
         gpu_constants["HAS_OBSTACLE"],
         gpu_fields["obstacle_mask"],

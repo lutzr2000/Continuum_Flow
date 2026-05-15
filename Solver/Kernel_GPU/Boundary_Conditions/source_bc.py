@@ -285,13 +285,14 @@ def _source_bc_kernel(
     source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
+    dt,
 ):
     """
-    clamps source regions to persistent source maxima on the GPU.
+    Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
 
     Each thread checks one source cell, sets the configured source velocity,
-    and raises temperature, smoke and fuel to the configured source values
-    when the source mask is active there.
+    keeps temperature above the configured minimum and injects smoke/fuel
+    according to the authored per-second emission rates.
 
     Args:
         u (device array): x-velocity field
@@ -319,8 +320,9 @@ def _source_bc_kernel(
         return
 
     source_temperature_value = source_temperature[i, j, k]
-    source_smoke_value = min(source_smoke[i, j, k], 100.0)
-    source_fuel_value = min(source_fuel[i, j, k], 100.0)
+    # Boost authored source rates so the emitted volume reads denser visually.
+    source_smoke_rate = 10.0 * source_smoke[i, j, k]
+    source_fuel_rate = 10.0 * source_fuel[i, j, k]
 
     if source_velocity_mask[i, j, k]:
         u[i, j, k] = source_velocity_x[i, j, k]
@@ -329,10 +331,8 @@ def _source_bc_kernel(
 
     if T[i, j, k] < source_temperature_value:
         T[i, j, k] = source_temperature_value
-    if smoke[i, j, k] < source_smoke_value:
-        smoke[i, j, k] = source_smoke_value
-    if fuel[i, j, k] < source_fuel_value:
-        fuel[i, j, k] = source_fuel_value
+    smoke[i, j, k] = min(max(smoke[i, j, k] + dt * source_smoke_rate, 0.0), 100.0)
+    fuel[i, j, k] = min(max(fuel[i, j, k] + dt * source_fuel_rate, 0.0), 100.0)
 
 
 def source_bc(
@@ -340,13 +340,14 @@ def source_bc(
     source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
+    dt,
     threadsperblock=None,
 ):
     """
     applies all source boundary conditions to the GPU field state.
 
-    Velocity is imposed directly and temperature, smoke and fuel are clamped to
-    their persistent source target values inside active source cells.
+    Velocity is imposed directly, temperature remains a minimum target and
+    smoke/fuel are injected as dt-scaled emission rates inside active cells.
 
     Args:
         u (device array): x-velocity field
@@ -377,5 +378,6 @@ def source_bc(
         source_mask, source_velocity_mask,
         source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
+        dt,
     )
     return u, v, w, T, smoke, fuel
