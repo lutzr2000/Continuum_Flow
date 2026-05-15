@@ -1,6 +1,8 @@
 Examples
 ========
 
+!!! Also do a comparison of advection schemes and runtime here
+
 This section should contain practical example setups and walkthroughs.
 
 Suggested topics for this chapter:

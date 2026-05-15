@@ -1,10 +1,11 @@
 TODO
 
-clean up recent code adds
 Make solver installable
 auto switch max cfl when user switches advection scheme
 speed up launch of code some stuff takes a too long there
 Update CPU to GPU state
+performance compare in campfire, drift and rising smoke
+documentation best practices or tips section
 Geometry nodes domain edge fade
 Documentation with sphynx
 Testing
