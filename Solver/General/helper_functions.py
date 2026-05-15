@@ -86,7 +86,7 @@ def _record_timing(stats, name, elapsed):
 
 
 def _print_timing_summary(stats, total_runtime, step_count, output_frame_count):
-    """Print a compact timing table for the recorded GPU solver sections."""
+    """Print a compact timing table for the recorded solver sections."""
     measured_total = sum(entry["total"] for entry in stats.values())
 
     print("Timing summary:")

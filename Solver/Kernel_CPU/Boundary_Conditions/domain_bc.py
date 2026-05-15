@@ -23,6 +23,32 @@ BC_TYPE_TO_MODE = {
 }
 
 
+@njit(cache=True, fastmath=True)
+def _pressure_poisson_apply_neumann_bcs(p):
+    """
+    Apply hard-coded zero-gradient pressure boundary conditions on all six faces.
+
+    This mirrors the GPU boundary helper so the pressure solve can source the
+    same Neumann boundary rule from the boundary-conditions module.
+    """
+    nx, ny, nz = p.shape
+
+    for j in range(ny):
+        for k in range(nz):
+            p[0, j, k] = p[1, j, k]
+            p[nx - 1, j, k] = p[nx - 2, j, k]
+
+    for i in range(nx):
+        for k in range(nz):
+            p[i, 0, k] = p[i, 1, k]
+            p[i, ny - 1, k] = p[i, ny - 2, k]
+
+    for i in range(nx):
+        for j in range(ny):
+            p[i, j, 0] = p[i, j, 1]
+            p[i, j, nz - 1] = p[i, j, nz - 2]
+
+
 @njit(cache=True, parallel=True)
 def _apply_face_bc_numba(
     u, v, w, p, T, smoke, fuel,

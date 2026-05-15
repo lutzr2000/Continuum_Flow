@@ -193,6 +193,8 @@ def _source_bc_kernel_cpu(
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
     dt,
+    apply_velocity,
+    apply_scalars,
 ):
     """Apply source velocity/temperature and inject smoke/fuel rates on the CPU."""
     total_size = source_mask.size
@@ -215,21 +217,22 @@ def _source_bc_kernel_cpu(
         if not source_mask_flat[idx]:
             continue
 
-        if source_velocity_mask_flat[idx]:
+        if apply_velocity and source_velocity_mask_flat[idx]:
             u_flat[idx] = source_velocity_x_flat[idx]
             v_flat[idx] = source_velocity_y_flat[idx]
             w_flat[idx] = source_velocity_z_flat[idx]
 
-        source_temperature_value = source_temperature_flat[idx]
-        # Boost authored source rates so the emitted volume reads denser visually.
-        source_smoke_rate = 10.0 * source_smoke_flat[idx]
-        source_fuel_rate = 10.0 * source_fuel_flat[idx]
+        if apply_scalars:
+            source_temperature_value = source_temperature_flat[idx]
+            # Boost authored source rates so the emitted volume reads denser visually.
+            source_smoke_rate = 10.0 * source_smoke_flat[idx]
+            source_fuel_rate = 10.0 * source_fuel_flat[idx]
 
-        if T_flat[idx] < source_temperature_value:
-            T_flat[idx] = source_temperature_value
+            if T_flat[idx] < source_temperature_value:
+                T_flat[idx] = source_temperature_value
 
-        smoke_flat[idx] = min(max(smoke_flat[idx] + dt * source_smoke_rate, 0.0), 100.0)
-        fuel_flat[idx] = min(max(fuel_flat[idx] + dt * source_fuel_rate, 0.0), 100.0)
+            smoke_flat[idx] = min(max(smoke_flat[idx] + dt * source_smoke_rate, 0.0), 100.0)
+            fuel_flat[idx] = min(max(fuel_flat[idx] + dt * source_fuel_rate, 0.0), 100.0)
 
 
 def source_bc(
@@ -238,12 +241,14 @@ def source_bc(
     source_temperature, source_smoke, source_fuel,
     source_velocity_x, source_velocity_y, source_velocity_z,
     dt,
+    apply_velocity=True,
+    apply_scalars=True,
 ):
     """
     Apply all source boundary conditions to the CPU field state.
 
-    Velocity is imposed directly, temperature remains a minimum target and
-    smoke/fuel are injected as dt-scaled emission rates inside active cells.
+    Velocity can be imposed directly and scalar source terms can be injected
+    independently so the caller can match the GPU source-application flow.
     """
     if source_mask.size == 0 or not np.any(source_mask):
         return u, v, w, T, smoke, fuel
@@ -254,5 +259,7 @@ def source_bc(
         source_temperature, source_smoke, source_fuel,
         source_velocity_x, source_velocity_y, source_velocity_z,
         dt,
+        apply_velocity,
+        apply_scalars,
     )
     return u, v, w, T, smoke, fuel

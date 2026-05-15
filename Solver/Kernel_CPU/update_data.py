@@ -35,6 +35,9 @@ def upload_simulation_state_to_cpu(simulation_params):
         "u_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "v_work": np.empty((nx, ny, nz), dtype=precision_dtype),
         "w_work": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "u_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "v_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "w_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
 
         # Pressure solve state.
         "p": host_state["p"],
@@ -43,10 +46,13 @@ def upload_simulation_state_to_cpu(simulation_params):
         # Advected scalar fields and their work buffers.
         "T": host_state["T"],
         "temperature_work": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "temperature_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
         "smoke": host_state["smoke"],
         "smoke_work": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "smoke_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
         "fuel": host_state["fuel"],
         "fuel_work": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "fuel_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
         "flame": host_state["flame"],
         "flame_work": np.empty((nx, ny, nz), dtype=precision_dtype),
 
