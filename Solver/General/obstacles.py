@@ -124,7 +124,7 @@ def _barycentric_yz(y, z, tri, eps):
 
 
 @njit(cache=True)
-def _scanline_pass(iy0, iy1, iz0, iz1, z_span, line_counts, offsets, candidates, write):
+def _scanline_pass(iy0, iy1, iz0, iz1, z_span, line_counts, candidates, write):
     """
     Shared scanline pass.
     - If candidates.size == 0: count touched scanlines in line_counts.
@@ -349,7 +349,7 @@ def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, i
     z_span = int(limit[1] + 1)
     counts = np.zeros(line_count, dtype=np.int32)
     dummy = np.empty(0, dtype=np.int32)
-    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, empty_offsets, dummy, counts)
+    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, dummy, counts)
 
     offsets = np.empty(line_count + 1, dtype=np.int32)
     offsets[0] = 0
@@ -357,7 +357,7 @@ def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, i
 
     candidates = np.empty(int(offsets[-1]), dtype=np.int32)
     write = offsets[:-1].copy()
-    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, offsets, candidates, write)
+    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, candidates, write)
     return offsets, candidates, triangles
 
 

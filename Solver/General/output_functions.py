@@ -73,7 +73,6 @@ def setup_output(
                 outpath,
                 frame_start,
                 delta,
-                buffered_variables,
                 host_writer_endpoint,
             ),
             daemon=True,
@@ -267,7 +266,6 @@ def writer_thread_func(
     outpath,
     frame_start,
     delta,
-    buffered_variables,
     host_writer_endpoint,
 ):
     """
@@ -279,7 +277,6 @@ def writer_thread_func(
         outpath (str): output directory for vdb files
         frame_start (int): Blender frame number used for the first written VDB
         delta (float): grid spacing
-        buffered_variables (list[str]): names of the fields that should be copied into shared memory
         host_writer_endpoint (dict): host/port for Blender's in-process writer
     Returns:
         None

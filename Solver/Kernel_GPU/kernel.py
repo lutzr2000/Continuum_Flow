@@ -309,7 +309,7 @@ def _initialise_solver(config):
     t = 0.0
     section_start = perf_counter()
     general_update_data.update_animated_constants(simulation_params, gpu_constants, t)
-    animated_force = update_data.update_animated_source_force_values(
+    update_data.update_animated_source_force_values(
         simulation_params,
         gpu_fields,
         t,

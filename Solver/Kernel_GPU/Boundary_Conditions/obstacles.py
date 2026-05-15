@@ -198,77 +198,6 @@ def prepare_dynamic_runtime_for_gpu(runtime_data):
     return runtime_data
 
 
-def update_dynamic_mask_gpu(runtime_data, time_value, out_mask):
-    """Update one combined world-space mask directly on the GPU."""
-    if out_mask is None:
-        raise ValueError("A device output mask is required for GPU dynamic updates.")
-
-    prepare_dynamic_runtime_for_gpu(runtime_data)
-
-    shape = runtime_data["shape"]
-    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
-    delta = np.float32(runtime_data["delta"])
-    full_volume = int(shape[0] * shape[1] * shape[2])
-    dirty_regions = []
-    dirty_volume = 0
-    active_objects = []
-
-    for object_index, obj in enumerate(runtime_data["objects"]):
-        state = general_obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
-        previous_bounds = obj.get("last_gpu_index_bounds")
-        current_bounds = state["index_bounds"] if state["active"] else None
-        dirty_bounds = general_obstacles._merge_index_bounds(previous_bounds, current_bounds)
-        if dirty_bounds is not None:
-            dirty_regions.append(dirty_bounds)
-            sx, sy, sz = general_obstacles._region_shape(dirty_bounds)
-            dirty_volume += sx * sy * sz
-        if state["active"]:
-            active_objects.append((object_index, obj, state))
-
-    if not runtime_data.get("gpu_mask_initialized", False) or dirty_volume >= full_volume:
-        _clear_mask_cuda[volume_blocks_per_grid(shape, THREADS_PER_BLOCK_3D), THREADS_PER_BLOCK_3D](out_mask)
-    else:
-        for dirty_bounds in dirty_regions:
-            ix0, ix1, iy0, iy1, iz0, iz1 = dirty_bounds
-            sx, sy, sz = general_obstacles._region_shape(dirty_bounds)
-            _clear_mask_box_cuda[
-                volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
-                THREADS_PER_BLOCK_3D,
-            ](out_mask, int(ix0), int(iy0), int(iz0), sx, sy, sz)
-
-    for object_index, obj, state in active_objects:
-        ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
-        sx, sy, sz = general_obstacles._region_shape(state["index_bounds"])
-        inv = state["inv"]
-        _sample_mask_backwards_object_cuda[
-            volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
-            THREADS_PER_BLOCK_3D,
-        ](
-            out_mask,
-            runtime_data["local_masks_flat_device"],
-            runtime_data["local_mask_offsets_device"],
-            runtime_data["local_mask_shapes_device"],
-            runtime_data["local_origins_device"],
-            int(object_index),
-            int(ix0), int(iy0), int(iz0),
-            sx, sy, sz,
-            np.float32(inv[0, 0]), np.float32(inv[0, 1]), np.float32(inv[0, 2]), np.float32(inv[0, 3]),
-            np.float32(inv[1, 0]), np.float32(inv[1, 1]), np.float32(inv[1, 2]), np.float32(inv[1, 3]),
-            np.float32(inv[2, 0]), np.float32(inv[2, 1]), np.float32(inv[2, 2]), np.float32(inv[2, 3]),
-            delta,
-            np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
-        )
-        obj["last_gpu_index_bounds"] = state["index_bounds"]
-
-    for obj in runtime_data["objects"]:
-        if obj.get("dynamic_state") is None or not obj["dynamic_state"].get("active", False):
-            obj["last_gpu_index_bounds"] = None
-
-    runtime_data["gpu_mask_initialized"] = True
-    runtime_data["last_has_obstacle"] = bool(len(active_objects) > 0)
-    return out_mask
-
-
 def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_velocity_x, out_velocity_y, out_velocity_z):
     """Update one moving obstacle mask and its wall velocity fields directly on the GPU."""
     if out_mask is None or out_velocity_x is None or out_velocity_y is None or out_velocity_z is None:
@@ -303,7 +232,7 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
         ](out_mask, out_velocity_x, out_velocity_y, out_velocity_z)
     else:
         for dirty_bounds in dirty_regions:
-            ix0, ix1, iy0, iy1, iz0, iz1 = dirty_bounds
+            ix0, _, iy0, _, iz0, _ = dirty_bounds
             sx, sy, sz = general_obstacles._region_shape(dirty_bounds)
             _clear_obstacle_fields_box_cuda[
                 volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
@@ -311,7 +240,7 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
             ](out_mask, out_velocity_x, out_velocity_y, out_velocity_z, int(ix0), int(iy0), int(iz0), sx, sy, sz)
 
     for object_index, obj, state in active_objects:
-        ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
+        ix0, _, iy0, _, iz0, _ = state["index_bounds"]
         sx, sy, sz = general_obstacles._region_shape(state["index_bounds"])
         inv = state["inv"]
         rate = state["matrix_rate"]
