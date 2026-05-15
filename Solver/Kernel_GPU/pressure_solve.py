@@ -66,20 +66,12 @@ def pressure_equation_right_side(
     # This comes from the divergence of the time derivative
     divergence = du_dx + dv_dy + dw_dz
 
-    # This comes from the divergence of the convection term
-    nonlinear = (
-        du_dx * du_dx +
-        dv_dy * dv_dy +
-        dw_dz * dw_dz +
-        2.0 * (du_dy * dv_dx + du_dz * dw_dx + dv_dz * dw_dy)
-    )
-
     #------------Artifical thermal divergence-------------------
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
     authored_divergence = point_divergence[i, j, k]
 
     #------------Right hand side-------------------
-    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - rho * nonlinear
+    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence)
 
     if obstacle_mask[i, j, k]:
         omega_x[i, j, k] = 0.0
