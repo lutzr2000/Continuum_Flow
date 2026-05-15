@@ -39,7 +39,7 @@ def update_obstacle_mask(obstacle_data, time_value):
     return updated_mask
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def _obstacle_bc_kernel(u, v, w, smoke, fuel, flame, mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z):
     """
     applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.

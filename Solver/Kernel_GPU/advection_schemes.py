@@ -1,7 +1,7 @@
 from numba import cuda
 
 
-@cuda.jit(device=True, inline=True)
+@cuda.jit(device=True, inline=True, cache=True)
 def _clamp(value, lower, upper):
     if value < lower:
         return lower
@@ -10,7 +10,7 @@ def _clamp(value, lower, upper):
     return value
 
 
-@cuda.jit(device=True, inline=True)
+@cuda.jit(device=True, inline=True, cache=True)
 def _sample_trilinear(field, x, y, z):
     nx, ny, nz = field.shape
 
@@ -49,7 +49,7 @@ def _sample_trilinear(field, x, y, z):
     return c0 + tz * (c1 - c0)
 
 
-@cuda.jit(device=True, inline=True)
+@cuda.jit(device=True, inline=True, cache=True)
 def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
     substep_dt = dt_over_delta * 0.25
     x_pos = x_start

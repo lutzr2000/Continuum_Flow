@@ -54,7 +54,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
         p[i, j, k] = p[i, j, nz - 2]
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, cache=True)
 def _apply_face_state(
     u, v, w, p, T, smoke, fuel,
     i, j, k,
@@ -98,7 +98,7 @@ def _apply_face_state(
     fuel[i, j, k] = neighbor_fuel
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def _domain_bc_kernel(
     u, v, w, p, T, smoke, fuel,
     x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,

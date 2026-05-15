@@ -279,7 +279,7 @@ def update_source_data(source_data, time_value):
     return source_data
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def _source_bc_kernel(
     u, v, w, T, smoke, fuel,
     source_mask, source_velocity_mask,
