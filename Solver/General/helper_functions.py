@@ -709,12 +709,7 @@ def apply_config(config):
         "FRAME_START": int(settings_cfg.get("start_frame", 0)),
         "CFL_MAX": float(settings_cfg["cfl"]),
         "MAX_ITER": int(settings_cfg["iterations"]),
-        "VELOCITY_ADVECTION_SCHEME": str(
-            settings_cfg.get(
-                "velocity_advection_scheme",
-                "SECOND_ORDER_UPWIND",
-            )
-        ),
+        "MACCORMACK_FACTOR": float(settings_cfg.get("maccormack_factor", 0.25)),
         "PRESSURE_SOLVER": str(settings_cfg.get("pressure_solver", "jacobi")),
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
             settings_cfg.get(

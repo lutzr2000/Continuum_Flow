@@ -10,11 +10,6 @@ the end frame should still be simulated
 Forces:
 turbulence force needs to be divergence free
 
-Schemes:
-remove first order upwind and semi lagrangian
-MacCormack and Semi lagrangian are sometimes less stable with smaller CFL, thats not good
-auto switch max cfl when user switches advection scheme
-
 Documentation:
 finish docu in general
 documentation best practices or tips section

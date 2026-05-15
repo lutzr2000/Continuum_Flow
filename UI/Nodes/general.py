@@ -493,7 +493,7 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     bl_width_max = 420.0
     property_groups = (
         ("Time", ("start_frame", "end_frame", "cfl")),
-        ("Solver", ("iterations", "velocity_advection_scheme")),
+        ("Solver", ("iterations", "maccormack_factor")),
     )
 
     solver_backend: bpy.props.EnumProperty(
@@ -507,19 +507,9 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
-    cfl: FloatProperty(name="CFL", default=0.9, min=0.000001, max=10.0, soft_max=10, description="CFL condition for the solver", options=set())  # type: ignore
-    iterations: IntProperty(name="Iterations", default=4, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
-    velocity_advection_scheme: bpy.props.EnumProperty(
-        name="",
-        items=(
-            ("FIRST_ORDER_UPWIND", "First Order Upwind", "less swirly, more stable, faster, CFL < 1"),
-            ("SECOND_ORDER_UPWIND", "Second Order Upwind", "more swirly, less stable, slower, CFL < 1"),
-            ("SEMI_LAGRANGIAN", "Semi-Lagrangian", "stable, less swirly, allows larger timesteps, CFL can be > 1"),
-            ("MACCORMACK", "MacCormack", "less stable, more swirly, allows larger timesteps, CFL can be > 1"),
-        ),
-        default="FIRST_ORDER_UPWIND",
-        options=set(),
-    )  # type: ignore
+    cfl: FloatProperty(name="CFL", default=4, min=0.000001, max=10.0, soft_max=100, description="CFL condition for the solver", options=set())  # type: ignore
+    iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
+    maccormack_factor: FloatProperty(name="MacCormack Factor", default=0.25, min=0.0, max=0.5, soft_min=0.0, soft_max=0.5, precision=3, description="Higher values make the flow more swirly, but can produce artefacts", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname

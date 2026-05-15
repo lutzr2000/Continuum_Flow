@@ -509,38 +509,17 @@ def _run_time_step(state, blockspergrid_3d):
     #------------Pressure solve-------------------
     #------------Velocity update-------------------
     section_start = perf_counter()
-    if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "FIRST_ORDER_UPWIND":
-        advection_schemes.update_velocity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
-            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-            np.float32(0.0),
-        )
-    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SECOND_ORDER_UPWIND":
-        advection_schemes.update_velocity_second_order_upwind[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
-            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-            np.float32(0.0),
-        )
-    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "MACCORMACK":
-        advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
-        )
-        advection_schemes.update_velocity_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, u_tmp, v_tmp, w_tmp,
-            p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
-            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-            np.float32(0.0),
-        )
-    else:
-        advection_schemes.update_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
-            gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
-            simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-            np.float32(0.0),
-        )
+    advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
+    )
+    advection_schemes.update_velocity_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        u, v, w, u_tmp, v_tmp, w_tmp,
+        p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
+        gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
+        simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
+        np.float32(0.0),
+        np.float32(simulation_params["MACCORMACK_FACTOR"]),
+    )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
 
@@ -620,54 +599,26 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Scalar update-------------------
     section_start = perf_counter()
-    if simulation_params["VELOCITY_ADVECTION_SCHEME"] == "SEMI_LAGRANGIAN":
-        scalar_update.update_scalar_fields_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            T, smoke, fuel, u, v, w, dt,
-            temperature_work, smoke_work, fuel_work, flame_work,
-            gpu_constants["DELTA"],
-            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
-            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
-            gpu_constants["SMOKE_DISSIPATION_RATE"],
-            gpu_constants["SMOKE_PRODUCTION_RATE"],
-            gpu_constants["FUEL_BURN_RATE"],
-            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
-            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
-            gpu_constants["T_REFERENCE"],
-        )
-    elif simulation_params["VELOCITY_ADVECTION_SCHEME"] == "MACCORMACK":
-        scalar_update.advect_scalar_fields_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            T, smoke, fuel, u, v, w, dt,
-            temperature_tmp, smoke_tmp, fuel_tmp,
-            gpu_constants["DELTA"],
-        )
-        scalar_update.update_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
-            u, v, w, dt,
-            temperature_work, smoke_work, fuel_work, flame_work,
-            gpu_constants["DELTA"],
-            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
-            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
-            gpu_constants["SMOKE_DISSIPATION_RATE"],
-            gpu_constants["SMOKE_PRODUCTION_RATE"],
-            gpu_constants["FUEL_BURN_RATE"],
-            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
-            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
-            gpu_constants["T_REFERENCE"],
-        )
-    else:
-        scalar_update.update_scalar_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            T, smoke, fuel, u, v, w, dt,
-            temperature_work, smoke_work, fuel_work, flame_work,
-            gpu_constants["DELTA"],
-            gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
-            gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
-            gpu_constants["SMOKE_DISSIPATION_RATE"],
-            gpu_constants["SMOKE_PRODUCTION_RATE"],
-            gpu_constants["FUEL_BURN_RATE"],
-            gpu_constants["FUEL_IGNITION_TEMPERATURE"],
-            gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
-            gpu_constants["T_REFERENCE"],
-        )
+    scalar_update.predict_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        T, smoke, fuel, u, v, w, dt,
+        temperature_tmp, smoke_tmp, fuel_tmp,
+        gpu_constants["DELTA"],
+    )
+    scalar_update.update_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
+        u, v, w, dt,
+        temperature_work, smoke_work, fuel_work, flame_work,
+        gpu_constants["DELTA"],
+        gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
+        gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
+        gpu_constants["SMOKE_DISSIPATION_RATE"],
+        gpu_constants["SMOKE_PRODUCTION_RATE"],
+        gpu_constants["FUEL_BURN_RATE"],
+        gpu_constants["FUEL_IGNITION_TEMPERATURE"],
+        gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
+        gpu_constants["T_REFERENCE"],
+        np.float32(simulation_params["MACCORMACK_FACTOR"]),
+    )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
 
