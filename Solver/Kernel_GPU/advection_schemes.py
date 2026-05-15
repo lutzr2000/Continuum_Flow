@@ -12,26 +12,42 @@ def _clamp(value, lower, upper):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_trilinear(field, x, y, z):
+def _sample_trilinear(field, x, y, z, nx, ny, nz):
     """
     Sample one scalar field at fractional grid coordinates with trilinear interpolation.
 
     The sample position is clamped to the valid array extent before the eight
     surrounding cell values are blended.
     """
-    nx, ny, nz = field.shape
+    if x < 0.0:
+        x = 0.0
+    elif x > nx - 1:
+        x = nx - 1.0
 
-    x = _clamp(x, 0.0, float(nx - 1))
-    y = _clamp(y, 0.0, float(ny - 1))
-    z = _clamp(z, 0.0, float(nz - 1))
+    if y < 0.0:
+        y = 0.0
+    elif y > ny - 1:
+        y = ny - 1.0
+
+    if z < 0.0:
+        z = 0.0
+    elif z > nz - 1:
+        z = nz - 1.0
 
     x0 = int(x)
     y0 = int(y)
     z0 = int(z)
 
-    x1 = min(x0 + 1, nx - 1)
-    y1 = min(y0 + 1, ny - 1)
-    z1 = min(z0 + 1, nz - 1)
+    x1 = x0 + 1
+    y1 = y0 + 1
+    z1 = z0 + 1
+
+    if x1 >= nx:
+        x1 = nx - 1
+    if y1 >= ny:
+        y1 = ny - 1
+    if z1 >= nz:
+        z1 = nz - 1
 
     tx = x - x0
     ty = y - y0
@@ -57,7 +73,7 @@ def _sample_trilinear(field, x, y, z):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
+def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, ny, nz):
     """
     Backtrace one particle position through the velocity field with two substeps.
 
@@ -70,9 +86,9 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
     z_pos = z_start
 
     for _ in range(3):
-        u_sample = _sample_trilinear(u, x_pos, y_pos, z_pos)
-        v_sample = _sample_trilinear(v, x_pos, y_pos, z_pos)
-        w_sample = _sample_trilinear(w, x_pos, y_pos, z_pos)
+        u_sample = _sample_trilinear(u, x_pos, y_pos, z_pos, nx, ny, nz)
+        v_sample = _sample_trilinear(v, x_pos, y_pos, z_pos, nx, ny, nz)
+        w_sample = _sample_trilinear(w, x_pos, y_pos, z_pos, nx, ny, nz)
 
         x_pos -= substep_dt * u_sample
         y_pos -= substep_dt * v_sample
@@ -82,9 +98,9 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta):
+def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, ny, nz):
     """Forward-trace one position by reusing the backtracer with a negated timestep."""
-    return _backtrace_position(u, v, w, x_start, y_start, z_start, -dt_over_delta)
+    return _backtrace_position(u, v, w, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz)
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -135,11 +151,12 @@ def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w,
         u, v, w,
         float(i), float(j), float(k),
         dt / delta,
+        nx, ny, nz,
     )
 
-    advected_u[i, j, k] = _sample_trilinear(u, x_depart, y_depart, z_depart)
-    advected_v[i, j, k] = _sample_trilinear(v, x_depart, y_depart, z_depart)
-    advected_w[i, j, k] = _sample_trilinear(w, x_depart, y_depart, z_depart)
+    advected_u[i, j, k] = _sample_trilinear(u, x_depart, y_depart, z_depart, nx, ny, nz)
+    advected_v[i, j, k] = _sample_trilinear(v, x_depart, y_depart, z_depart, nx, ny, nz)
+    advected_w[i, j, k] = _sample_trilinear(w, x_depart, y_depart, z_depart, nx, ny, nz)
 
 
 @cuda.jit(cache=True)
@@ -175,20 +192,22 @@ def update_velocity_maccormack(
         u, v, w,
         float(i), float(j), float(k),
         dt_over_delta,
+        nx, ny, nz,
     )
     x_forward, y_forward, z_forward = _forward_trace_position(
         u, v, w,
         float(i), float(j), float(k),
         dt_over_delta,
+        nx, ny, nz,
     )
 
     advected_u = predictor_u[i, j, k]
     advected_v = predictor_v[i, j, k]
     advected_w = predictor_w[i, j, k]
 
-    reverse_u = _sample_trilinear(predictor_u, x_forward, y_forward, z_forward)
-    reverse_v = _sample_trilinear(predictor_v, x_forward, y_forward, z_forward)
-    reverse_w = _sample_trilinear(predictor_w, x_forward, y_forward, z_forward)
+    reverse_u = _sample_trilinear(predictor_u, x_forward, y_forward, z_forward, nx, ny, nz)
+    reverse_v = _sample_trilinear(predictor_v, x_forward, y_forward, z_forward, nx, ny, nz)
+    reverse_w = _sample_trilinear(predictor_w, x_forward, y_forward, z_forward, nx, ny, nz)
 
     corrected_u = advected_u + maccormack_factor * (u_center - reverse_u)
     corrected_v = advected_v + maccormack_factor * (v_center - reverse_v)

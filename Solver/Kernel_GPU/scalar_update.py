@@ -20,11 +20,12 @@ def predict_scalar_fields_maccormack(
         u, v, w,
         float(i), float(j), float(k),
         dt / delta,
+        nx, ny, nz,
     )
 
-    predictor_T[i, j, k] = advection_schemes._sample_trilinear(T, x_depart, y_depart, z_depart)
-    predictor_smoke[i, j, k] = advection_schemes._sample_trilinear(smoke, x_depart, y_depart, z_depart)
-    predictor_fuel[i, j, k] = advection_schemes._sample_trilinear(fuel, x_depart, y_depart, z_depart)
+    predictor_T[i, j, k] = advection_schemes._sample_trilinear(T, x_depart, y_depart, z_depart, nx, ny, nz)
+    predictor_smoke[i, j, k] = advection_schemes._sample_trilinear(smoke, x_depart, y_depart, z_depart, nx, ny, nz)
+    predictor_fuel[i, j, k] = advection_schemes._sample_trilinear(fuel, x_depart, y_depart, z_depart, nx, ny, nz)
 
 
 @cuda.jit(cache=True)
@@ -56,20 +57,22 @@ def update_scalar_fields_maccormack(
         u, v, w,
         float(i), float(j), float(k),
         dt_over_delta,
+        nx, ny, nz,
     )
     x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
         u, v, w,
         float(i), float(j), float(k),
         dt_over_delta,
+        nx, ny, nz,
     )
 
     T_advected = predictor_T[i, j, k]
     smoke_advected = predictor_smoke[i, j, k]
     fuel_advected = predictor_fuel[i, j, k]
 
-    T_reverse = advection_schemes._sample_trilinear(predictor_T, x_forward, y_forward, z_forward)
-    smoke_reverse = advection_schemes._sample_trilinear(predictor_smoke, x_forward, y_forward, z_forward)
-    fuel_reverse = advection_schemes._sample_trilinear(predictor_fuel, x_forward, y_forward, z_forward)
+    T_reverse = advection_schemes._sample_trilinear(predictor_T, x_forward, y_forward, z_forward, nx, ny, nz)
+    smoke_reverse = advection_schemes._sample_trilinear(predictor_smoke, x_forward, y_forward, z_forward, nx, ny, nz)
+    fuel_reverse = advection_schemes._sample_trilinear(predictor_fuel, x_forward, y_forward, z_forward, nx, ny, nz)
 
     T_corrected = T_advected + maccormack_factor * (T[i, j, k] - T_reverse)
     smoke_corrected = smoke_advected + maccormack_factor * (smoke[i, j, k] - smoke_reverse)
