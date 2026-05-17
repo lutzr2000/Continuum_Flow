@@ -568,7 +568,7 @@ def main(config=None):
         print("ERROR: The solver diverged before output setup, stopping the simulation!")
     else:
         section_start = perf_counter()
-        write_queue, buffer_pool, writer_threads, shared_memory_blocks = output_functions.setup_output(
+        write_queue, buffer_pool, writer_threads, shared_memory_blocks, _device_output_staging = output_functions.setup_output(
             state["simulation_params"]["OUTPATH"],
             state["simulation_params"]["FRAME_START"],
             state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],

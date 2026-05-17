@@ -4,8 +4,34 @@ import queue
 import socket
 import threading
 from multiprocessing import shared_memory
+from time import perf_counter
 
 import numpy as np
+try:
+    from numba import cuda
+except ImportError:
+    cuda = None
+
+import Solver.Kernel_GPU.kernel_config as kernel_config
+
+
+if cuda is not None:
+    @cuda.jit(cache=True)
+    def _cast_field_to_float16_kernel(source_field, output_field):
+        i, j, k = cuda.grid(3)
+        nx, ny, nz = source_field.shape
+
+        if i >= nx or j >= ny or k >= nz:
+            return
+
+        output_field[i, j, k] = np.float16(source_field[i, j, k])
+else:
+    _cast_field_to_float16_kernel = None
+
+
+def _is_cuda_array(field):
+    """Return whether the passed field looks like a CUDA device array."""
+    return cuda is not None and hasattr(field, "copy_to_host")
 
 
 def setup_output(
@@ -33,7 +59,8 @@ def setup_output(
         host_writer_endpoint (dict): host/port for Blender's in-process writer
         storage_dtype (dtype-like): target dtype used for VDB file storage
     Returns:
-        tuple: write queue, buffer queue, forwarder threads and list of shared-memory blocks
+        tuple: write queue, buffer queue, forwarder threads, list of shared-memory blocks
+        and optional device staging buffers
     """
     if not host_writer_endpoint:
         raise RuntimeError('No host VDB writer endpoint was configured.')
@@ -44,21 +71,40 @@ def setup_output(
     buffer_pool = queue.Queue(maxsize=queue_size)
     shared_memory_blocks = []
     storage_dtype = np.dtype(storage_dtype or np.float16)
+    use_float16_staging = cuda is not None and storage_dtype == np.dtype(np.float16)
+    device_staging_fields = {}
+    field_layouts = {}
+
+    for variable_name in buffered_variables:
+        template_array = template_fields[variable_name]
+        shape = tuple(template_array.shape)
+        source_dtype = np.dtype(template_array.dtype)
+        buffer_dtype = source_dtype
+
+        if use_float16_staging and _is_cuda_array(template_array) and source_dtype != storage_dtype:
+            device_staging_fields[variable_name] = cuda.device_array(shape, dtype=storage_dtype)
+            buffer_dtype = storage_dtype
+
+        field_layouts[variable_name] = {
+            'shape': shape,
+            'dtype': str(buffer_dtype),
+            'storage_dtype': str(storage_dtype),
+            'nbytes': int(np.prod(shape)) * buffer_dtype.itemsize,
+        }
 
     for _ in range(queue_size):
         fields = {}
         for variable_name in buffered_variables:
-            template_array = template_fields[variable_name]
-            shape = tuple(template_array.shape)
-            source_dtype = np.dtype(template_array.dtype)
-            nbytes = int(np.prod(shape)) * source_dtype.itemsize
-            shm = shared_memory.SharedMemory(create=True, size=nbytes)
+            layout = field_layouts[variable_name]
+            shape = layout['shape']
+            buffer_dtype = np.dtype(layout['dtype'])
+            shm = shared_memory.SharedMemory(create=True, size=layout['nbytes'])
             shared_memory_blocks.append(shm)
             fields[variable_name] = {
-                'array': np.ndarray(shape, dtype=source_dtype, buffer=shm.buf),
+                'array': np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
                 'shape': shape,
-                'dtype': str(source_dtype),
-                'storage_dtype': str(storage_dtype),
+                'dtype': layout['dtype'],
+                'storage_dtype': layout['storage_dtype'],
                 'shm_name': shm.name,
             }
         buffer_pool.put(fields)
@@ -80,7 +126,7 @@ def setup_output(
         writer_thread.start()
         writer_threads.append(writer_thread)
 
-    return write_queue, buffer_pool, writer_threads, shared_memory_blocks
+    return write_queue, buffer_pool, writer_threads, shared_memory_blocks, (device_staging_fields or None)
 
 
 def enqueue_device_output(
@@ -88,6 +134,7 @@ def enqueue_device_output(
     buffer_pool,
     buffered_variables,
     source_device_fields,
+    device_staging_fields,
     output_index,
     time_value,
     output_field_config,
@@ -103,13 +150,46 @@ def enqueue_device_output(
         output_index (int): output frame index
         time_value (float): physical simulation time
     Returns:
-        None
+        dict: timing breakdown for wait, pack and copy
     """
+    timings = {
+        "wait_for_buffer": 0.0,
+        "device_pack": 0.0,
+        "device_copy": 0.0,
+    }
+
+    section_start = perf_counter()
     fields = buffer_pool.get()
+    timings["wait_for_buffer"] = perf_counter() - section_start
+
+    staged_variables = []
+    if device_staging_fields:
+        section_start = perf_counter()
+        threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
+        for variable_name in buffered_variables:
+            staging_buffer = device_staging_fields.get(variable_name)
+            if staging_buffer is None:
+                continue
+            source_field = source_device_fields[variable_name]
+            blockspergrid_3d = kernel_config.volume_blocks_per_grid(source_field.shape, threadsperblock_3d)
+            _cast_field_to_float16_kernel[blockspergrid_3d, threadsperblock_3d](source_field, staging_buffer)
+            staged_variables.append(variable_name)
+
+        if staged_variables:
+            cuda.synchronize()
+            timings["device_pack"] = perf_counter() - section_start
+
+    section_start = perf_counter()
     for variable_name in buffered_variables:
         field_info = fields[variable_name]
-        source_device_fields[variable_name].copy_to_host(field_info['array'])
+        source_field = source_device_fields[variable_name]
+        if device_staging_fields and variable_name in device_staging_fields:
+            source_field = device_staging_fields[variable_name]
+        source_field.copy_to_host(field_info['array'])
+    timings["device_copy"] = perf_counter() - section_start
+
     write_queue.put((int(output_index), float(time_value), fields, output_field_config))
+    return timings
 
 
 def shutdown_output(write_queue, writer_threads, shared_memory_blocks):

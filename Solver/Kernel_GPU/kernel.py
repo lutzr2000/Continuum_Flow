@@ -323,6 +323,7 @@ def _initialise_solver(config):
     write_queue = None
     writer_threads = None
     shared_memory_blocks = None
+    device_output_staging = None
     solver_diverged = False
     cancel_requested = False
 
@@ -380,6 +381,7 @@ def _initialise_solver(config):
         "write_queue": write_queue,
         "writer_threads": writer_threads,
         "shared_memory_blocks": shared_memory_blocks,
+        "device_output_staging": device_output_staging,
         "solver_diverged": solver_diverged,
         "cancel_requested": cancel_requested,
     }
@@ -792,7 +794,7 @@ def main(config=None):
     #------------Prepare output-------------------
     section_start = perf_counter()
 
-    write_queue, buffer_pool, writer_threads, shared_memory_blocks = output_functions.setup_output(
+    write_queue, buffer_pool, writer_threads, shared_memory_blocks, device_output_staging = output_functions.setup_output(
         state["simulation_params"]["OUTPATH"],
         state["simulation_params"]["FRAME_START"],
         state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
@@ -809,6 +811,7 @@ def main(config=None):
     state["write_queue"] = write_queue
     state["writer_threads"] = writer_threads
     state["shared_memory_blocks"] = shared_memory_blocks
+    state["device_output_staging"] = device_output_staging
 
     helper_functions._record_timing(state["timing_stats"], "init_output_setup", perf_counter() - section_start)
 
@@ -838,7 +841,7 @@ def main(config=None):
         #------------Output-------------------
         section_start = perf_counter()
         while state["t"] >= next_output_time:
-            output_functions.enqueue_device_output(
+            output_timings = output_functions.enqueue_device_output(
                 write_queue,
                 buffer_pool,
                 state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
@@ -846,9 +849,25 @@ def main(config=None):
                     state["device_fields"],
                     state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
                 ),
+                state["device_output_staging"],
                 output_index,
                 state["t"],
                 state["simulation_params"]["OUTPUT_FIELD_CONFIG"],
+            )
+            helper_functions._record_timing(
+                state["timing_stats"],
+                "loop_output_wait_buffer",
+                output_timings["wait_for_buffer"],
+            )
+            helper_functions._record_timing(
+                state["timing_stats"],
+                "loop_output_device_pack",
+                output_timings["device_pack"],
+            )
+            helper_functions._record_timing(
+                state["timing_stats"],
+                "loop_output_device_copy",
+                output_timings["device_copy"],
             )
 
             output_index += 1
