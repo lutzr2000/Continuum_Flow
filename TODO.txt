@@ -5,6 +5,7 @@ Make solver installable
 Geometry nodes domain edge fade
 viewer hide show domain is broken
 Check when saving sparse to vdb if flame field is accounted for
+the live preview produces a RAM accumulation
 
 Solver: 
 optimise pressure solve more speed wise. SOR tends to overshoot but what are other options, also to many kernels, in general see if kernels can be united
