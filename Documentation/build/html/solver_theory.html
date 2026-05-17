@@ -323,70 +323,91 @@ limits:</p>
 </div>
 <p>and is additionally clamped to the current output interval.</p>
 </section>
-<section id="advection-and-upwind-schemes">
-<h2>Advection and Upwind Schemes<a class="headerlink" href="#advection-and-upwind-schemes" title="Link to this heading">¶</a></h2>
-<p>The nonlinear convection term <span class="math notranslate nohighlight">\((\mathbf{u}\cdot\nabla)\mathbf{u}\)</span> is the
-most delicate part of the transport step. To keep the method stable, the solver
-uses upwind differencing. The basic idea is simple: derivatives are evaluated
-using values from the upstream side of the flow. This follows the physical
-transport direction and suppresses the oscillations that often appear with pure
-central differencing.</p>
-<section id="first-order-upwind">
-<h3>First-Order Upwind<a class="headerlink" href="#first-order-upwind" title="Link to this heading">¶</a></h3>
-<p>In the first-order upwind scheme, each derivative uses the immediately adjacent
-cell in the upwind direction. For example, for a scalar quantity <span class="math notranslate nohighlight">\(\phi\)</span>
-in <span class="math notranslate nohighlight">\(x\)</span> direction:</p>
+<section id="semi-lagrangian-and-maccormack-advection">
+<h2>Semi-Lagrangian and MacCormack Advection<a class="headerlink" href="#semi-lagrangian-and-maccormack-advection" title="Link to this heading">¶</a></h2>
+<p>The nonlinear transport term <span class="math notranslate nohighlight">\((\mathbf{u}\cdot\nabla)\mathbf{u}\)</span> is the
+most delicate part of the update. In the current solver, both velocity and
+scalar transport are handled with a semi-Lagrangian backtracing scheme followed
+by a MacCormack correction step. This is more stable than a purely explicit
+high-order finite-difference advection and less diffusive than a plain
+first-order semi-Lagrangian pass.</p>
+<section id="semi-lagrangian-predictor">
+<h3>Semi-Lagrangian Predictor<a class="headerlink" href="#semi-lagrangian-predictor" title="Link to this heading">¶</a></h3>
+<p>For each cell center, the solver traces a departure position backward through
+the current velocity field:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
-\[\begin{split}\frac{\partial \phi}{\partial x}
-\approx
-\begin{cases}
-\dfrac{\phi_{i,j,k} - \phi_{i-1,j,k}}{\Delta}, &amp; u_{i,j,k} \ge 0 \\
-\dfrac{\phi_{i+1,j,k} - \phi_{i,j,k}}{\Delta}, &amp; u_{i,j,k} &lt; 0
-\end{cases}\end{split}\]</div>
+\[\mathbf{x}_d = \mathbf{x}_{i,j,k} - \Delta t \, \mathbf{u}(\mathbf{x}_{i,j,k})\]</div>
 </div>
-<p>This scheme is robust and dissipative. In practice that means it is hard to
-destabilize, but it also smooths the flow and reduces small vortical detail.
-For fast previews and difficult setups, this is usually the safest choice.</p>
+<p>The traced position is evaluated in grid coordinates and sampled with trilinear
+interpolation. In implementation, the backtrace is split into a few small
+substeps to make the characteristic integration more robust in strongly varying
+flow fields.</p>
+<p>For a transported quantity <span class="math notranslate nohighlight">\(\phi\)</span>, the predictor therefore becomes</p>
+<div class="math-wrapper docutils container">
+<div class="math notranslate nohighlight">
+\[\phi^\star_{i,j,k} = \phi^n(\mathbf{x}_d)\]</div>
+</div>
+<p>The same idea is applied component-wise to the velocity field.</p>
 </section>
-<section id="second-order-upwind">
-<h3>Second-Order Upwind<a class="headerlink" href="#second-order-upwind" title="Link to this heading">¶</a></h3>
-<p>The second-order upwind scheme uses a larger stencil and therefore preserves
-sharper gradients. When the local flow is positive, the derivative in
-<span class="math notranslate nohighlight">\(x\)</span> direction is approximated by</p>
+<section id="maccormack-correction">
+<h3>MacCormack Correction<a class="headerlink" href="#maccormack-correction" title="Link to this heading">¶</a></h3>
+<p>The pure semi-Lagrangian predictor is very robust, but it tends to smooth out
+detail. To recover sharper structures, the solver adds a MacCormack-style
+correction. After the backward predictor, a forward trace through the predictor
+field estimates the local transport error:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
-\[\frac{\partial \phi}{\partial x}
-\approx
-\frac{3\phi_{i,j,k} - 4\phi_{i-1,j,k} + \phi_{i-2,j,k}}{2\Delta}\]</div>
+\[\phi^{\mathrm{rev}}_{i,j,k} = \phi^\star(\mathbf{x}_f)\]</div>
 </div>
-<p>and for negative flow by</p>
+<p>The corrected value is then</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
-\[\frac{\partial \phi}{\partial x}
-\approx
-\frac{-3\phi_{i,j,k} + 4\phi_{i+1,j,k} - \phi_{i+2,j,k}}{2\Delta}\]</div>
+\[\phi^{n+1}_{i,j,k}
+=
+\phi^\star_{i,j,k}
++
+\kappa
+\left(
+\phi^n_{i,j,k} - \phi^{\mathrm{rev}}_{i,j,k}
+\right)\]</div>
 </div>
-<p>The same idea is applied in all three coordinate directions and for all three
-velocity components. Near domain boundaries, where the wider stencil is not
-available, the solver automatically falls back to first-order upwind.</p>
-<p>This second-order method is less diffusive and keeps more swirl and structure
-in the motion, but it is also less forgiving. In particular it usually requires
-a smaller CFL number than first-order upwinding.</p>
-<p>The transported scalar fields temperature, smoke and fuel are currently updated
-with first-order upwinding.</p>
+<p>where <span class="math notranslate nohighlight">\(\kappa\)</span> is the user-controlled MacCormack factor.</p>
+<p>To avoid overshoots and new extrema, the corrected result is clamped to the
+value range of the departure cell used by the semi-Lagrangian sample. This is
+important for both visual stability and bounded fields such as smoke and fuel.</p>
+</section>
+<section id="velocity-update-around-the-advection-step">
+<h3>Velocity Update Around the Advection Step<a class="headerlink" href="#velocity-update-around-the-advection-step" title="Link to this heading">¶</a></h3>
+<p>For velocity, the corrected advective update is not the final value yet.
+Diffusion and external forces are added explicitly:</p>
+<div class="math-wrapper docutils container">
+<div class="math notranslate nohighlight">
+\[\mathbf{u}^{\dagger}
+=
+\mathbf{u}^{\mathrm{adv}}
++
+\nu \Delta t \, \nabla^2 \mathbf{u}
++
+\frac{\Delta t}{\rho}\mathbf{f}\]</div>
+</div>
+<p>The implementation also limits the per-step velocity increment to avoid large
+single-step jumps in highly forced setups. Pressure is not applied in this
+predictor stage; incompressibility is enforced afterwards with a dedicated
+pressure projection.</p>
 </section>
 </section>
 <section id="pressure-solve-and-enforcing-incompressibility">
 <h2>Pressure Solve and Enforcing Incompressibility<a class="headerlink" href="#pressure-solve-and-enforcing-incompressibility" title="Link to this heading">¶</a></h2>
-<p>After force assembly, the solver computes a pressure field that counteracts
-velocity divergence. The pressure equation is built from the divergence of the
-momentum equation and solved as a Poisson problem:</p>
+<p>After the velocity predictor and boundary update, the solver computes a
+pressure field that removes the remaining divergence. The pressure equation is
+solved as a Poisson problem:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
 \[\nabla^2 p = b\]</div>
 </div>
-<p>The right-hand side <span class="math notranslate nohighlight">\(b\)</span> is assembled from three parts:</p>
+<p>The right-hand side <span class="math notranslate nohighlight">\(b\)</span> is assembled from the divergence of the predicted
+velocity, an authored divergence source, and the thermal-expansion term:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
 \[b =
@@ -395,18 +416,16 @@ momentum equation and solved as a Poisson problem:</p>
 \nabla \cdot \mathbf{u}
 + d_{\mathrm{authored}}
 - d_{\mathrm{thermal}}
-\right)
-- \rho \, N\]</div>
+\right)\]</div>
 </div>
-<p>where <span class="math notranslate nohighlight">\(N\)</span> is the nonlinear term coming from
-<span class="math notranslate nohighlight">\(\nabla \cdot ((\mathbf{u}\cdot\nabla)\mathbf{u})\)</span>,
-<span class="math notranslate nohighlight">\(d_{\mathrm{authored}}\)</span> is an additional user-authored divergence source,
-and <span class="math notranslate nohighlight">\(d_{\mathrm{thermal}}\)</span> is the thermal expansion term discussed below.</p>
-<p>The pressure field is solved iteratively with a red-black Gauss-Seidel method.
-Each iteration updates alternating checkerboard cells and applies homogeneous
-Neumann boundary conditions, meaning the normal pressure gradient at the domain
-boundary is zero. In discrete form, boundary pressure values are copied from the
-adjacent interior cells.</p>
+<p>where <span class="math notranslate nohighlight">\(d_{\mathrm{authored}}\)</span> is an additional user-authored divergence
+source and <span class="math notranslate nohighlight">\(d_{\mathrm{thermal}}\)</span> is the thermal expansion term
+discussed below.</p>
+<p>The pressure field is solved iteratively with a red-black SOR method built on
+top of Gauss-Seidel updates. Each iteration updates alternating checkerboard
+cells and reapplies homogeneous Neumann boundary conditions, meaning the normal
+pressure gradient at the domain boundary is zero. In discrete form, boundary
+pressure values are copied from the adjacent interior cells.</p>
 <p>Because a Poisson equation with pure Neumann boundary conditions only defines
 pressure up to an arbitrary constant, the discrete right-hand side must be
 compatible. The solver therefore subtracts the mean value of <span class="math notranslate nohighlight">\(b\)</span> before
@@ -514,8 +533,9 @@ would be incomplete.</p>
 <section id="scalar-fields-temperature-smoke-and-fuel">
 <h2>Scalar Fields: Temperature, Smoke and Fuel<a class="headerlink" href="#scalar-fields-temperature-smoke-and-fuel" title="Link to this heading">¶</a></h2>
 <p>The scalar fields temperature, smoke and fuel are all transported by the
-velocity field with first-order upwinding. In addition, each field has simple
-source and dissipation terms.</p>
+projected velocity field with the same semi-Lagrangian predictor plus
+MacCormack correction used for velocity. After the advection stage, each field
+receives simple source and dissipation terms.</p>
 <p>Fuel burns only when the temperature in a cell exceeds the ignition threshold:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
@@ -551,31 +571,39 @@ order:</p>
 <li><p>Update dynamic masks, animated constants and time-dependent force inputs.</p></li>
 <li><p>Assemble the body-force field from authored forces and turbulence.</p></li>
 <li><p>Add buoyancy to the vertical force component.</p></li>
-<li><p>Build and solve the pressure Poisson equation.</p></li>
-<li><p>Optionally add vorticity forces.</p></li>
-<li><p>Update the velocity field with either first-order or second-order upwind
-advection, plus pressure, viscosity and body forces.</p></li>
-<li><p>Advect and update temperature, smoke, fuel and flame.</p></li>
-<li><p>Apply domain, obstacle and source boundary conditions.</p></li>
+<li><p>Optionally compute vorticity diagnostics and add vorticity-confinement
+forces.</p></li>
+<li><p>Advect velocity with the semi-Lagrangian predictor and apply the MacCormack
+correction, diffusion and body forces.</p></li>
+<li><p>Apply velocity, obstacle and source boundary conditions to the predicted
+velocity field.</p></li>
+<li><p>Build and solve the pressure Poisson equation from that predicted field.</p></li>
+<li><p>Project velocity with the solved pressure to enforce incompressibility.</p></li>
+<li><p>Reapply boundary conditions after projection.</p></li>
+<li><p>Advect and update temperature, smoke, fuel and flame with the projected
+velocity field.</p></li>
 <li><p>Write output if the simulation time reached the next output point.</p></li>
 <li><p>Recompute a stable timestep from the updated state.</p></li>
 </ol>
-<p>This ordering is important because pressure, buoyancy, thermal expansion and
-scalar transport all interact. In particular, temperature affects buoyancy
+<p>This ordering is important because the solver now follows a projection-method
+pipeline: forces and diffusion first build an intermediate velocity, and the
+pressure solve then removes its divergence. Temperature affects buoyancy
 through the body-force term and affects thermal expansion through the pressure
-equation right-hand side.</p>
+right-hand side, so the scalar state from the previous substep directly shapes
+the current velocity predictor and projection.</p>
 </section>
 <section id="boundary-conditions-and-practical-notes">
 <h2>Boundary Conditions and Practical Notes<a class="headerlink" href="#boundary-conditions-and-practical-notes" title="Link to this heading">¶</a></h2>
 <p>The solver works on interior cells and handles boundaries explicitly. Pressure
 uses zero-gradient boundary conditions during the Poisson solve. Velocity and
-scalar fields are then overwritten by the configured domain, obstacle and source
-conditions.</p>
-<p>Near boundaries, the second-order upwind stencil is not always available, so
-the scheme falls back to first-order upwind locally. This is one reason why the
-solver remains robust even with more accurate advection enabled.</p>
+scalar fields are overwritten where necessary by the configured domain,
+obstacle and source conditions.</p>
+<p>The semi-Lagrangian sampler clamps traced positions to the valid grid range,
+and the MacCormack correction is limited with local extrema clamps. Together,
+these two safeguards keep the higher-detail transport step robust even near the
+domain boundary.</p>
 <p>To improve stability further, the velocity update also limits the maximum
-per-step velocity change to improve stability.</p>
+per-step velocity change in strongly forced regions.</p>
 </section>
 </section>
 
@@ -637,9 +665,10 @@ per-step velocity change to improve stability.</p>
 <li><a class="reference internal" href="#">Solver Theory</a><ul>
 <li><a class="reference internal" href="#governing-equations">Governing Equations</a></li>
 <li><a class="reference internal" href="#finite-difference-discretization">Finite-Difference Discretization</a></li>
-<li><a class="reference internal" href="#advection-and-upwind-schemes">Advection and Upwind Schemes</a><ul>
-<li><a class="reference internal" href="#first-order-upwind">First-Order Upwind</a></li>
-<li><a class="reference internal" href="#second-order-upwind">Second-Order Upwind</a></li>
+<li><a class="reference internal" href="#semi-lagrangian-and-maccormack-advection">Semi-Lagrangian and MacCormack Advection</a><ul>
+<li><a class="reference internal" href="#semi-lagrangian-predictor">Semi-Lagrangian Predictor</a></li>
+<li><a class="reference internal" href="#maccormack-correction">MacCormack Correction</a></li>
+<li><a class="reference internal" href="#velocity-update-around-the-advection-step">Velocity Update Around the Advection Step</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#pressure-solve-and-enforcing-incompressibility">Pressure Solve and Enforcing Incompressibility</a></li>
