@@ -1,5 +1,7 @@
 from numba import cuda
 
+import Solver.Kernel_GPU.kernel_config as kernel_config
+
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _clamp(value, lower, upper):
@@ -130,11 +132,51 @@ def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, n
     return _backtrace_position(u, v, w, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz)
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def _active_tile_cell_indices(field_shape):
+    """Map one active-tile launch to one cell index."""
+    tile_i = cuda.blockIdx.x
+    tile_j = cuda.blockIdx.y
+    tile_k = cuda.blockIdx.z
+    local_i = cuda.threadIdx.x
+    local_j = cuda.threadIdx.y
+    local_k = cuda.threadIdx.z
+
+    i = tile_i * kernel_config.ACTIVE_TILE_SIZE + local_i
+    j = tile_j * kernel_config.ACTIVE_TILE_SIZE + local_j
+    k = tile_k * kernel_config.ACTIVE_TILE_SIZE + local_k
+    nx, ny, nz = field_shape
+    return tile_i, tile_j, tile_k, i, j, k, nx, ny, nz
+
+
 @cuda.jit(cache=True)
-def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w, dt, delta):
+def preserve_inactive_velocity_tiles(u, v, w, u_out, v_out, w_out, active_tile_mask):
+    """Copy unchanged velocity values for inactive tiles."""
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+
+    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+        return
+    if i >= nx or j >= ny or k >= nz:
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] != 0:
+        return
+
+    u_out[i, j, k] = u[i, j, k]
+    v_out[i, j, k] = v[i, j, k]
+    w_out[i, j, k] = w[i, j, k]
+
+
+@cuda.jit(cache=True)
+def advect_velocity_semi_lagrangian(
+    u, v, w, advected_u, advected_v, advected_w, dt, delta, active_tile_mask
+):
     """Backtrace the velocity field once and store the purely advected values."""
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+
+    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
+        return
     if i >= nx or j >= ny or k >= nz:
         return
 
@@ -156,7 +198,7 @@ def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w,
 def update_velocity_maccormack(
     u, v, w, predictor_u, predictor_v, predictor_w,
     p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor, pressure_scale, maccormack_factor
+    max_velocity_increment_factor, pressure_scale, maccormack_factor, active_tile_mask
 ):
     """
     CUDA kernel that updates velocity with a MacCormack-corrected
@@ -167,8 +209,12 @@ def update_velocity_maccormack(
     compensation term, clamps the result to the departure cell range, and then
     adds pressure, diffusion and external forces explicitly.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+
+    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
+        return
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 

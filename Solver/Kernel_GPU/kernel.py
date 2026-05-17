@@ -511,16 +511,55 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Velocity update-------------------
     section_start = perf_counter()
-    advection_schemes.advect_velocity_semi_lagrangian[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-        u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
+    scalar_update.build_active_scalar_tile_mask[
+        kernel_config.volume_blocks_per_grid(
+            gpu_fields["scalar_active_tiles"].shape,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+        ),
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+    ](
+        T, smoke, fuel, flame,
+        gpu_fields["scalar_active_tiles"],
+        gpu_constants["T_REFERENCE"],
+        np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
     )
-    advection_schemes.update_velocity_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+    scalar_update.dilate_active_scalar_tile_mask[
+        kernel_config.volume_blocks_per_grid(
+            gpu_fields["scalar_active_tiles"].shape,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+        ),
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+    ](
+        gpu_fields["scalar_active_tiles"],
+        gpu_fields["scalar_active_tiles_dilated"],
+        scalar_tile_padding,
+    )
+    advection_schemes.preserve_inactive_velocity_tiles[
+        scalar_tile_blocks,
+        kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
+        u, v, w, u_work, v_work, w_work,
+        gpu_fields["scalar_active_tiles_dilated"],
+    )
+    advection_schemes.advect_velocity_semi_lagrangian[
+        scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
+        u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
+        gpu_fields["scalar_active_tiles_dilated"],
+    )
+    advection_schemes.update_velocity_maccormack[
+        scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
         u, v, w, u_tmp, v_tmp, w_tmp,
         p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
         simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         np.float32(0.0),
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
+        gpu_fields["scalar_active_tiles_dilated"],
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
@@ -602,32 +641,6 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Scalar update-------------------
     section_start = perf_counter()
-    scalar_update.build_active_scalar_tile_mask[
-        kernel_config.volume_blocks_per_grid(
-            gpu_fields["scalar_active_tiles"].shape,
-            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-        ),
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-    ](
-        T, smoke, fuel, flame,
-        gpu_fields["scalar_active_tiles"],
-        gpu_constants["T_REFERENCE"],
-        np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
-    )
-    scalar_update.dilate_active_scalar_tile_mask[
-        kernel_config.volume_blocks_per_grid(
-            gpu_fields["scalar_active_tiles"].shape,
-            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-        ),
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-    ](
-        gpu_fields["scalar_active_tiles"],
-        gpu_fields["scalar_active_tiles_dilated"],
-        scalar_tile_padding,
-    )
     scalar_update.preserve_inactive_scalar_tiles[
         scalar_tile_blocks,
         kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
