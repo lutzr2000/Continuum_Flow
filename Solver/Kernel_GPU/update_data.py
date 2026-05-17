@@ -47,6 +47,11 @@ def upload_simulation_state_to_gpu(simulation_params):
         # Pressure solve state.
         "p": cuda.to_device(host_state["p"]),
         "pressure_rhs": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "pressure_rhs_partial_sums": cuda.device_array(
+            kernel_config.MAX_REDUCTION_BLOCKS,
+            dtype=np.float32,
+        ),
+        "pressure_rhs_sum": cuda.device_array(1, dtype=np.float32),
 
         # Advected scalar fields and their work buffers.
         "T": cuda.to_device(host_state["T"]),

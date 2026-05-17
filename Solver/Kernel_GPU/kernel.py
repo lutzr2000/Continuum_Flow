@@ -616,7 +616,9 @@ def _run_time_step(state, blockspergrid_3d):
         u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
         gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"], dt, gpu_fields["point_divergence"],
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
-        gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"]
+        gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
+        rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],
+        rhs_sum_buffer=gpu_fields["pressure_rhs_sum"],
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)

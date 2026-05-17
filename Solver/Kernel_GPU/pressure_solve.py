@@ -6,6 +6,8 @@ from numba import cuda
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
+REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
+
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
     u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
@@ -93,20 +95,80 @@ def pressure_equation_right_side(
 
 
 @cuda.jit(cache=True)
-def _sum_rhs_kernel(b, rhs_sum):
-    """
-    Accumulate the zero-boundary RHS into one scalar sum on the GPU.
-
-    This cached kernel is intentionally simple and avoids the more complex
-    reduction pattern that triggered CUDA code-library serialization issues.
-    """
-    i, j, k = cuda.grid(3)
+def _sum_rhs_partial_kernel(b, partial_sums):
+    """Reduce the interior RHS into one partial sum per CUDA block."""
     nx, ny, nz = b.shape
+    interior_nx = nx - 2
+    interior_ny = ny - 2
+    interior_nz = nz - 2
+    interior_cell_count = interior_nx * interior_ny * interior_nz
 
-    if i >= nx or j >= ny or k >= nz:
+    if interior_cell_count <= 0:
         return
 
-    cuda.atomic.add(rhs_sum, 0, b[i, j, k])
+    tid = cuda.threadIdx.x
+    block_size = cuda.blockDim.x
+    global_idx = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    shared_sums = cuda.shared.array(
+        shape=REDUCTION_THREADS_PER_BLOCK,
+        dtype=np.float32,
+    )
+
+    local_sum = np.float32(0.0)
+    flat_idx = global_idx
+    plane_size = interior_ny * interior_nz
+
+    while flat_idx < interior_cell_count:
+        i = flat_idx // plane_size + 1
+        remainder = flat_idx % plane_size
+        j = remainder // interior_nz + 1
+        k = remainder % interior_nz + 1
+        local_sum += b[i, j, k]
+        flat_idx += stride
+
+    shared_sums[tid] = local_sum
+    cuda.syncthreads()
+
+    offset = block_size >> 1
+    while offset > 0:
+        if tid < offset:
+            shared_sums[tid] += shared_sums[tid + offset]
+        cuda.syncthreads()
+        offset >>= 1
+
+    if tid == 0:
+        partial_sums[cuda.blockIdx.x] = shared_sums[0]
+
+
+@cuda.jit(cache=True)
+def _sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
+    """Reduce the block partial sums into one scalar sum on the GPU."""
+    tid = cuda.threadIdx.x
+    stride = cuda.blockDim.x
+    shared_sums = cuda.shared.array(
+        shape=REDUCTION_THREADS_PER_BLOCK,
+        dtype=np.float32,
+    )
+
+    local_sum = np.float32(0.0)
+    idx = tid
+    while idx < partial_count:
+        local_sum += partial_sums[idx]
+        idx += stride
+
+    shared_sums[tid] = local_sum
+    cuda.syncthreads()
+
+    offset = stride >> 1
+    while offset > 0:
+        if tid < offset:
+            shared_sums[tid] += shared_sums[tid + offset]
+        cuda.syncthreads()
+        offset >>= 1
+
+    if tid == 0:
+        rhs_sum[0] = shared_sums[0]
 
 
 @cuda.jit(cache=True)
@@ -124,24 +186,32 @@ def _subtract_rhs_mean_kernel(b, rhs_mean):
     b[i, j, k] -= rhs_mean
 
 
-def _remove_rhs_mean(b, threadsperblock_3d):
+def _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums=None, rhs_sum_buffer=None):
     """
     Enforce the Neumann compatibility condition by removing the RHS mean.
 
-    The expensive sum is reduced on the GPU into a small partial buffer; only
-    those block sums are transferred to the host for the final scalar sum.
+    The interior sum is reduced on the GPU in two stages so we avoid a
+    high-contention global atomic on a single scalar. Only the final sum is
+    copied back to the host.
     """
     nx, ny, nz = b.shape
     interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
-    rhs_sum = cuda.to_device(np.zeros(1, dtype=np.float32))
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, threadsperblock_3d)
+    reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
+    reduction_threads = REDUCTION_THREADS_PER_BLOCK
 
-    _sum_rhs_kernel[blockspergrid_3d, threadsperblock_3d](b, rhs_sum)
+    if rhs_partial_sums is None:
+        rhs_partial_sums = cuda.device_array(reduction_blocks, dtype=np.float32)
+    if rhs_sum_buffer is None:
+        rhs_sum_buffer = cuda.device_array(1, dtype=np.float32)
 
-    rhs_mean = float(rhs_sum.copy_to_host()[0]) / float(interior_cell_count)
+    _sum_rhs_partial_kernel[reduction_blocks, reduction_threads](b, rhs_partial_sums)
+    _sum_partial_sums_kernel[1, reduction_threads](rhs_partial_sums, reduction_blocks, rhs_sum_buffer)
+
+    rhs_mean = float(rhs_sum_buffer.copy_to_host()[0]) / float(interior_cell_count)
     if abs(rhs_mean) <= 1.0e-12:
         return
 
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, threadsperblock_3d)
     _subtract_rhs_mean_kernel[blockspergrid_3d, threadsperblock_3d](b, rhs_mean)
 
 
@@ -212,7 +282,8 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
-    max_iter=10, threadsperblock_3d=None, relaxation_factor=1
+    max_iter=10, threadsperblock_3d=None,
+    rhs_partial_sums=None, rhs_sum_buffer=None,
 ):
     """
     Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
@@ -249,7 +320,7 @@ def pressure_poisson(
         u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
-    _remove_rhs_mean(b, threadsperblock_3d)
+    _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer)
     p_old = p
 
     for _ in range(max_iter):
