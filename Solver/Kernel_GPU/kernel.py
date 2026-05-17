@@ -432,6 +432,8 @@ def _run_time_step(state, blockspergrid_3d):
     flame_work = state["flame_work"]
     t = state["t"]
     dt = state["dt"]
+    scalar_tile_blocks = kernel_config.active_tile_shape(u.shape)
+    scalar_tile_padding = kernel_config.active_tile_padding_tiles()
 
     #------------Update dynamic inputs-------------------
     if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
@@ -600,12 +602,53 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Scalar update-------------------
     section_start = perf_counter()
-    scalar_update.predict_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+    scalar_update.build_active_scalar_tile_mask[
+        kernel_config.volume_blocks_per_grid(
+            gpu_fields["scalar_active_tiles"].shape,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+        ),
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+    ](
+        T, smoke, fuel, flame,
+        gpu_fields["scalar_active_tiles"],
+        gpu_constants["T_REFERENCE"],
+        np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
+        np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
+    )
+    scalar_update.dilate_active_scalar_tile_mask[
+        kernel_config.volume_blocks_per_grid(
+            gpu_fields["scalar_active_tiles"].shape,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+        ),
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+    ](
+        gpu_fields["scalar_active_tiles"],
+        gpu_fields["scalar_active_tiles_dilated"],
+        scalar_tile_padding,
+    )
+    scalar_update.preserve_inactive_scalar_tiles[
+        scalar_tile_blocks,
+        kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
+        T, smoke, fuel, flame,
+        temperature_work, smoke_work, fuel_work, flame_work,
+        gpu_fields["scalar_active_tiles_dilated"],
+    )
+    scalar_update.predict_scalar_fields_maccormack[
+        scalar_tile_blocks,
+        kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
         T, smoke, fuel, u, v, w, dt,
         temperature_tmp, smoke_tmp, fuel_tmp,
         gpu_constants["DELTA"],
+        gpu_fields["scalar_active_tiles_dilated"],
     )
-    scalar_update.update_scalar_fields_maccormack[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+    scalar_update.update_scalar_fields_maccormack[
+        scalar_tile_blocks,
+        kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
         T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
         u, v, w, dt,
         temperature_work, smoke_work, fuel_work, flame_work,
@@ -619,6 +662,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
         gpu_constants["T_REFERENCE"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
+        gpu_fields["scalar_active_tiles_dilated"],
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)

@@ -4,6 +4,7 @@ from numba import cuda
 import Solver.General.update_data as general_update_data
 import Solver.Kernel_GPU.Boundary_Conditions.obstacles as obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
 def _prepare_gpu_obstacle_data(obstacle_data):
@@ -29,6 +30,7 @@ def upload_simulation_state_to_gpu(simulation_params):
     nx, ny, nz = host_state["shape"]
     force_field_data = host_state["force_field_data"]
     turbulence_data = host_state["turbulence_data"]
+    active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
 
     gpu_fields = {
         # Primary velocity state and scratch buffers.
@@ -58,6 +60,8 @@ def upload_simulation_state_to_gpu(simulation_params):
         "fuel_tmp": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
         "flame": cuda.to_device(host_state["flame"]),
         "flame_work": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
+        "scalar_active_tiles": cuda.device_array(active_tile_shape, dtype=np.uint8),
+        "scalar_active_tiles_dilated": cuda.device_array(active_tile_shape, dtype=np.uint8),
 
         # Vorticity diagnostics for confinement forces.
         "vorticity_x": cuda.device_array((nx, ny, nz), dtype=precision_dtype),
@@ -109,6 +113,8 @@ def upload_simulation_state_to_gpu(simulation_params):
     )
 
     return gpu_fields, gpu_constants
+
+
 def _update_gpu_source_data(source_field_data, gpu_fields, time_value):
     source_bc.update_source_data_gpu(source_field_data, gpu_fields, time_value)
 
