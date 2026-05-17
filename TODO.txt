@@ -8,10 +8,10 @@ Check when saving sparse to vdb if flame field is accounted for
 the live preview produces a RAM accumulation
 
 Solver: 
-optimise pressure solve more speed wise. SOR tends to overshoot but what are other options, also to many kernels, in general see if kernels can be united
-maybe implement sparse update as optional if even possible, start with only scalars sparse and than maybe velocity sparse, these are the expenisve ones, maybe do blocks, not single cell sparsly
-compute bounacy force in scalar or velocity method if possible?
+sparse simulation needs a ui input
+optimise pressure solve more speed wise
 Rework forces in general?
+put forces in a seperate file
 GPU in general less moving around between cpu and gpu mor continous gpu run
 Testing
 time CPU

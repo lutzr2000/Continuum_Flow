@@ -85,6 +85,18 @@ def dilate_active_scalar_tile_mask(tile_mask_in, tile_mask_out, padding_tiles):
     tile_mask_out[tile_i, tile_j, tile_k] = active
 
 
+@cuda.jit(cache=True)
+def fill_active_scalar_tile_mask(tile_mask, value):
+    """Write one uniform activity value into the whole tile mask."""
+    tile_i, tile_j, tile_k = cuda.grid(3)
+    tiles_x, tiles_y, tiles_z = tile_mask.shape
+
+    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+        return
+
+    tile_mask[tile_i, tile_j, tile_k] = value
+
+
 @cuda.jit(device=True, inline=True, cache=True)
 def _active_tile_cell_indices(field_shape):
     """Map one active-tile launch to one cell index."""

@@ -707,6 +707,7 @@ def apply_config(config):
         "CFL_MAX": float(settings_cfg["cfl"]),
         "MAX_ITER": int(settings_cfg["iterations"]),
         "MACCORMACK_FACTOR": float(settings_cfg.get("maccormack_factor", 0.25)),
+        "SIMULATE_SPARSELY": bool(settings_cfg.get("simulate_sparsely", True)),
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
             settings_cfg.get(
                 "max_velocity_increment_factor",

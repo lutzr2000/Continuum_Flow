@@ -408,6 +408,7 @@ def _run_time_step(state, blockspergrid_3d):
     device_fields = state["device_fields"]
     turbulence_angular_frequencies = state["turbulence_angular_frequencies"]
     turbulence_count = state["turbulence_count"]
+    simulate_sparsely = state["simulation_params"].get("SIMULATE_SPARSELY", True)
 
     u = state["u"]
     v = state["v"]
@@ -511,32 +512,46 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Velocity update-------------------
     section_start = perf_counter()
-    scalar_update.build_active_scalar_tile_mask[
-        kernel_config.volume_blocks_per_grid(
-            gpu_fields["scalar_active_tiles"].shape,
-            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-        ),
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-    ](
-        T, smoke, fuel, flame,
-        gpu_fields["scalar_active_tiles"],
-        gpu_constants["T_REFERENCE"],
-        np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
-        np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
+    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
+        gpu_fields["scalar_active_tiles"].shape,
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
     )
-    scalar_update.dilate_active_scalar_tile_mask[
-        kernel_config.volume_blocks_per_grid(
-            gpu_fields["scalar_active_tiles"].shape,
-            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-        ),
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-    ](
-        gpu_fields["scalar_active_tiles"],
-        gpu_fields["scalar_active_tiles_dilated"],
-        scalar_tile_padding,
-    )
+    if simulate_sparsely:
+        scalar_update.build_active_scalar_tile_mask[
+            active_tile_mask_blocks,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+        ](
+            T, smoke, fuel, flame,
+            gpu_fields["scalar_active_tiles"],
+            gpu_constants["T_REFERENCE"],
+            np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
+            np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
+            np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
+            np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
+        )
+        scalar_update.dilate_active_scalar_tile_mask[
+            active_tile_mask_blocks,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+        ](
+            gpu_fields["scalar_active_tiles"],
+            gpu_fields["scalar_active_tiles_dilated"],
+            scalar_tile_padding,
+        )
+    else:
+        scalar_update.fill_active_scalar_tile_mask[
+            active_tile_mask_blocks,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+        ](
+            gpu_fields["scalar_active_tiles"],
+            np.uint8(1),
+        )
+        scalar_update.fill_active_scalar_tile_mask[
+            active_tile_mask_blocks,
+            kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+        ](
+            gpu_fields["scalar_active_tiles_dilated"],
+            np.uint8(1),
+        )
     advection_schemes.preserve_inactive_velocity_tiles[
         scalar_tile_blocks,
         kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
@@ -608,9 +623,15 @@ def _run_time_step(state, blockspergrid_3d):
 
     #------------Velocity projection-------------------
     section_start = perf_counter()
-    u, v, w = pressure_solve.project_velocity(
-        u, v, w, p, gpu_fields["obstacle_mask"], dt,
-        gpu_constants["DELTA"], gpu_constants["RHO"]
+    pressure_solve.project_velocity_kernel[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        u,
+        v,
+        w,
+        p,
+        gpu_fields["obstacle_mask"],
+        dt,
+        gpu_constants["DELTA"],
+        gpu_constants["RHO"],
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_projection", perf_counter() - section_start)

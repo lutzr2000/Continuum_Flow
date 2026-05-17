@@ -184,7 +184,7 @@ def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def _project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
+def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
 
@@ -264,13 +264,3 @@ def pressure_poisson(
     return p_old
 
 
-def project_velocity(u, v, w, p, obstacle_mask, dt, delta, rho, threadsperblock_3d=None):
-    """Project one intermediate velocity field with the solved pressure."""
-    if threadsperblock_3d is None:
-        threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
-
-    _project_velocity_kernel[blockspergrid_3d, threadsperblock_3d](
-        u, v, w, p, obstacle_mask, dt, delta, rho
-    )
-    return u, v, w
