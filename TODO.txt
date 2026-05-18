@@ -12,6 +12,7 @@ Rework forces in general?
 put forces in a seperate file
 optimise output speed more
 something in vorticity compute is doubled, but removing it changes flow behaviour, why?
+pull cpu to gpu state
 Testing
 time CPU
 

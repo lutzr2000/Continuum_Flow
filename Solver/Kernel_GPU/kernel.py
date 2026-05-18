@@ -26,6 +26,8 @@ warnings.filterwarnings(
     category=CudaNumbaPerformanceWarning,
 )
 
+GPU_FIELD_DTYPE = np.float32
+
 
 # ===============================
 # Methods
@@ -216,6 +218,7 @@ def _initialise_solver(config):
     section_start = perf_counter()
     memory_tracker = helper_functions.MemoryUsageTracker("VRAM", helper_functions._sample_gpu_memory_usage)
     simulation_params = helper_functions.apply_config(config)
+    simulation_params["PRECISION"] = GPU_FIELD_DTYPE
     cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
     helper_functions._record_timing(timing_stats, "init_config", perf_counter() - section_start)
 
@@ -256,7 +259,7 @@ def _initialise_solver(config):
     flame_work = gpu_fields["flame_work"]
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
-        dtype=simulation_params["PRECISION"],
+        dtype=GPU_FIELD_DTYPE,
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
