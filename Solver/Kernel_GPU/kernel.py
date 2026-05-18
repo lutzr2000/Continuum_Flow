@@ -1,6 +1,5 @@
 from time import perf_counter
 
-import math
 from pathlib import Path
 import warnings
 import numpy as np
@@ -9,8 +8,10 @@ from numba.cuda.core.errors import NumbaPerformanceWarning as CudaNumbaPerforman
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
+import Solver.Kernel_GPU.forces as forces
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
+import Solver.Kernel_GPU.vorticity as vorticity
 import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
 import Solver.General.update_data as general_update_data
@@ -27,184 +28,6 @@ warnings.filterwarnings(
 )
 
 GPU_FIELD_DTYPE = np.float32
-
-
-# ===============================
-# Methods
-# ===============================
-
-@cuda.jit(cache=True)
-def update_force_fields(Fx_base, Fy_base, Fz_base,
-                        turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
-                        turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
-                        turbulence_cos_coeffs, turbulence_sin_coeffs,
-                        turbulence_count, animated_force_x, animated_force_y, animated_force_z,
-                        Fx, Fy, Fz):
-    """
-    Update body-force fields from base fields and animated turbulence bases.
-
-    The expensive smooth turbulence fields are precomputed on the host. Per
-    timestep this kernel only mixes them with host-computed sine/cosine
-    coefficients, keeping the force update bandwidth-bound and predictable.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = Fx.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    fx = Fx_base[i, j, k] + animated_force_x
-    fy = Fy_base[i, j, k] + animated_force_y
-    fz = Fz_base[i, j, k] + animated_force_z
-
-    for turbulence_index in range(turbulence_count):
-        cos_coeff = turbulence_cos_coeffs[turbulence_index]
-        sin_coeff = turbulence_sin_coeffs[turbulence_index]
-        fx += (
-            cos_coeff * turbulence_Fx_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fx_b[turbulence_index, i, j, k]
-        )
-        fy += (
-            cos_coeff * turbulence_Fy_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fy_b[turbulence_index, i, j, k]
-        )
-        fz += (
-            cos_coeff * turbulence_Fz_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fz_b[turbulence_index, i, j, k]
-        )
-
-    Fx[i, j, k] = fx
-    Fy[i, j, k] = fy
-    Fz[i, j, k] = fz
-
-@cuda.jit(cache=True)
-def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
-    """
-    computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
-
-    Each thread updates one interior cell of the z-direction body-force field.
-    The force is derived from the local temperature difference to the reference
-    temperature and scaled by gravity and the configured buoyancy factor.
-
-    Args:
-        T (device array): temperature field
-        Fz (device array): z-direction force field that will be updated in-place
-        buoyancy_factor (float): thermal expansion coefficient used by the model
-        t_reference (float): reference temperature
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = T.shape
-
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        return
-
-    g = 9.81
-    Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
-
-@cuda.jit(cache=True)
-def compute_vorticity(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta):
-    """
-    Compute vorticity components and scalar magnitude from the velocity field.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = omega_magnitude.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if (
-        i < 1 or j < 1 or k < 1 or
-        i >= nx - 1 or j >= ny - 1 or k >= nz - 1
-    ):
-        omega_x[i, j, k] = 0.0
-        omega_y[i, j, k] = 0.0
-        omega_z[i, j, k] = 0.0
-        omega_magnitude[i, j, k] = 0.0
-        return
-
-    if obstacle_mask[i, j, k]:
-        omega_x[i, j, k] = 0.0
-        omega_y[i, j, k] = 0.0
-        omega_z[i, j, k] = 0.0
-        omega_magnitude[i, j, k] = 0.0
-        return
-
-    half_inv_delta = 0.5 / delta
-    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
-    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
-    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
-    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
-    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
-    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
-
-    wx = dw_dy - dv_dz
-    wy = du_dz - dw_dx
-    wz = dv_dx - du_dy
-
-    omega_x[i, j, k] = wx
-    omega_y[i, j, k] = wy
-    omega_z[i, j, k] = wz
-    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
-
-
-@cuda.jit(cache=True)
-def apply_vorticity_confinement(
-    obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, Fx, Fy, Fz, delta, vorticity_strength
-):
-    """
-    adds the vorticity confinement force to the body-force field on the GPU.
-
-    Each thread computes the gradient of the precomputed vorticity magnitude,
-    normalizes it to the confinement direction N and evaluates the force
-    epsilon * (N x omega) in one interior fluid cell. The resulting force is
-    accumulated into the existing force arrays so confinement combines with
-    turbulence, buoyancy and any authored force fields.
-
-    Args:
-        obstacle_mask (device array): boolean obstacle mask used to skip solids
-        omega_x (device array): x-component of the vorticity field
-        omega_y (device array): y-component of the vorticity field
-        omega_z (device array): z-component of the vorticity field
-        omega_magnitude (device array): scalar vorticity magnitude field
-        Fx (device array): x-direction force field updated in-place
-        Fy (device array): y-direction force field updated in-place
-        Fz (device array): z-direction force field updated in-place
-        delta (float): grid spacing
-        vorticity_strength (float): confinement strength epsilon from the UI
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = omega_magnitude.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if (
-        i < 2 or j < 2 or k < 2 or
-        i >= nx - 2 or j >= ny - 2 or k >= nz - 2 or
-        obstacle_mask[i, j, k]
-    ):
-        return
-
-    half_inv_delta = 0.5 / delta
-    grad_x = (omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]) * half_inv_delta
-    grad_y = (omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]) * half_inv_delta
-    grad_z = (omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]) * half_inv_delta
-
-    grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
-    if grad_length <= 1.0e-12:
-        return
-
-    nx_dir = grad_x / grad_length
-    ny_dir = grad_y / grad_length
-    nz_dir = grad_z / grad_length
-
-    wx = omega_x[i, j, k]
-    wy = omega_y[i, j, k]
-    wz = omega_z[i, j, k]
-
-    Fx[i, j, k] += vorticity_strength * (ny_dir * wz - nz_dir * wy)
-    Fy[i, j, k] += vorticity_strength * (nz_dir * wx - nx_dir * wz)
-    Fz[i, j, k] += vorticity_strength * (nx_dir * wy - ny_dir * wx)
 
 
 def apply_all_BC(
@@ -512,7 +335,7 @@ def _run_time_step(state, blockspergrid_3d):
         helper_functions._record_timing(timing_stats, "loop_turbulence_coefficients", perf_counter() - section_start)
 
     section_start = perf_counter()
-    update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+    forces.update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
         gpu_fields["Fx_base"], gpu_fields["Fy_base"], gpu_fields["Fz_base"],
         gpu_fields["turbulence_Fx_a"], gpu_fields["turbulence_Fy_a"], gpu_fields["turbulence_Fz_a"],
         gpu_fields["turbulence_Fx_b"], gpu_fields["turbulence_Fy_b"], gpu_fields["turbulence_Fz_b"],
@@ -527,7 +350,7 @@ def _run_time_step(state, blockspergrid_3d):
     helper_functions._record_timing(timing_stats, "loop_force_fields", perf_counter() - section_start)
 
     section_start = perf_counter()
-    buoyancy_approximation[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+    forces.buoyancy_approximation[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
         T, gpu_fields["Fz"], gpu_constants["BUOANCY_FACTOR"], gpu_constants["T_REFERENCE"]
     )
     cuda.synchronize()
@@ -541,7 +364,7 @@ def _run_time_step(state, blockspergrid_3d):
             dt, gpu_fields["point_divergence"], gpu_constants["DELTA"], gpu_constants["RHO"],
             gpu_constants["EXPANSION_RATE"], gpu_constants["T_REFERENCE"]
         )
-        compute_vorticity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        vorticity.compute_vorticity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u,
             v,
             w,
@@ -552,11 +375,7 @@ def _run_time_step(state, blockspergrid_3d):
             gpu_fields["vorticity_magnitude"],
             gpu_constants["DELTA"],
         )
-        cuda.synchronize()
-        helper_functions._record_timing(timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start)
-
-        section_start = perf_counter()
-        apply_vorticity_confinement[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        vorticity.apply_vorticity_confinement[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             gpu_fields["obstacle_mask"],
             gpu_fields["vorticity_x"],
             gpu_fields["vorticity_y"],
