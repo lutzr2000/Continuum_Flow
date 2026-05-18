@@ -6,6 +6,7 @@ Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
 
 Solver: 
+convert simuale sparsly to adaprive domain, implement threshold
 Rework forces in general?
 put forces in a seperate file
 pull cpu to gpu state

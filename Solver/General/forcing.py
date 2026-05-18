@@ -31,13 +31,29 @@ def _normalise_vector_field(components, amplitude, dtype):
     return tuple(np.asarray(component, dtype=dtype) for component in centered_components)
 
 
+def _upsample_repeat_to_shape(field, shape):
+    """Expand one coarse field to the target shape with cheap nearest-neighbour repeats."""
+    result = np.asarray(field, dtype=np.float32)
+    for axis, target_size in enumerate(shape):
+        source_size = int(result.shape[axis])
+        repeat_count = max(1, int(np.ceil(float(target_size) / float(source_size))))
+        result = np.repeat(result, repeat_count, axis=axis)
+
+        slicer = [slice(None)] * result.ndim
+        slicer[axis] = slice(0, target_size)
+        result = result[tuple(slicer)]
+
+    return np.asarray(result, dtype=np.float32)
+
+
 def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtype=np.float32):
     """
     Build one smooth, divergence-free random force field from a random vector potential.
 
     A random vector potential is low-pass filtered in Fourier space and converted
-    to a velocity-like field by taking its curl. The curl guarantees a
-    divergence-free field while the Gaussian filter keeps the structures smooth.
+    to a velocity-like field by taking its curl. To reduce startup cost, the
+    field is built on a coarse FFT grid first and then upsampled to the solver
+    resolution.
     """
     dtype = np.dtype(dtype)
     amplitude = float(amplitude)
@@ -45,16 +61,24 @@ def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtyp
         return tuple(np.zeros(shape, dtype=dtype) for _ in range(3))
 
     nx, ny, nz = (int(shape[0]), int(shape[1]), int(shape[2]))
-    scale = max(float(scale), float(delta), 1.0e-6)
+    scale = max(float(scale), 2.0 * float(delta), 1.0e-6)
     rng = np.random.default_rng(int(seed))
 
-    potential_x = rng.standard_normal((nx, ny, nz), dtype=np.float32)
-    potential_y = rng.standard_normal((nx, ny, nz), dtype=np.float32)
-    potential_z = rng.standard_normal((nx, ny, nz), dtype=np.float32)
+    coarse_factor = max(2, int(np.ceil(scale / delta)))
+    coarse_shape = (
+        max(2, int(np.ceil(nx / coarse_factor))),
+        max(2, int(np.ceil(ny / coarse_factor))),
+        max(2, int(np.ceil(nz / coarse_factor))),
+    )
+    coarse_delta = float(delta) * float(coarse_factor)
 
-    kx = (2.0 * np.pi * np.fft.fftfreq(nx, d=delta)).astype(np.float32)[:, None, None]
-    ky = (2.0 * np.pi * np.fft.fftfreq(ny, d=delta)).astype(np.float32)[None, :, None]
-    kz = (2.0 * np.pi * np.fft.rfftfreq(nz, d=delta)).astype(np.float32)[None, None, :]
+    potential_x = rng.standard_normal(coarse_shape, dtype=np.float32)
+    potential_y = rng.standard_normal(coarse_shape, dtype=np.float32)
+    potential_z = rng.standard_normal(coarse_shape, dtype=np.float32)
+
+    kx = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[0], d=coarse_delta)).astype(np.float32)[:, None, None]
+    ky = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[1], d=coarse_delta)).astype(np.float32)[None, :, None]
+    kz = (2.0 * np.pi * np.fft.rfftfreq(coarse_shape[2], d=coarse_delta)).astype(np.float32)[None, None, :]
 
     gaussian_width = scale / (2.0 * np.pi)
     filter_kernel = np.exp(
@@ -73,9 +97,18 @@ def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtyp
     curl_y_hat = 1j * (kz * potential_x_hat - kx * potential_z_hat)
     curl_z_hat = 1j * (kx * potential_y_hat - ky * potential_x_hat)
 
-    field_x = np.fft.irfftn(curl_x_hat, s=shape).real.astype(np.float32, copy=False)
-    field_y = np.fft.irfftn(curl_y_hat, s=shape).real.astype(np.float32, copy=False)
-    field_z = np.fft.irfftn(curl_z_hat, s=shape).real.astype(np.float32, copy=False)
+    field_x = _upsample_repeat_to_shape(
+        np.fft.irfftn(curl_x_hat, s=coarse_shape).real.astype(np.float32, copy=False),
+        shape,
+    )
+    field_y = _upsample_repeat_to_shape(
+        np.fft.irfftn(curl_y_hat, s=coarse_shape).real.astype(np.float32, copy=False),
+        shape,
+    )
+    field_z = _upsample_repeat_to_shape(
+        np.fft.irfftn(curl_z_hat, s=coarse_shape).real.astype(np.float32, copy=False),
+        shape,
+    )
 
     return _normalise_vector_field(
         (field_x, field_y, field_z),
