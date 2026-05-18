@@ -1,10 +1,87 @@
-import hashlib
 import numpy as np
 
 POINT_FORCE_NODE_TYPES = {
     "BLENDERCFD_FORCE_POINT_NODE",
     "CONTINUUM_FLOW_FORCE_POINT_NODE",
 }
+
+
+def _normalise_vector_field(components, amplitude, dtype):
+    """Center one vector field and scale its RMS magnitude to the target amplitude."""
+    centered_components = []
+    for component in components:
+        centered = np.asarray(component, dtype=np.float32).copy()
+        centered -= np.mean(centered, dtype=np.float64)
+        centered_components.append(centered)
+
+    rms = np.sqrt(
+        sum(
+            np.mean(component * component, dtype=np.float64)
+            for component in centered_components
+        )
+    )
+    if rms > 1.0e-12:
+        scale = float(amplitude) / rms
+        for component in centered_components:
+            component *= scale
+    else:
+        for component in centered_components:
+            component.fill(0.0)
+
+    return tuple(np.asarray(component, dtype=dtype) for component in centered_components)
+
+
+def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtype=np.float32):
+    """
+    Build one smooth, divergence-free random force field from a random vector potential.
+
+    A random vector potential is low-pass filtered in Fourier space and converted
+    to a velocity-like field by taking its curl. The curl guarantees a
+    divergence-free field while the Gaussian filter keeps the structures smooth.
+    """
+    dtype = np.dtype(dtype)
+    amplitude = float(amplitude)
+    if abs(amplitude) <= 1.0e-12:
+        return tuple(np.zeros(shape, dtype=dtype) for _ in range(3))
+
+    nx, ny, nz = (int(shape[0]), int(shape[1]), int(shape[2]))
+    scale = max(float(scale), float(delta), 1.0e-6)
+    rng = np.random.default_rng(int(seed))
+
+    potential_x = rng.standard_normal((nx, ny, nz), dtype=np.float32)
+    potential_y = rng.standard_normal((nx, ny, nz), dtype=np.float32)
+    potential_z = rng.standard_normal((nx, ny, nz), dtype=np.float32)
+
+    kx = (2.0 * np.pi * np.fft.fftfreq(nx, d=delta)).astype(np.float32)[:, None, None]
+    ky = (2.0 * np.pi * np.fft.fftfreq(ny, d=delta)).astype(np.float32)[None, :, None]
+    kz = (2.0 * np.pi * np.fft.rfftfreq(nz, d=delta)).astype(np.float32)[None, None, :]
+
+    gaussian_width = scale / (2.0 * np.pi)
+    filter_kernel = np.exp(
+        -0.5 * (
+            (kx * gaussian_width) * (kx * gaussian_width) +
+            (ky * gaussian_width) * (ky * gaussian_width) +
+            (kz * gaussian_width) * (kz * gaussian_width)
+        )
+    ).astype(np.float32)
+
+    potential_x_hat = np.fft.rfftn(potential_x).astype(np.complex64, copy=False) * filter_kernel
+    potential_y_hat = np.fft.rfftn(potential_y).astype(np.complex64, copy=False) * filter_kernel
+    potential_z_hat = np.fft.rfftn(potential_z).astype(np.complex64, copy=False) * filter_kernel
+
+    curl_x_hat = 1j * (ky * potential_z_hat - kz * potential_y_hat)
+    curl_y_hat = 1j * (kz * potential_x_hat - kx * potential_z_hat)
+    curl_z_hat = 1j * (kx * potential_y_hat - ky * potential_x_hat)
+
+    field_x = np.fft.irfftn(curl_x_hat, s=shape).real.astype(np.float32, copy=False)
+    field_y = np.fft.irfftn(curl_y_hat, s=shape).real.astype(np.float32, copy=False)
+    field_z = np.fft.irfftn(curl_z_hat, s=shape).real.astype(np.float32, copy=False)
+
+    return _normalise_vector_field(
+        (field_x, field_y, field_z),
+        amplitude,
+        dtype,
+    )
 
 
 def _point_divergence_weight(shape, delta, origin, radius):
@@ -156,86 +233,26 @@ def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
 
 def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     """
-    Build the precomputed turbulence basis fields for one force node.
+    Build exactly two precomputed turbulence force fields for one force node.
 
-    The time-dependent animation is applied later by the GPU kernel using
-    cosine and sine coefficients for the two stored basis fields.
+    The GPU kernel later blends the two fields over time with one sinus-based
+    mix factor, so the expensive random smooth field generation happens only
+    once before the first timestep.
     """
-    #------------Parameters-------------------
     amplitude = float(force_cfg.get("amplitude", 0.0))
-    spatial_scale = max(float(force_cfg.get("scale", 1.0)), delta * 2.0, 1e-6)
+    spatial_scale = max(float(force_cfg.get("scale", 1.0)), delta, 1.0e-6)
     seed_base = int(force_cfg.get("seed", 0))
     components = ("x", "y", "z")
 
-    #------------Basis fields-------------------
-    if amplitude == 0.0:
-        basis_by_suffix = {
-            suffix: tuple(np.zeros(shape, dtype=dtype) for _ in components)
-            for suffix in ("a", "b")
-        }
-    else:
-        x = np.arange(shape[0], dtype=np.float32)[:, None, None] * delta
-        y = np.arange(shape[1], dtype=np.float32)[None, :, None] * delta
-        z = np.arange(shape[2], dtype=np.float32)[None, None, :] * delta
+    basis_by_suffix = {
+        "a": build_divergence_free_noise_field(
+            shape, delta, spatial_scale, amplitude, seed_base, dtype=dtype,
+        ),
+        "b": build_divergence_free_noise_field(
+            shape, delta, spatial_scale, amplitude, seed_base + 1, dtype=dtype,
+        ),
+    }
 
-        def build_basis(seed_suffix):
-            digest = hashlib.sha256()
-            for part in (
-                seed_base,
-                force_cfg.get("node_name", ""),
-                spatial_scale,
-                amplitude,
-                shape,
-                delta,
-                seed_suffix,
-            ):
-                digest.update(str(part).encode("utf-8"))
-                digest.update(b"\0")
-            seed = int.from_bytes(digest.digest()[:8], byteorder="little", signed=False)
-            rng = np.random.default_rng(seed)
-
-            field = {component: np.zeros(shape, dtype=np.float32) for component in components}
-
-            #------------Waves-------------------
-            for _ in range(5):
-                direction = rng.normal(size=3)
-                direction_norm = np.linalg.norm(direction)
-                if direction_norm <= 1e-12:
-                    continue
-                direction /= direction_norm
-
-                wavelength = spatial_scale * rng.uniform(0.75, 1.75)
-                phase = rng.uniform(0.0, 2.0 * np.pi)
-                wave = np.sin(
-                    2.0 * np.pi * (
-                        direction[0] * x +
-                        direction[1] * y +
-                        direction[2] * z
-                    ) / wavelength + phase
-                )
-
-                for component in components:
-                    field[component] += rng.uniform(-1.0, 1.0) * wave
-
-            #------------Normalise-------------------
-            for component in components:
-                field[component] -= np.mean(field[component], dtype=np.float64)
-            rms = np.sqrt(
-                sum(
-                    np.mean(field[component] * field[component], dtype=np.float64)
-                    for component in components
-                )
-            )
-            if rms > 1e-12:
-                scale = amplitude / rms
-                for component in components:
-                    field[component] *= scale
-
-            return tuple(field[component].astype(dtype, copy=False) for component in components)
-
-        basis_by_suffix = {suffix: build_basis(suffix) for suffix in ("a", "b")}
-
-    #------------Store-------------------
     for suffix in ("a", "b"):
         basis = basis_by_suffix[suffix]
         for index, component in enumerate(components):
@@ -250,7 +267,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     Build all force-field data on the CPU before the simulation starts.
 
     Static components are stored directly, while turbulence is represented as
-    precomputed basis fields plus angular frequencies.
+    two precomputed force fields plus one angular frequency per node.
     """
     #------------Grid-------------------
     shape = (
@@ -329,18 +346,21 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     }
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
         for component in components:
-            initial_components[component] += turbulence[f"F{component}_a"][index]
+            initial_components[component] += turbulence[f"F{component}_b"][index]
 
     #------------Force bounds-------------------
     dynamic_max = {component: 0.0 for component in components}
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
         for component in components:
             dynamic_max[component] += float(
-                np.max(
-                    np.hypot(
-                        turbulence[f"F{component}_a"][index],
-                        turbulence[f"F{component}_b"][index],
-                    )
+                max(
+                    np.max(np.abs(turbulence[f"F{component}_a"][index])),
+                    np.max(
+                        np.abs(
+                            2.0 * turbulence[f"F{component}_b"][index] -
+                            turbulence[f"F{component}_a"][index]
+                        )
+                    ),
                 )
             )
     static_max = {

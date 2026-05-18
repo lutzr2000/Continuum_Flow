@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from ctypes import wintypes
+from time import perf_counter
 
 import numpy as np
 try:
@@ -225,8 +226,12 @@ def _build_runtime_data(domain_cfg, obstacle_entries, source_entries, force_entr
     """Build persistent obstacle, source, and force data structures for the solver."""
     obstacle_data = obstacle_bc.build_obstacle_data(domain_cfg, obstacle_entries)
     source_data = source_bc.build_source_data(domain_cfg, source_entries)
+    force_start = perf_counter()
     force_data = forcing.build_force_field_data(domain_cfg, force_entries, dtype=np.float32)
-    return obstacle_data, source_data, force_data
+    runtime_timings = {
+        "init_forces": perf_counter() - force_start,
+    }
+    return obstacle_data, source_data, force_data, runtime_timings
 
 
 def _source_temperature_max(source_data):
@@ -659,7 +664,7 @@ def apply_config(config):
     # Build persistent runtime data derived from the exported node config.
     bc_config = build_boundary_config(domain_cfg)
     initial_velocity = initial_velocity_from_inflows(bc_config)
-    obstacle_data, source_data, force_data = _build_runtime_data(
+    obstacle_data, source_data, force_data, runtime_timings = _build_runtime_data(
         domain_cfg,
         obstacle_entries,
         source_entries,
@@ -753,6 +758,7 @@ def apply_config(config):
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
         "force_field_data": force_data,
+        "INIT_FORCE_BUILD_TIME": float(runtime_timings.get("init_forces", 0.0)),
         "HAS_DYNAMIC_BOUNDARIES": bool(
             obstacle_data.get("is_animated", False) or
             source_data.get("is_animated", False)

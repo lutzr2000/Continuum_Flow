@@ -186,6 +186,11 @@ def _initialise_solver(config):
     cpu_count = max(1, available_cores - 2 - reserved_writer_cores)
     set_num_threads(cpu_count)
     helper_functions._record_timing(timing_stats, "init_config", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats,
+        "init_forces",
+        simulation_params.get("INIT_FORCE_BUILD_TIME", 0.0),
+    )
 
     print("################################################################")
     print("Initialise")

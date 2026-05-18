@@ -4,15 +4,15 @@ from numba import cuda
 def update_force_fields(Fx_base, Fy_base, Fz_base,
                         turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
                         turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
-                        turbulence_cos_coeffs, turbulence_sin_coeffs,
+                        turbulence_mix_factors,
                         turbulence_count, animated_force_x, animated_force_y, animated_force_z,
                         Fx, Fy, Fz):
     """
-    Update body-force fields from base fields and animated turbulence bases.
+    Update body-force fields from base fields and precomputed turbulence fields.
 
     The expensive smooth turbulence fields are precomputed on the host. Per
-    timestep this kernel only mixes them with host-computed sine/cosine
-    coefficients, keeping the force update bandwidth-bound and predictable.
+    timestep this kernel only blends the two stored fields with one
+    host-computed mix factor per turbulence node.
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = Fx.shape
@@ -25,19 +25,19 @@ def update_force_fields(Fx_base, Fy_base, Fz_base,
     fz = Fz_base[i, j, k] + animated_force_z
 
     for turbulence_index in range(turbulence_count):
-        cos_coeff = turbulence_cos_coeffs[turbulence_index]
-        sin_coeff = turbulence_sin_coeffs[turbulence_index]
+        mix_factor = turbulence_mix_factors[turbulence_index]
+        inverse_mix_factor = 1.0 - mix_factor
         fx += (
-            cos_coeff * turbulence_Fx_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fx_b[turbulence_index, i, j, k]
+            mix_factor * turbulence_Fx_a[turbulence_index, i, j, k] +
+            inverse_mix_factor * turbulence_Fx_b[turbulence_index, i, j, k]
         )
         fy += (
-            cos_coeff * turbulence_Fy_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fy_b[turbulence_index, i, j, k]
+            mix_factor * turbulence_Fy_a[turbulence_index, i, j, k] +
+            inverse_mix_factor * turbulence_Fy_b[turbulence_index, i, j, k]
         )
         fz += (
-            cos_coeff * turbulence_Fz_a[turbulence_index, i, j, k] +
-            sin_coeff * turbulence_Fz_b[turbulence_index, i, j, k]
+            mix_factor * turbulence_Fz_a[turbulence_index, i, j, k] +
+            inverse_mix_factor * turbulence_Fz_b[turbulence_index, i, j, k]
         )
 
     Fx[i, j, k] = fx

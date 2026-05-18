@@ -369,10 +369,37 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._clear_status_progress(context)
         self._window_manager = None
         if self._session is not None:
-            self._session["writer_server"].stop()
+            process = self._session.get("process")
+            output_thread = self._session.get("output_thread")
+            writer_server = self._session.get("writer_server")
+
+            if process is not None:
+                try:
+                    process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    pass
+
+                for stream_name in ("stdin", "stdout", "stderr"):
+                    stream = getattr(process, stream_name, None)
+                    if stream is None:
+                        continue
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+
+            if output_thread is not None and output_thread.is_alive():
+                output_thread.join(timeout=0.5)
+
+            if writer_server is not None:
+                writer_server.stop()
             self._session = None
         BakeStorage._clear_bake_cancel_flag(self._config_dict)
         BakeStorage._cleanup_geometry_cache(self._config_dict)
+        self._config_dict = None
+        self._output_tail = None
+        self._reader_error = None
+        self._solver_divergence_message = None
         if _ACTIVE_BAKE_OPERATOR is self:
             _ACTIVE_BAKE_OPERATOR = None
         set_bake_running(False, context=context)

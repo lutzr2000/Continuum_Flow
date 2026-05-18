@@ -89,8 +89,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "turbulence_Fx_b": cuda.to_device(np.asarray(turbulence_data["Fx_b"], dtype=GPU_FIELD_DTYPE)),
         "turbulence_Fy_b": cuda.to_device(np.asarray(turbulence_data["Fy_b"], dtype=GPU_FIELD_DTYPE)),
         "turbulence_Fz_b": cuda.to_device(np.asarray(turbulence_data["Fz_b"], dtype=GPU_FIELD_DTYPE)),
-        "turbulence_cos_coeffs": cuda.to_device(np.ones(len(turbulence_data["angular_frequencies"]), dtype=GPU_FIELD_DTYPE)),
-        "turbulence_sin_coeffs": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=GPU_FIELD_DTYPE)),
+        "turbulence_mix_factors": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=GPU_FIELD_DTYPE)),
 
         # Dynamic obstacle mask and obstacle wall velocities.
         "obstacle_mask": cuda.to_device(host_state["obstacle_mask"]),

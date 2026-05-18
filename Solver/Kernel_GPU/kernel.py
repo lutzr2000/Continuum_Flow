@@ -90,6 +90,11 @@ def _initialise_solver(config):
     simulation_params["PRECISION"] = GPU_FIELD_DTYPE
     cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
     helper_functions._record_timing(timing_stats, "init_config", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats,
+        "init_forces",
+        simulation_params.get("INIT_FORCE_BUILD_TIME", 0.0),
+    )
 
     print("################################################################")
     print('Initialise')
@@ -329,17 +334,18 @@ def _run_time_step(state, blockspergrid_3d):
     #------------Update force fields-------------------
     if turbulence_count > 0:
         section_start = perf_counter()
-        gpu_fields["turbulence_cos_coeffs"].copy_to_device(np.cos(turbulence_angular_frequencies * t))
-        gpu_fields["turbulence_sin_coeffs"].copy_to_device(np.sin(turbulence_angular_frequencies * t))
+        gpu_fields["turbulence_mix_factors"].copy_to_device(
+            np.sin(turbulence_angular_frequencies * t).astype(GPU_FIELD_DTYPE, copy=False)
+        )
         cuda.synchronize()
-        helper_functions._record_timing(timing_stats, "loop_turbulence_coefficients", perf_counter() - section_start)
+        helper_functions._record_timing(timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start)
 
     section_start = perf_counter()
     forces.update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
         gpu_fields["Fx_base"], gpu_fields["Fy_base"], gpu_fields["Fz_base"],
         gpu_fields["turbulence_Fx_a"], gpu_fields["turbulence_Fy_a"], gpu_fields["turbulence_Fz_a"],
         gpu_fields["turbulence_Fx_b"], gpu_fields["turbulence_Fy_b"], gpu_fields["turbulence_Fz_b"],
-        gpu_fields["turbulence_cos_coeffs"], gpu_fields["turbulence_sin_coeffs"],
+        gpu_fields["turbulence_mix_factors"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),
