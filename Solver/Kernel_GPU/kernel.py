@@ -102,6 +102,52 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
     Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
 
 @cuda.jit(cache=True)
+def compute_vorticity(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta):
+    """
+    Compute vorticity components and scalar magnitude from the velocity field.
+    """
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = omega_magnitude.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1
+    ):
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
+        return
+
+    if obstacle_mask[i, j, k]:
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
+        return
+
+    half_inv_delta = 0.5 / delta
+    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
+    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
+    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
+    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
+    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
+    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
+
+    wx = dw_dy - dv_dz
+    wy = du_dz - dw_dx
+    wz = dv_dx - du_dy
+
+    omega_x[i, j, k] = wx
+    omega_y[i, j, k] = wy
+    omega_z[i, j, k] = wz
+    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
+
+
+@cuda.jit(cache=True)
 def apply_vorticity_confinement(
     obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, Fx, Fy, Fz, delta, vorticity_strength
 ):
@@ -174,7 +220,7 @@ def apply_all_BC(
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
     """
-    u, v, w, p, T, smoke, fuel = BC.apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config)
+    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
     if has_obstacle:
         u, v, w, smoke, fuel, flame = obstacle_bc.obstacle_bc(
@@ -491,10 +537,20 @@ def _run_time_step(state, blockspergrid_3d):
     if gpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
         pressure_solve.pressure_equation_right_side[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
-            gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"],
+            u, v, w, T, gpu_fields["pressure_rhs"],
             dt, gpu_fields["point_divergence"], gpu_constants["DELTA"], gpu_constants["RHO"],
             gpu_constants["EXPANSION_RATE"], gpu_constants["T_REFERENCE"]
+        )
+        compute_vorticity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+            u,
+            v,
+            w,
+            gpu_fields["obstacle_mask"],
+            gpu_fields["vorticity_x"],
+            gpu_fields["vorticity_y"],
+            gpu_fields["vorticity_z"],
+            gpu_fields["vorticity_magnitude"],
+            gpu_constants["DELTA"],
         )
         cuda.synchronize()
         helper_functions._record_timing(timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start)
@@ -548,14 +604,14 @@ def _run_time_step(state, blockspergrid_3d):
             kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
         ](
             gpu_fields["scalar_active_tiles"],
-            np.uint8(1),
+            np.bool_(True),
         )
         scalar_update.fill_active_scalar_tile_mask[
             active_tile_mask_blocks,
             kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
         ](
             gpu_fields["scalar_active_tiles_dilated"],
-            np.uint8(1),
+            np.bool_(True),
         )
     advection_schemes.preserve_inactive_velocity_tiles[
         scalar_tile_blocks,
@@ -619,7 +675,7 @@ def _run_time_step(state, blockspergrid_3d):
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
         u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
-        gpu_fields["vorticity_x"], gpu_fields["vorticity_y"], gpu_fields["vorticity_z"], gpu_fields["vorticity_magnitude"], dt, gpu_fields["point_divergence"],
+        dt, gpu_fields["point_divergence"],
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
         gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
         rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],

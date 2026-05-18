@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 from numba import cuda
 
@@ -10,7 +8,7 @@ REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
-    u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
+    u, v, w, T, b,
     dt, point_divergence, delta, rho, expansion_rate, t_reference
 ):
     """
@@ -21,12 +19,7 @@ def pressure_equation_right_side(
         v (device array): y-velocity field
         w (device array): z-velocity field
         T (device array): temperature field
-        obstacle_mask (device array): boolean obstacle mask used to zero solid vorticity
         b (device array): output array for the pressure equation right hand side
-        omega_x (device array): output array for the x-component of vorticity
-        omega_y (device array): output array for the y-component of vorticity
-        omega_z (device array): output array for the z-component of vorticity
-        omega_magnitude (device array): output array for the vorticity magnitude
         dt (float): timestep size
         point_divergence (device array): authored divergence source field
         delta (float): grid spacing
@@ -45,10 +38,6 @@ def pressure_equation_right_side(
         i >= nx - 1 or j >= ny - 1 or k >= nz - 1
     ):
         b[i, j, k] = 0.0
-        omega_x[i, j, k] = 0.0
-        omega_y[i, j, k] = 0.0
-        omega_z[i, j, k] = 0.0
-        omega_magnitude[i, j, k] = 0.0
         return
 
     half_inv_delta = 0.5 / delta
@@ -59,15 +48,6 @@ def pressure_equation_right_side(
     dv_dy = (v[i, j + 1, k] - v[i, j - 1, k]) * half_inv_delta
     dw_dz = (w[i, j, k + 1] - w[i, j, k - 1]) * half_inv_delta
 
-    #------------Of-diagonal derivatives-------------------
-    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
-    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
-    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
-    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
-    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
-    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
-
-    # This comes from the divergence of the time derivative
     divergence = du_dx + dv_dy + dw_dz
 
     #------------Artifical thermal divergence-------------------
@@ -76,22 +56,6 @@ def pressure_equation_right_side(
 
     #------------Right hand side-------------------
     b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence)
-
-    if obstacle_mask[i, j, k]:
-        omega_x[i, j, k] = 0.0
-        omega_y[i, j, k] = 0.0
-        omega_z[i, j, k] = 0.0
-        omega_magnitude[i, j, k] = 0.0
-        return
-
-    wx = dw_dy - dv_dz
-    wy = du_dz - dw_dx
-    wz = dv_dx - du_dy
-
-    omega_x[i, j, k] = wx
-    omega_y[i, j, k] = wy
-    omega_z[i, j, k] = wz
-    omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
 
 @cuda.jit(cache=True)
@@ -280,7 +244,7 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
 
 
 def pressure_poisson(
-    u, v, w, p, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
+    u, v, w, p, T, obstacle_mask, b,
     dt, point_divergence, delta, rho, expansion_rate, t_reference,
     max_iter=10, threadsperblock_3d=None,
     rhs_partial_sums=None, rhs_sum_buffer=None,
@@ -297,10 +261,6 @@ def pressure_poisson(
         T (device array): temperature field
         obstacle_mask (device array): boolean obstacle mask used to zero solid vorticity
         b (device array): work array for the pressure equation right hand side
-        omega_x (device array): work array for the x-component of vorticity
-        omega_y (device array): work array for the y-component of vorticity
-        omega_z (device array): work array for the z-component of vorticity
-        omega_magnitude (device array): work array for the vorticity magnitude
         dt (float): timestep size
         point_divergence (device array): authored divergence source field
         delta (float): grid spacing
@@ -317,7 +277,7 @@ def pressure_poisson(
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
-        u, v, w, T, obstacle_mask, b, omega_x, omega_y, omega_z, omega_magnitude,
+        u, v, w, T, b,
         dt, point_divergence, delta, rho, expansion_rate, t_reference
     )
     _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer)

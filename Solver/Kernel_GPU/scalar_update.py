@@ -23,7 +23,7 @@ def build_active_scalar_tile_mask(
     cell_j_start = tile_j * kernel_config.ACTIVE_TILE_SIZE
     cell_k_start = tile_k * kernel_config.ACTIVE_TILE_SIZE
 
-    active = 0
+    active = False
     for local_i in range(kernel_config.ACTIVE_TILE_SIZE):
         i = cell_i_start + local_i
         if i >= nx:
@@ -43,7 +43,7 @@ def build_active_scalar_tile_mask(
                     flame[i, j, k] > flame_epsilon or
                     abs(T[i, j, k] - t_reference) > temperature_epsilon
                 ):
-                    active = 1
+                    active = True
                     break
 
             if active:
@@ -70,12 +70,12 @@ def dilate_active_scalar_tile_mask(tile_mask_in, tile_mask_out, padding_tiles):
     k_start = max(0, tile_k - padding_tiles)
     k_stop = min(tiles_z, tile_k + padding_tiles + 1)
 
-    active = 0
+    active = False
     for source_i in range(i_start, i_stop):
         for source_j in range(j_start, j_stop):
             for source_k in range(k_start, k_stop):
                 if tile_mask_in[source_i, source_j, source_k] != 0:
-                    active = 1
+                    active = True
                     break
             if active:
                 break

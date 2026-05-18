@@ -66,8 +66,8 @@ def upload_simulation_state_to_gpu(simulation_params):
         "fuel_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
         "flame": cuda.to_device(np.asarray(host_state["flame"], dtype=GPU_FIELD_DTYPE)),
         "flame_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "scalar_active_tiles": cuda.device_array(active_tile_shape, dtype=np.uint8),
-        "scalar_active_tiles_dilated": cuda.device_array(active_tile_shape, dtype=np.uint8),
+        "scalar_active_tiles": cuda.device_array(active_tile_shape, dtype=np.bool_),
+        "scalar_active_tiles_dilated": cuda.device_array(active_tile_shape, dtype=np.bool_),
 
         # Vorticity diagnostics for confinement forces.
         "vorticity_x": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),

@@ -187,7 +187,7 @@ def _domain_bc_kernel(
         )
 
 
-def apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config):
+def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     """
     Apply all configured domain boundary conditions to the GPU field state.
 
