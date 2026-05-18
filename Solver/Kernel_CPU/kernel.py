@@ -1,11 +1,10 @@
 from time import perf_counter
 
-import math
 import os
 from pathlib import Path
 
 import numpy as np
-from numba import njit, prange, set_num_threads
+from numba import set_num_threads
 
 import Solver.General.helper_functions as helper_functions
 import Solver.General.output_functions as output_functions
@@ -14,94 +13,13 @@ import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_CPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_CPU.advection_schemes as advection_schemes
+import Solver.Kernel_CPU.forces as forces
+import Solver.Kernel_CPU.kernel_config as kernel_config
 import Solver.Kernel_CPU.pressure_solve as pressure_solve
 import Solver.Kernel_CPU.scalar_update as scalar_update
 import Solver.Kernel_CPU.time_step as time_step
 import Solver.Kernel_CPU.update_data as update_data
-
-
-@njit(cache=True, parallel=True, fastmath=True)
-def update_force_fields(
-    Fx_base, Fy_base, Fz_base,
-    turbulence_Fx_a, turbulence_Fy_a, turbulence_Fz_a,
-    turbulence_Fx_b, turbulence_Fy_b, turbulence_Fz_b,
-    turbulence_cos_coeffs, turbulence_sin_coeffs,
-    turbulence_count, animated_force_x, animated_force_y, animated_force_z,
-    Fx, Fy, Fz
-):
-    """Update body-force fields from base, animated and turbulence contributions."""
-    nx, ny, nz = Fx.shape
-    for i in prange(nx):
-        for j in range(ny):
-            for k in range(nz):
-                fx = Fx_base[i, j, k] + animated_force_x
-                fy = Fy_base[i, j, k] + animated_force_y
-                fz = Fz_base[i, j, k] + animated_force_z
-
-                for turbulence_index in range(turbulence_count):
-                    cos_coeff = turbulence_cos_coeffs[turbulence_index]
-                    sin_coeff = turbulence_sin_coeffs[turbulence_index]
-                    fx += (
-                        cos_coeff * turbulence_Fx_a[turbulence_index, i, j, k] +
-                        sin_coeff * turbulence_Fx_b[turbulence_index, i, j, k]
-                    )
-                    fy += (
-                        cos_coeff * turbulence_Fy_a[turbulence_index, i, j, k] +
-                        sin_coeff * turbulence_Fy_b[turbulence_index, i, j, k]
-                    )
-                    fz += (
-                        cos_coeff * turbulence_Fz_a[turbulence_index, i, j, k] +
-                        sin_coeff * turbulence_Fz_b[turbulence_index, i, j, k]
-                    )
-
-                Fx[i, j, k] = fx
-                Fy[i, j, k] = fy
-                Fz[i, j, k] = fz
-
-
-@njit(cache=True, parallel=True, fastmath=True)
-def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
-    """Accumulate Boussinesq buoyancy into the z-force field on the CPU."""
-    nx, ny, nz = T.shape
-    g = 9.81
-    for i in prange(1, nx - 1):
-        for j in range(1, ny - 1):
-            for k in range(1, nz - 1):
-                Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
-
-
-@njit(cache=True, parallel=True, fastmath=True)
-def apply_vorticity_confinement(
-    obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, Fx, Fy, Fz, delta, vorticity_strength
-):
-    """Accumulate vorticity confinement forces into the body-force fields on the CPU."""
-    nx, ny, nz = omega_magnitude.shape
-    half_inv_delta = 0.5 / delta
-    for i in prange(2, nx - 2):
-        for j in range(2, ny - 2):
-            for k in range(2, nz - 2):
-                if obstacle_mask[i, j, k]:
-                    continue
-
-                grad_x = (omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]) * half_inv_delta
-                grad_y = (omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]) * half_inv_delta
-                grad_z = (omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]) * half_inv_delta
-
-                grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
-                if grad_length <= 1.0e-12:
-                    continue
-
-                nx_dir = grad_x / grad_length
-                ny_dir = grad_y / grad_length
-                nz_dir = grad_z / grad_length
-
-                wx = omega_x[i, j, k]
-                wy = omega_y[i, j, k]
-                wz = omega_z[i, j, k]
-
-                Fx[i, j, k] += vorticity_strength * (ny_dir * wz - nz_dir * wy)
-                Fy[i, j, k] += vorticity_strength * (nz_dir * wx - nx_dir * wz)
-                Fz[i, j, k] += vorticity_strength * (nx_dir * wy - ny_dir * wx)
+import Solver.Kernel_CPU.vorticity as vorticity
 
 
 def apply_all_BC(
@@ -134,22 +52,6 @@ def apply_all_BC(
             apply_scalars=apply_source_scalars,
         )
     return u, v, w, p, T, smoke, fuel, flame
-
-
-def _enqueue_host_output(
-    write_queue,
-    buffer_pool,
-    buffered_variables,
-    field_map,
-    output_index,
-    time_value,
-    output_field_config,
-):
-    """Copy one CPU output frame into shared memory and enqueue it for writing."""
-    fields = buffer_pool.get()
-    for variable_name in buffered_variables:
-        np.copyto(fields[variable_name]["array"], field_map[variable_name])
-    write_queue.put((int(output_index), float(time_value), fields, output_field_config))
 
 
 def _sync_host_field_views(host_fields, cpu_fields):
@@ -209,6 +111,7 @@ def _initialise_solver(config):
         dtype=simulation_params["PRECISION"],
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
+    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
     host_fields = {}
     _sync_host_field_views(host_fields, cpu_fields)
@@ -256,7 +159,7 @@ def _initialise_solver(config):
     t = 0.0
     section_start = perf_counter()
     general_update_data.update_animated_constants(simulation_params, cpu_constants, t)
-    animated_force = update_data.update_animated_source_force_values(
+    update_data.update_animated_source_force_values(
         simulation_params,
         cpu_fields,
         t,
@@ -274,6 +177,7 @@ def _initialise_solver(config):
     cancel_requested = False
 
     section_start = perf_counter()
+    time_step.reset_velocity_maxima(cpu_fields["velocity_maxima"], velocity_maxima_host_zeros)
     dt, solver_diverged = time_step.compute_new_timestep_cpu(
         cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
         cpu_constants["RHO"], cpu_constants["DELTA"], cpu_constants["NU"], simulation_params["CFL_MAX"],
@@ -293,6 +197,7 @@ def _initialise_solver(config):
         "cpu_constants": cpu_constants,
         "turbulence_angular_frequencies": turbulence_angular_frequencies,
         "turbulence_count": turbulence_count,
+        "velocity_maxima_host_zeros": velocity_maxima_host_zeros,
         "host_fields": host_fields,
         "t": t,
         "dt": dt,
@@ -304,7 +209,6 @@ def _initialise_solver(config):
         "shared_memory_blocks": shared_memory_blocks,
         "solver_diverged": solver_diverged,
         "cancel_requested": cancel_requested,
-        "animated_force": animated_force,
     }
 
 
@@ -316,6 +220,10 @@ def _run_time_step(state):
     timing_stats = state["timing_stats"]
     turbulence_angular_frequencies = state["turbulence_angular_frequencies"]
     turbulence_count = state["turbulence_count"]
+    simulate_sparsely = simulation_params.get("SIMULATE_SPARSELY", True)
+    adaptive_domain_threshold = np.float32(
+        simulation_params.get("ADAPTIVE_DOMAIN_THRESHOLD", 0.001)
+    )
 
     u = cpu_fields["u"]
     v = cpu_fields["v"]
@@ -340,6 +248,7 @@ def _run_time_step(state):
     flame_work = cpu_fields["flame_work"]
     t = state["t"]
     dt = state["dt"]
+    scalar_tile_padding = kernel_config.active_tile_padding_tiles()
 
     if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
         section_start = perf_counter()
@@ -357,16 +266,15 @@ def _run_time_step(state):
 
     if turbulence_count > 0:
         section_start = perf_counter()
-        cpu_fields["turbulence_cos_coeffs"][:] = np.cos(turbulence_angular_frequencies * t)
-        cpu_fields["turbulence_sin_coeffs"][:] = np.sin(turbulence_angular_frequencies * t)
-        helper_functions._record_timing(timing_stats, "loop_turbulence_coefficients", perf_counter() - section_start)
+        cpu_fields["turbulence_mix_factors"][:] = np.sin(turbulence_angular_frequencies * t)
+        helper_functions._record_timing(timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start)
 
     section_start = perf_counter()
-    update_force_fields(
+    forces.update_force_fields(
         cpu_fields["Fx_base"], cpu_fields["Fy_base"], cpu_fields["Fz_base"],
         cpu_fields["turbulence_Fx_a"], cpu_fields["turbulence_Fy_a"], cpu_fields["turbulence_Fz_a"],
         cpu_fields["turbulence_Fx_b"], cpu_fields["turbulence_Fy_b"], cpu_fields["turbulence_Fz_b"],
-        cpu_fields["turbulence_cos_coeffs"], cpu_fields["turbulence_sin_coeffs"],
+        cpu_fields["turbulence_mix_factors"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),
@@ -376,22 +284,31 @@ def _run_time_step(state):
     helper_functions._record_timing(timing_stats, "loop_force_fields", perf_counter() - section_start)
 
     section_start = perf_counter()
-    buoyancy_approximation(T, cpu_fields["Fz"], cpu_constants["BUOANCY_FACTOR"], cpu_constants["T_REFERENCE"])
+    forces.buoyancy_approximation(T, cpu_fields["Fz"], cpu_constants["BUOANCY_FACTOR"], cpu_constants["T_REFERENCE"])
     helper_functions._record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
 
     if cpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
         pressure_solve.pressure_equation_right_side(
-            u, v, w, T, cpu_fields["obstacle_mask"], cpu_fields["pressure_rhs"],
-            cpu_fields["vorticity_x"], cpu_fields["vorticity_y"], cpu_fields["vorticity_z"],
-            cpu_fields["vorticity_magnitude"],
+            u, v, w, T, cpu_fields["pressure_rhs"],
             dt, cpu_fields["point_divergence"], cpu_constants["DELTA"], cpu_constants["RHO"],
             cpu_constants["EXPANSION_RATE"], cpu_constants["T_REFERENCE"],
+        )
+        vorticity.compute_vorticity(
+            u,
+            v,
+            w,
+            cpu_fields["obstacle_mask"],
+            cpu_fields["vorticity_x"],
+            cpu_fields["vorticity_y"],
+            cpu_fields["vorticity_z"],
+            cpu_fields["vorticity_magnitude"],
+            cpu_constants["DELTA"],
         )
         helper_functions._record_timing(timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start)
 
         section_start = perf_counter()
-        apply_vorticity_confinement(
+        vorticity.apply_vorticity_confinement(
             cpu_fields["obstacle_mask"],
             cpu_fields["vorticity_x"],
             cpu_fields["vorticity_y"],
@@ -406,8 +323,30 @@ def _run_time_step(state):
         helper_functions._record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
     section_start = perf_counter()
+    if simulate_sparsely:
+        scalar_update.build_active_scalar_tile_mask(
+            T,
+            smoke,
+            fuel,
+            flame,
+            cpu_fields["scalar_active_tiles"],
+            cpu_constants["T_REFERENCE"],
+            adaptive_domain_threshold,
+        )
+        scalar_update.dilate_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles"],
+            cpu_fields["scalar_active_tiles_dilated"],
+            scalar_tile_padding,
+        )
+    else:
+        scalar_update.fill_active_scalar_tile_mask(cpu_fields["scalar_active_tiles"], np.bool_(True))
+        scalar_update.fill_active_scalar_tile_mask(cpu_fields["scalar_active_tiles_dilated"], np.bool_(True))
+
+    advection_schemes.preserve_inactive_velocity_tiles(
+        u, v, w, u_work, v_work, w_work, cpu_fields["scalar_active_tiles_dilated"],
+    )
     advection_schemes.advect_velocity_semi_lagrangian(
-        u, v, w, u_tmp, v_tmp, w_tmp, dt, cpu_constants["DELTA"],
+        u, v, w, u_tmp, v_tmp, w_tmp, dt, cpu_constants["DELTA"], cpu_fields["scalar_active_tiles_dilated"],
     )
     advection_schemes.update_velocity_maccormack(
         u, v, w, u_tmp, v_tmp, w_tmp,
@@ -416,6 +355,7 @@ def _run_time_step(state):
         simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         np.float32(0.0),
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
 
@@ -449,9 +389,8 @@ def _run_time_step(state):
 
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
-        u, v, w, p, T, cpu_fields["obstacle_mask"], cpu_fields["pressure_rhs"],
-        cpu_fields["vorticity_x"], cpu_fields["vorticity_y"], cpu_fields["vorticity_z"],
-        cpu_fields["vorticity_magnitude"], dt, cpu_fields["point_divergence"],
+        u, v, w, p, T, cpu_fields["pressure_rhs"],
+        dt, cpu_fields["point_divergence"],
         cpu_constants["DELTA"], cpu_constants["RHO"], cpu_constants["EXPANSION_RATE"],
         cpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
     )
@@ -487,10 +426,16 @@ def _run_time_step(state):
     helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)
 
     section_start = perf_counter()
+    scalar_update.preserve_inactive_scalar_tiles(
+        T, smoke, fuel, flame,
+        temperature_work, smoke_work, fuel_work, flame_work,
+        cpu_fields["scalar_active_tiles_dilated"],
+    )
     scalar_update.predict_scalar_fields_maccormack(
         T, smoke, fuel, u, v, w, dt,
         temperature_tmp, smoke_tmp, fuel_tmp,
         cpu_constants["DELTA"],
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     scalar_update.update_scalar_fields_maccormack(
         T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
@@ -506,6 +451,7 @@ def _run_time_step(state):
         cpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],
         cpu_constants["T_REFERENCE"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
 
@@ -561,7 +507,6 @@ def _run_time_step(state):
     cpu_fields["flame_work"] = flame_work
 
     _sync_host_field_views(state["host_fields"], cpu_fields)
-    state["animated_force"] = animated_force
     return state
 
 
@@ -573,7 +518,7 @@ def main(config=None):
         print("ERROR: The solver diverged before output setup, stopping the simulation!")
     else:
         section_start = perf_counter()
-        write_queue, buffer_pool, writer_threads, shared_memory_blocks, _device_output_staging = output_functions.setup_output(
+        write_queue, buffer_pool, writer_threads, shared_memory_blocks, _unused_output_staging = output_functions.setup_output(
             state["simulation_params"]["OUTPATH"],
             state["simulation_params"]["FRAME_START"],
             state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
@@ -613,7 +558,7 @@ def main(config=None):
 
             section_start = perf_counter()
             while state["t"] >= next_output_time:
-                _enqueue_host_output(
+                output_functions.enqueue_host_output(
                     write_queue,
                     buffer_pool,
                     state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
@@ -634,6 +579,10 @@ def main(config=None):
             state["t"] += state["dt"]
 
             section_start = perf_counter()
+            time_step.reset_velocity_maxima(
+                state["cpu_fields"]["velocity_maxima"],
+                state["velocity_maxima_host_zeros"],
+            )
             dt_new, state["solver_diverged"] = time_step.compute_new_timestep_cpu(
                 state["cpu_fields"]["u"],
                 state["cpu_fields"]["v"],

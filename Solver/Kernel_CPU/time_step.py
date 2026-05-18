@@ -1,5 +1,9 @@
-import math
 import numpy as np
+
+
+def reset_velocity_maxima(maxima, host_zeros):
+    """Reset the persistent velocity-maxima buffer to zero."""
+    maxima[...] = host_zeros
 
 
 def compute_new_timestep_cpu(
@@ -34,12 +38,12 @@ def compute_new_timestep_cpu(
     maxima[2] = abs_w_max
 
     solver_diverged = bool(
-        math.isnan(float(abs_u_max)) or
-        math.isnan(float(abs_v_max)) or
-        math.isnan(float(abs_w_max)) or
-        math.isinf(float(abs_u_max)) or
-        math.isinf(float(abs_v_max)) or
-        math.isinf(float(abs_w_max))
+        np.isnan(abs_u_max) or
+        np.isnan(abs_v_max) or
+        np.isnan(abs_w_max) or
+        np.isinf(abs_u_max) or
+        np.isinf(abs_v_max) or
+        np.isinf(abs_w_max)
     )
     if solver_diverged:
         return 0.0, True
@@ -61,7 +65,7 @@ def compute_new_timestep_cpu(
     if max_dt is not None:
         dt = min(dt, float(max_dt))
 
-    if math.isnan(float(dt)) or math.isinf(float(dt)) or float(dt) < 1.0e-7:
+    if np.isnan(dt) or np.isinf(dt) or float(dt) < 1.0e-7:
         return 0.0, True
 
     return dt, False

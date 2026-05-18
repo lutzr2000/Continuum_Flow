@@ -192,6 +192,22 @@ def enqueue_device_output(
     return timings
 
 
+def enqueue_host_output(
+    write_queue,
+    buffer_pool,
+    buffered_variables,
+    source_fields,
+    output_index,
+    time_value,
+    output_field_config,
+):
+    """Copy one host-resident output frame into shared memory and enqueue it."""
+    fields = buffer_pool.get()
+    for variable_name in buffered_variables:
+        np.copyto(fields[variable_name]["array"], source_fields[variable_name])
+    write_queue.put((int(output_index), float(time_value), fields, output_field_config))
+
+
 def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
     """
     waits for all forwarded output work to finish and releases shared-memory buffers.

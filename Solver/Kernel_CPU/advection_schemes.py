@@ -1,5 +1,7 @@
 from numba import njit, prange
 
+import Solver.Kernel_CPU.kernel_config as kernel_config
+
 
 @njit(cache=True, inline="always")
 def _clamp(value, lower, upper):
@@ -131,12 +133,37 @@ def _forward_trace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, n
 
 
 @njit(cache=True, parallel=True, fastmath=True)
-def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w, dt, delta):
+def preserve_inactive_velocity_tiles(u, v, w, u_out, v_out, w_out, active_tile_mask):
+    """Copy unchanged velocity values for inactive tiles."""
+    nx, ny, nz = u.shape
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
+    for i in prange(nx):
+        tile_i = i // tile_size
+        for j in range(ny):
+            tile_j = j // tile_size
+            for k in range(nz):
+                tile_k = k // tile_size
+                if active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+                u_out[i, j, k] = u[i, j, k]
+                v_out[i, j, k] = v[i, j, k]
+                w_out[i, j, k] = w[i, j, k]
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w, dt, delta, active_tile_mask):
     """Backtrace the velocity field once and store the purely advected values."""
     nx, ny, nz = u.shape
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
     for i in prange(nx):
+        tile_i = i // tile_size
         for j in range(ny):
+            tile_j = j // tile_size
             for k in range(nz):
+                tile_k = k // tile_size
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+
                 x_depart, y_depart, z_depart = _backtrace_position(
                     u, v, w,
                     float(i), float(j), float(k),
@@ -155,7 +182,7 @@ def advect_velocity_semi_lagrangian(u, v, w, advected_u, advected_v, advected_w,
 def update_velocity_maccormack(
     u, v, w, predictor_u, predictor_v, predictor_w,
     p, dt, Fx, Fy, Fz, un, vn, wn, delta, rho, nu,
-    max_velocity_increment_factor, pressure_scale, maccormack_factor
+    max_velocity_increment_factor, pressure_scale, maccormack_factor, active_tile_mask
 ):
     """
     Update velocity with a MacCormack-corrected semi-Lagrangian advection step.
@@ -166,16 +193,17 @@ def update_velocity_maccormack(
     adds pressure, diffusion and external forces explicitly.
     """
     nx, ny, nz = u.shape
-    for i in prange(nx):
-        for j in range(ny):
-            for k in range(nz):
-                un[i, j, k] = u[i, j, k]
-                vn[i, j, k] = v[i, j, k]
-                wn[i, j, k] = w[i, j, k]
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
 
     for i in prange(1, nx - 1):
+        tile_i = i // tile_size
         for j in range(1, ny - 1):
+            tile_j = j // tile_size
             for k in range(1, nz - 1):
+                tile_k = k // tile_size
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+
                 dt_over_delta = dt / delta
                 pressure_coeff = dt / (2.0 * rho * delta)
                 diffusion_coeff = nu * dt / (delta * delta)

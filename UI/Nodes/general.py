@@ -511,7 +511,7 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     maccormack_factor: FloatProperty(name="MacCormack Factor", default=0.25, min=0.0, max=0.5, soft_min=0.0, soft_max=0.5, precision=3, description="Higher values make the flow more swirly, but can produce artefacts", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
-    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
+    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.1, min=0.0, precision=6, description="cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname

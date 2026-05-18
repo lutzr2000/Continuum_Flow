@@ -6,14 +6,12 @@ Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
 
 Solver: 
-pull cpu to gpu state
 time CPU
 Testing
 
 Documentation:
 finish docu in general
 documentation best practices or tips section
-compare same cases with different schemes, once with settings all the same, once with settings adjusted best for each scheme
 performance compare in campfire, drift and rising smoke
 
 

@@ -3,6 +3,7 @@ import numpy as np
 import Solver.General.update_data as general_update_data
 import Solver.Kernel_CPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_CPU.kernel_config as kernel_config
 
 
 def rebuild_cpu_boundary_data(simulation_params):
@@ -27,6 +28,7 @@ def upload_simulation_state_to_cpu(simulation_params):
     nx, ny, nz = host_state["shape"]
     force_field_data = host_state["force_field_data"]
     turbulence_data = host_state["turbulence_data"]
+    active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
 
     cpu_fields = {
         # Primary velocity state, corrected output buffers and predictor buffers.
@@ -77,8 +79,7 @@ def upload_simulation_state_to_cpu(simulation_params):
         "turbulence_Fx_b": np.asarray(turbulence_data["Fx_b"], dtype=precision_dtype),
         "turbulence_Fy_b": np.asarray(turbulence_data["Fy_b"], dtype=precision_dtype),
         "turbulence_Fz_b": np.asarray(turbulence_data["Fz_b"], dtype=precision_dtype),
-        "turbulence_cos_coeffs": np.ones(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype),
-        "turbulence_sin_coeffs": np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype),
+        "turbulence_mix_factors": np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype),
 
         # Dynamic obstacle mask and obstacle wall velocities.
         "obstacle_mask": host_state["obstacle_mask"],
@@ -96,6 +97,10 @@ def upload_simulation_state_to_cpu(simulation_params):
         "source_velocity_y": host_state["source_velocity_y"],
         "source_velocity_z": host_state["source_velocity_z"],
 
+        # Sparse simulation masks.
+        "scalar_active_tiles": np.zeros(active_tile_shape, dtype=np.bool_),
+        "scalar_active_tiles_dilated": np.zeros(active_tile_shape, dtype=np.bool_),
+
         # Temporary timestep maxima storage.
         "velocity_maxima": np.zeros(3, dtype=np.float32),
     }
@@ -107,6 +112,8 @@ def upload_simulation_state_to_cpu(simulation_params):
     )
 
     return cpu_fields, cpu_constants
+
+
 def _sync_cpu_source_fields(source_field_data, cpu_fields):
     cpu_fields["source_mask"] = source_field_data["mask"]
     cpu_fields["source_velocity_mask"] = source_field_data["velocity_mask"]

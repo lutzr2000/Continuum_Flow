@@ -1,20 +1,133 @@
 from numba import njit, prange
 
 import Solver.Kernel_CPU.advection_schemes as advection_schemes
+import Solver.Kernel_CPU.kernel_config as kernel_config
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def build_active_scalar_tile_mask(
+    T, smoke, fuel, flame, tile_mask, t_reference, activity_threshold,
+):
+    """Mark tiles that currently contain meaningful scalar activity."""
+    tiles_x, tiles_y, tiles_z = tile_mask.shape
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
+    nx, ny, nz = T.shape
+
+    for tile_i in prange(tiles_x):
+        cell_i_start = tile_i * tile_size
+        for tile_j in range(tiles_y):
+            cell_j_start = tile_j * tile_size
+            for tile_k in range(tiles_z):
+                cell_k_start = tile_k * tile_size
+                active = False
+
+                for local_i in range(tile_size):
+                    i = cell_i_start + local_i
+                    if i >= nx:
+                        break
+                    for local_j in range(tile_size):
+                        j = cell_j_start + local_j
+                        if j >= ny:
+                            break
+                        for local_k in range(tile_size):
+                            k = cell_k_start + local_k
+                            if k >= nz:
+                                break
+
+                            if (
+                                smoke[i, j, k] > activity_threshold or
+                                fuel[i, j, k] > activity_threshold or
+                                flame[i, j, k] > activity_threshold or
+                                abs(T[i, j, k] - t_reference) > activity_threshold
+                            ):
+                                active = True
+                                break
+
+                        if active:
+                            break
+                    if active:
+                        break
+
+                tile_mask[tile_i, tile_j, tile_k] = active
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def dilate_active_scalar_tile_mask(tile_mask_in, tile_mask_out, padding_tiles):
+    """Expand active scalar tiles by a tile-radius buffer."""
+    tiles_x, tiles_y, tiles_z = tile_mask_in.shape
+
+    for tile_i in prange(tiles_x):
+        i_start = max(0, tile_i - padding_tiles)
+        i_stop = min(tiles_x, tile_i + padding_tiles + 1)
+        for tile_j in range(tiles_y):
+            j_start = max(0, tile_j - padding_tiles)
+            j_stop = min(tiles_y, tile_j + padding_tiles + 1)
+            for tile_k in range(tiles_z):
+                k_start = max(0, tile_k - padding_tiles)
+                k_stop = min(tiles_z, tile_k + padding_tiles + 1)
+                active = False
+
+                for source_i in range(i_start, i_stop):
+                    for source_j in range(j_start, j_stop):
+                        for source_k in range(k_start, k_stop):
+                            if tile_mask_in[source_i, source_j, source_k]:
+                                active = True
+                                break
+                        if active:
+                            break
+                    if active:
+                        break
+
+                tile_mask_out[tile_i, tile_j, tile_k] = active
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def fill_active_scalar_tile_mask(tile_mask, value):
+    """Write one uniform activity value into the whole tile mask."""
+    tile_mask[:] = value
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def preserve_inactive_scalar_tiles(
+    T, smoke, fuel, flame, T_out, smoke_out, fuel_out, flame_out, active_tile_mask
+):
+    """Copy current scalar values into output buffers for inactive tiles."""
+    nx, ny, nz = T.shape
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
+
+    for i in prange(nx):
+        tile_i = i // tile_size
+        for j in range(ny):
+            tile_j = j // tile_size
+            for k in range(nz):
+                tile_k = k // tile_size
+                if active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+                T_out[i, j, k] = T[i, j, k]
+                smoke_out[i, j, k] = smoke[i, j, k]
+                fuel_out[i, j, k] = fuel[i, j, k]
+                flame_out[i, j, k] = flame[i, j, k]
 
 
 @njit(cache=True, parallel=True, fastmath=True)
 def predict_scalar_fields_maccormack(
-    T, smoke, fuel, u, v, w, dt, predictor_T, predictor_smoke, predictor_fuel, delta
+    T, smoke, fuel, u, v, w, dt, predictor_T, predictor_smoke, predictor_fuel, delta, active_tile_mask
 ):
     """
     Build the forward predictor state for the MacCormack scalar update.
     """
     nx, ny, nz = u.shape
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
 
     for i in prange(nx):
+        tile_i = i // tile_size
         for j in range(ny):
+            tile_j = j // tile_size
             for k in range(nz):
+                tile_k = k // tile_size
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+
                 x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
                     u, v, w,
                     float(i), float(j), float(k),
@@ -38,7 +151,7 @@ def update_scalar_fields_maccormack(
     delta, temperature_dissipation_rate, temperature_production_rate,
     smoke_dissipation_rate, smoke_production_rate,
     fuel_burn_rate, fuel_ignition_temperature, minimum_oxygen_concentration, t_reference,
-    maccormack_factor
+    maccormack_factor, active_tile_mask
 ):
     """
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
@@ -49,18 +162,17 @@ def update_scalar_fields_maccormack(
     dissipation source terms from the corrected state.
     """
     nx, ny, nz = u.shape
-
-    for i in prange(nx):
-        for j in range(ny):
-            for k in range(nz):
-                T_out[i, j, k] = T[i, j, k]
-                smoke_out[i, j, k] = smoke[i, j, k]
-                fuel_out[i, j, k] = fuel[i, j, k]
-                flame_out[i, j, k] = 0.0
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
 
     for i in prange(1, nx - 1):
+        tile_i = i // tile_size
         for j in range(1, ny - 1):
+            tile_j = j // tile_size
             for k in range(1, nz - 1):
+                tile_k = k // tile_size
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
+
                 dt_over_delta = dt / delta
 
                 x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
