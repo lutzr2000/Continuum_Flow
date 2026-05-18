@@ -20,6 +20,33 @@ _OUTPUT_PATH_KEY = "continuum_flow_output_path"
 _LEGACY_OUTPUT_PATH_KEY = "blendercfd_output_path"
 
 
+def _iter_simulation_dicts(config_dict):
+    """Yield only valid simulation dictionaries from one config payload."""
+    if not isinstance(config_dict, dict):
+        return
+    for simulation_cfg in config_dict.get("simulations", ()) or ():
+        if isinstance(simulation_cfg, dict):
+            yield simulation_cfg
+
+
+def _iter_output_dicts(simulation_cfg):
+    """Yield only valid output dictionaries from one simulation entry."""
+    if not isinstance(simulation_cfg, dict):
+        return
+    for output_cfg in simulation_cfg.get("outputs", ()) or ():
+        if isinstance(output_cfg, dict):
+            yield output_cfg
+
+
+def _iter_viewer_dicts(simulation_cfg):
+    """Yield only valid viewer dictionaries from one simulation entry."""
+    if not isinstance(simulation_cfg, dict):
+        return
+    for viewer_cfg in simulation_cfg.get("viewers", ()) or ():
+        if isinstance(viewer_cfg, dict):
+            yield viewer_cfg
+
+
 def _tag_all_areas_redraw(context=None):
     window_manager = getattr(context, "window_manager", None) if context is not None else None
     if window_manager is None:
@@ -160,8 +187,8 @@ def _prepare_config_for_bake(config_dict, bake_token=None):
     meta_cfg = prepared_config.setdefault("meta", {})
     meta_cfg["bake_token"] = bake_token
     cancel_flag_path = None
-    for simulation_cfg in prepared_config.get("simulations", ()):
-        for output_cfg in simulation_cfg.get("outputs", ()):
+    for simulation_cfg in _iter_simulation_dicts(prepared_config):
+        for output_cfg in _iter_output_dicts(simulation_cfg):
             output_path = output_cfg.get("output_path", "")
             if not output_path:
                 continue
@@ -178,8 +205,8 @@ def _prepare_config_for_bake(config_dict, bake_token=None):
 def _output_directories_from_config(config_dict):
     output_directories = []
     seen_paths = set()
-    for simulation_cfg in config_dict.get("simulations", ()):
-        for output_cfg in simulation_cfg.get("outputs", ()):
+    for simulation_cfg in _iter_simulation_dicts(config_dict):
+        for output_cfg in _iter_output_dicts(simulation_cfg):
             output_path = output_cfg.get("output_path", "")
             if not output_path:
                 continue
@@ -193,10 +220,10 @@ def _output_directories_from_config(config_dict):
 
 def _start_frame_for_output_directory(config_dict, output_directory):
     output_directory = Path(output_directory).resolve()
-    for simulation_cfg in config_dict.get("simulations", ()):
-        settings = simulation_cfg.get("settings", {})
+    for simulation_cfg in _iter_simulation_dicts(config_dict):
+        settings = simulation_cfg.get("settings") or {}
         start_frame = int(settings.get("start_frame", 1))
-        for output_cfg in simulation_cfg.get("outputs", ()):
+        for output_cfg in _iter_output_dicts(simulation_cfg):
             output_path = output_cfg.get("output_path", "")
             if not output_path:
                 continue
@@ -482,15 +509,15 @@ def _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame
 
 
 def _iter_live_preview_output_entries(config_dict):
-    for simulation_cfg in config_dict.get("simulations", ()):
-        viewers = simulation_cfg.get("viewers", ())
+    for simulation_cfg in _iter_simulation_dicts(config_dict):
+        viewers = tuple(_iter_viewer_dicts(simulation_cfg))
         if not viewers:
             continue
         if not any(bool(viewer_cfg.get("live_preview", True)) for viewer_cfg in viewers):
             continue
-        settings = simulation_cfg.get("settings", {})
+        settings = simulation_cfg.get("settings") or {}
         start_frame = int(settings.get("start_frame", 1))
-        for output_cfg in simulation_cfg.get("outputs", ()):
+        for output_cfg in _iter_output_dicts(simulation_cfg):
             output_path = output_cfg.get("output_path", "")
             if not output_path:
                 continue

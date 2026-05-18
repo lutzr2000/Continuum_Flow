@@ -462,6 +462,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             return {"RUNNING_MODAL"}
         self._drain_kernel_output()
         reader_error = self._reader_error
+        config_dict = self._config_dict
+        solver_divergence_message = self._solver_divergence_message
+        cancel_requested = self._cancel_requested
         self._cleanup_bake(context)
         if reader_error:
             self.report({"ERROR"}, f"Bake failed while reading kernel output: {reader_error}")
@@ -473,25 +476,25 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             )
             return {"CANCELLED"}
         try:
-            imported_count, missing_directories = BakeStorage._import_baked_vdbs(self._config_dict)
+            imported_count, missing_directories = BakeStorage._import_baked_vdbs(config_dict)
         except Exception as exc:
-            if self._solver_divergence_message is not None:
-                self.report({"WARNING"}, f"{self._solver_divergence_message} VDB import failed: {exc}")
+            if solver_divergence_message is not None:
+                self.report({"WARNING"}, f"{solver_divergence_message} VDB import failed: {exc}")
             else:
                 self.report({"WARNING"}, f"Bake finished, but VDB import failed: {exc}")
             return {"FINISHED"}
-        if self._solver_divergence_message is not None:
+        if solver_divergence_message is not None:
             if imported_count > 0:
                 self.report(
                     {"WARNING"},
-                    f"{self._solver_divergence_message} Imported {imported_count} VDB volume(s) up to that point.",
+                    f"{solver_divergence_message} Imported {imported_count} VDB volume(s) up to that point.",
                 )
             elif missing_directories:
-                self.report({"WARNING"}, f"{self._solver_divergence_message} No VDB output directory was found.")
+                self.report({"WARNING"}, f"{solver_divergence_message} No VDB output directory was found.")
             else:
-                self.report({"WARNING"}, f"{self._solver_divergence_message} No VDB files were found to import.")
+                self.report({"WARNING"}, f"{solver_divergence_message} No VDB files were found to import.")
             return {"FINISHED"}
-        if self._cancel_requested:
+        if cancel_requested:
             if imported_count > 0:
                 self.report(
                     {"WARNING"},
