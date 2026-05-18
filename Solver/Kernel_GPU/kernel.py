@@ -288,6 +288,9 @@ def _run_time_step(state, blockspergrid_3d):
     turbulence_angular_frequencies = state["turbulence_angular_frequencies"]
     turbulence_count = state["turbulence_count"]
     simulate_sparsely = state["simulation_params"].get("SIMULATE_SPARSELY", True)
+    adaptive_domain_threshold = np.float32(
+        state["simulation_params"].get("ADAPTIVE_DOMAIN_THRESHOLD", 0.001)
+    )
 
     u = state["u"]
     v = state["v"]
@@ -410,10 +413,7 @@ def _run_time_step(state, blockspergrid_3d):
             T, smoke, fuel, flame,
             gpu_fields["scalar_active_tiles"],
             gpu_constants["T_REFERENCE"],
-            np.float32(kernel_config.ACTIVE_TILE_SMOKE_EPSILON),
-            np.float32(kernel_config.ACTIVE_TILE_FUEL_EPSILON),
-            np.float32(kernel_config.ACTIVE_TILE_FLAME_EPSILON),
-            np.float32(kernel_config.ACTIVE_TILE_TEMPERATURE_EPSILON),
+            adaptive_domain_threshold,
         )
         scalar_update.dilate_active_scalar_tile_mask[
             active_tile_mask_blocks,

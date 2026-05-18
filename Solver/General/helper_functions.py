@@ -713,6 +713,7 @@ def apply_config(config):
         "MAX_ITER": int(settings_cfg["iterations"]),
         "MACCORMACK_FACTOR": float(settings_cfg.get("maccormack_factor", 0.25)),
         "SIMULATE_SPARSELY": bool(settings_cfg.get("simulate_sparsely", True)),
+        "ADAPTIVE_DOMAIN_THRESHOLD": float(settings_cfg.get("adaptive_domain_threshold", 0.001)),
         "MAX_VELOCITY_INCREMENT_FACTOR": float(
             settings_cfg.get(
                 "max_velocity_increment_factor",

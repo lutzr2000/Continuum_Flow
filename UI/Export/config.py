@@ -620,6 +620,7 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
             "iterations": int(simulation_node.iterations),
             "maccormack_factor": float(getattr(simulation_node, "maccormack_factor", 0.25)),
             "simulate_sparsely": bool(getattr(simulation_node, "simulate_sparsely", True)),
+            "adaptive_domain_threshold": float(getattr(simulation_node, "adaptive_domain_threshold", 0.001)),
         },
         "animation_timeline": {
             "fps": simulation_fps,

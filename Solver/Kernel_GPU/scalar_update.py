@@ -6,8 +6,7 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 
 @cuda.jit(cache=True)
 def build_active_scalar_tile_mask(
-    T, smoke, fuel, flame, tile_mask, t_reference,
-    smoke_epsilon, fuel_epsilon, flame_epsilon, temperature_epsilon,
+    T, smoke, fuel, flame, tile_mask, t_reference, activity_threshold,
 ):
     """
     Mark 4x4x4 tiles that currently contain meaningful scalar activity.
@@ -38,10 +37,10 @@ def build_active_scalar_tile_mask(
                     break
 
                 if (
-                    smoke[i, j, k] > smoke_epsilon or
-                    fuel[i, j, k] > fuel_epsilon or
-                    flame[i, j, k] > flame_epsilon or
-                    abs(T[i, j, k] - t_reference) > temperature_epsilon
+                    smoke[i, j, k] > activity_threshold or
+                    fuel[i, j, k] > activity_threshold or
+                    flame[i, j, k] > activity_threshold or
+                    abs(T[i, j, k] - t_reference) > activity_threshold
                 ):
                     active = True
                     break
