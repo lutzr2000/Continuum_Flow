@@ -8,11 +8,10 @@ Check when saving sparse to vdb if flame field is accounted for
 the live preview produces a RAM accumulation
 
 Solver: 
-sparse simulation needs a ui input
-optimise pressure solve more speed wise
 Rework forces in general?
 put forces in a seperate file
-GPU in general less moving around between cpu and gpu mor continous gpu run
+optimise output speed more
+something in vorticity compute is doubled, but removing it changes flow behaviour, why?
 Testing
 time CPU
 
