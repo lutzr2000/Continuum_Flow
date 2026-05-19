@@ -4,8 +4,11 @@ General:
 Make solver installable
 Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
+search for unused variables and methods, search for comments still in german
+sit down go through whole code
 
 Solver: 
+all boundary BCs are enforced 3 times in _run_time_step, that is very inefficent
 time CPU
 Testing
 

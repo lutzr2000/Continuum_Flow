@@ -289,11 +289,6 @@ def _run_time_step(state):
 
     if cpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
-        pressure_solve.pressure_equation_right_side(
-            u, v, w, T, cpu_fields["pressure_rhs"],
-            dt, cpu_fields["point_divergence"], cpu_constants["DELTA"], cpu_constants["RHO"],
-            cpu_constants["EXPANSION_RATE"], cpu_constants["T_REFERENCE"],
-        )
         vorticity.compute_vorticity(
             u,
             v,

@@ -368,11 +368,6 @@ def _run_time_step(state, blockspergrid_3d):
     #------------Vorticity-------------------
     if gpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
-        pressure_solve.pressure_equation_right_side[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-            u, v, w, T, gpu_fields["pressure_rhs"],
-            dt, gpu_fields["point_divergence"], gpu_constants["DELTA"], gpu_constants["RHO"],
-            gpu_constants["EXPANSION_RATE"], gpu_constants["T_REFERENCE"]
-        )
         vorticity.compute_vorticity[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
             u,
             v,
