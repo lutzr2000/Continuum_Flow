@@ -193,15 +193,6 @@ def _vector_add(a, b):
     )
 
 
-def _vector_sub(a, b):
-    """Subtract two 3D vectors."""
-    return (
-        float(a[0]) - float(b[0]),
-        float(a[1]) - float(b[1]),
-        float(a[2]) - float(b[2]),
-    )
-
-
 def _cross(a, b):
     """Return the cross product of two 3D vectors."""
     return (
@@ -275,17 +266,6 @@ def _arrow_segments(start, vector, head_scale=0.18):
     return lines
 
 
-def _polyline_segments(points):
-    """Convert one polyline point list into individual line segments."""
-    if len(points) < 2:
-        return []
-
-    lines = []
-    for index in range(len(points) - 1):
-        lines.extend((points[index], points[index + 1]))
-    return lines
-
-
 def _linked_simulation_nodes_from_force(force_node):
     """Resolve downstream simulation nodes connected to one force node."""
     socket = force_node.outputs.get("Force")
@@ -348,11 +328,6 @@ def _force_preview_scale(force_node):
     return 0.25
 
 
-def _turbulence_preview_lines(force_node, center, preview_scale):
-    """Turbulence nodes currently do not have a dedicated viewport preview."""
-    return []
-
-
 def _force_preview_geometry(force_node):
     """Build viewport line geometry for the active force node."""
     node_type = getattr(force_node, "bl_idname", "")
@@ -393,9 +368,7 @@ def _force_preview_geometry(force_node):
         return lines
 
     if node_type == "BLENDERCFD_FORCE_TURBULENCE_NODE":
-        domain_node = _linked_domain_from_force(force_node)
-        center = _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
-        return _turbulence_preview_lines(force_node, center, preview_scale)
+        return []
 
     return []
 

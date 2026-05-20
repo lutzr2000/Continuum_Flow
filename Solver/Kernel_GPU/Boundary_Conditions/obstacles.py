@@ -15,21 +15,6 @@ _resolve_dynamic_object_state = general_obstacles._resolve_dynamic_object_state
 
 
 @cuda.jit(cache=True)
-def _clear_mask_cuda(mask):
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
-    if i < nx and j < ny and k < nz:
-        mask[i, j, k] = False
-
-
-@cuda.jit(cache=True)
-def _clear_mask_box_cuda(mask, ix0, iy0, iz0, sx, sy, sz):
-    di, dj, dk = cuda.grid(3)
-    if di < sx and dj < sy and dk < sz:
-        mask[ix0 + di, iy0 + dj, iz0 + dk] = False
-
-
-@cuda.jit(cache=True)
 def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
     i, j, k = cuda.grid(3)
     nx, ny, nz = mask.shape
@@ -51,54 +36,6 @@ def _clear_obstacle_fields_box_cuda(mask, velocity_x, velocity_y, velocity_z, ix
         velocity_x[i, j, k] = 0.0
         velocity_y[i, j, k] = 0.0
         velocity_z[i, j, k] = 0.0
-
-
-@cuda.jit(cache=True)
-def _sample_mask_backwards_object_cuda(
-    out,
-    local_masks_flat,
-    local_mask_offsets,
-    local_mask_shapes,
-    local_origins,
-    object_index,
-    ix0, iy0, iz0,
-    sx, sy, sz,
-    m00, m01, m02, m03,
-    m10, m11, m12, m13,
-    m20, m21, m22, m23,
-    delta,
-    ox, oy, oz,
-):
-    di, dj, dk = cuda.grid(3)
-    if di >= sx or dj >= sy or dk >= sz:
-        return
-
-    i = ix0 + di
-    j = iy0 + dj
-    k = iz0 + dk
-
-    x = ox + i * delta
-    y = oy + j * delta
-    z = oz + k * delta
-
-    bx = m00 * x + m01 * y + m02 * z + m03
-    by = m10 * x + m11 * y + m12 * z + m13
-    bz = m20 * x + m21 * y + m22 * z + m23
-
-    base_ox = local_origins[object_index, 0]
-    base_oy = local_origins[object_index, 1]
-    base_oz = local_origins[object_index, 2]
-    bi = int(math.floor((bx - base_ox) / delta + 0.5))
-    bj = int(math.floor((by - base_oy) / delta + 0.5))
-    bk = int(math.floor((bz - base_oz) / delta + 0.5))
-
-    bn_x = local_mask_shapes[object_index, 0]
-    bn_y = local_mask_shapes[object_index, 1]
-    bn_z = local_mask_shapes[object_index, 2]
-    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
-        flat_index = local_mask_offsets[object_index] + (bi * bn_y + bj) * bn_z + bk
-        if local_masks_flat[flat_index]:
-            out[i, j, k] = True
 
 
 @cuda.jit(cache=True)
