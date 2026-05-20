@@ -4,11 +4,10 @@ General:
 Make solver installable
 Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
-search for unused variables and methods, search for comments still in german
+search for comments still in german
 sit down go through whole code
 
 Solver: 
-reduce VRAM usage
 time CPU
 Testing
 

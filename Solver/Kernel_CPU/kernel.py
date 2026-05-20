@@ -111,8 +111,6 @@ def _initialise_solver(config):
         dtype=simulation_params["PRECISION"],
     )
     turbulence_count = int(turbulence_angular_frequencies.size)
-    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
-
     host_fields = {}
     _sync_host_field_views(host_fields, cpu_fields)
 
@@ -177,7 +175,6 @@ def _initialise_solver(config):
     cancel_requested = False
 
     section_start = perf_counter()
-    time_step.reset_velocity_maxima(cpu_fields["velocity_maxima"], velocity_maxima_host_zeros)
     dt, solver_diverged = time_step.compute_new_timestep_cpu(
         cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
         cpu_constants["RHO"], cpu_constants["DELTA"], cpu_constants["NU"], simulation_params["CFL_MAX"],
@@ -197,7 +194,6 @@ def _initialise_solver(config):
         "cpu_constants": cpu_constants,
         "turbulence_angular_frequencies": turbulence_angular_frequencies,
         "turbulence_count": turbulence_count,
-        "velocity_maxima_host_zeros": velocity_maxima_host_zeros,
         "host_fields": host_fields,
         "t": t,
         "dt": dt,
@@ -552,10 +548,6 @@ def main(config=None):
             state["t"] += state["dt"]
 
             section_start = perf_counter()
-            time_step.reset_velocity_maxima(
-                state["cpu_fields"]["velocity_maxima"],
-                state["velocity_maxima_host_zeros"],
-            )
             dt_new, state["solver_diverged"] = time_step.compute_new_timestep_cpu(
                 state["cpu_fields"]["u"],
                 state["cpu_fields"]["v"],
