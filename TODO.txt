@@ -8,7 +8,7 @@ search for unused variables and methods, search for comments still in german
 sit down go through whole code
 
 Solver: 
-all boundary BCs are enforced 3 times in _run_time_step, that is very inefficent
+reduce VRAM usage
 time CPU
 Testing
 

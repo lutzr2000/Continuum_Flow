@@ -465,32 +465,6 @@ def _run_time_step(state, blockspergrid_3d):
     v, v_work = v_work, v
     w, w_work = w_work, w
 
-    #------------BC-------------------
-    section_start = perf_counter()
-    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        u, v, w, p, T, smoke, fuel, flame,
-        dt,
-        simulation_params["BC_CONFIG"],
-        gpu_constants["HAS_OBSTACLE"],
-        gpu_fields["obstacle_mask"],
-        gpu_fields["obstacle_velocity_x"],
-        gpu_fields["obstacle_velocity_y"],
-        gpu_fields["obstacle_velocity_z"],
-        gpu_constants["HAS_SOURCE"],
-        gpu_fields["source_mask"],
-        gpu_fields["source_velocity_mask"],
-        gpu_fields["source_temperature"],
-        gpu_fields["source_smoke"],
-        gpu_fields["source_fuel"],
-        gpu_fields["source_velocity_x"],
-        gpu_fields["source_velocity_y"],
-        gpu_fields["source_velocity_z"],
-        apply_source_velocity=True,
-        apply_source_scalars=False,
-    )
-    cuda.synchronize()
-    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_velocity", perf_counter() - section_start)
-
     #------------Pressure solve-------------------
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
