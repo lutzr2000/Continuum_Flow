@@ -33,6 +33,14 @@ def upload_simulation_state_to_gpu(simulation_params):
     turbulence_data = host_state["turbulence_data"]
     active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
 
+    # Reuse three full-volume scratch buffers across vorticity, velocity
+    # MacCormack prediction, pressure RHS assembly and scalar MacCormack
+    # prediction. These phases run sequentially in one timestep, so their
+    # lifetimes do not overlap.
+    scratch_x = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    scratch_y = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    scratch_z = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+
     gpu_fields = {
         # Primary velocity state and scratch buffers.
         "u": cuda.to_device(np.asarray(host_state["u"], dtype=GPU_FIELD_DTYPE)),
@@ -41,13 +49,13 @@ def upload_simulation_state_to_gpu(simulation_params):
         "u_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
         "v_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
         "w_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "u_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "v_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "w_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "u_tmp": scratch_x,
+        "v_tmp": scratch_y,
+        "w_tmp": scratch_z,
 
         # Pressure solve state.
         "p": cuda.to_device(np.asarray(host_state["p"], dtype=GPU_FIELD_DTYPE)),
-        "pressure_rhs": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "pressure_rhs": scratch_x,
         "pressure_rhs_partial_sums": cuda.device_array(
             kernel_config.MAX_REDUCTION_BLOCKS,
             dtype=np.float32,
@@ -57,22 +65,21 @@ def upload_simulation_state_to_gpu(simulation_params):
         # Advected scalar fields and their work buffers.
         "T": cuda.to_device(np.asarray(host_state["T"], dtype=GPU_FIELD_DTYPE)),
         "temperature_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "temperature_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "temperature_tmp": scratch_x,
         "smoke": cuda.to_device(np.asarray(host_state["smoke"], dtype=GPU_FIELD_DTYPE)),
         "smoke_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "smoke_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "smoke_tmp": scratch_y,
         "fuel": cuda.to_device(np.asarray(host_state["fuel"], dtype=GPU_FIELD_DTYPE)),
         "fuel_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "fuel_tmp": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "fuel_tmp": scratch_z,
         "flame": cuda.to_device(np.asarray(host_state["flame"], dtype=GPU_FIELD_DTYPE)),
-        "flame_work": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
         "scalar_active_tiles": cuda.device_array(active_tile_shape, dtype=np.bool_),
         "scalar_active_tiles_dilated": cuda.device_array(active_tile_shape, dtype=np.bool_),
 
         # Vorticity diagnostics for confinement forces.
-        "vorticity_x": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "vorticity_y": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
-        "vorticity_z": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
+        "vorticity_x": scratch_x,
+        "vorticity_y": scratch_y,
+        "vorticity_z": scratch_z,
         "vorticity_magnitude": cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE),
 
         # Static and animated body-force inputs.

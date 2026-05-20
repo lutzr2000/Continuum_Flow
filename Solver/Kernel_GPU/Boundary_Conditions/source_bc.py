@@ -146,7 +146,6 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
     source_velocity_x = gpu_fields["source_velocity_x"]
     source_velocity_y = gpu_fields["source_velocity_y"]
     source_velocity_z = gpu_fields["source_velocity_z"]
-
     _clear_source_fields_kernel[
         volume_blocks_per_grid(source_mask.shape, THREADS_PER_BLOCK_3D),
         THREADS_PER_BLOCK_3D,

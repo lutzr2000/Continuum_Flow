@@ -130,7 +130,6 @@ def _initialise_solver(config):
     fuel_work = gpu_fields["fuel_work"]
     fuel_tmp = gpu_fields["fuel_tmp"]
     flame = gpu_fields["flame"]
-    flame_work = gpu_fields["flame_work"]
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
         dtype=GPU_FIELD_DTYPE,
@@ -245,7 +244,6 @@ def _initialise_solver(config):
         "fuel_work": fuel_work,
         "fuel_tmp": fuel_tmp,
         "flame": flame,
-        "flame_work": flame_work,
         "turbulence_angular_frequencies": turbulence_angular_frequencies,
         "turbulence_count": turbulence_count,
         "velocity_maxima_host_zeros": velocity_maxima_host_zeros,
@@ -312,7 +310,6 @@ def _run_time_step(state, blockspergrid_3d):
     fuel_work = state["fuel_work"]
     fuel_tmp = state["fuel_tmp"]
     flame = state["flame"]
-    flame_work = state["flame_work"]
     t = state["t"]
     dt = state["dt"]
     scalar_tile_blocks = kernel_config.active_tile_shape(u.shape)
@@ -524,7 +521,7 @@ def _run_time_step(state, blockspergrid_3d):
         kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
         T, smoke, fuel, flame,
-        temperature_work, smoke_work, fuel_work, flame_work,
+        temperature_work, smoke_work, fuel_work, flame,
         gpu_fields["scalar_active_tiles_dilated"],
     )
     scalar_update.predict_scalar_fields_maccormack[
@@ -542,7 +539,7 @@ def _run_time_step(state, blockspergrid_3d):
     ](
         T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
         u, v, w, dt,
-        temperature_work, smoke_work, fuel_work, flame_work,
+        temperature_work, smoke_work, fuel_work, flame,
         gpu_constants["DELTA"],
         gpu_constants["TEMPERATURE_DISSIPATION_RATE"],
         gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
@@ -562,7 +559,6 @@ def _run_time_step(state, blockspergrid_3d):
     T, temperature_work = temperature_work, T
     smoke, smoke_work = smoke_work, smoke
     fuel, fuel_work = fuel_work, fuel
-    flame, flame_work = flame_work, flame
 
     #------------Boundary conditions-------------------
     section_start = perf_counter()
@@ -621,7 +617,6 @@ def _run_time_step(state, blockspergrid_3d):
         "fuel_work": fuel_work,
         "fuel_tmp": fuel_tmp,
         "flame": flame,
-        "flame_work": flame_work,
     })
     return state
 
