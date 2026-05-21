@@ -112,7 +112,7 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, n
     to estimate the departure point in grid coordinates.
     """
     n_substeps = 3
-    substep_dt = dt_over_delta * 1 // n_substeps
+    substep_dt = dt_over_delta * 1/n_substeps 
     x_pos = x_start
     y_pos = y_start
     z_pos = z_start
