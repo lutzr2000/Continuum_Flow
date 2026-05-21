@@ -19,6 +19,9 @@ def _clear_source_fields_kernel(
     source_velocity_y,
     source_velocity_z,
 ):
+    """
+    Update the full source masks and target fields by clearing all cells.
+    """
     i, j, k = cuda.grid(3)
     nx, ny, nz = source_mask.shape
 
@@ -62,6 +65,9 @@ def _sample_source_entry_cuda(
     velocity_y_value,
     velocity_z_value,
 ):
+    """
+    Update one source region by backward-sampling a source object on the GPU.
+    """
     di, dj, dk = cuda.grid(3)
     if di >= sx or dj >= sy or dk >= sz:
         return
@@ -110,17 +116,14 @@ def build_source_data(domain_cfg, source_entries):
     Velocity targets are written directly so later overlapping sources override
     earlier ones component-wise.
 
-    Args:
-        domain_cfg (dict): exported domain configuration
-        source_entries (list[dict]): exported source node configurations
-    Returns:
-        dict: source mask and persistent source target fields
     """
     return general_sources.build_source_data(domain_cfg, source_entries, obstacles)
 
 
 def prepare_source_data_for_gpu(source_data):
-    """Upload static local voxel masks for dynamic source sampling on the GPU."""
+    """
+    Upload static local voxel masks for dynamic source sampling on the GPU.
+    """
     if not source_data.get("is_animated", False):
         source_data["gpu_ready"] = False
         return source_data
@@ -131,7 +134,9 @@ def prepare_source_data_for_gpu(source_data):
 
 
 def update_source_data_gpu(source_data, gpu_fields, time_value):
-    """Rebuild dynamic source masks and fields directly on the GPU."""
+    """
+    Rebuild dynamic source masks and fields directly on the GPU.
+    """
     if not source_data.get("is_animated", False):
         source_data["last_has_source"] = bool(np.any(source_data["mask"]))
         return source_data
@@ -222,7 +227,9 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
 
 
 def update_source_data(source_data, time_value):
-    """Rebuild source masks and persistent source target fields for the current time."""
+    """
+    Rebuild source masks and persistent source target fields for the current time.
+    """
     source_active_mask = source_data["mask"]
     velocity_active_mask = source_data["velocity_mask"]
     temperature_field = source_data["temperature"]
@@ -279,7 +286,7 @@ def update_source_data(source_data, time_value):
 
 
 @cuda.jit(cache=True)
-def _source_bc_kernel(
+def source_bc_kernel(
     u, v, w, T, smoke, fuel,
     source_mask, source_velocity_mask,
     source_temperature, source_smoke, source_fuel,
@@ -295,21 +302,6 @@ def _source_bc_kernel(
     keeps temperature above the configured minimum and injects smoke/fuel
     according to the authored per-second emission rates.
 
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        T (device array): temperature field
-        smoke (device array): smoke field
-        fuel (device array): fuel field
-        source_mask (device array): boolean source mask
-        source_velocity_mask (device array): boolean mask for cells with imposed velocity
-        source_temperature (device array): source temperature targets
-        source_smoke (device array): source smoke targets
-        source_fuel (device array): source fuel targets
-        source_velocity_x (device array): source x-velocity targets
-        source_velocity_y (device array): source y-velocity targets
-        source_velocity_z (device array): source z-velocity targets
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = source_mask.shape
@@ -336,58 +328,3 @@ def _source_bc_kernel(
         smoke[i, j, k] = min(max(smoke[i, j, k] + dt * source_smoke_rate, 0.0), 100.0)
         fuel[i, j, k] = min(max(fuel[i, j, k] + dt * source_fuel_rate, 0.0), 100.0)
 
-
-def source_bc(
-    u, v, w, T, smoke, fuel,
-    source_mask, source_velocity_mask,
-    source_temperature, source_smoke, source_fuel,
-    source_velocity_x, source_velocity_y, source_velocity_z,
-    dt,
-    apply_velocity=True,
-    apply_scalars=True,
-    threadsperblock=None,
-):
-    """
-    applies all source boundary conditions to the GPU field state.
-
-    Velocity can be imposed directly and scalar source terms can be injected
-    independently so the caller can project source-driven velocity before the
-    final scalar/source pass.
-
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        T (device array): temperature field
-        smoke (device array): smoke field
-        fuel (device array): fuel field
-        source_mask (device array): boolean source mask
-        source_velocity_mask (device array): boolean mask for cells with imposed velocity
-        source_temperature (device array): source temperature targets
-        source_smoke (device array): source smoke targets
-        source_fuel (device array): source fuel targets
-        source_velocity_x (device array): source x-velocity targets
-        source_velocity_y (device array): source y-velocity targets
-        source_velocity_z (device array): source z-velocity targets
-        apply_velocity (bool, optional): whether to impose source velocity targets
-        apply_scalars (bool, optional): whether to apply source temperature,
-            smoke and fuel targets
-        threadsperblock (tuple[int, int, int], optional): CUDA block shape for volume kernels
-    Returns:
-        tuple: updated velocity, temperature, smoke and fuel fields
-    """
-    if threadsperblock is None:
-        threadsperblock = THREADS_PER_BLOCK_3D
-
-    blockspergrid = volume_blocks_per_grid(source_mask.shape, threadsperblock)
-
-    _source_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, T, smoke, fuel,
-        source_mask, source_velocity_mask,
-        source_temperature, source_smoke, source_fuel,
-        source_velocity_x, source_velocity_y, source_velocity_z,
-        dt,
-        apply_velocity,
-        apply_scalars,
-    )
-    return u, v, w, T, smoke, fuel

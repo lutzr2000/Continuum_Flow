@@ -46,20 +46,32 @@ def apply_all_BC(
     u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
     if has_obstacle:
-        u, v, w, smoke, fuel, flame = obstacle_bc.obstacle_bc(
+        blockspergrid = kernel_config.volume_blocks_per_grid(
+            obstacle_mask.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+        obstacle_bc.obstacle_bc_kernel[
+            blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
+        ](
             u, v, w, smoke, fuel, flame,
             obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
         )
 
     if has_source:
-        u, v, w, T, smoke, fuel = source_bc.source_bc(
+        blockspergrid = kernel_config.volume_blocks_per_grid(
+            source_mask.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+        source_bc.source_bc_kernel[
+            blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
+        ](
             u, v, w, T, smoke, fuel,
             source_mask, source_velocity_mask,
             source_temperature, source_smoke, source_fuel,
             source_velocity_x, source_velocity_y, source_velocity_z,
             dt,
-            apply_velocity=apply_source_velocity,
-            apply_scalars=apply_source_scalars,
+            apply_source_velocity,
+            apply_source_scalars,
         )
     return u, v, w, p, T, smoke, fuel, flame
 

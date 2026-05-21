@@ -29,8 +29,6 @@ def _pressure_poisson_apply_neumann_bcs(p):
     cell. This kernel writes the boundary values after each Jacobi iteration so
     the next iteration starts from a pressure field with valid boundary values.
 
-    Args:
-        p (device array): pressure field whose domain boundaries will be updated
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = p.shape
@@ -63,6 +61,15 @@ def _apply_face_state(
     u_value, v_value, w_value,
     temp_value, use_temp,
 ):
+    """
+    applies one configured domain-face boundary condition to a single GPU cell.
+
+    The device helper updates velocity based on the selected boundary mode,
+    copies pressure from the adjacent interior cell, and propagates scalar
+    fields from the neighbor unless an explicit face temperature is configured.
+    It is called by the domain boundary kernel once per matching face, so edge
+    and corner cells are processed sequentially in a fixed order.
+    """
     neighbor_u = u[src_i, src_j, src_k]
     neighbor_v = v[src_i, src_j, src_k]
     neighbor_w = w[src_i, src_j, src_k]

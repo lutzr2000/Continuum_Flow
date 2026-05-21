@@ -16,6 +16,9 @@ _resolve_dynamic_object_state = general_obstacles._resolve_dynamic_object_state
 
 @cuda.jit(cache=True)
 def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
+    """
+    Update the full obstacle mask and wall-velocity fields by clearing all cells.
+    """
     i, j, k = cuda.grid(3)
     nx, ny, nz = mask.shape
     if i < nx and j < ny and k < nz:
@@ -27,6 +30,9 @@ def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
 
 @cuda.jit(cache=True)
 def _clear_obstacle_fields_box_cuda(mask, velocity_x, velocity_y, velocity_z, ix0, iy0, iz0, sx, sy, sz):
+    """
+    Update one obstacle subregion by clearing the mask and wall-velocity fields.
+    """
     di, dj, dk = cuda.grid(3)
     if di < sx and dj < sy and dk < sz:
         i = ix0 + di
@@ -60,6 +66,9 @@ def _sample_obstacle_data_backwards_object_cuda(
     delta,
     ox, oy, oz,
 ):
+    """
+    Update one obstacle region by backward-sampling a moving object on the GPU.
+    """
     di, dj, dk = cuda.grid(3)
     if di >= sx or dj >= sy or dk >= sz:
         return
@@ -96,7 +105,9 @@ def _sample_obstacle_data_backwards_object_cuda(
 
 
 def prepare_dynamic_runtime_for_gpu(runtime_data):
-    """Upload static per-object voxel masks so dynamic sampling can run on the GPU."""
+    """
+    Upload static per-object voxel masks so dynamic sampling can run on the GPU.
+    """
     if runtime_data.get("gpu_ready"):
         return runtime_data
 
@@ -136,9 +147,9 @@ def prepare_dynamic_runtime_for_gpu(runtime_data):
 
 
 def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_velocity_x, out_velocity_y, out_velocity_z):
-    """Update one moving obstacle mask and its wall velocity fields directly on the GPU."""
-    if out_mask is None or out_velocity_x is None or out_velocity_y is None or out_velocity_z is None:
-        raise ValueError("Device obstacle mask and velocity fields are required for GPU dynamic updates.")
+    """
+    Update one moving obstacle mask and its wall velocity fields directly on the GPU.
+    """
 
     prepare_dynamic_runtime_for_gpu(runtime_data)
 
