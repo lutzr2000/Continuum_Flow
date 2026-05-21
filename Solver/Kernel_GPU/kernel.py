@@ -462,7 +462,6 @@ def _run_time_step(state, blockspergrid_3d):
         p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
         simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-        np.float32(0.0),
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
         gpu_fields["scalar_active_tiles_dilated"],
     )

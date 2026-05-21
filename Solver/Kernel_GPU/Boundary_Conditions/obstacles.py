@@ -6,7 +6,6 @@ from numba import cuda
 import Solver.General.obstacles as general_obstacles
 from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
-
 mesh = general_obstacles.mesh
 build_dynamic_runtime = general_obstacles.build_dynamic_runtime
 update_dynamic_mask = general_obstacles.update_dynamic_mask
@@ -29,7 +28,9 @@ def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
 
 
 @cuda.jit(cache=True)
-def _clear_obstacle_fields_box_cuda(mask, velocity_x, velocity_y, velocity_z, ix0, iy0, iz0, sx, sy, sz):
+def _clear_obstacle_fields_box_cuda(
+    mask, velocity_x, velocity_y, velocity_z, ix0, iy0, iz0, sx, sy, sz
+):
     """
     Update one obstacle subregion by clearing the mask and wall-velocity fields.
     """
@@ -55,16 +56,40 @@ def _sample_obstacle_data_backwards_object_cuda(
     local_mask_shapes,
     local_origins,
     object_index,
-    ix0, iy0, iz0,
-    sx, sy, sz,
-    m00, m01, m02, m03,
-    m10, m11, m12, m13,
-    m20, m21, m22, m23,
-    r00, r01, r02, r03,
-    r10, r11, r12, r13,
-    r20, r21, r22, r23,
+    ix0,
+    iy0,
+    iz0,
+    sx,
+    sy,
+    sz,
+    m00,
+    m01,
+    m02,
+    m03,
+    m10,
+    m11,
+    m12,
+    m13,
+    m20,
+    m21,
+    m22,
+    m23,
+    r00,
+    r01,
+    r02,
+    r03,
+    r10,
+    r11,
+    r12,
+    r13,
+    r20,
+    r21,
+    r22,
+    r23,
     delta,
-    ox, oy, oz,
+    ox,
+    oy,
+    oz,
 ):
     """
     Update one obstacle region by backward-sampling a moving object on the GPU.
@@ -134,9 +159,15 @@ def prepare_dynamic_runtime_for_gpu(runtime_data):
         local_masks_flat = np.empty(0, dtype=np.bool_)
 
     runtime_data["local_masks_flat_device"] = cuda.to_device(local_masks_flat)
-    runtime_data["local_mask_offsets_device"] = cuda.to_device(np.asarray(mask_offsets, dtype=np.int32))
-    runtime_data["local_mask_shapes_device"] = cuda.to_device(np.asarray(mask_shapes, dtype=np.int32))
-    runtime_data["local_origins_device"] = cuda.to_device(np.asarray(mask_origins, dtype=np.float32))
+    runtime_data["local_mask_offsets_device"] = cuda.to_device(
+        np.asarray(mask_offsets, dtype=np.int32)
+    )
+    runtime_data["local_mask_shapes_device"] = cuda.to_device(
+        np.asarray(mask_shapes, dtype=np.int32)
+    )
+    runtime_data["local_origins_device"] = cuda.to_device(
+        np.asarray(mask_origins, dtype=np.float32)
+    )
     runtime_data["gpu_mask_initialized"] = False
 
     for obj in objects:
@@ -146,7 +177,9 @@ def prepare_dynamic_runtime_for_gpu(runtime_data):
     return runtime_data
 
 
-def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_velocity_x, out_velocity_y, out_velocity_z):
+def update_dynamic_obstacle_data_gpu(
+    runtime_data, time_value, out_mask, out_velocity_x, out_velocity_y, out_velocity_z
+):
     """
     Update one moving obstacle mask and its wall velocity fields directly on the GPU.
     """
@@ -162,10 +195,14 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
     active_objects = []
 
     for object_index, obj in enumerate(runtime_data["objects"]):
-        state = general_obstacles._resolve_dynamic_object_state(obj, time_value, delta, origin, shape)
+        state = general_obstacles._resolve_dynamic_object_state(
+            obj, time_value, delta, origin, shape
+        )
         previous_bounds = obj.get("last_gpu_index_bounds")
         current_bounds = state["index_bounds"] if state["active"] else None
-        dirty_bounds = general_obstacles._merge_index_bounds(previous_bounds, current_bounds)
+        dirty_bounds = general_obstacles._merge_index_bounds(
+            previous_bounds, current_bounds
+        )
         if dirty_bounds is not None:
             dirty_regions.append(dirty_bounds)
             sx, sy, sz = general_obstacles._region_shape(dirty_bounds)
@@ -173,7 +210,10 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
         if state["active"]:
             active_objects.append((object_index, obj, state))
 
-    if not runtime_data.get("gpu_mask_initialized", False) or dirty_volume >= full_volume:
+    if (
+        not runtime_data.get("gpu_mask_initialized", False)
+        or dirty_volume >= full_volume
+    ):
         _clear_obstacle_fields_cuda[
             volume_blocks_per_grid(shape, THREADS_PER_BLOCK_3D),
             THREADS_PER_BLOCK_3D,
@@ -185,7 +225,18 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
             _clear_obstacle_fields_box_cuda[
                 volume_blocks_per_grid((sx, sy, sz), THREADS_PER_BLOCK_3D),
                 THREADS_PER_BLOCK_3D,
-            ](out_mask, out_velocity_x, out_velocity_y, out_velocity_z, int(ix0), int(iy0), int(iz0), sx, sy, sz)
+            ](
+                out_mask,
+                out_velocity_x,
+                out_velocity_y,
+                out_velocity_z,
+                int(ix0),
+                int(iy0),
+                int(iz0),
+                sx,
+                sy,
+                sz,
+            )
 
     for object_index, obj, state in active_objects:
         ix0, _, iy0, _, iz0, _ = state["index_bounds"]
@@ -205,21 +256,47 @@ def update_dynamic_obstacle_data_gpu(runtime_data, time_value, out_mask, out_vel
             runtime_data["local_mask_shapes_device"],
             runtime_data["local_origins_device"],
             int(object_index),
-            int(ix0), int(iy0), int(iz0),
-            sx, sy, sz,
-            np.float32(inv[0, 0]), np.float32(inv[0, 1]), np.float32(inv[0, 2]), np.float32(inv[0, 3]),
-            np.float32(inv[1, 0]), np.float32(inv[1, 1]), np.float32(inv[1, 2]), np.float32(inv[1, 3]),
-            np.float32(inv[2, 0]), np.float32(inv[2, 1]), np.float32(inv[2, 2]), np.float32(inv[2, 3]),
-            np.float32(rate[0, 0]), np.float32(rate[0, 1]), np.float32(rate[0, 2]), np.float32(rate[0, 3]),
-            np.float32(rate[1, 0]), np.float32(rate[1, 1]), np.float32(rate[1, 2]), np.float32(rate[1, 3]),
-            np.float32(rate[2, 0]), np.float32(rate[2, 1]), np.float32(rate[2, 2]), np.float32(rate[2, 3]),
+            int(ix0),
+            int(iy0),
+            int(iz0),
+            sx,
+            sy,
+            sz,
+            np.float32(inv[0, 0]),
+            np.float32(inv[0, 1]),
+            np.float32(inv[0, 2]),
+            np.float32(inv[0, 3]),
+            np.float32(inv[1, 0]),
+            np.float32(inv[1, 1]),
+            np.float32(inv[1, 2]),
+            np.float32(inv[1, 3]),
+            np.float32(inv[2, 0]),
+            np.float32(inv[2, 1]),
+            np.float32(inv[2, 2]),
+            np.float32(inv[2, 3]),
+            np.float32(rate[0, 0]),
+            np.float32(rate[0, 1]),
+            np.float32(rate[0, 2]),
+            np.float32(rate[0, 3]),
+            np.float32(rate[1, 0]),
+            np.float32(rate[1, 1]),
+            np.float32(rate[1, 2]),
+            np.float32(rate[1, 3]),
+            np.float32(rate[2, 0]),
+            np.float32(rate[2, 1]),
+            np.float32(rate[2, 2]),
+            np.float32(rate[2, 3]),
             delta,
-            np.float32(origin[0]), np.float32(origin[1]), np.float32(origin[2]),
+            np.float32(origin[0]),
+            np.float32(origin[1]),
+            np.float32(origin[2]),
         )
         obj["last_gpu_index_bounds"] = state["index_bounds"]
 
     for obj in runtime_data["objects"]:
-        if obj.get("dynamic_state") is None or not obj["dynamic_state"].get("active", False):
+        if obj.get("dynamic_state") is None or not obj["dynamic_state"].get(
+            "active", False
+        ):
             obj["last_gpu_index_bounds"] = None
 
     runtime_data["gpu_mask_initialized"] = True

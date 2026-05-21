@@ -2,7 +2,6 @@ from numba import cuda
 
 from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D
 
-
 BC_OUTFLOW = 0
 BC_INFLOW = 1
 BC_NO_SLIP_WALL = 2
@@ -54,12 +53,27 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(
-    u, v, w, p, T, smoke, fuel,
-    i, j, k,
-    src_i, src_j, src_k,
-    axis, side_index, bc_mode,
-    u_value, v_value, w_value,
-    temp_value, use_temp,
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    i,
+    j,
+    k,
+    src_i,
+    src_j,
+    src_k,
+    axis,
+    side_index,
+    bc_mode,
+    u_value,
+    v_value,
+    w_value,
+    temp_value,
+    use_temp,
 ):
     """
     applies one configured domain-face boundary condition to a single GPU cell.
@@ -81,11 +95,17 @@ def _apply_face_state(
         v[i, j, k] = neighbor_v
         w[i, j, k] = neighbor_w
         if axis == 0:
-            u[i, j, k] = min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+            u[i, j, k] = (
+                min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+            )
         elif axis == 1:
-            v[i, j, k] = min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+            v[i, j, k] = (
+                min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+            )
         else:
-            w[i, j, k] = min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            w[i, j, k] = (
+                min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            )
     elif bc_mode == BC_INFLOW:
         u[i, j, k] = u_value
         v[i, j, k] = v_value
@@ -107,13 +127,49 @@ def _apply_face_state(
 
 @cuda.jit(cache=True)
 def _domain_bc_kernel(
-    u, v, w, p, T, smoke, fuel,
-    x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,
-    x_high_mode, x_high_u, x_high_v, x_high_w, x_high_temp, x_high_use_temp,
-    y_low_mode, y_low_u, y_low_v, y_low_w, y_low_temp, y_low_use_temp,
-    y_high_mode, y_high_u, y_high_v, y_high_w, y_high_temp, y_high_use_temp,
-    z_low_mode, z_low_u, z_low_v, z_low_w, z_low_temp, z_low_use_temp,
-    z_high_mode, z_high_u, z_high_v, z_high_w, z_high_temp, z_high_use_temp,
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    x_low_mode,
+    x_low_u,
+    x_low_v,
+    x_low_w,
+    x_low_temp,
+    x_low_use_temp,
+    x_high_mode,
+    x_high_u,
+    x_high_v,
+    x_high_w,
+    x_high_temp,
+    x_high_use_temp,
+    y_low_mode,
+    y_low_u,
+    y_low_v,
+    y_low_w,
+    y_low_temp,
+    y_low_use_temp,
+    y_high_mode,
+    y_high_u,
+    y_high_v,
+    y_high_w,
+    y_high_temp,
+    y_high_use_temp,
+    z_low_mode,
+    z_low_u,
+    z_low_v,
+    z_low_w,
+    z_low_temp,
+    z_low_use_temp,
+    z_high_mode,
+    z_high_u,
+    z_high_v,
+    z_high_w,
+    z_high_temp,
+    z_high_use_temp,
 ):
     """
     Apply all configured domain face boundary conditions in one 3D launch.
@@ -132,65 +188,149 @@ def _domain_bc_kernel(
 
     if i == 0:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            1, j, k,
-            0, 0,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            1,
+            j,
+            k,
+            0,
+            0,
             x_low_mode,
-            x_low_u, x_low_v, x_low_w,
-            x_low_temp, x_low_use_temp,
+            x_low_u,
+            x_low_v,
+            x_low_w,
+            x_low_temp,
+            x_low_use_temp,
         )
     elif i == nx - 1:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            nx - 2, j, k,
-            0, 1,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            nx - 2,
+            j,
+            k,
+            0,
+            1,
             x_high_mode,
-            x_high_u, x_high_v, x_high_w,
-            x_high_temp, x_high_use_temp,
+            x_high_u,
+            x_high_v,
+            x_high_w,
+            x_high_temp,
+            x_high_use_temp,
         )
 
     if j == 0:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            i, 1, k,
-            1, 0,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            i,
+            1,
+            k,
+            1,
+            0,
             y_low_mode,
-            y_low_u, y_low_v, y_low_w,
-            y_low_temp, y_low_use_temp,
+            y_low_u,
+            y_low_v,
+            y_low_w,
+            y_low_temp,
+            y_low_use_temp,
         )
     elif j == ny - 1:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            i, ny - 2, k,
-            1, 1,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            i,
+            ny - 2,
+            k,
+            1,
+            1,
             y_high_mode,
-            y_high_u, y_high_v, y_high_w,
-            y_high_temp, y_high_use_temp,
+            y_high_u,
+            y_high_v,
+            y_high_w,
+            y_high_temp,
+            y_high_use_temp,
         )
 
     if k == 0:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            i, j, 1,
-            2, 0,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            i,
+            j,
+            1,
+            2,
+            0,
             z_low_mode,
-            z_low_u, z_low_v, z_low_w,
-            z_low_temp, z_low_use_temp,
+            z_low_u,
+            z_low_v,
+            z_low_w,
+            z_low_temp,
+            z_low_use_temp,
         )
     elif k == nz - 1:
         _apply_face_state(
-            u, v, w, p, T, smoke, fuel,
-            i, j, k,
-            i, j, nz - 2,
-            2, 1,
+            u,
+            v,
+            w,
+            p,
+            T,
+            smoke,
+            fuel,
+            i,
+            j,
+            k,
+            i,
+            j,
+            nz - 2,
+            2,
+            1,
             z_high_mode,
-            z_high_u, z_high_v, z_high_w,
-            z_high_temp, z_high_use_temp,
+            z_high_u,
+            z_high_v,
+            z_high_w,
+            z_high_temp,
+            z_high_use_temp,
         )
 
 
@@ -216,7 +356,9 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
         elif bc_type == "SLIP_WALL":
             bc_mode = BC_SLIP_WALL
         else:
-            raise ValueError(f"Unknown boundary condition '{bc_type}' for side '{side}'")
+            raise ValueError(
+                f"Unknown boundary condition '{bc_type}' for side '{side}'"
+            )
 
         face_args[side] = (
             bc_mode,
@@ -227,7 +369,11 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
             temperature is not None,
         )
 
-    threadsperblock = (THREADS_PER_BLOCK_2D[0], THREADS_PER_BLOCK_2D[0], THREADS_PER_BLOCK_2D[1])
+    threadsperblock = (
+        THREADS_PER_BLOCK_2D[0],
+        THREADS_PER_BLOCK_2D[0],
+        THREADS_PER_BLOCK_2D[1],
+    )
     blockspergrid = (
         (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
         (u.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
@@ -235,7 +381,13 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     )
 
     _domain_bc_kernel[blockspergrid, threadsperblock](
-        u, v, w, p, T, smoke, fuel,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
         *face_args["x_low"],
         *face_args["x_high"],
         *face_args["y_low"],
