@@ -111,12 +111,13 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, n
     The helper is used by the semi-Lagrangian and MacCormack advection passes
     to estimate the departure point in grid coordinates.
     """
-    substep_dt = dt_over_delta * 0.25
+    n_substeps = 3
+    substep_dt = dt_over_delta * 1 // n_substeps
     x_pos = x_start
     y_pos = y_start
     z_pos = z_start
 
-    for _ in range(3):
+    for _ in range(n_substeps):
         u_sample, v_sample, w_sample = _sample_trilinear_vec3(u, v, w, x_pos, y_pos, z_pos, nx, ny, nz)
 
         x_pos -= substep_dt * u_sample
