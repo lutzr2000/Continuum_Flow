@@ -5,7 +5,9 @@ import Solver.General.helper_functions as helper_functions
 
 
 def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
-    """Rebuild obstacle/source runtime data through backend-specific builders."""
+    """
+    Rebuild obstacle/source runtime data through backend-specific builders.
+    """
     domain_cfg = {
         "grid": {
             "nx": simulation_params["NX"],
@@ -28,8 +30,8 @@ def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
     simulation_params["HAS_OBSTACLE"] = bool(np.any(obstacle_data["mask"]))
     simulation_params["HAS_SOURCE"] = bool(np.any(source_field_data["mask"]))
     simulation_params["HAS_DYNAMIC_BOUNDARIES"] = bool(
-        obstacle_data.get("is_animated", False) or
-        source_field_data.get("is_animated", False)
+        obstacle_data.get("is_animated", False)
+        or source_field_data.get("is_animated", False)
     )
     return simulation_params
 
@@ -63,14 +65,22 @@ def build_initial_host_state(
     force_field_data = simulation_params["force_field_data"]
     turbulence_data = force_field_data["turbulence"]
 
-    obstacle_data = simulation_params.get("obstacle_data", {"mask": simulation_params["obstacle_mask"]})
+    obstacle_data = simulation_params.get(
+        "obstacle_data", {"mask": simulation_params["obstacle_mask"]}
+    )
     if obstacle_prepare is not None:
         obstacle_prepare(obstacle_data)
 
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
-    obstacle_velocity_x_host = np.asarray(obstacle_data["velocity_x"], dtype=precision_dtype)
-    obstacle_velocity_y_host = np.asarray(obstacle_data["velocity_y"], dtype=precision_dtype)
-    obstacle_velocity_z_host = np.asarray(obstacle_data["velocity_z"], dtype=precision_dtype)
+    obstacle_velocity_x_host = np.asarray(
+        obstacle_data["velocity_x"], dtype=precision_dtype
+    )
+    obstacle_velocity_y_host = np.asarray(
+        obstacle_data["velocity_y"], dtype=precision_dtype
+    )
+    obstacle_velocity_z_host = np.asarray(
+        obstacle_data["velocity_z"], dtype=precision_dtype
+    )
 
     source_field_data = simulation_params["source_field_data"]
     if source_prepare is not None:
@@ -78,13 +88,23 @@ def build_initial_host_state(
 
     source_mask_host = np.asarray(source_field_data["mask"])
     source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
-    source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
+    source_temperature_host = np.asarray(
+        source_field_data["temperature"], dtype=precision_dtype
+    )
     source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
     source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
-    source_extra_pressure_host = np.asarray(source_field_data["extra_pressure"], dtype=precision_dtype)
-    source_velocity_x_host = np.asarray(source_field_data["velocity_x"], dtype=precision_dtype)
-    source_velocity_y_host = np.asarray(source_field_data["velocity_y"], dtype=precision_dtype)
-    source_velocity_z_host = np.asarray(source_field_data["velocity_z"], dtype=precision_dtype)
+    source_extra_pressure_host = np.asarray(
+        source_field_data["extra_pressure"], dtype=precision_dtype
+    )
+    source_velocity_x_host = np.asarray(
+        source_field_data["velocity_x"], dtype=precision_dtype
+    )
+    source_velocity_y_host = np.asarray(
+        source_field_data["velocity_y"], dtype=precision_dtype
+    )
+    source_velocity_z_host = np.asarray(
+        source_field_data["velocity_z"], dtype=precision_dtype
+    )
 
     u[source_velocity_mask_host] = source_velocity_x_host[source_velocity_mask_host]
     v[source_velocity_mask_host] = source_velocity_y_host[source_velocity_mask_host]
@@ -121,19 +141,35 @@ def build_initial_host_state(
 
 
 def build_solver_constants(simulation_params, precision_dtype, force_field_data):
-    """Build the backend-agnostic scalar solver constants block."""
+    """
+    Build the backend-agnostic scalar solver constants block.
+    """
     return {
         "RHO": precision_dtype.type(simulation_params["RHO"]),
         "NU": precision_dtype.type(simulation_params["NU"]),
-        "TEMPERATURE_DISSIPATION_RATE": precision_dtype.type(simulation_params["TEMPERATURE_DISSIPATION_RATE"]),
-        "TEMPERATURE_PRODUCTION_RATE": precision_dtype.type(simulation_params["TEMPERATURE_PRODUCTION_RATE"]),
-        "SMOKE_DISSIPATION_RATE": precision_dtype.type(simulation_params["SMOKE_DISSIPATION_RATE"]),
-        "SMOKE_PRODUCTION_RATE": precision_dtype.type(simulation_params["SMOKE_PRODUCTION_RATE"]),
+        "TEMPERATURE_DISSIPATION_RATE": precision_dtype.type(
+            simulation_params["TEMPERATURE_DISSIPATION_RATE"]
+        ),
+        "TEMPERATURE_PRODUCTION_RATE": precision_dtype.type(
+            simulation_params["TEMPERATURE_PRODUCTION_RATE"]
+        ),
+        "SMOKE_DISSIPATION_RATE": precision_dtype.type(
+            simulation_params["SMOKE_DISSIPATION_RATE"]
+        ),
+        "SMOKE_PRODUCTION_RATE": precision_dtype.type(
+            simulation_params["SMOKE_PRODUCTION_RATE"]
+        ),
         "FUEL_BURN_RATE": precision_dtype.type(simulation_params["FUEL_BURN_RATE"]),
-        "FUEL_IGNITION_TEMPERATURE": precision_dtype.type(simulation_params["FUEL_IGNITION_TEMPERATURE"]),
-        "MINIMUM_OXYGEN_CONCENTRATION": precision_dtype.type(simulation_params["MINIMUM_OXYGEN_CONCENTRATION"]),
+        "FUEL_IGNITION_TEMPERATURE": precision_dtype.type(
+            simulation_params["FUEL_IGNITION_TEMPERATURE"]
+        ),
+        "MINIMUM_OXYGEN_CONCENTRATION": precision_dtype.type(
+            simulation_params["MINIMUM_OXYGEN_CONCENTRATION"]
+        ),
         "T_REFERENCE": precision_dtype.type(simulation_params["T_REFERENCE"]),
-        "SOURCE_TEMPERATURE_MAX": precision_dtype.type(simulation_params["SOURCE_TEMPERATURE_MAX"]),
+        "SOURCE_TEMPERATURE_MAX": precision_dtype.type(
+            simulation_params["SOURCE_TEMPERATURE_MAX"]
+        ),
         "BUOANCY_FACTOR": precision_dtype.type(simulation_params["BUOANCY_FACTOR"]),
         "EXPANSION_RATE": precision_dtype.type(simulation_params["EXPANSION_RATE"]),
         "VORTICITY": precision_dtype.type(simulation_params["VORTICITY"]),
@@ -151,7 +187,9 @@ def build_solver_constants(simulation_params, precision_dtype, force_field_data)
 
 
 def update_animated_constants(simulation_params, constants, time_value):
-    """Update animated scalar solver constants for the current simulation time."""
+    """
+    Update animated scalar solver constants for the current simulation time.
+    """
     animation_state = simulation_params.get("ANIMATION_STATE")
     if not animation_state or not animation_state.get("enabled", False):
         return
@@ -170,20 +208,40 @@ def update_animated_source_force_values(
     source_sync=None,
     force_updater=None,
 ):
-    """Update animated source targets and animated constant-force values."""
+    """
+    Update animated source targets and animated constant-force values.
+    """
     force_changed = False
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None:
         source_changed = False
         for runtime_entry in source_field_data.get("runtime_entries", ()):
             if "_base_temperature" not in runtime_entry:
-                runtime_entry["_base_temperature"] = np.float32(runtime_entry.get("temperature", 0.0))
-                runtime_entry["_base_smoke"] = np.float32(runtime_entry.get("smoke", 0.0))
+                runtime_entry["_base_temperature"] = np.float32(
+                    runtime_entry.get("temperature", 0.0)
+                )
+                runtime_entry["_base_smoke"] = np.float32(
+                    runtime_entry.get("smoke", 0.0)
+                )
                 runtime_entry["_base_fuel"] = np.float32(runtime_entry.get("fuel", 0.0))
-                runtime_entry["_base_extra_pressure"] = np.float32(runtime_entry.get("extra_pressure", 0.0))
-                runtime_entry["_base_velocity_x"] = np.float32(runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x", 0.0)))
-                runtime_entry["_base_velocity_y"] = np.float32(runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y", 0.0)))
-                runtime_entry["_base_velocity_z"] = np.float32(runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z", 0.0)))
+                runtime_entry["_base_extra_pressure"] = np.float32(
+                    runtime_entry.get("extra_pressure", 0.0)
+                )
+                runtime_entry["_base_velocity_x"] = np.float32(
+                    runtime_entry.get(
+                        "authored_velocity_x", runtime_entry.get("velocity_x", 0.0)
+                    )
+                )
+                runtime_entry["_base_velocity_y"] = np.float32(
+                    runtime_entry.get(
+                        "authored_velocity_y", runtime_entry.get("velocity_y", 0.0)
+                    )
+                )
+                runtime_entry["_base_velocity_z"] = np.float32(
+                    runtime_entry.get(
+                        "authored_velocity_z", runtime_entry.get("velocity_z", 0.0)
+                    )
+                )
 
             next_temperature = runtime_entry["_base_temperature"]
             next_smoke = runtime_entry["_base_smoke"]
@@ -193,34 +251,54 @@ def update_animated_source_force_values(
             next_velocity_y = runtime_entry["_base_velocity_y"]
             next_velocity_z = runtime_entry["_base_velocity_z"]
 
-            temperature_series = helper_functions._cached_animation_series(runtime_entry, "temperature", np.float32)
+            temperature_series = helper_functions._cached_animation_series(
+                runtime_entry, "temperature", np.float32
+            )
             if temperature_series is not None:
                 next_temperature = np.float32(
-                    helper_functions._interpolate_animation_series(temperature_series, time_value)
+                    helper_functions._interpolate_animation_series(
+                        temperature_series, time_value
+                    )
                 )
 
-            smoke_series = helper_functions._cached_animation_series(runtime_entry, "smoke", np.float32)
+            smoke_series = helper_functions._cached_animation_series(
+                runtime_entry, "smoke", np.float32
+            )
             if smoke_series is not None:
                 next_smoke = np.float32(
-                    helper_functions._interpolate_animation_series(smoke_series, time_value)
+                    helper_functions._interpolate_animation_series(
+                        smoke_series, time_value
+                    )
                 )
 
-            fuel_series = helper_functions._cached_animation_series(runtime_entry, "fuel", np.float32)
+            fuel_series = helper_functions._cached_animation_series(
+                runtime_entry, "fuel", np.float32
+            )
             if fuel_series is not None:
                 next_fuel = np.float32(
-                    helper_functions._interpolate_animation_series(fuel_series, time_value)
+                    helper_functions._interpolate_animation_series(
+                        fuel_series, time_value
+                    )
                 )
 
-            extra_pressure_series = helper_functions._cached_animation_series(runtime_entry, "extra_pressure", np.float32)
+            extra_pressure_series = helper_functions._cached_animation_series(
+                runtime_entry, "extra_pressure", np.float32
+            )
             if extra_pressure_series is not None:
                 next_extra_pressure = np.float32(
-                    helper_functions._interpolate_animation_series(extra_pressure_series, time_value)
+                    helper_functions._interpolate_animation_series(
+                        extra_pressure_series, time_value
+                    )
                 )
 
-            velocity_series = helper_functions._cached_animation_series(runtime_entry, "velocity", np.float32)
+            velocity_series = helper_functions._cached_animation_series(
+                runtime_entry, "velocity", np.float32
+            )
             if velocity_series is not None:
                 velocity_value = np.asarray(
-                    helper_functions._interpolate_animation_series(velocity_series, time_value),
+                    helper_functions._interpolate_animation_series(
+                        velocity_series, time_value
+                    ),
                     dtype=np.float32,
                 ).reshape(-1)
                 if velocity_value.size > 0:
@@ -231,13 +309,22 @@ def update_animated_source_force_values(
                     next_velocity_z = np.float32(velocity_value[2])
 
             if (
-                next_temperature != runtime_entry.get("temperature") or
-                next_smoke != runtime_entry.get("smoke") or
-                next_fuel != runtime_entry.get("fuel") or
-                next_extra_pressure != runtime_entry.get("extra_pressure", 0.0) or
-                next_velocity_x != runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x")) or
-                next_velocity_y != runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y")) or
-                next_velocity_z != runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z"))
+                next_temperature != runtime_entry.get("temperature")
+                or next_smoke != runtime_entry.get("smoke")
+                or next_fuel != runtime_entry.get("fuel")
+                or next_extra_pressure != runtime_entry.get("extra_pressure", 0.0)
+                or next_velocity_x
+                != runtime_entry.get(
+                    "authored_velocity_x", runtime_entry.get("velocity_x")
+                )
+                or next_velocity_y
+                != runtime_entry.get(
+                    "authored_velocity_y", runtime_entry.get("velocity_y")
+                )
+                or next_velocity_z
+                != runtime_entry.get(
+                    "authored_velocity_z", runtime_entry.get("velocity_z")
+                )
             ):
                 runtime_entry["temperature"] = next_temperature
                 runtime_entry["smoke"] = next_smoke
@@ -247,7 +334,9 @@ def update_animated_source_force_values(
                 runtime_entry["authored_velocity_y"] = next_velocity_y
                 runtime_entry["authored_velocity_z"] = next_velocity_z
                 runtime_entry["has_velocity_target"] = bool(
-                    next_velocity_x != 0.0 or next_velocity_y != 0.0 or next_velocity_z != 0.0
+                    next_velocity_x != 0.0
+                    or next_velocity_y != 0.0
+                    or next_velocity_z != 0.0
                 )
                 source_changed = True
 
@@ -263,27 +352,41 @@ def update_animated_source_force_values(
 
         for runtime_entry in force_field_data.get("point_force_entries", ()):
             if "_base_strength" not in runtime_entry:
-                runtime_entry["_base_strength"] = np.float32(runtime_entry.get("strength", 0.0))
+                runtime_entry["_base_strength"] = np.float32(
+                    runtime_entry.get("strength", 0.0)
+                )
                 runtime_entry["_base_origin"] = np.asarray(
                     runtime_entry.get("origin", (0.0, 0.0, 0.0)),
                     dtype=np.float32,
                 )
-                runtime_entry["_base_radius"] = np.float32(runtime_entry.get("radius", 1.0))
-
-            next_strength = runtime_entry["_base_strength"]
-            next_origin = np.asarray(runtime_entry["_base_origin"], dtype=np.float32).copy()
-            next_radius = runtime_entry["_base_radius"]
-
-            strength_series = helper_functions._cached_animation_series(runtime_entry, "strength", np.float32)
-            if strength_series is not None:
-                next_strength = np.float32(
-                    helper_functions._interpolate_animation_series(strength_series, time_value)
+                runtime_entry["_base_radius"] = np.float32(
+                    runtime_entry.get("radius", 1.0)
                 )
 
-            origin_series = helper_functions._cached_animation_series(runtime_entry, "origin", np.float32)
+            next_strength = runtime_entry["_base_strength"]
+            next_origin = np.asarray(
+                runtime_entry["_base_origin"], dtype=np.float32
+            ).copy()
+            next_radius = runtime_entry["_base_radius"]
+
+            strength_series = helper_functions._cached_animation_series(
+                runtime_entry, "strength", np.float32
+            )
+            if strength_series is not None:
+                next_strength = np.float32(
+                    helper_functions._interpolate_animation_series(
+                        strength_series, time_value
+                    )
+                )
+
+            origin_series = helper_functions._cached_animation_series(
+                runtime_entry, "origin", np.float32
+            )
             if origin_series is not None:
                 origin_value = np.asarray(
-                    helper_functions._interpolate_animation_series(origin_series, time_value),
+                    helper_functions._interpolate_animation_series(
+                        origin_series, time_value
+                    ),
                     dtype=np.float32,
                 ).reshape(-1)
                 if origin_value.size > 0:
@@ -293,16 +396,23 @@ def update_animated_source_force_values(
                 if origin_value.size > 2:
                     next_origin[2] = origin_value[2]
 
-            radius_series = helper_functions._cached_animation_series(runtime_entry, "radius", np.float32)
+            radius_series = helper_functions._cached_animation_series(
+                runtime_entry, "radius", np.float32
+            )
             if radius_series is not None:
                 next_radius = np.float32(
-                    helper_functions._interpolate_animation_series(radius_series, time_value)
+                    helper_functions._interpolate_animation_series(
+                        radius_series, time_value
+                    )
                 )
 
             if (
-                next_strength != runtime_entry.get("strength") or
-                next_radius != runtime_entry.get("radius") or
-                not np.array_equal(next_origin, np.asarray(runtime_entry.get("origin"), dtype=np.float32))
+                next_strength != runtime_entry.get("strength")
+                or next_radius != runtime_entry.get("radius")
+                or not np.array_equal(
+                    next_origin,
+                    np.asarray(runtime_entry.get("origin"), dtype=np.float32),
+                )
             ):
                 runtime_entry["strength"] = next_strength
                 runtime_entry["origin"] = next_origin
@@ -324,19 +434,27 @@ def update_animated_source_force_values(
 
         force_changed = True
 
-    if force_field_data is not None and force_field_data.get("turbulence_runtime_entries"):
+    if force_field_data is not None and force_field_data.get(
+        "turbulence_runtime_entries"
+    ):
         turbulence_data = force_field_data.get("turbulence", {})
         turbulence_amplitudes = turbulence_data.get("amplitudes")
         if turbulence_amplitudes is not None:
             for runtime_entry in force_field_data.get("turbulence_runtime_entries", ()):
                 if "_base_amplitude" not in runtime_entry:
-                    runtime_entry["_base_amplitude"] = np.float32(runtime_entry.get("amplitude", 0.0))
+                    runtime_entry["_base_amplitude"] = np.float32(
+                        runtime_entry.get("amplitude", 0.0)
+                    )
 
                 next_amplitude = runtime_entry["_base_amplitude"]
-                amplitude_series = helper_functions._cached_animation_series(runtime_entry, "amplitude", np.float32)
+                amplitude_series = helper_functions._cached_animation_series(
+                    runtime_entry, "amplitude", np.float32
+                )
                 if amplitude_series is not None:
                     next_amplitude = np.float32(
-                        helper_functions._interpolate_animation_series(amplitude_series, time_value)
+                        helper_functions._interpolate_animation_series(
+                            amplitude_series, time_value
+                        )
                     )
 
                 if next_amplitude != runtime_entry.get("amplitude"):

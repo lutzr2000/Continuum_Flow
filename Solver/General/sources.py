@@ -2,7 +2,9 @@ import numpy as np
 
 
 def _as_f32_vector(values):
-    """Return a contiguous float32 vector with exactly three components."""
+    """
+    Return a contiguous float32 vector with exactly three components.
+    """
     vector = np.zeros(3, dtype=np.float32)
     if values is None:
         return vector
@@ -14,10 +16,14 @@ def _as_f32_vector(values):
 
 
 def _rotation_from_world_matrix(matrix):
-    """Extract the closest pure rotation from an affine world matrix."""
+    """
+    Extract the closest pure rotation from an affine world matrix.
+    """
     linear = np.asarray(matrix, dtype=np.float32)[:3, :3]
     try:
-        u, _, vh = np.linalg.svd(linear.astype(np.float64, copy=False), full_matrices=False)
+        u, _, vh = np.linalg.svd(
+            linear.astype(np.float64, copy=False), full_matrices=False
+        )
         rotation = u @ vh
         if np.linalg.det(rotation) < 0.0:
             u[:, -1] *= -1.0
@@ -28,19 +34,29 @@ def _rotation_from_world_matrix(matrix):
 
 
 def resolve_local_space_velocity(local_velocity, matrix_world):
-    """Convert one local-space velocity vector into world space using object orientation."""
+    """
+    Convert one local-space velocity vector into world space using object orientation.
+    """
     local_velocity = _as_f32_vector(local_velocity)
     rotation = _rotation_from_world_matrix(matrix_world)
     return np.asarray(rotation @ local_velocity, dtype=np.float32)
 
 
 def resolve_runtime_entry_velocity(runtime_entry, time_value, obstacles_backend):
-    """Resolve the authored source velocity into world space for the current object state."""
+    """
+    Resolve the authored source velocity into world space for the current object state.
+    """
     authored_velocity = _as_f32_vector(
         (
-            runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x", 0.0)),
-            runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y", 0.0)),
-            runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z", 0.0)),
+            runtime_entry.get(
+                "authored_velocity_x", runtime_entry.get("velocity_x", 0.0)
+            ),
+            runtime_entry.get(
+                "authored_velocity_y", runtime_entry.get("velocity_y", 0.0)
+            ),
+            runtime_entry.get(
+                "authored_velocity_z", runtime_entry.get("velocity_z", 0.0)
+            ),
         )
     )
     if runtime_entry.get("velocity_space", "WORLD") != "LOCAL":
@@ -142,7 +158,9 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
             if not np.any(source_mask):
                 continue
 
-            resolved_velocity = resolve_runtime_entry_velocity(runtime_entry, 0.0, obstacles_backend)
+            resolved_velocity = resolve_runtime_entry_velocity(
+                runtime_entry, 0.0, obstacles_backend
+            )
             source_active_mask |= source_mask
             temperature_field[source_mask] = np.maximum(
                 temperature_field[source_mask],

@@ -3,7 +3,9 @@ from numba import njit, prange
 
 
 def combine_exported_obstacles(obstacle_entries):
-    """Merge exported obstacle nodes into one kernel obstacle configuration."""
+    """
+    Merge exported obstacle nodes into one kernel obstacle configuration.
+    """
     mesh_objects = []
     for obstacle_entry in obstacle_entries:
         if obstacle_entry.get("shape") != "mesh":
@@ -51,7 +53,9 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
 
     if obstacle_cfg["shape"] == "mesh":
         mesh_cfg = obstacle_cfg.get("mesh", {})
-        mesh_objects = mesh_cfg.get("objects", mesh_cfg if isinstance(mesh_cfg, list) else [])
+        mesh_objects = mesh_cfg.get(
+            "objects", mesh_cfg if isinstance(mesh_cfg, list) else []
+        )
         obstacle_runtime = obstacles_backend.build_dynamic_runtime(
             nx,
             ny,
@@ -62,9 +66,11 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
             origin_y=origin_y,
             origin_z=origin_z,
         )
-        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = obstacles_backend.update_dynamic_obstacle_data(
-            obstacle_runtime,
-            0.0,
+        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = (
+            obstacles_backend.update_dynamic_obstacle_data(
+                obstacle_runtime,
+                0.0,
+            )
         )
         return {
             "config": obstacle_cfg,
@@ -94,9 +100,12 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
 # Small numba kernels
 # -----------------------------------------------------------------------------
 
+
 @njit(cache=True)
 def _sort_prefix(a, n):
-    """Sort a[:n] in-place. Small per-scanline arrays make insertion sort fine."""
+    """
+    Sort a[:n] in-place. Small per-scanline arrays make insertion sort fine.
+    """
     for i in range(1, n):
         x = a[i]
         j = i - 1
@@ -108,7 +117,9 @@ def _sort_prefix(a, n):
 
 @njit(cache=True)
 def _barycentric_yz(y, z, tri, eps):
-    """Barycentric coordinates of point (y, z) in tri projected to the YZ plane."""
+    """
+    Barycentric coordinates of point (y, z) in tri projected to the YZ plane.
+    """
     y0, z0 = tri[0, 1], tri[0, 2]
     y1, z1 = tri[1, 1], tri[1, 2]
     y2, z2 = tri[2, 1], tri[2, 2]
@@ -145,7 +156,9 @@ def _scanline_pass(iy0, iy1, iz0, iz1, z_span, line_counts, candidates, write):
 
 @njit(cache=True, parallel=True)
 def _fill_scanlines(mask, triangles, delta, ox, oy, oz, line_offsets, candidates):
-    """Fill a cropped mask by ray casting along X for every YZ scanline."""
+    """
+    Fill a cropped mask by ray casting along X for every YZ scanline.
+    """
     eps = np.float32(delta * 1.0e-5 + 1.0e-7)
     nx, ny, nz = mask.shape
     line_count = ny * nz
@@ -189,8 +202,12 @@ def _fill_scanlines(mask, triangles, delta, ox, oy, oz, line_offsets, candidates
 
 
 @njit(cache=True, parallel=True)
-def _sample_mask_backwards(out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0, iz1, box, inv):
-    """Back-sample a local reference mask into the world grid."""
+def _sample_mask_backwards(
+    out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0, iz1, box, inv
+):
+    """
+    Back-sample a local reference mask into the world grid.
+    """
     base_ox, base_oy, base_oz = box
     bn_x, bn_y, bn_z = base.shape
     sx, sy, sz = ix1 - ix0 + 1, iy1 - iy0 + 1, iz1 - iz0 + 1
@@ -219,12 +236,28 @@ def _sample_mask_backwards(out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0
 
 @njit(cache=True, parallel=True)
 def _sample_obstacle_data_backwards(
-    out_mask, out_vx, out_vy, out_vz,
-    base, delta, ox, oy, oz,
-    ix0, ix1, iy0, iy1, iz0, iz1,
-    box, inv, rate
+    out_mask,
+    out_vx,
+    out_vy,
+    out_vz,
+    base,
+    delta,
+    ox,
+    oy,
+    oz,
+    ix0,
+    ix1,
+    iy0,
+    iy1,
+    iz0,
+    iz1,
+    box,
+    inv,
+    rate,
 ):
-    """Back-sample one moving obstacle mask and its wall velocity into the world grid."""
+    """
+    Back-sample one moving obstacle mask and its wall velocity into the world grid.
+    """
     base_ox, base_oy, base_oz = box
     bn_x, bn_y, bn_z = base.shape
     sx, sy, sz = ix1 - ix0 + 1, iy1 - iy0 + 1, iz1 - iz0 + 1
@@ -249,29 +282,48 @@ def _sample_obstacle_data_backwards(
 
         if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
             out_mask[i, j, k] = True
-            out_vx[i, j, k] = rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
-            out_vy[i, j, k] = rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
-            out_vz[i, j, k] = rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
+            out_vx[i, j, k] = (
+                rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
+            )
+            out_vy[i, j, k] = (
+                rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
+            )
+            out_vz[i, j, k] = (
+                rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
+            )
 
 
 # -----------------------------------------------------------------------------
 # Geometry helpers
 # -----------------------------------------------------------------------------
 
+
 def _eps(delta):
+    """
+    Return the geometric tolerance used by voxelization helpers for one cell size.
+    """
     return np.float32(np.float32(delta) * 1.0e-5 + 1.0e-7)
 
 
 def _as_f32(a):
+    """
+    Return a contiguous float32 view/copy of the given array-like input.
+    """
     return np.ascontiguousarray(a, dtype=np.float32)
 
 
 def _triangle_bounds(triangles):
+    """
+    Compute axis-aligned bounds for a triangle array shaped like (n, 3, 3).
+    """
     v = triangles.reshape(-1, 3)
     return v.min(axis=0).astype(np.float32), v.max(axis=0).astype(np.float32)
 
 
 def _bounds_center_extent(bounds_min, bounds_max):
+    """
+    Convert min/max bounds into center/extent form for cheaper transforms.
+    """
     bounds_min = np.asarray(bounds_min, dtype=np.float32)
     bounds_max = np.asarray(bounds_max, dtype=np.float32)
     center = (bounds_min + bounds_max) * np.float32(0.5)
@@ -279,7 +331,12 @@ def _bounds_center_extent(bounds_min, bounds_max):
     return _as_f32(center), _as_f32(extent)
 
 
-def _bounds_to_indices(bounds_min, bounds_max, delta, origin=(0.0, 0.0, 0.0), shape=None):
+def _bounds_to_indices(
+    bounds_min, bounds_max, delta, origin=(0.0, 0.0, 0.0), shape=None
+):
+    """
+    Convert world-space bounds into inclusive voxel index bounds, optionally clipped.
+    """
     origin = np.asarray(origin, dtype=np.float32)
     lo = np.floor((bounds_min - origin) / delta).astype(np.int32)
     hi = np.ceil((bounds_max - origin) / delta).astype(np.int32)
@@ -293,6 +350,9 @@ def _bounds_to_indices(bounds_min, bounds_max, delta, origin=(0.0, 0.0, 0.0), sh
 
 
 def _object_bounds(mesh_object, triangles):
+    """
+    Return exported object bounds when available, otherwise derive them from triangles.
+    """
     bounds = mesh_object.get("bounds") or {}
     if bounds:
         return (
@@ -303,7 +363,9 @@ def _object_bounds(mesh_object, triangles):
 
 
 def _load_mesh_triangles(mesh_object):
-    """Load one mesh object's triangle payload into contiguous float32 shape (n, 3, 3)."""
+    """
+    Load one mesh object's triangle payload into contiguous float32 shape (n, 3, 3).
+    """
     if mesh_object.get("triangles_file"):
         triangles = np.load(mesh_object["triangles_file"], allow_pickle=False)
     else:
@@ -321,17 +383,27 @@ def _load_mesh_triangles(mesh_object):
 # Static voxelization
 # -----------------------------------------------------------------------------
 
-def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, iz_min, iz_max):
-    """Build compact candidate triangle lists for all cropped YZ scanlines."""
+
+def _scanline_candidates(
+    triangles, delta, origin_y, origin_z, iy_min, iy_max, iz_min, iz_max
+):
+    """
+    Build compact candidate triangle lists for all cropped YZ scanlines.
+    """
     line_count = int((iy_max - iy_min + 1) * (iz_max - iz_min + 1))
     empty_offsets = np.zeros(max(line_count, 0) + 1, dtype=np.int32)
     if triangles.size == 0 or line_count <= 0:
-        return empty_offsets, np.empty(0, dtype=np.int32), np.empty((0, 3, 3), dtype=np.float32)
+        return (
+            empty_offsets,
+            np.empty(0, dtype=np.int32),
+            np.empty((0, 3, 3), dtype=np.float32),
+        )
 
     eps = _eps(delta)
     yz = triangles[:, :, 1:3]
-    den = (yz[:, 1, 1] - yz[:, 2, 1]) * (yz[:, 0, 0] - yz[:, 2, 0]) + \
-          (yz[:, 2, 0] - yz[:, 1, 0]) * (yz[:, 0, 1] - yz[:, 2, 1])
+    den = (yz[:, 1, 1] - yz[:, 2, 1]) * (yz[:, 0, 0] - yz[:, 2, 0]) + (
+        yz[:, 2, 0] - yz[:, 1, 0]
+    ) * (yz[:, 0, 1] - yz[:, 2, 1])
     triangles = _as_f32(triangles[np.abs(den) > eps])
     if triangles.size == 0:
         return empty_offsets, np.empty(0, dtype=np.int32), triangles
@@ -339,8 +411,12 @@ def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, i
     yz_min = triangles[:, :, 1:3].min(axis=1)
     yz_max = triangles[:, :, 1:3].max(axis=1)
     origin = np.asarray((origin_y, origin_z), dtype=np.float32)
-    local_min = np.floor((yz_min - origin - eps) / delta).astype(np.int32) - np.asarray((iy_min, iz_min), dtype=np.int32)
-    local_max = np.ceil((yz_max - origin + eps) / delta).astype(np.int32) - np.asarray((iy_min, iz_min), dtype=np.int32)
+    local_min = np.floor((yz_min - origin - eps) / delta).astype(np.int32) - np.asarray(
+        (iy_min, iz_min), dtype=np.int32
+    )
+    local_max = np.ceil((yz_max - origin + eps) / delta).astype(np.int32) - np.asarray(
+        (iy_min, iz_min), dtype=np.int32
+    )
 
     limit = np.asarray((iy_max - iy_min, iz_max - iz_min), dtype=np.int32)
     local_min = np.minimum(np.maximum(local_min, 0), limit)
@@ -349,7 +425,16 @@ def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, i
     z_span = int(limit[1] + 1)
     counts = np.zeros(line_count, dtype=np.int32)
     dummy = np.empty(0, dtype=np.int32)
-    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, dummy, counts)
+    _scanline_pass(
+        local_min[:, 0],
+        local_max[:, 0],
+        local_min[:, 1],
+        local_max[:, 1],
+        z_span,
+        counts,
+        dummy,
+        counts,
+    )
 
     offsets = np.empty(line_count + 1, dtype=np.int32)
     offsets[0] = 0
@@ -357,12 +442,23 @@ def _scanline_candidates(triangles, delta, origin_y, origin_z, iy_min, iy_max, i
 
     candidates = np.empty(int(offsets[-1]), dtype=np.int32)
     write = offsets[:-1].copy()
-    _scanline_pass(local_min[:, 0], local_max[:, 0], local_min[:, 1], local_max[:, 1], z_span, counts, candidates, write)
+    _scanline_pass(
+        local_min[:, 0],
+        local_max[:, 0],
+        local_min[:, 1],
+        local_max[:, 1],
+        z_span,
+        counts,
+        candidates,
+        write,
+    )
     return offsets, candidates, triangles
 
 
 def _voxelize_cropped(triangles, delta, origin, index_bounds):
-    """Voxelize triangles into the inclusive cropped index bounds."""
+    """
+    Voxelize triangles into the inclusive cropped index bounds.
+    """
     ix0, ix1, iy0, iy1, iz0, iz1 = index_bounds
     if triangles.size == 0 or ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
         return None
@@ -377,21 +473,36 @@ def _voxelize_cropped(triangles, delta, origin, index_bounds):
     if candidates.size == 0:
         return None
 
-    cropped_origin = _as_f32(origin + delta * np.asarray((ix0, iy0, iz0), dtype=np.float32))
-    _fill_scanlines(mask, valid_triangles, delta, cropped_origin[0], cropped_origin[1], cropped_origin[2], offsets, candidates)
+    cropped_origin = _as_f32(
+        origin + delta * np.asarray((ix0, iy0, iz0), dtype=np.float32)
+    )
+    _fill_scanlines(
+        mask,
+        valid_triangles,
+        delta,
+        cropped_origin[0],
+        cropped_origin[1],
+        cropped_origin[2],
+        offsets,
+        candidates,
+    )
 
     return {
         "mask": np.ascontiguousarray(mask),
         "origin": cropped_origin,
         "bounds_min": cropped_origin,
-        "bounds_max": _as_f32(origin + delta * np.asarray((ix1, iy1, iz1), dtype=np.float32)),
+        "bounds_max": _as_f32(
+            origin + delta * np.asarray((ix1, iy1, iz1), dtype=np.float32)
+        ),
         "index_min": np.asarray((ix0, iy0, iz0), dtype=np.int32),
         "index_max": np.asarray((ix1, iy1, iz1), dtype=np.int32),
     }
 
 
 def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0.0):
-    """Create one combined boolean mask for static Blender-exported triangle meshes."""
+    """
+    Create one combined boolean mask for static Blender-exported triangle meshes.
+    """
     out = np.zeros((nx, ny, nz), dtype=np.bool_)
     if not mesh_objects:
         return out
@@ -405,13 +516,15 @@ def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0
             continue
 
         bounds = _object_bounds(obj, triangles)
-        index_bounds = _bounds_to_indices(bounds[0], bounds[1], delta, origin, shape=out.shape)
+        index_bounds = _bounds_to_indices(
+            bounds[0], bounds[1], delta, origin, shape=out.shape
+        )
         voxels = _voxelize_cropped(triangles, delta, origin, index_bounds)
         if voxels is None or not np.any(voxels["mask"]):
             continue
 
         ix0, ix1, iy0, iy1, iz0, iz1 = index_bounds
-        out[ix0:ix1 + 1, iy0:iy1 + 1, iz0:iz1 + 1] |= voxels["mask"]
+        out[ix0 : ix1 + 1, iy0 : iy1 + 1, iz0 : iz1 + 1] |= voxels["mask"]
 
     return out
 
@@ -420,23 +533,37 @@ def mesh(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0
 # Dynamic runtime
 # -----------------------------------------------------------------------------
 
+
 def _matrix_series(animation):
-    """Normalize exported transform samples into a runtime-friendly series."""
+    """
+    Normalize exported transform samples into a runtime-friendly series.
+    """
     if not animation:
-        return {"times": np.zeros(1, dtype=np.float32), "matrices_world": np.eye(4, dtype=np.float32)[None], "cursor": 0}
+        return {
+            "times": np.zeros(1, dtype=np.float32),
+            "matrices_world": np.eye(4, dtype=np.float32)[None],
+            "cursor": 0,
+        }
 
     times = np.asarray(animation.get("times", (0.0,)), dtype=np.float32)
-    matrices = np.asarray(animation.get("matrices_world", (np.eye(4, dtype=np.float32),)), dtype=np.float32).reshape((-1, 4, 4))
+    matrices = np.asarray(
+        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
+        dtype=np.float32,
+    ).reshape((-1, 4, 4))
     n = min(max(times.size, 1), matrices.shape[0])
     return {
         "times": _as_f32(times[:n] if times.size else np.zeros(1, dtype=np.float32)),
-        "matrices_world": _as_f32(matrices[:n] if matrices.size else np.eye(4, dtype=np.float32)[None]),
+        "matrices_world": _as_f32(
+            matrices[:n] if matrices.size else np.eye(4, dtype=np.float32)[None]
+        ),
         "cursor": 0,
     }
 
 
 def _transform_series_is_animated(series):
-    """Return whether a transform series can change over time."""
+    """
+    Return whether a transform series can change over time.
+    """
     times = series["times"]
     matrices = series["matrices_world"]
     if int(times.size) <= 1 or matrices.shape[0] <= 1:
@@ -450,7 +577,9 @@ def _transform_series_is_animated(series):
 
 
 def _matrix_and_rate_at(series, t):
-    """Return the interpolated world matrix and its piecewise-linear time derivative."""
+    """
+    Return the interpolated world matrix and its piecewise-linear time derivative.
+    """
     times = series["times"]
     matrices = series["matrices_world"]
     if times.size <= 1:
@@ -492,7 +621,9 @@ def _matrix_and_rate_at(series, t):
 
 
 def _invert_affine_matrix(matrix):
-    """Invert a 4x4 affine transform using only the 3x3 linear part and translation."""
+    """
+    Invert a 4x4 affine transform using only the 3x3 linear part and translation.
+    """
     matrix = np.asarray(matrix, dtype=np.float32)
     linear = matrix[:3, :3]
     translation = matrix[:3, 3]
@@ -506,7 +637,9 @@ def _invert_affine_matrix(matrix):
 
 
 def _transform_bounds(bounds_center, bounds_extent, matrix):
-    """Transform an AABB using center/extent form to avoid rebuilding its eight corners."""
+    """
+    Transform an AABB using center/extent form to avoid rebuilding its eight corners.
+    """
     matrix = np.asarray(matrix, dtype=np.float32)
     linear = matrix[:3, :3]
     translation = matrix[:3, 3]
@@ -516,7 +649,9 @@ def _transform_bounds(bounds_center, bounds_extent, matrix):
 
 
 def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
-    """Cache the expensive per-frame transform, inverse and index bounds for one object."""
+    """
+    Cache the expensive per-frame transform, inverse and index bounds for one object.
+    """
     state = obj.get("dynamic_state")
     if state is not None and state.get("time_value") == float(time_value):
         return state
@@ -527,8 +662,14 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
         obj["local_bounds_extent"],
         matrix,
     )
-    index_bounds = _bounds_to_indices(bounds_min, bounds_max, delta, origin, shape=shape)
-    active = not (index_bounds[0] > index_bounds[1] or index_bounds[2] > index_bounds[3] or index_bounds[4] > index_bounds[5])
+    index_bounds = _bounds_to_indices(
+        bounds_min, bounds_max, delta, origin, shape=shape
+    )
+    active = not (
+        index_bounds[0] > index_bounds[1]
+        or index_bounds[2] > index_bounds[3]
+        or index_bounds[4] > index_bounds[5]
+    )
 
     state = {
         "time_value": float(time_value),
@@ -547,6 +688,9 @@ def _resolve_dynamic_object_state(obj, time_value, delta, origin, shape):
 
 
 def _region_shape(index_bounds):
+    """
+    Return the voxel dimensions covered by one inclusive index-bounds tuple.
+    """
     ix0, ix1, iy0, iy1, iz0, iz1 = index_bounds
     return (
         int(ix1 - ix0 + 1),
@@ -556,6 +700,9 @@ def _region_shape(index_bounds):
 
 
 def _merge_index_bounds(a, b):
+    """
+    Merge two inclusive index-bounds tuples into one covering both regions.
+    """
     if a is None:
         return b
     if b is None:
@@ -571,11 +718,15 @@ def _merge_index_bounds(a, b):
 
 
 def _voxelize_local(triangles, delta):
-    """Voxelize a mesh once in local space for later transform-based sampling."""
+    """
+    Voxelize a mesh once in local space for later transform-based sampling.
+    """
     if triangles.size == 0:
         return None
     bounds = _triangle_bounds(triangles)
-    voxels = _voxelize_cropped(triangles, delta, (0.0, 0.0, 0.0), _bounds_to_indices(*bounds, delta))
+    voxels = _voxelize_cropped(
+        triangles, delta, (0.0, 0.0, 0.0), _bounds_to_indices(*bounds, delta)
+    )
     if voxels is None:
         return None
     return {
@@ -586,8 +737,12 @@ def _voxelize_local(triangles, delta):
     }
 
 
-def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0.0):
-    """Precompute local masks and animation samples for dynamic obstacle/source masks."""
+def build_dynamic_runtime(
+    nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0.0
+):
+    """
+    Precompute local masks and animation samples for dynamic obstacle/source masks.
+    """
     objects = []
     has_animation = False
     for obj in mesh_objects:
@@ -595,21 +750,25 @@ def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_
         voxels = _voxelize_local(triangles, delta)
         if voxels is None or not np.any(voxels["mask"]):
             continue
-        bounds_center, bounds_extent = _bounds_center_extent(voxels["bounds_min"], voxels["bounds_max"])
+        bounds_center, bounds_extent = _bounds_center_extent(
+            voxels["bounds_min"], voxels["bounds_max"]
+        )
         transform_series = _matrix_series(obj.get("transform_animation", {}))
         has_animation = has_animation or _transform_series_is_animated(transform_series)
 
-        objects.append({
-            "object_name": obj.get("object_name"),
-            "local_mask": voxels["mask"],
-            "local_origin": voxels["origin"],
-            "local_bounds_min": voxels["bounds_min"],
-            "local_bounds_max": voxels["bounds_max"],
-            "local_bounds_center": bounds_center,
-            "local_bounds_extent": bounds_extent,
-            "transform_series": transform_series,
-            "dynamic_state": None,
-        })
+        objects.append(
+            {
+                "object_name": obj.get("object_name"),
+                "local_mask": voxels["mask"],
+                "local_origin": voxels["origin"],
+                "local_bounds_min": voxels["bounds_min"],
+                "local_bounds_max": voxels["bounds_max"],
+                "local_bounds_center": bounds_center,
+                "local_bounds_extent": bounds_extent,
+                "transform_series": transform_series,
+                "dynamic_state": None,
+            }
+        )
 
     return {
         "objects": objects,
@@ -621,7 +780,9 @@ def build_dynamic_runtime(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_
 
 
 def update_dynamic_mask(runtime_data, time_value, out_mask=None):
-    """Update one combined world-space mask by back-sampling all runtime objects."""
+    """
+    Update one combined world-space mask by back-sampling all runtime objects.
+    """
     shape = runtime_data["shape"]
     out = np.zeros(shape, dtype=np.bool_) if out_mask is None else out_mask
     out.fill(False)
@@ -639,8 +800,15 @@ def update_dynamic_mask(runtime_data, time_value, out_mask=None):
             out,
             obj["local_mask"],
             delta,
-            origin[0], origin[1], origin[2],
-            ix0, ix1, iy0, iy1, iz0, iz1,
+            origin[0],
+            origin[1],
+            origin[2],
+            ix0,
+            ix1,
+            iy0,
+            iy1,
+            iz0,
+            iz1,
             obj["local_origin"],
             state["inv"],
         )
@@ -656,12 +824,20 @@ def update_dynamic_obstacle_data(
     out_velocity_y=None,
     out_velocity_z=None,
 ):
-    """Update one moving obstacle mask and its wall velocity fields on the host."""
+    """
+    Update one moving obstacle mask and its wall velocity fields on the host.
+    """
     shape = runtime_data["shape"]
     out_mask = np.zeros(shape, dtype=np.bool_) if out_mask is None else out_mask
-    out_velocity_x = np.zeros(shape, dtype=np.float32) if out_velocity_x is None else out_velocity_x
-    out_velocity_y = np.zeros(shape, dtype=np.float32) if out_velocity_y is None else out_velocity_y
-    out_velocity_z = np.zeros(shape, dtype=np.float32) if out_velocity_z is None else out_velocity_z
+    out_velocity_x = (
+        np.zeros(shape, dtype=np.float32) if out_velocity_x is None else out_velocity_x
+    )
+    out_velocity_y = (
+        np.zeros(shape, dtype=np.float32) if out_velocity_y is None else out_velocity_y
+    )
+    out_velocity_z = (
+        np.zeros(shape, dtype=np.float32) if out_velocity_z is None else out_velocity_z
+    )
 
     out_mask.fill(False)
     out_velocity_x.fill(0.0)
@@ -684,8 +860,15 @@ def update_dynamic_obstacle_data(
             out_velocity_z,
             obj["local_mask"],
             delta,
-            origin[0], origin[1], origin[2],
-            ix0, ix1, iy0, iy1, iz0, iz1,
+            origin[0],
+            origin[1],
+            origin[2],
+            ix0,
+            ix1,
+            iy0,
+            iy1,
+            iz0,
+            iz1,
             obj["local_origin"],
             state["inv"],
             state["matrix_rate"],

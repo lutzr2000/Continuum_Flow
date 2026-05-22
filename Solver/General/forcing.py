@@ -7,7 +7,9 @@ POINT_FORCE_NODE_TYPES = {
 
 
 def _animation_series_max_abs(animation_entry):
-    """Return the maximum absolute sampled value from one exported animation entry."""
+    """
+    Return the maximum absolute sampled value from one exported animation entry.
+    """
     if not animation_entry:
         return 0.0
 
@@ -18,7 +20,9 @@ def _animation_series_max_abs(animation_entry):
 
 
 def _normalise_vector_field(components, amplitude, dtype):
-    """Center one vector field and scale its RMS magnitude to the target amplitude."""
+    """
+    Center one vector field and scale its RMS magnitude to the target amplitude.
+    """
     centered_components = []
     for component in components:
         centered = np.asarray(component, dtype=np.float32).copy()
@@ -39,11 +43,15 @@ def _normalise_vector_field(components, amplitude, dtype):
         for component in centered_components:
             component.fill(0.0)
 
-    return tuple(np.asarray(component, dtype=dtype) for component in centered_components)
+    return tuple(
+        np.asarray(component, dtype=dtype) for component in centered_components
+    )
 
 
 def _upsample_repeat_to_shape(field, shape):
-    """Expand one coarse field to the target shape with cheap nearest-neighbour repeats."""
+    """
+    Expand one coarse field to the target shape with cheap nearest-neighbour repeats.
+    """
     result = np.asarray(field, dtype=np.float32)
     for axis, target_size in enumerate(shape):
         source_size = int(result.shape[axis])
@@ -57,7 +65,9 @@ def _upsample_repeat_to_shape(field, shape):
     return np.asarray(result, dtype=np.float32)
 
 
-def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtype=np.float32):
+def build_divergence_free_noise_field(
+    shape, delta, scale, amplitude, seed, dtype=np.float32
+):
     """
     Build one smooth, divergence-free random force field from a random vector potential.
 
@@ -87,22 +97,35 @@ def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtyp
     potential_y = rng.standard_normal(coarse_shape, dtype=np.float32)
     potential_z = rng.standard_normal(coarse_shape, dtype=np.float32)
 
-    kx = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[0], d=coarse_delta)).astype(np.float32)[:, None, None]
-    ky = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[1], d=coarse_delta)).astype(np.float32)[None, :, None]
-    kz = (2.0 * np.pi * np.fft.rfftfreq(coarse_shape[2], d=coarse_delta)).astype(np.float32)[None, None, :]
+    kx = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[0], d=coarse_delta)).astype(
+        np.float32
+    )[:, None, None]
+    ky = (2.0 * np.pi * np.fft.fftfreq(coarse_shape[1], d=coarse_delta)).astype(
+        np.float32
+    )[None, :, None]
+    kz = (2.0 * np.pi * np.fft.rfftfreq(coarse_shape[2], d=coarse_delta)).astype(
+        np.float32
+    )[None, None, :]
 
     gaussian_width = scale / (2.0 * np.pi)
     filter_kernel = np.exp(
-        -0.5 * (
-            (kx * gaussian_width) * (kx * gaussian_width) +
-            (ky * gaussian_width) * (ky * gaussian_width) +
-            (kz * gaussian_width) * (kz * gaussian_width)
+        -0.5
+        * (
+            (kx * gaussian_width) * (kx * gaussian_width)
+            + (ky * gaussian_width) * (ky * gaussian_width)
+            + (kz * gaussian_width) * (kz * gaussian_width)
         )
     ).astype(np.float32)
 
-    potential_x_hat = np.fft.rfftn(potential_x).astype(np.complex64, copy=False) * filter_kernel
-    potential_y_hat = np.fft.rfftn(potential_y).astype(np.complex64, copy=False) * filter_kernel
-    potential_z_hat = np.fft.rfftn(potential_z).astype(np.complex64, copy=False) * filter_kernel
+    potential_x_hat = (
+        np.fft.rfftn(potential_x).astype(np.complex64, copy=False) * filter_kernel
+    )
+    potential_y_hat = (
+        np.fft.rfftn(potential_y).astype(np.complex64, copy=False) * filter_kernel
+    )
+    potential_z_hat = (
+        np.fft.rfftn(potential_z).astype(np.complex64, copy=False) * filter_kernel
+    )
 
     curl_x_hat = 1j * (ky * potential_z_hat - kz * potential_y_hat)
     curl_y_hat = 1j * (kz * potential_x_hat - kx * potential_z_hat)
@@ -129,7 +152,9 @@ def build_divergence_free_noise_field(shape, delta, scale, amplitude, seed, dtyp
 
 
 def _point_divergence_weight(shape, delta, origin, radius):
-    """Return the normalized Gaussian support weight for one point divergence."""
+    """
+    Return the normalized Gaussian support weight for one point divergence.
+    """
     radius = max(float(radius), 1.0e-6)
     origin_x = -0.5 * shape[0] * delta
     origin_y = -0.5 * shape[1] * delta
@@ -143,12 +168,16 @@ def _point_divergence_weight(shape, delta, origin, radius):
     dz = z - float(origin[2])
     distance2 = dx * dx + dy * dy + dz * dz
     weight = np.exp(-distance2 / (radius * radius))
-    weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta ** 3)
+    weight_integral = float(np.sum(weight, dtype=np.float64)) * (delta**3)
     return weight, weight_integral
 
 
-def build_point_divergence_field(shape, delta, strength, origin, radius, dtype, out=None):
-    """Build or overwrite one point-divergence field from one point-force setup."""
+def build_point_divergence_field(
+    shape, delta, strength, origin, radius, dtype, out=None
+):
+    """
+    Build or overwrite one point-divergence field from one point-force setup.
+    """
     dtype = np.dtype(dtype)
     if out is None:
         out = np.zeros(shape, dtype=dtype)
@@ -202,13 +231,17 @@ def forcing_point_divergence(force_state, shape, delta, force_cfg, dtype):
         force_cfg.get("origin", (0.0, 0.0, 0.0)),
         force_cfg.get("radius", 1.0),
         dtype,
-        out=force_state.setdefault("_point_divergence_work", np.zeros(shape, dtype=np.dtype(dtype))),
+        out=force_state.setdefault(
+            "_point_divergence_work", np.zeros(shape, dtype=np.dtype(dtype))
+        ),
     )
     force_state["point_divergence"] += force_state["_point_divergence_work"]
 
 
 def _has_point_force_animation(force_cfg):
-    """Return whether one point force has animated values that affect divergence."""
+    """
+    Return whether one point force has animated values that affect divergence.
+    """
     animations = force_cfg.get("animations") or {}
     return any(name in animations for name in ("strength", "origin", "radius"))
 
@@ -246,18 +279,12 @@ def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
     dy = y - float(origin[1])
     dz = z - float(origin[2])
 
-    axial_projection = (
-        dx * axis_unit[0] +
-        dy * axis_unit[1] +
-        dz * axis_unit[2]
-    )
+    axial_projection = dx * axis_unit[0] + dy * axis_unit[1] + dz * axis_unit[2]
     radial_x = dx - axial_projection * axis_unit[0]
     radial_y = dy - axial_projection * axis_unit[1]
     radial_z = dz - axial_projection * axis_unit[2]
     radial_distance = np.sqrt(
-        radial_x * radial_x +
-        radial_y * radial_y +
-        radial_z * radial_z
+        radial_x * radial_x + radial_y * radial_y + radial_z * radial_z
     )
 
     tangential_x = axis_unit[1] * radial_z - axis_unit[2] * radial_y
@@ -296,10 +323,20 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
 
     basis_by_suffix = {
         "a": build_divergence_free_noise_field(
-            shape, delta, spatial_scale, 1.0, seed_base, dtype=dtype,
+            shape,
+            delta,
+            spatial_scale,
+            1.0,
+            seed_base,
+            dtype=dtype,
         ),
         "b": build_divergence_free_noise_field(
-            shape, delta, spatial_scale, 1.0, seed_base + 1, dtype=dtype,
+            shape,
+            delta,
+            spatial_scale,
+            1.0,
+            seed_base + 1,
+            dtype=dtype,
         ),
     }
 
@@ -329,7 +366,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     Static components are stored directly, while turbulence is represented as
     two precomputed force fields plus one angular frequency per node.
     """
-    #------------Grid-------------------
+    # ------------Grid-------------------
     shape = (
         int(domain_cfg["grid"]["nx"]),
         int(domain_cfg["grid"]["ny"]),
@@ -339,7 +376,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     dtype = np.dtype(dtype)
     components = ("x", "y", "z")
 
-    #------------Initialise-------------------
+    # ------------Initialise-------------------
     force_state = {
         "Fx_base": np.zeros(shape, dtype=dtype),
         "Fy_base": np.zeros(shape, dtype=dtype),
@@ -361,14 +398,23 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "turbulence_runtime_entries": [],
     }
 
-    #------------Dispatch force nodes-------------------
+    # ------------Dispatch force nodes-------------------
     for force_cfg in force_entries or ():
         node_type = force_cfg.get("node_type", "")
-        if node_type in {"BLENDERCFD_FORCE_TURBULENCE_NODE", "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"}:
+        if node_type in {
+            "BLENDERCFD_FORCE_TURBULENCE_NODE",
+            "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
+        }:
             forcing_turbulence(force_state, shape, delta, force_cfg, dtype)
-        elif node_type in {"BLENDERCFD_FORCE_CONSTANT_NODE", "CONTINUUM_FLOW_FORCE_CONSTANT_NODE"}:
+        elif node_type in {
+            "BLENDERCFD_FORCE_CONSTANT_NODE",
+            "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
+        }:
             forcing_constant(force_state, force_cfg, dtype)
-        elif node_type in {"BLENDERCFD_FORCE_SWIRL_NODE", "CONTINUUM_FLOW_FORCE_SWIRL_NODE"}:
+        elif node_type in {
+            "BLENDERCFD_FORCE_SWIRL_NODE",
+            "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
+        }:
             forcing_swirl(force_state, shape, delta, force_cfg, dtype)
         elif node_type in POINT_FORCE_NODE_TYPES:
             if _has_point_force_animation(force_cfg):
@@ -377,7 +423,9 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
                         "node_name": force_cfg.get("node_name", ""),
                         "node_type": node_type,
                         "strength": np.float32(force_cfg.get("strength", 0.0)),
-                        "origin": np.asarray(force_cfg.get("origin", (0.0, 0.0, 0.0)), dtype=np.float32),
+                        "origin": np.asarray(
+                            force_cfg.get("origin", (0.0, 0.0, 0.0)), dtype=np.float32
+                        ),
                         "radius": np.float32(force_cfg.get("radius", 1.0)),
                         "animations": dict(force_cfg.get("animations", {})),
                     }
@@ -385,13 +433,15 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
             else:
                 forcing_point_divergence(force_state, shape, delta, force_cfg, dtype)
 
-    #------------Pack turbulence arrays-------------------
+    # ------------Pack turbulence arrays-------------------
     turbulence = {}
     for suffix in ("a", "b"):
         for component in components:
             key = f"F{component}_{suffix}"
             if force_state["turbulence"][key]:
-                turbulence[key] = np.stack(force_state["turbulence"][key]).astype(dtype, copy=False)
+                turbulence[key] = np.stack(force_state["turbulence"][key]).astype(
+                    dtype, copy=False
+                )
             else:
                 turbulence[key] = np.zeros((0,) + shape, dtype=dtype)
     turbulence["angular_frequencies"] = np.asarray(
@@ -404,7 +454,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         force_state["turbulence"]["max_amplitudes"], dtype=dtype
     )
 
-    #------------Initial force state-------------------
+    # ------------Initial force state-------------------
     fx_initial = force_state["Fx_base"].copy()
     fy_initial = force_state["Fy_base"].copy()
     fz_initial = force_state["Fz_base"].copy()
@@ -416,20 +466,23 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
         amplitude = float(turbulence["amplitudes"][index])
         for component in components:
-            initial_components[component] += amplitude * turbulence[f"F{component}_b"][index]
+            initial_components[component] += (
+                amplitude * turbulence[f"F{component}_b"][index]
+            )
 
-    #------------Force bounds-------------------
+    # ------------Force bounds-------------------
     dynamic_max = {component: 0.0 for component in components}
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
         amplitude = float(turbulence["max_amplitudes"][index])
         for component in components:
             dynamic_max[component] += float(
-                amplitude * max(
+                amplitude
+                * max(
                     np.max(np.abs(turbulence[f"F{component}_a"][index])),
                     np.max(
                         np.abs(
-                            2.0 * turbulence[f"F{component}_b"][index] -
-                            turbulence[f"F{component}_a"][index]
+                            2.0 * turbulence[f"F{component}_b"][index]
+                            - turbulence[f"F{component}_a"][index]
                         )
                     ),
                 )
@@ -440,7 +493,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "z": float(np.max(np.abs(force_state["Fz_base"]))),
     }
 
-    #------------Return-------------------
+    # ------------Return-------------------
     return {
         "Fx_base": force_state["Fx_base"],
         "Fy_base": force_state["Fy_base"],
