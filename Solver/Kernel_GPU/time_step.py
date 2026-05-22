@@ -8,8 +8,11 @@ from Solver.Kernel_GPU.kernel_config import (
 
 
 def reset_velocity_maxima(maxima, host_zeros):
-    """Reset the persistent velocity-maxima reduction buffer to zero."""
+    """
+    Reset the persistent velocity-maxima reduction buffer to zero.
+    """
     maxima.copy_to_device(host_zeros)
+
 
 @cuda.jit
 def _velocity_maxima_timestep(u, v, w, maxima, total_size):
@@ -20,12 +23,6 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
     local maxima in shared memory and atomically updates one global maximum per
     velocity component.
 
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        maxima (device array): output array with shape (3,) for global maxima
-        total_size (int): flattened number of elements in each field
     """
     s_u = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=np.float32)
     s_v = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=np.float32)
@@ -92,36 +89,23 @@ def compute_new_timestep_gpu(
     The smallest of the convective, diffusive and forcing restrictions is
     returned.
 
-    Args:
-        u (device array): x-velocity field
-        v (device array): y-velocity field
-        w (device array): z-velocity field
-        maxima (device array): persistent reduction buffer with shape (3,)
-        fx_max (float): maximum absolute x-direction force used in the timestep limiter
-        fy_max (float): maximum absolute y-direction force used in the timestep limiter
-        fz_max (float): maximum absolute z-direction force used in the timestep limiter
-        rho (float): fluid density
-        delta (float): grid spacing
-        nu (float): kinematic viscosity
-        cfl_max (float): maximum admissible CFL number
-        max_dt (float, optional): upper bound for the returned timestep
-    Returns:
-        tuple[float, bool]: stable timestep and divergence flag
     """
     eps = 1e-12
     total_size = u.size
     blockspergrid = reduction_blocks_per_grid(total_size)
 
-    _velocity_maxima_timestep[blockspergrid, REDUCTION_THREADS_PER_BLOCK](u, v, w, maxima, total_size)
+    _velocity_maxima_timestep[blockspergrid, REDUCTION_THREADS_PER_BLOCK](
+        u, v, w, maxima, total_size
+    )
 
     abs_u_max, abs_v_max, abs_w_max = maxima.copy_to_host()
     solver_diverged = bool(
-        np.isnan(abs_u_max) or
-        np.isnan(abs_v_max) or
-        np.isnan(abs_w_max) or
-        np.isinf(abs_u_max) or
-        np.isinf(abs_v_max) or
-        np.isinf(abs_w_max)
+        np.isnan(abs_u_max)
+        or np.isnan(abs_v_max)
+        or np.isnan(abs_w_max)
+        or np.isinf(abs_u_max)
+        or np.isinf(abs_v_max)
+        or np.isinf(abs_w_max)
     )
 
     if solver_diverged:

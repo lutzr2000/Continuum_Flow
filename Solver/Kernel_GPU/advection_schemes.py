@@ -232,6 +232,10 @@ def advect_velocity_semi_lagrangian(
     if i >= nx or j >= ny or k >= nz:
         return
 
+    # Backwards trace
+    # compute:
+    # x_depart = x - dt * u
+    # _backtrace_position does this in 3 substeps to allow for curvature in the path
     x_depart, y_depart, z_depart = _backtrace_position(
         u,
         v,
@@ -319,10 +323,6 @@ def update_velocity_maccormack(
     v_center = v[i, j, k]
     w_center = w[i, j, k]
 
-    # Backwards trace
-    # compute:
-    # x_depart = x - dt * u
-    # _backtrace_position does this in 3 substeps to allow for curvature in the path
     x_depart = depart_x[i, j, k]
     y_depart = depart_y[i, j, k]
     z_depart = depart_z[i, j, k]

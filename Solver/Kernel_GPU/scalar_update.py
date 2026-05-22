@@ -273,6 +273,10 @@ def update_scalar_fields_maccormack(
     x_depart = depart_x[i, j, k]
     y_depart = depart_y[i, j, k]
     z_depart = depart_z[i, j, k]
+
+    # Forward trace from the departure point:
+    # approximately:
+    # x_forward = x_depart + dt * u(x_depart)
     x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
         u,
         v,
@@ -290,6 +294,7 @@ def update_scalar_fields_maccormack(
     smoke_advected = predictor_smoke[i, j, k]
     fuel_advected = predictor_fuel[i, j, k]
 
+    # find depart scalar values
     T_reverse, smoke_reverse, fuel_reverse = advection_schemes._sample_trilinear_vec3(
         predictor_T,
         predictor_smoke,
@@ -311,6 +316,8 @@ def update_scalar_fields_maccormack(
     x0, y0, z0, x1, y1, z1, _, _, _ = advection_schemes._prepare_trilinear_coords(
         x_depart, y_depart, z_depart, nx, ny, nz
     )
+
+    # find the scalars upper and lower bounds of neighbour cells at backtrace positions
     T_lower, T_upper = advection_schemes._sample_cell_extrema_inner(
         T, x0, y0, z0, x1, y1, z1
     )
@@ -321,14 +328,17 @@ def update_scalar_fields_maccormack(
         fuel, x0, y0, z0, x1, y1, z1
     )
 
+    # clamping to bounds
     T_corrected = advection_schemes._clamp(T_corrected, T_lower, T_upper)
     smoke_corrected = advection_schemes._clamp(
         smoke_corrected, smoke_lower, smoke_upper
     )
     fuel_corrected = advection_schemes._clamp(fuel_corrected, fuel_lower, fuel_upper)
 
+    # oxygen
     oxygen_center = 100.0 - smoke_corrected
 
+    # burn logic
     if (
         T_corrected > fuel_ignition_temperature
         and fuel_corrected > 0.0
@@ -338,9 +348,11 @@ def update_scalar_fields_maccormack(
     else:
         fuel_source = 0.0
 
+    # temperature source
     temperature_source = -temperature_dissipation_rate * (
         T_corrected - t_reference
     ) + temperature_production_rate * (-fuel_source)
+    # smoke source
     smoke_source = (
         smoke_production_rate * (-fuel_source)
         - smoke_dissipation_rate * smoke_corrected
@@ -350,6 +362,7 @@ def update_scalar_fields_maccormack(
     smoke_updated = smoke_corrected + dt * smoke_source
     fuel_updated = fuel_corrected + dt * fuel_source
 
+    # ensure physically reasonable bounds
     T_out[i, j, k] = max(T_updated, 0.0)
     smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
     fuel_out[i, j, k] = min(max(fuel_updated, 0.0), 100.0)
