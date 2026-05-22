@@ -81,6 +81,7 @@ def build_initial_host_state(
     source_temperature_host = np.asarray(source_field_data["temperature"], dtype=precision_dtype)
     source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
     source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
+    source_extra_pressure_host = np.asarray(source_field_data["extra_pressure"], dtype=precision_dtype)
     source_velocity_x_host = np.asarray(source_field_data["velocity_x"], dtype=precision_dtype)
     source_velocity_y_host = np.asarray(source_field_data["velocity_y"], dtype=precision_dtype)
     source_velocity_z_host = np.asarray(source_field_data["velocity_z"], dtype=precision_dtype)
@@ -112,6 +113,7 @@ def build_initial_host_state(
         "source_temperature": source_temperature_host,
         "source_smoke": source_smoke_host,
         "source_fuel": source_fuel_host,
+        "source_extra_pressure": source_extra_pressure_host,
         "source_velocity_x": source_velocity_x_host,
         "source_velocity_y": source_velocity_y_host,
         "source_velocity_z": source_velocity_z_host,
@@ -178,6 +180,7 @@ def update_animated_source_force_values(
                 runtime_entry["_base_temperature"] = np.float32(runtime_entry.get("temperature", 0.0))
                 runtime_entry["_base_smoke"] = np.float32(runtime_entry.get("smoke", 0.0))
                 runtime_entry["_base_fuel"] = np.float32(runtime_entry.get("fuel", 0.0))
+                runtime_entry["_base_extra_pressure"] = np.float32(runtime_entry.get("extra_pressure", 0.0))
                 runtime_entry["_base_velocity_x"] = np.float32(runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x", 0.0)))
                 runtime_entry["_base_velocity_y"] = np.float32(runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y", 0.0)))
                 runtime_entry["_base_velocity_z"] = np.float32(runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z", 0.0)))
@@ -185,6 +188,7 @@ def update_animated_source_force_values(
             next_temperature = runtime_entry["_base_temperature"]
             next_smoke = runtime_entry["_base_smoke"]
             next_fuel = runtime_entry["_base_fuel"]
+            next_extra_pressure = runtime_entry["_base_extra_pressure"]
             next_velocity_x = runtime_entry["_base_velocity_x"]
             next_velocity_y = runtime_entry["_base_velocity_y"]
             next_velocity_z = runtime_entry["_base_velocity_z"]
@@ -207,6 +211,12 @@ def update_animated_source_force_values(
                     helper_functions._interpolate_animation_series(fuel_series, time_value)
                 )
 
+            extra_pressure_series = helper_functions._cached_animation_series(runtime_entry, "extra_pressure", np.float32)
+            if extra_pressure_series is not None:
+                next_extra_pressure = np.float32(
+                    helper_functions._interpolate_animation_series(extra_pressure_series, time_value)
+                )
+
             velocity_series = helper_functions._cached_animation_series(runtime_entry, "velocity", np.float32)
             if velocity_series is not None:
                 velocity_value = np.asarray(
@@ -224,6 +234,7 @@ def update_animated_source_force_values(
                 next_temperature != runtime_entry.get("temperature") or
                 next_smoke != runtime_entry.get("smoke") or
                 next_fuel != runtime_entry.get("fuel") or
+                next_extra_pressure != runtime_entry.get("extra_pressure", 0.0) or
                 next_velocity_x != runtime_entry.get("authored_velocity_x", runtime_entry.get("velocity_x")) or
                 next_velocity_y != runtime_entry.get("authored_velocity_y", runtime_entry.get("velocity_y")) or
                 next_velocity_z != runtime_entry.get("authored_velocity_z", runtime_entry.get("velocity_z"))
@@ -231,6 +242,7 @@ def update_animated_source_force_values(
                 runtime_entry["temperature"] = next_temperature
                 runtime_entry["smoke"] = next_smoke
                 runtime_entry["fuel"] = next_fuel
+                runtime_entry["extra_pressure"] = next_extra_pressure
                 runtime_entry["authored_velocity_x"] = next_velocity_x
                 runtime_entry["authored_velocity_y"] = next_velocity_y
                 runtime_entry["authored_velocity_z"] = next_velocity_z

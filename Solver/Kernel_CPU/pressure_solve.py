@@ -6,7 +6,7 @@ import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 
 @njit(cache=True, parallel=True, fastmath=True)
 def pressure_equation_right_side(
-    u, v, w, T, b, dt, point_divergence, delta, rho, expansion_rate, t_reference
+    u, v, w, T, b, dt, point_divergence, source_extra_pressure, delta, rho, expansion_rate, t_reference
 ):
     """Compute the right hand side of the pressure Poisson equation on the CPU."""
     nx, ny, nz = u.shape
@@ -30,8 +30,9 @@ def pressure_equation_right_side(
                 divergence = du_dx + dv_dy + dw_dz
                 thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
                 authored_divergence = point_divergence[i, j, k]
+                extra_pressure_term = source_extra_pressure[i, j, k]
 
-                b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence)
+                b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - extra_pressure_term
 
 
 def _remove_rhs_mean(b):
@@ -93,6 +94,7 @@ def pressure_poisson(
     b,
     dt,
     point_divergence,
+    source_extra_pressure,
     delta,
     rho,
     expansion_rate,
@@ -101,7 +103,7 @@ def pressure_poisson(
 ):
     """Host-side CPU pressure Poisson solve aligned with the GPU-side API."""
     pressure_equation_right_side(
-        u, v, w, T, b, dt, point_divergence, delta, rho, expansion_rate, t_reference
+        u, v, w, T, b, dt, point_divergence, source_extra_pressure, delta, rho, expansion_rate, t_reference
     )
     _remove_rhs_mean(b)
     p_old = p

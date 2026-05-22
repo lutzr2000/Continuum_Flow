@@ -555,7 +555,7 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
     bl_width_default = 220.0
     bl_width_min = 200.0
     bl_width_max = 360.0
-    scalar_property_names = ("fuel", "smoke", "temperature")
+    scalar_property_names = ("fuel", "smoke", "temperature", "extra_pressure")
     velocity_space_items = (
         ("WORLD", "World Space", "Apply the source velocity in world coordinates"),
         ("LOCAL", "Local Space", "Apply the source velocity in each linked object's local coordinates"),
@@ -564,6 +564,7 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
     fuel: FloatProperty(name="Fuel Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Fuel emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Smoke emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
     temperature: FloatProperty(name="Temperature", default=300.0, min=0.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
+    extra_pressure: FloatProperty(name="Extra Pressure", default=0.0, precision=4, description="Additional pressure source term injected inside the source region", options={"ANIMATABLE"})  # type: ignore
     velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 

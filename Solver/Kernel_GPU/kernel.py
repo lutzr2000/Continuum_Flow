@@ -477,7 +477,7 @@ def _run_time_step(state, blockspergrid_3d):
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
         u, v, w, p, T, gpu_fields["obstacle_mask"], gpu_fields["pressure_rhs"],
-        dt, gpu_fields["point_divergence"],
+        dt, gpu_fields["point_divergence"], gpu_fields["source_extra_pressure"],
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["EXPANSION_RATE"],
         gpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
         rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],

@@ -197,7 +197,8 @@ solved as a Poisson problem:
    \nabla^2 p = b
 
 The right-hand side :math:`b` is assembled from the divergence of the predicted
-velocity, an authored divergence source, and the thermal-expansion term:
+velocity, an authored divergence source, a source-authored extra-pressure term,
+and the thermal-expansion term:
 
 .. math::
 
@@ -208,10 +209,12 @@ velocity, an authored divergence source, and the thermal-expansion term:
    + d_{\mathrm{authored}}
    - d_{\mathrm{thermal}}
    \right)
+   - p_{\mathrm{extra}}
 
 where :math:`d_{\mathrm{authored}}` is an additional user-authored divergence
-source and :math:`d_{\mathrm{thermal}}` is the thermal expansion term
-discussed below.
+source, :math:`p_{\mathrm{extra}}` is the additional pressure source term
+coming from source nodes, and :math:`d_{\mathrm{thermal}}` is the thermal
+expansion term discussed below.
 
 The pressure field is solved iteratively with a red-black SOR method built on
 top of Gauss-Seidel updates. Each iteration updates alternating checkerboard

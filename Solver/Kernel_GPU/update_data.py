@@ -111,6 +111,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "source_temperature": cuda.to_device(np.asarray(host_state["source_temperature"], dtype=GPU_FIELD_DTYPE)),
         "source_smoke": cuda.to_device(np.asarray(host_state["source_smoke"], dtype=GPU_FIELD_DTYPE)),
         "source_fuel": cuda.to_device(np.asarray(host_state["source_fuel"], dtype=GPU_FIELD_DTYPE)),
+        "source_extra_pressure": cuda.to_device(np.asarray(host_state["source_extra_pressure"], dtype=GPU_FIELD_DTYPE)),
         "source_velocity_x": cuda.to_device(np.asarray(host_state["source_velocity_x"], dtype=GPU_FIELD_DTYPE)),
         "source_velocity_y": cuda.to_device(np.asarray(host_state["source_velocity_y"], dtype=GPU_FIELD_DTYPE)),
         "source_velocity_z": cuda.to_device(np.asarray(host_state["source_velocity_z"], dtype=GPU_FIELD_DTYPE)),

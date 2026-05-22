@@ -9,7 +9,7 @@ REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
     u, v, w, T, b,
-    dt, point_divergence, delta, rho, expansion_rate, t_reference
+    dt, point_divergence, source_extra_pressure, delta, rho, expansion_rate, t_reference
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
@@ -22,6 +22,7 @@ def pressure_equation_right_side(
         b (device array): output array for the pressure equation right hand side
         dt (float): timestep size
         point_divergence (device array): authored divergence source field
+        source_extra_pressure (device array): source-driven pressure RHS term
         delta (float): grid spacing
         rho (float): density
         expansion_rate (float): thermal expansion coupling
@@ -53,9 +54,10 @@ def pressure_equation_right_side(
     #------------Artifical thermal divergence-------------------
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
     authored_divergence = point_divergence[i, j, k]
+    extra_pressure_term = source_extra_pressure[i, j, k]
 
     #------------Right hand side-------------------
-    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence)
+    b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - extra_pressure_term
 
 
 @cuda.jit(cache=True)
@@ -245,7 +247,7 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
 
 def pressure_poisson(
     u, v, w, p, T, obstacle_mask, b,
-    dt, point_divergence, delta, rho, expansion_rate, t_reference,
+    dt, point_divergence, source_extra_pressure, delta, rho, expansion_rate, t_reference,
     max_iter=10, threadsperblock_3d=None,
     rhs_partial_sums=None, rhs_sum_buffer=None,
 ):
@@ -263,6 +265,7 @@ def pressure_poisson(
         b (device array): work array for the pressure equation right hand side
         dt (float): timestep size
         point_divergence (device array): authored divergence source field
+        source_extra_pressure (device array): source-driven pressure RHS term
         delta (float): grid spacing
         rho (float): density
         expansion_rate (float): thermal expansion coupling
@@ -278,7 +281,7 @@ def pressure_poisson(
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u, v, w, T, b,
-        dt, point_divergence, delta, rho, expansion_rate, t_reference
+        dt, point_divergence, source_extra_pressure, delta, rho, expansion_rate, t_reference
     )
     _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer)
     p_old = p

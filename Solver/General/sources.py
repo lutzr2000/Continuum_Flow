@@ -81,6 +81,7 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
     temperature_field = np.zeros((nx, ny, nz), dtype=np.float32)
     smoke_field = np.zeros((nx, ny, nz), dtype=np.float32)
     fuel_field = np.zeros((nx, ny, nz), dtype=np.float32)
+    extra_pressure_field = np.zeros((nx, ny, nz), dtype=np.float32)
     velocity_x_field = np.zeros((nx, ny, nz), dtype=np.float32)
     velocity_y_field = np.zeros((nx, ny, nz), dtype=np.float32)
     velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
@@ -104,6 +105,7 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
         source_temperature = np.float32(source_entry.get("temperature", 0.0))
         source_smoke = np.float32(source_entry.get("smoke", 0.0))
         source_fuel = np.float32(source_entry.get("fuel", 0.0))
+        source_extra_pressure = np.float32(source_entry.get("extra_pressure", 0.0))
         has_velocity_target = bool(np.any(velocity != 0.0))
 
         for mesh_object in mesh_objects:
@@ -124,6 +126,7 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
                 "temperature": source_temperature,
                 "smoke": source_smoke,
                 "fuel": source_fuel,
+                "extra_pressure": source_extra_pressure,
                 "velocity_space": velocity_space,
                 "authored_velocity_x": np.float32(velocity[0]),
                 "authored_velocity_y": np.float32(velocity[1]),
@@ -153,6 +156,7 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
                 fuel_field[source_mask],
                 source_fuel,
             )
+            extra_pressure_field[source_mask] += source_extra_pressure
             if has_velocity_target:
                 velocity_active_mask[source_mask] = True
                 velocity_x_field[source_mask] = resolved_velocity[0]
@@ -165,6 +169,7 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
         "temperature": temperature_field,
         "smoke": smoke_field,
         "fuel": fuel_field,
+        "extra_pressure": extra_pressure_field,
         "velocity_x": velocity_x_field,
         "velocity_y": velocity_y_field,
         "velocity_z": velocity_z_field,

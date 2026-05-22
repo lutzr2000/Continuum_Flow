@@ -94,6 +94,7 @@ def upload_simulation_state_to_cpu(simulation_params):
         "source_temperature": host_state["source_temperature"],
         "source_smoke": host_state["source_smoke"],
         "source_fuel": host_state["source_fuel"],
+        "source_extra_pressure": host_state["source_extra_pressure"],
         "source_velocity_x": host_state["source_velocity_x"],
         "source_velocity_y": host_state["source_velocity_y"],
         "source_velocity_z": host_state["source_velocity_z"],
@@ -121,6 +122,7 @@ def _sync_cpu_source_fields(source_field_data, cpu_fields):
     cpu_fields["source_temperature"] = source_field_data["temperature"]
     cpu_fields["source_smoke"] = source_field_data["smoke"]
     cpu_fields["source_fuel"] = source_field_data["fuel"]
+    cpu_fields["source_extra_pressure"] = source_field_data["extra_pressure"]
     cpu_fields["source_velocity_x"] = source_field_data["velocity_x"]
     cpu_fields["source_velocity_y"] = source_field_data["velocity_y"]
     cpu_fields["source_velocity_z"] = source_field_data["velocity_z"]

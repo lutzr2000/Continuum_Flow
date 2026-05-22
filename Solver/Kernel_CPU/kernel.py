@@ -382,7 +382,7 @@ def _run_time_step(state):
     section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
         u, v, w, p, T, cpu_fields["pressure_rhs"],
-        dt, cpu_fields["point_divergence"],
+        dt, cpu_fields["point_divergence"], cpu_fields["source_extra_pressure"],
         cpu_constants["DELTA"], cpu_constants["RHO"], cpu_constants["EXPANSION_RATE"],
         cpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
     )

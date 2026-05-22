@@ -15,6 +15,7 @@ def _clear_source_fields_kernel(
     source_temperature,
     source_smoke,
     source_fuel,
+    source_extra_pressure,
     source_velocity_x,
     source_velocity_y,
     source_velocity_z,
@@ -33,6 +34,7 @@ def _clear_source_fields_kernel(
     source_temperature[i, j, k] = 0.0
     source_smoke[i, j, k] = 0.0
     source_fuel[i, j, k] = 0.0
+    source_extra_pressure[i, j, k] = 0.0
     source_velocity_x[i, j, k] = 0.0
     source_velocity_y[i, j, k] = 0.0
     source_velocity_z[i, j, k] = 0.0
@@ -45,6 +47,7 @@ def _sample_source_entry_cuda(
     source_temperature,
     source_smoke,
     source_fuel,
+    source_extra_pressure,
     source_velocity_x,
     source_velocity_y,
     source_velocity_z,
@@ -77,6 +80,7 @@ def _sample_source_entry_cuda(
     temperature_value,
     smoke_value,
     fuel_value,
+    extra_pressure_value,
     has_velocity_target,
     velocity_x_value,
     velocity_y_value,
@@ -117,6 +121,7 @@ def _sample_source_entry_cuda(
         source_smoke[i, j, k] = smoke_value
     if source_fuel[i, j, k] < fuel_value:
         source_fuel[i, j, k] = fuel_value
+    source_extra_pressure[i, j, k] += extra_pressure_value
 
     if has_velocity_target:
         source_velocity_mask[i, j, k] = True
@@ -165,6 +170,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
     source_temperature = gpu_fields["source_temperature"]
     source_smoke = gpu_fields["source_smoke"]
     source_fuel = gpu_fields["source_fuel"]
+    source_extra_pressure = gpu_fields["source_extra_pressure"]
     source_velocity_x = gpu_fields["source_velocity_x"]
     source_velocity_y = gpu_fields["source_velocity_y"]
     source_velocity_z = gpu_fields["source_velocity_z"]
@@ -177,6 +183,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
         source_temperature,
         source_smoke,
         source_fuel,
+        source_extra_pressure,
         source_velocity_x,
         source_velocity_y,
         source_velocity_z,
@@ -220,6 +227,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
                 source_temperature,
                 source_smoke,
                 source_fuel,
+                source_extra_pressure,
                 source_velocity_x,
                 source_velocity_y,
                 source_velocity_z,
@@ -252,6 +260,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
                 np.float32(runtime_entry["temperature"]),
                 np.float32(runtime_entry["smoke"]),
                 np.float32(runtime_entry["fuel"]),
+                np.float32(runtime_entry.get("extra_pressure", 0.0)),
                 bool(runtime_entry["has_velocity_target"]),
                 np.float32(resolved_velocity[0]),
                 np.float32(resolved_velocity[1]),
@@ -271,6 +280,7 @@ def update_source_data(source_data, time_value):
     temperature_field = source_data["temperature"]
     smoke_field = source_data["smoke"]
     fuel_field = source_data["fuel"]
+    extra_pressure_field = source_data["extra_pressure"]
     velocity_x_field = source_data["velocity_x"]
     velocity_y_field = source_data["velocity_y"]
     velocity_z_field = source_data["velocity_z"]
@@ -280,6 +290,7 @@ def update_source_data(source_data, time_value):
     temperature_field.fill(0.0)
     smoke_field.fill(0.0)
     fuel_field.fill(0.0)
+    extra_pressure_field.fill(0.0)
     velocity_x_field.fill(0.0)
     velocity_y_field.fill(0.0)
     velocity_z_field.fill(0.0)
@@ -311,6 +322,7 @@ def update_source_data(source_data, time_value):
             fuel_field[source_mask],
             runtime_entry["fuel"],
         )
+        extra_pressure_field[source_mask] += runtime_entry.get("extra_pressure", 0.0)
 
         if runtime_entry["has_velocity_target"]:
             velocity_active_mask[source_mask] = True

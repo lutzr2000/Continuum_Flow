@@ -12,6 +12,7 @@ def _clear_source_fields_cpu(
     source_temperature,
     source_smoke,
     source_fuel,
+    source_extra_pressure,
     source_velocity_x,
     source_velocity_y,
     source_velocity_z,
@@ -23,6 +24,7 @@ def _clear_source_fields_cpu(
     source_temperature_flat = source_temperature.reshape(total_size)
     source_smoke_flat = source_smoke.reshape(total_size)
     source_fuel_flat = source_fuel.reshape(total_size)
+    source_extra_pressure_flat = source_extra_pressure.reshape(total_size)
     source_velocity_x_flat = source_velocity_x.reshape(total_size)
     source_velocity_y_flat = source_velocity_y.reshape(total_size)
     source_velocity_z_flat = source_velocity_z.reshape(total_size)
@@ -33,6 +35,7 @@ def _clear_source_fields_cpu(
         source_temperature_flat[idx] = 0.0
         source_smoke_flat[idx] = 0.0
         source_fuel_flat[idx] = 0.0
+        source_extra_pressure_flat[idx] = 0.0
         source_velocity_x_flat[idx] = 0.0
         source_velocity_y_flat[idx] = 0.0
         source_velocity_z_flat[idx] = 0.0
@@ -45,6 +48,7 @@ def _sample_source_entry_cpu(
     source_temperature,
     source_smoke,
     source_fuel,
+    source_extra_pressure,
     source_velocity_x,
     source_velocity_y,
     source_velocity_z,
@@ -57,6 +61,7 @@ def _sample_source_entry_cpu(
     temperature_value,
     smoke_value,
     fuel_value,
+    extra_pressure_value,
     has_velocity_target,
     velocity_x_value,
     velocity_y_value,
@@ -97,6 +102,7 @@ def _sample_source_entry_cpu(
             source_smoke[i, j, k] = smoke_value
         if source_fuel[i, j, k] < fuel_value:
             source_fuel[i, j, k] = fuel_value
+        source_extra_pressure[i, j, k] += extra_pressure_value
 
         if has_velocity_target:
             source_velocity_mask[i, j, k] = True
@@ -123,6 +129,7 @@ def update_source_data(source_data, time_value):
     temperature_field = source_data["temperature"]
     smoke_field = source_data["smoke"]
     fuel_field = source_data["fuel"]
+    extra_pressure_field = source_data["extra_pressure"]
     velocity_x_field = source_data["velocity_x"]
     velocity_y_field = source_data["velocity_y"]
     velocity_z_field = source_data["velocity_z"]
@@ -133,6 +140,7 @@ def update_source_data(source_data, time_value):
         temperature_field,
         smoke_field,
         fuel_field,
+        extra_pressure_field,
         velocity_x_field,
         velocity_y_field,
         velocity_z_field,
@@ -164,6 +172,7 @@ def update_source_data(source_data, time_value):
                 temperature_field,
                 smoke_field,
                 fuel_field,
+                extra_pressure_field,
                 velocity_x_field,
                 velocity_y_field,
                 velocity_z_field,
@@ -176,6 +185,7 @@ def update_source_data(source_data, time_value):
                 np.float32(runtime_entry["temperature"]),
                 np.float32(runtime_entry["smoke"]),
                 np.float32(runtime_entry["fuel"]),
+                np.float32(runtime_entry.get("extra_pressure", 0.0)),
                 bool(runtime_entry["has_velocity_target"]),
                 np.float32(resolved_velocity[0]),
                 np.float32(resolved_velocity[1]),
