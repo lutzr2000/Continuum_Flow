@@ -10,7 +10,6 @@ improve explosion setup
 add an airofil example that slowly rotates until stall to show flow slove capabilities
 
 Solver: 
-source velocity_spawn does nor work properly
 VRAM active tiling?
 time CPU
 Testing

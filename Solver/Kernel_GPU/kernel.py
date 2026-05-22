@@ -512,7 +512,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["obstacle_velocity_x"],
         gpu_fields["obstacle_velocity_y"],
         gpu_fields["obstacle_velocity_z"],
-        False,
+        gpu_constants["HAS_SOURCE"],
         gpu_fields["source_mask"],
         gpu_fields["source_velocity_mask"],
         gpu_fields["source_temperature"],
@@ -521,6 +521,8 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["source_velocity_x"],
         gpu_fields["source_velocity_y"],
         gpu_fields["source_velocity_z"],
+        apply_source_velocity=True,
+        apply_source_scalars=False,
     )
     cuda.synchronize()
     helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)

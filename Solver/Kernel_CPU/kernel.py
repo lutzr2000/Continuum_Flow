@@ -396,6 +396,30 @@ def _run_time_step(state):
     helper_functions._record_timing(timing_stats, "loop_projection", perf_counter() - section_start)
 
     section_start = perf_counter()
+    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+        u, v, w, p, T, smoke, fuel, flame,
+        dt,
+        simulation_params["BC_CONFIG"],
+        cpu_constants["HAS_OBSTACLE"],
+        cpu_fields["obstacle_mask"],
+        cpu_fields["obstacle_velocity_x"],
+        cpu_fields["obstacle_velocity_y"],
+        cpu_fields["obstacle_velocity_z"],
+        cpu_constants["HAS_SOURCE"],
+        cpu_fields["source_mask"],
+        cpu_fields["source_velocity_mask"],
+        cpu_fields["source_temperature"],
+        cpu_fields["source_smoke"],
+        cpu_fields["source_fuel"],
+        cpu_fields["source_velocity_x"],
+        cpu_fields["source_velocity_y"],
+        cpu_fields["source_velocity_z"],
+        apply_source_velocity=True,
+        apply_source_scalars=False,
+    )
+    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)
+
+    section_start = perf_counter()
     scalar_update.preserve_inactive_scalar_tiles(
         T, smoke, fuel, flame,
         temperature_work, smoke_work, fuel_work, flame_work,
