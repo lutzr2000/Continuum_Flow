@@ -163,6 +163,9 @@ def predict_scalar_fields_semi_lagrangian(
     predictor_T,
     predictor_smoke,
     predictor_fuel,
+    depart_x,
+    depart_y,
+    depart_z,
     delta,
     active_tile_mask,
 ):
@@ -194,6 +197,9 @@ def predict_scalar_fields_semi_lagrangian(
         ny,
         nz,
     )
+    depart_x[i, j, k] = x_depart
+    depart_y[i, j, k] = y_depart
+    depart_z[i, j, k] = z_depart
 
     predictor_T[i, j, k], predictor_smoke[i, j, k], predictor_fuel[i, j, k] = (
         advection_schemes._sample_trilinear_vec3(
@@ -218,6 +224,9 @@ def update_scalar_fields_maccormack(
     predictor_T,
     predictor_smoke,
     predictor_fuel,
+    depart_x,
+    depart_y,
+    depart_z,
     u,
     v,
     w,
@@ -261,25 +270,16 @@ def update_scalar_fields_maccormack(
 
     dt_over_delta = dt / delta
 
-    x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
-        u,
-        v,
-        w,
-        float(i),
-        float(j),
-        float(k),
-        dt_over_delta,
-        nx,
-        ny,
-        nz,
-    )
+    x_depart = depart_x[i, j, k]
+    y_depart = depart_y[i, j, k]
+    z_depart = depart_z[i, j, k]
     x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
         u,
         v,
         w,
-        float(i),
-        float(j),
-        float(k),
+        x_depart,
+        y_depart,
+        z_depart,
         dt_over_delta,
         nx,
         ny,

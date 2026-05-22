@@ -203,7 +203,18 @@ def preserve_inactive_velocity_tiles(u, v, w, u_out, v_out, w_out, active_tile_m
 
 @cuda.jit(cache=True)
 def advect_velocity_semi_lagrangian(
-    u, v, w, advected_u, advected_v, advected_w, dt, delta, active_tile_mask
+    u,
+    v,
+    w,
+    advected_u,
+    advected_v,
+    advected_w,
+    depart_x,
+    depart_y,
+    depart_z,
+    dt,
+    delta,
+    active_tile_mask,
 ):
     """
     Backtrace the velocity field once and store the purely advected values.
@@ -233,6 +244,9 @@ def advect_velocity_semi_lagrangian(
         ny,
         nz,
     )
+    depart_x[i, j, k] = x_depart
+    depart_y[i, j, k] = y_depart
+    depart_z[i, j, k] = z_depart
 
     advected_u[i, j, k], advected_v[i, j, k], advected_w[i, j, k] = (
         _sample_trilinear_vec3(
@@ -257,6 +271,9 @@ def update_velocity_maccormack(
     predictor_u,
     predictor_v,
     predictor_w,
+    depart_x,
+    depart_y,
+    depart_z,
     dt,
     Fx,
     Fy,
@@ -306,18 +323,9 @@ def update_velocity_maccormack(
     # compute:
     # x_depart = x - dt * u
     # _backtrace_position does this in 3 substeps to allow for curvature in the path
-    x_depart, y_depart, z_depart = _backtrace_position(
-        u,
-        v,
-        w,
-        float(i),
-        float(j),
-        float(k),
-        dt_over_delta,
-        nx,
-        ny,
-        nz,
-    )
+    x_depart = depart_x[i, j, k]
+    y_depart = depart_y[i, j, k]
+    z_depart = depart_z[i, j, k]
     # Forward trace from the departure point:
     # approximately:
     # x_forward = x_depart + dt * u(x_depart)
@@ -325,9 +333,9 @@ def update_velocity_maccormack(
         u,
         v,
         w,
-        float(i),
-        float(j),
-        float(k),
+        x_depart,
+        y_depart,
+        z_depart,
         dt_over_delta,
         nx,
         ny,

@@ -40,6 +40,9 @@ def upload_simulation_state_to_gpu(simulation_params):
     scratch_x = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
     scratch_y = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
     scratch_z = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    depart_x = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    depart_y = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    depart_z = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
 
     gpu_fields = {
         # Primary velocity state and scratch buffers.
@@ -52,6 +55,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         "u_tmp": scratch_x,
         "v_tmp": scratch_y,
         "w_tmp": scratch_z,
+        "depart_x": depart_x,
+        "depart_y": depart_y,
+        "depart_z": depart_z,
 
         # Pressure solve state.
         "p": cuda.to_device(np.asarray(host_state["p"], dtype=GPU_FIELD_DTYPE)),

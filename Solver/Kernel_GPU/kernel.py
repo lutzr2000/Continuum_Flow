@@ -131,6 +131,9 @@ def _initialise_solver(config):
     u_tmp = gpu_fields["u_tmp"]
     v_tmp = gpu_fields["v_tmp"]
     w_tmp = gpu_fields["w_tmp"]
+    depart_x = gpu_fields["depart_x"]
+    depart_y = gpu_fields["depart_y"]
+    depart_z = gpu_fields["depart_z"]
     p = gpu_fields["p"]
     T = gpu_fields["T"]
     temperature_work = gpu_fields["temperature_work"]
@@ -245,6 +248,9 @@ def _initialise_solver(config):
         "u_tmp": u_tmp,
         "v_tmp": v_tmp,
         "w_tmp": w_tmp,
+        "depart_x": depart_x,
+        "depart_y": depart_y,
+        "depart_z": depart_z,
         "p": p,
         "T": T,
         "temperature_work": temperature_work,
@@ -311,6 +317,9 @@ def _run_time_step(state, blockspergrid_3d):
     u_tmp = state["u_tmp"]
     v_tmp = state["v_tmp"]
     w_tmp = state["w_tmp"]
+    depart_x = state["depart_x"]
+    depart_y = state["depart_y"]
+    depart_z = state["depart_z"]
     p = state["p"]
     T = state["T"]
     temperature_work = state["temperature_work"]
@@ -452,13 +461,14 @@ def _run_time_step(state, blockspergrid_3d):
     advection_schemes.advect_velocity_semi_lagrangian[
         scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
-        u, v, w, u_tmp, v_tmp, w_tmp, dt, gpu_constants["DELTA"],
+        u, v, w, u_tmp, v_tmp, w_tmp, depart_x, depart_y, depart_z,
+        dt, gpu_constants["DELTA"],
         gpu_fields["scalar_active_tiles_dilated"],
     )
     advection_schemes.update_velocity_maccormack[
         scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
-        u, v, w, u_tmp, v_tmp, w_tmp,
+        u, v, w, u_tmp, v_tmp, w_tmp, depart_x, depart_y, depart_z,
         dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
@@ -542,6 +552,7 @@ def _run_time_step(state, blockspergrid_3d):
     ](
         T, smoke, fuel, u, v, w, dt,
         temperature_tmp, smoke_tmp, fuel_tmp,
+        depart_x, depart_y, depart_z,
         gpu_constants["DELTA"],
         gpu_fields["scalar_active_tiles_dilated"],
     )
@@ -549,7 +560,7 @@ def _run_time_step(state, blockspergrid_3d):
         scalar_tile_blocks,
         kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
-        T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
+        T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp, depart_x, depart_y, depart_z,
         u, v, w, dt,
         temperature_work, smoke_work, fuel_work, flame,
         gpu_constants["DELTA"],
