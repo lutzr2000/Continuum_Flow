@@ -357,7 +357,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["Fx_base"], gpu_fields["Fy_base"], gpu_fields["Fz_base"],
         gpu_fields["turbulence_Fx_a"], gpu_fields["turbulence_Fy_a"], gpu_fields["turbulence_Fz_a"],
         gpu_fields["turbulence_Fx_b"], gpu_fields["turbulence_Fy_b"], gpu_fields["turbulence_Fz_b"],
-        gpu_fields["turbulence_mix_factors"],
+        gpu_fields["turbulence_amplitudes"], gpu_fields["turbulence_mix_factors"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),
@@ -459,7 +459,7 @@ def _run_time_step(state, blockspergrid_3d):
         scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
         u, v, w, u_tmp, v_tmp, w_tmp,
-        p, dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
+        dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
         simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),

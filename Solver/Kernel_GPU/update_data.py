@@ -96,6 +96,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         "turbulence_Fx_b": cuda.to_device(np.asarray(turbulence_data["Fx_b"], dtype=GPU_FIELD_DTYPE)),
         "turbulence_Fy_b": cuda.to_device(np.asarray(turbulence_data["Fy_b"], dtype=GPU_FIELD_DTYPE)),
         "turbulence_Fz_b": cuda.to_device(np.asarray(turbulence_data["Fz_b"], dtype=GPU_FIELD_DTYPE)),
+        "turbulence_amplitudes": cuda.to_device(np.asarray(turbulence_data["amplitudes"], dtype=GPU_FIELD_DTYPE)),
         "turbulence_mix_factors": cuda.to_device(np.zeros(len(turbulence_data["angular_frequencies"]), dtype=GPU_FIELD_DTYPE)),
 
         # Dynamic obstacle mask and obstacle wall velocities.
@@ -134,6 +135,9 @@ def _update_gpu_source_data(source_field_data, gpu_fields, time_value):
 def _sync_gpu_force_fields(force_field_data, gpu_fields):
     gpu_fields["point_divergence"].copy_to_device(
         np.asarray(force_field_data["point_divergence"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["turbulence_amplitudes"].copy_to_device(
+        np.asarray(force_field_data["turbulence"]["amplitudes"], dtype=GPU_FIELD_DTYPE)
     )
 
 

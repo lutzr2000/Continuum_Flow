@@ -95,7 +95,7 @@ class BlenderCFDForceTurbulenceNode(_BlenderCFDBaseForceNode):
 
     scale: FloatProperty(name="Scale", default=1.0, min=0.0, description="Scale of turbulent force, bigger means more large scale fluctuations", options=set())  # type: ignore
     frequency: FloatProperty(name="Frequency", default=1.0, min=0.0, description="Frequency of turbulence, bigger means faster fluctuations", options=set())  # type: ignore
-    amplitude: FloatProperty(name="Amplitude", default=1.0, min=0.0, description="Amplitude of turbulent force", options=set())  # type: ignore
+    amplitude: FloatProperty(name="Amplitude", default=1.0, min=0.0, description="Amplitude of turbulent force", options={"ANIMATABLE"})  # type: ignore
     seed: bpy.props.IntProperty(name="Seed", default=0, description="Random seed for turbulence", options=set())  # type: ignore
 
 

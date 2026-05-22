@@ -270,6 +270,7 @@ def _run_time_step(state):
         cpu_fields["Fx_base"], cpu_fields["Fy_base"], cpu_fields["Fz_base"],
         cpu_fields["turbulence_Fx_a"], cpu_fields["turbulence_Fy_a"], cpu_fields["turbulence_Fz_a"],
         cpu_fields["turbulence_Fx_b"], cpu_fields["turbulence_Fy_b"], cpu_fields["turbulence_Fz_b"],
+        cpu_fields["turbulence_amplitudes"],
         cpu_fields["turbulence_mix_factors"],
         turbulence_count,
         np.float32(animated_force["x"]),

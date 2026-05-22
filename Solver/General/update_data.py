@@ -169,6 +169,7 @@ def update_animated_source_force_values(
     force_updater=None,
 ):
     """Update animated source targets and animated constant-force values."""
+    force_changed = False
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None:
         source_changed = False
@@ -309,8 +310,34 @@ def update_animated_source_force_values(
             )
             point_divergence += force_field_data["_point_divergence_work"]
 
-        if force_updater is not None:
-            force_updater(force_field_data, solver_fields)
+        force_changed = True
+
+    if force_field_data is not None and force_field_data.get("turbulence_runtime_entries"):
+        turbulence_data = force_field_data.get("turbulence", {})
+        turbulence_amplitudes = turbulence_data.get("amplitudes")
+        if turbulence_amplitudes is not None:
+            for runtime_entry in force_field_data.get("turbulence_runtime_entries", ()):
+                if "_base_amplitude" not in runtime_entry:
+                    runtime_entry["_base_amplitude"] = np.float32(runtime_entry.get("amplitude", 0.0))
+
+                next_amplitude = runtime_entry["_base_amplitude"]
+                amplitude_series = helper_functions._cached_animation_series(runtime_entry, "amplitude", np.float32)
+                if amplitude_series is not None:
+                    next_amplitude = np.float32(
+                        helper_functions._interpolate_animation_series(amplitude_series, time_value)
+                    )
+
+                if next_amplitude != runtime_entry.get("amplitude"):
+                    runtime_entry["amplitude"] = next_amplitude
+
+                turbulence_index = int(runtime_entry.get("index", -1))
+                if 0 <= turbulence_index < len(turbulence_amplitudes):
+                    if turbulence_amplitudes[turbulence_index] != next_amplitude:
+                        turbulence_amplitudes[turbulence_index] = next_amplitude
+                        force_changed = True
+
+    if force_changed and force_updater is not None:
+        force_updater(force_field_data, solver_fields)
 
     animated_force = {"x": 0.0, "y": 0.0, "z": 0.0}
     animation_state = simulation_params.get("ANIMATION_STATE") or {}

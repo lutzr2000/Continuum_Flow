@@ -79,6 +79,7 @@ def upload_simulation_state_to_cpu(simulation_params):
         "turbulence_Fx_b": np.asarray(turbulence_data["Fx_b"], dtype=precision_dtype),
         "turbulence_Fy_b": np.asarray(turbulence_data["Fy_b"], dtype=precision_dtype),
         "turbulence_Fz_b": np.asarray(turbulence_data["Fz_b"], dtype=precision_dtype),
+        "turbulence_amplitudes": np.asarray(turbulence_data["amplitudes"], dtype=precision_dtype),
         "turbulence_mix_factors": np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype),
 
         # Dynamic obstacle mask and obstacle wall velocities.
@@ -131,6 +132,7 @@ def _update_cpu_source_data(source_field_data, _cpu_fields, time_value):
 
 def _sync_cpu_force_fields(force_field_data, cpu_fields):
     cpu_fields["point_divergence"] = force_field_data["point_divergence"]
+    cpu_fields["turbulence_amplitudes"] = force_field_data["turbulence"]["amplitudes"]
 
 
 def update_animated_source_force_values(simulation_params, cpu_fields, time_value):

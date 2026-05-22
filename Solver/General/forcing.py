@@ -6,6 +6,17 @@ POINT_FORCE_NODE_TYPES = {
 }
 
 
+def _animation_series_max_abs(animation_entry):
+    """Return the maximum absolute sampled value from one exported animation entry."""
+    if not animation_entry:
+        return 0.0
+
+    values = np.asarray(animation_entry.get("values", ()), dtype=np.float32)
+    if values.size == 0:
+        return 0.0
+    return float(np.max(np.abs(values)))
+
+
 def _normalise_vector_field(components, amplitude, dtype):
     """Center one vector field and scale its RMS magnitude to the target amplitude."""
     centered_components = []
@@ -275,14 +286,20 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     amplitude = float(force_cfg.get("amplitude", 0.0))
     spatial_scale = max(float(force_cfg.get("scale", 1.0)), delta, 1.0e-6)
     seed_base = int(force_cfg.get("seed", 0))
+    animations = force_cfg.get("animations") or {}
+    amplitude_animation = animations.get("amplitude")
+    amplitude_max = max(abs(amplitude), _animation_series_max_abs(amplitude_animation))
+    if amplitude_max <= 1.0e-12:
+        return
     components = ("x", "y", "z")
+    turbulence_index = len(force_state["turbulence"]["angular_frequencies"])
 
     basis_by_suffix = {
         "a": build_divergence_free_noise_field(
-            shape, delta, spatial_scale, amplitude, seed_base, dtype=dtype,
+            shape, delta, spatial_scale, 1.0, seed_base, dtype=dtype,
         ),
         "b": build_divergence_free_noise_field(
-            shape, delta, spatial_scale, amplitude, seed_base + 1, dtype=dtype,
+            shape, delta, spatial_scale, 1.0, seed_base + 1, dtype=dtype,
         ),
     }
 
@@ -293,6 +310,16 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     force_state["turbulence"]["angular_frequencies"].append(
         2.0 * np.pi * max(float(force_cfg.get("frequency", 0.0)), 0.0)
     )
+    force_state["turbulence"]["amplitudes"].append(np.float32(amplitude))
+    force_state["turbulence"]["max_amplitudes"].append(np.float32(amplitude_max))
+    if amplitude_animation:
+        force_state["turbulence_runtime_entries"].append(
+            {
+                "index": int(turbulence_index),
+                "amplitude": np.float32(amplitude),
+                "animations": dict(animations),
+            }
+        )
 
 
 def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
@@ -328,7 +355,10 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
             "Fy_b": [],
             "Fz_b": [],
             "angular_frequencies": [],
+            "amplitudes": [],
+            "max_amplitudes": [],
         },
+        "turbulence_runtime_entries": [],
     }
 
     #------------Dispatch force nodes-------------------
@@ -367,6 +397,12 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     turbulence["angular_frequencies"] = np.asarray(
         force_state["turbulence"]["angular_frequencies"], dtype=dtype
     )
+    turbulence["amplitudes"] = np.asarray(
+        force_state["turbulence"]["amplitudes"], dtype=dtype
+    )
+    turbulence["max_amplitudes"] = np.asarray(
+        force_state["turbulence"]["max_amplitudes"], dtype=dtype
+    )
 
     #------------Initial force state-------------------
     fx_initial = force_state["Fx_base"].copy()
@@ -378,15 +414,17 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "z": fz_initial,
     }
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
+        amplitude = float(turbulence["amplitudes"][index])
         for component in components:
-            initial_components[component] += turbulence[f"F{component}_b"][index]
+            initial_components[component] += amplitude * turbulence[f"F{component}_b"][index]
 
     #------------Force bounds-------------------
     dynamic_max = {component: 0.0 for component in components}
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
+        amplitude = float(turbulence["max_amplitudes"][index])
         for component in components:
             dynamic_max[component] += float(
-                max(
+                amplitude * max(
                     np.max(np.abs(turbulence[f"F{component}_a"][index])),
                     np.max(
                         np.abs(
@@ -413,6 +451,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "point_divergence": force_state["point_divergence"],
         "point_divergence_base": force_state["point_divergence"].copy(),
         "point_force_entries": force_state["point_force_entries"],
+        "turbulence_runtime_entries": force_state["turbulence_runtime_entries"],
         "turbulence": turbulence,
         "max_abs": (
             static_max["x"] + dynamic_max["x"],

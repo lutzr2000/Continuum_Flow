@@ -12,6 +12,7 @@ def update_force_fields(
     turbulence_Fx_b,
     turbulence_Fy_b,
     turbulence_Fz_b,
+    turbulence_amplitudes,
     turbulence_mix_factors,
     turbulence_count,
     animated_force_x,
@@ -31,19 +32,26 @@ def update_force_fields(
                 fz = Fz_base[i, j, k] + animated_force_z
 
                 for turbulence_index in range(turbulence_count):
+                    amplitude = turbulence_amplitudes[turbulence_index]
                     mix_factor = turbulence_mix_factors[turbulence_index]
                     inverse_mix_factor = 1.0 - mix_factor
                     fx += (
-                        mix_factor * turbulence_Fx_a[turbulence_index, i, j, k] +
-                        inverse_mix_factor * turbulence_Fx_b[turbulence_index, i, j, k]
+                        amplitude * (
+                            mix_factor * turbulence_Fx_a[turbulence_index, i, j, k] +
+                            inverse_mix_factor * turbulence_Fx_b[turbulence_index, i, j, k]
+                        )
                     )
                     fy += (
-                        mix_factor * turbulence_Fy_a[turbulence_index, i, j, k] +
-                        inverse_mix_factor * turbulence_Fy_b[turbulence_index, i, j, k]
+                        amplitude * (
+                            mix_factor * turbulence_Fy_a[turbulence_index, i, j, k] +
+                            inverse_mix_factor * turbulence_Fy_b[turbulence_index, i, j, k]
+                        )
                     )
                     fz += (
-                        mix_factor * turbulence_Fz_a[turbulence_index, i, j, k] +
-                        inverse_mix_factor * turbulence_Fz_b[turbulence_index, i, j, k]
+                        amplitude * (
+                            mix_factor * turbulence_Fz_a[turbulence_index, i, j, k] +
+                            inverse_mix_factor * turbulence_Fz_b[turbulence_index, i, j, k]
+                        )
                     )
 
                 Fx[i, j, k] = fx

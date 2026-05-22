@@ -257,7 +257,6 @@ def update_velocity_maccormack(
     predictor_u,
     predictor_v,
     predictor_w,
-    p,
     dt,
     Fx,
     Fy,
