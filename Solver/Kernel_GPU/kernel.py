@@ -712,6 +712,7 @@ def main(config=None):
                 output_index,
                 state["t"],
                 state["simulation_params"]["OUTPUT_FIELD_CONFIG"],
+                state["simulation_params"]["OUTPUT_SPARSE_THRESHOLD"],
             )
             helper_functions._record_timing(
                 state["timing_stats"],

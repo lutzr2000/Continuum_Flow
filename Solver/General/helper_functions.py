@@ -370,7 +370,7 @@ def build_output_field_config(output_cfg):
     fuel_cfg = _field_option_value(fields_cfg, "fuel")
     flame_cfg = _field_option_value(fields_cfg, "flame")
 
-    return {
+    output_field_config = {
         "u": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
         "v": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
         "w": {"export": velocity_cfg["enabled"], "sparse": velocity_cfg["sparse"]},
@@ -380,6 +380,7 @@ def build_output_field_config(output_cfg):
         "fuel": {"export": fuel_cfg["enabled"], "sparse": fuel_cfg["sparse"]},
         "flame": {"export": flame_cfg["enabled"], "sparse": flame_cfg["sparse"]},
     }
+    return output_field_config
 
 
 def collect_output_variables(output_field_config):
@@ -750,6 +751,7 @@ def apply_config(config):
         "OUTPATH": output_cfg.get("output_path", ""),
         "OUTPUT_DTYPE": output_dtype,
         "OUTPUT_FIELD_CONFIG": output_field_config,
+        "OUTPUT_SPARSE_THRESHOLD": float(settings_cfg.get("adaptive_domain_threshold", 0.001)),
         "OUTPUT_VARIABLES": collect_output_variables(output_field_config),
         "OUTPUT_BUFFER_VARIABLES": collect_buffer_variables(output_field_config),
         "HOST_VDB_WRITER": host_vdb_writer,

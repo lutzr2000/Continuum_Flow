@@ -39,9 +39,9 @@ def _create_vector_grid(storage_dtype):
     raise AttributeError("No supported OpenVDB vector grid class is available.")
 
 
-def _nonzero_mask(array):
+def _nonzero_mask(array, threshold):
     """Return a boolean active mask for one scalar field."""
-    return np.abs(array) > 1.0e-12
+    return np.abs(array) > float(threshold)
 
 
 def _load_shared_array(field_info):
@@ -60,6 +60,7 @@ def _sparse_export_mask(payload):
     sparse_mask_fields = payload.get("sparse_mask_fields", {})
     if not sparse_mask_fields:
         return None, []
+    sparse_threshold = float(payload.get("sparse_threshold", 0.0))
 
     open_shared_memory = []
     sparse_mask = None
@@ -69,7 +70,7 @@ def _sparse_export_mask(payload):
             continue
         shm, array = _load_shared_array(field_info)
         open_shared_memory.append(shm)
-        field_mask = _nonzero_mask(array)
+        field_mask = _nonzero_mask(array, sparse_threshold)
         sparse_mask = field_mask if sparse_mask is None else np.logical_or(sparse_mask, field_mask)
     return sparse_mask, open_shared_memory
 

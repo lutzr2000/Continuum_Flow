@@ -6,8 +6,13 @@ Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
 search for comments still in german
 sit down go through whole code
+improve explosion setup
+make turbulence amplitude animatable
+add randomness as option for divergence force in some form (is also there in EmberGen)
+add an airofil example that slowly rotates until stall to show flow slove capabilities
 
 Solver: 
+VRAM active tiling?
 time CPU
 Testing
 

@@ -535,6 +535,7 @@ def main(config=None):
                     output_index,
                     state["t"],
                     state["simulation_params"]["OUTPUT_FIELD_CONFIG"],
+                    state["simulation_params"]["OUTPUT_SPARSE_THRESHOLD"],
                 )
                 output_index += 1
                 state["output_frame_count"] += 1

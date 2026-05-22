@@ -138,6 +138,7 @@ def enqueue_device_output(
     output_index,
     time_value,
     output_field_config,
+    sparse_threshold,
 ):
     """
     copies one output frame directly from CUDA device arrays into shared memory.
@@ -188,7 +189,7 @@ def enqueue_device_output(
         source_field.copy_to_host(field_info['array'])
     timings["device_copy"] = perf_counter() - section_start
 
-    write_queue.put((int(output_index), float(time_value), fields, output_field_config))
+    write_queue.put((int(output_index), float(time_value), fields, output_field_config, float(sparse_threshold)))
     return timings
 
 
@@ -200,12 +201,13 @@ def enqueue_host_output(
     output_index,
     time_value,
     output_field_config,
+    sparse_threshold,
 ):
     """Copy one host-resident output frame into shared memory and enqueue it."""
     fields = buffer_pool.get()
     for variable_name in buffered_variables:
         np.copyto(fields[variable_name]["array"], source_fields[variable_name])
-    write_queue.put((int(output_index), float(time_value), fields, output_field_config))
+    write_queue.put((int(output_index), float(time_value), fields, output_field_config, float(sparse_threshold)))
 
 
 def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
@@ -282,7 +284,7 @@ def _build_grid_payload(fields, output_field_config):
     return grid_entries
 
 
-def create_writer_payload(fields, output_field_config, output_path, time_value, delta):
+def create_writer_payload(fields, output_field_config, output_path, time_value, delta, sparse_threshold):
     """
     builds the metadata package that is sent to Blender's host VDB writer.
 
@@ -292,6 +294,7 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
         output_path (str): full path of the target vdb file
         time_value (float): physical simulation time
         delta (float): grid spacing
+        sparse_threshold (float): scalar activity threshold shared with adaptive simulation masking
     Returns:
         dict: serializable writer payload
     """
@@ -306,6 +309,7 @@ def create_writer_payload(fields, output_field_config, output_path, time_value, 
             'voxel_size': float(delta),
             'origin': _domain_origin_from_shape(first_field_shape, delta),
         },
+        'sparse_threshold': float(sparse_threshold),
         'grids': [
             {
                 'name': grid_entry['name'],
@@ -392,10 +396,17 @@ def writer_thread_func(
                         writer_file = None
                     break
 
-                output_idx, time_value, fields, output_field_config = item
+                output_idx, time_value, fields, output_field_config, sparse_threshold = item
                 frame_idx = int(frame_start) + int(output_idx)
                 vdb_output_path = os.path.join(outpath, f'frame_{frame_idx:06d}.vdb')
-                writer_payload = create_writer_payload(fields, output_field_config, vdb_output_path, time_value, delta)
+                writer_payload = create_writer_payload(
+                    fields,
+                    output_field_config,
+                    vdb_output_path,
+                    time_value,
+                    delta,
+                    sparse_threshold,
+                )
 
                 if writer_file is None or writer_file.closed:
                     writer_socket = socket.create_connection(
