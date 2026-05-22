@@ -1,6 +1,5 @@
 from numba import njit, prange
 
-
 BC_OUTFLOW = 0
 BC_INFLOW = 1
 BC_NO_SLIP_WALL = 2
@@ -15,21 +14,18 @@ SIDE_TO_AXIS_AND_INDEX = {
     "z_high": (2, 1),
 }
 
-BC_TYPE_TO_MODE = {
-    "OUTFLOW": BC_OUTFLOW,
-    "INFLOW": BC_INFLOW,
-    "WALL": BC_NO_SLIP_WALL,
-    "SLIP_WALL": BC_SLIP_WALL,
-}
-
 
 @njit(cache=True, fastmath=True)
 def _pressure_poisson_apply_neumann_bcs(p):
     """
-    Apply hard-coded zero-gradient pressure boundary conditions on all six faces.
+    applies the hard-coded zero-gradient pressure boundary conditions on all
+    six domain faces on the CPU.
 
-    This mirrors the GPU boundary helper so the pressure solve can source the
-    same Neumann boundary rule from the boundary-conditions module.
+    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
+    meaning the pressure at the boundary is copied from the adjacent interior
+    cell. This kernel writes the boundary values after each iteration so
+    the next iteration starts from a pressure field with valid boundary values.
+
     """
     nx, ny, nz = p.shape
 
@@ -50,17 +46,31 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
 
 @njit(cache=True, parallel=True)
-def _apply_face_bc_numba(
-    u, v, w, p, T, smoke, fuel,
-    axis, side_index, bc_mode,
-    u_value, v_value, w_value,
-    temp_value, use_temp,
+def _apply_face_state(
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    axis,
+    side_index,
+    bc_mode,
+    u_value,
+    v_value,
+    w_value,
+    temp_value,
+    use_temp,
 ):
     """
-    Apply one boundary condition to one domain face on the CPU.
+    applies one configured domain-face boundary condition on the CPU.
 
-    The face sweep is flattened to one parallel loop so Numba can distribute
-    the work across threads while keeping the inner logic branch-light.
+    The device helper updates velocity based on the selected boundary mode,
+    copies pressure from the adjacent interior cell, and propagates scalar
+    fields from the neighbor unless an explicit face temperature is configured.
+    It is called by the domain boundary kernel once per matching face, so edge
+    and corner cells are processed sequentially in a fixed order.
     """
     nx, ny, nz = u.shape
 
@@ -80,7 +90,9 @@ def _apply_face_bc_numba(
             neighbor_fuel = fuel[src_i, j, k]
 
             if bc_mode == BC_OUTFLOW:
-                u[i, j, k] = min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+                u[i, j, k] = (
+                    min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+                )
                 v[i, j, k] = neighbor_v
                 w[i, j, k] = neighbor_w
             elif bc_mode == BC_INFLOW:
@@ -119,7 +131,9 @@ def _apply_face_bc_numba(
 
             if bc_mode == BC_OUTFLOW:
                 u[i, j, k] = neighbor_u
-                v[i, j, k] = min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+                v[i, j, k] = (
+                    min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+                )
                 w[i, j, k] = neighbor_w
             elif bc_mode == BC_INFLOW:
                 u[i, j, k] = u_value
@@ -157,7 +171,9 @@ def _apply_face_bc_numba(
         if bc_mode == BC_OUTFLOW:
             u[i, j, k] = neighbor_u
             v[i, j, k] = neighbor_v
-            w[i, j, k] = min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            w[i, j, k] = (
+                min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            )
         elif bc_mode == BC_INFLOW:
             u[i, j, k] = u_value
             v[i, j, k] = v_value
@@ -178,24 +194,47 @@ def _apply_face_bc_numba(
 
 
 def _apply_face_bc(
-    u, v, w, p, T, smoke, fuel,
-    side, bc_mode,
-    u_value=0.0, v_value=0.0, w_value=0.0,
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    side,
+    bc_mode,
+    u_value=0.0,
+    v_value=0.0,
+    w_value=0.0,
     temp_value=None,
 ):
-    """Dispatch one CPU boundary update to the compiled Numba face kernel."""
+    """
+    Dispatch one CPU boundary update to the compiled Numba face kernel.
+    """
     axis, side_index = SIDE_TO_AXIS_AND_INDEX[side]
-    _apply_face_bc_numba(
-        u, v, w, p, T, smoke, fuel,
-        axis, side_index, bc_mode,
-        u_value, v_value, w_value,
+    _apply_face_state(
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
+        axis,
+        side_index,
+        bc_mode,
+        u_value,
+        v_value,
+        w_value,
         0.0 if temp_value is None else temp_value,
         temp_value is not None,
     )
     return u, v, w, p, T, smoke, fuel
 
 
-def inflow_bc(u, v, w, p, T, smoke, fuel, side, u_inflow, v_inflow, w_inflow, t_inflow=None):
+def inflow_bc(
+    u, v, w, p, T, smoke, fuel, side, u_inflow, v_inflow, w_inflow, t_inflow=None
+):
     """
     Apply inflow boundary conditions to one side of the domain on the CPU.
 
@@ -204,7 +243,13 @@ def inflow_bc(u, v, w, p, T, smoke, fuel, side, u_inflow, v_inflow, w_inflow, t_
     value or a Neumann condition when no temperature is specified.
     """
     return _apply_face_bc(
-        u, v, w, p, T, smoke, fuel,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
         side,
         BC_INFLOW,
         u_value=u_inflow,
@@ -222,7 +267,13 @@ def outflow_bc(u, v, w, p, T, smoke, fuel, side):
     copied from the adjacent interior cells.
     """
     return _apply_face_bc(
-        u, v, w, p, T, smoke, fuel,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
         side,
         BC_OUTFLOW,
     )
@@ -237,7 +288,13 @@ def slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
     a homogeneous Neumann condition.
     """
     return _apply_face_bc(
-        u, v, w, p, T, smoke, fuel,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
         side,
         BC_SLIP_WALL,
         temp_value=t_wall,
@@ -253,14 +310,20 @@ def no_slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
     interior or fixed to a prescribed wall value.
     """
     return _apply_face_bc(
-        u, v, w, p, T, smoke, fuel,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
         side,
         BC_NO_SLIP_WALL,
         temp_value=t_wall,
     )
 
 
-def apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config):
+def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     """
     Apply all configured domain boundary conditions to the CPU field state.
 
@@ -269,14 +332,29 @@ def apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config):
     """
     for side, bc in bc_config.items():
         bc_type = bc["type"]
-        bc_mode = BC_TYPE_TO_MODE.get(bc_type)
-        if bc_mode is None:
-            raise ValueError(f"Unknown boundary condition '{bc_type}' for side '{side}'")
+        if bc_type == "OUTFLOW":
+            bc_mode = BC_OUTFLOW
+        elif bc_type == "INFLOW":
+            bc_mode = BC_INFLOW
+        elif bc_type == "WALL":
+            bc_mode = BC_NO_SLIP_WALL
+        elif bc_type == "SLIP_WALL":
+            bc_mode = BC_SLIP_WALL
+        else:
+            raise ValueError(
+                f"Unknown boundary condition '{bc_type}' for side '{side}'"
+            )
 
         temperature = bc.get("T", bc.get("temperature"))
         if bc_mode == BC_INFLOW:
             u, v, w, p, T, smoke, fuel = inflow_bc(
-                u, v, w, p, T, smoke, fuel,
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
                 side,
                 bc.get("u", 0.0),
                 bc.get("v", 0.0),

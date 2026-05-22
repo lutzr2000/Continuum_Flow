@@ -111,7 +111,21 @@ def preserve_inactive_scalar_tiles(
 
 @njit(cache=True, parallel=True, fastmath=True)
 def predict_scalar_fields_maccormack(
-    T, smoke, fuel, u, v, w, dt, predictor_T, predictor_smoke, predictor_fuel, delta, active_tile_mask
+    T,
+    smoke,
+    fuel,
+    u,
+    v,
+    w,
+    dt,
+    predictor_T,
+    predictor_smoke,
+    predictor_fuel,
+    depart_x,
+    depart_y,
+    depart_z,
+    delta,
+    active_tile_mask,
 ):
     """
     Build the forward predictor state for the MacCormack scalar update.
@@ -134,6 +148,9 @@ def predict_scalar_fields_maccormack(
                     dt / delta,
                     nx, ny, nz,
                 )
+                depart_x[i, j, k] = x_depart
+                depart_y[i, j, k] = y_depart
+                depart_z[i, j, k] = z_depart
 
                 predictor_T[i, j, k], predictor_smoke[i, j, k], predictor_fuel[i, j, k] = (
                     advection_schemes._sample_trilinear_vec3(
@@ -146,12 +163,34 @@ def predict_scalar_fields_maccormack(
 
 @njit(cache=True, parallel=True, fastmath=True)
 def update_scalar_fields_maccormack(
-    T, smoke, fuel, predictor_T, predictor_smoke, predictor_fuel,
-    u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
-    delta, temperature_dissipation_rate, temperature_production_rate,
-    smoke_dissipation_rate, smoke_production_rate,
-    fuel_burn_rate, fuel_ignition_temperature, minimum_oxygen_concentration, t_reference,
-    maccormack_factor, active_tile_mask
+    T,
+    smoke,
+    fuel,
+    predictor_T,
+    predictor_smoke,
+    predictor_fuel,
+    depart_x,
+    depart_y,
+    depart_z,
+    u,
+    v,
+    w,
+    dt,
+    T_out,
+    smoke_out,
+    fuel_out,
+    flame_out,
+    delta,
+    temperature_dissipation_rate,
+    temperature_production_rate,
+    smoke_dissipation_rate,
+    smoke_production_rate,
+    fuel_burn_rate,
+    fuel_ignition_temperature,
+    minimum_oxygen_concentration,
+    t_reference,
+    maccormack_factor,
+    active_tile_mask,
 ):
     """
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
@@ -175,15 +214,12 @@ def update_scalar_fields_maccormack(
 
                 dt_over_delta = dt / delta
 
-                x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
-                    u, v, w,
-                    float(i), float(j), float(k),
-                    dt_over_delta,
-                    nx, ny, nz,
-                )
+                x_depart = depart_x[i, j, k]
+                y_depart = depart_y[i, j, k]
+                z_depart = depart_z[i, j, k]
                 x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
                     u, v, w,
-                    float(i), float(j), float(k),
+                    x_depart, y_depart, z_depart,
                     dt_over_delta,
                     nx, ny, nz,
                 )

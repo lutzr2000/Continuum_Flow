@@ -402,9 +402,9 @@ def update_velocity_maccormack(
     )
 
     # u_sword = u_n+1 - D_x + Fx
-    u_raw = corrected_u - diffusion_x + force_coeff * Fx[i, j, k]
-    v_raw = corrected_v - diffusion_y + force_coeff * Fy[i, j, k]
-    w_raw = corrected_w - diffusion_z + force_coeff * Fz[i, j, k]
+    u_raw = corrected_u + diffusion_x + force_coeff * Fx[i, j, k]
+    v_raw = corrected_v + diffusion_y + force_coeff * Fy[i, j, k]
+    w_raw = corrected_w + diffusion_z + force_coeff * Fz[i, j, k]
 
     un[i, j, k] = u_raw
     vn[i, j, k] = v_raw

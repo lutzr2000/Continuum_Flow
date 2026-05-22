@@ -41,6 +41,9 @@ def upload_simulation_state_to_cpu(simulation_params):
         "u_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
         "v_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
         "w_tmp": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "depart_x": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "depart_y": np.empty((nx, ny, nz), dtype=precision_dtype),
+        "depart_z": np.empty((nx, ny, nz), dtype=precision_dtype),
 
         # Pressure solve state.
         "p": host_state["p"],

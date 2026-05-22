@@ -4,8 +4,12 @@ from numba import njit, prange
 
 
 @njit(cache=True, parallel=True, fastmath=True)
-def compute_vorticity(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta):
-    """Compute vorticity components and scalar magnitude from the velocity field."""
+def compute_vorticity(
+    u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta
+):
+    """
+    Compute vorticity components and scalar magnitude from the velocity field.
+    """
     nx, ny, nz = omega_magnitude.shape
     half_inv_delta = 0.5 / delta
 
@@ -13,9 +17,13 @@ def compute_vorticity(u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_m
         for j in range(ny):
             for k in range(nz):
                 if (
-                    i < 1 or j < 1 or k < 1 or
-                    i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
-                    obstacle_mask[i, j, k]
+                    i < 1
+                    or j < 1
+                    or k < 1
+                    or i >= nx - 1
+                    or j >= ny - 1
+                    or k >= nz - 1
+                    or obstacle_mask[i, j, k]
                 ):
                     omega_x[i, j, k] = 0.0
                     omega_y[i, j, k] = 0.0
@@ -53,7 +61,9 @@ def apply_vorticity_confinement(
     delta,
     vorticity_strength,
 ):
-    """Accumulate vorticity confinement forces into the body-force fields on the CPU."""
+    """
+    Accumulate vorticity confinement forces into the body-force fields on the CPU.
+    """
     nx, ny, nz = omega_magnitude.shape
     half_inv_delta = 0.5 / delta
 
@@ -63,11 +73,19 @@ def apply_vorticity_confinement(
                 if obstacle_mask[i, j, k]:
                     continue
 
-                grad_x = (omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]) * half_inv_delta
-                grad_y = (omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]) * half_inv_delta
-                grad_z = (omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]) * half_inv_delta
+                grad_x = (
+                    omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]
+                ) * half_inv_delta
+                grad_y = (
+                    omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]
+                ) * half_inv_delta
+                grad_z = (
+                    omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]
+                ) * half_inv_delta
 
-                grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
+                grad_length = math.sqrt(
+                    grad_x * grad_x + grad_y * grad_y + grad_z * grad_z
+                )
                 if grad_length <= 1.0e-12:
                     continue
 

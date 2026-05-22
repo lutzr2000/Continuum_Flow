@@ -4,7 +4,9 @@ from numba import njit, prange
 
 @njit(cache=True, parallel=True, fastmath=True)
 def _compute_velocity_maxima_and_divergence(u, v, w):
-    """Scan all velocity components once and return maxima plus divergence state."""
+    """
+    Scan all velocity components once and return maxima plus divergence state.
+    """
     nx, ny, nz = u.shape
     partial_u = np.empty(nx, dtype=u.dtype)
     partial_v = np.empty(nx, dtype=v.dtype)
@@ -73,26 +75,12 @@ def compute_new_timestep_cpu(
 ):
     """
     Compute a stable timestep from convection, diffusion and forcing limits on the CPU.
-
-    Args:
-        u (ndarray): x-velocity field
-        v (ndarray): y-velocity field
-        w (ndarray): z-velocity field
-        maxima (ndarray): persistent output array with shape (3,) for the maxima
-        fx_max (float): maximum absolute x-direction force used in the timestep limiter
-        fy_max (float): maximum absolute y-direction force used in the timestep limiter
-        fz_max (float): maximum absolute z-direction force used in the timestep limiter
-        rho (float): fluid density
-        delta (float): grid spacing
-        nu (float): kinematic viscosity
-        cfl_max (float): maximum admissible CFL number
-        max_dt (float, optional): upper bound for the returned timestep
-    Returns:
-        tuple[float, bool]: stable timestep and divergence flag
     """
     eps = 1e-12
 
-    abs_u_max, abs_v_max, abs_w_max, solver_diverged = _compute_velocity_maxima_and_divergence(u, v, w)
+    abs_u_max, abs_v_max, abs_w_max, solver_diverged = (
+        _compute_velocity_maxima_and_divergence(u, v, w)
+    )
     maxima[0] = abs_u_max
     maxima[1] = abs_v_max
     maxima[2] = abs_w_max

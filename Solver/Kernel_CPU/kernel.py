@@ -23,30 +23,66 @@ import Solver.Kernel_CPU.vorticity as vorticity
 
 
 def apply_all_BC(
-    u, v, w, p, T, smoke, fuel, flame,
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    flame,
     dt,
     bc_config,
-    has_obstacle, obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
-    has_source, source_mask, source_velocity_mask, source_temperature, source_smoke, source_fuel,
-    source_velocity_x, source_velocity_y, source_velocity_z,
+    has_obstacle,
+    obstacle_mask,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
+    has_source,
+    source_mask,
+    source_velocity_mask,
+    source_temperature,
+    source_smoke,
+    source_fuel,
+    source_velocity_x,
+    source_velocity_y,
+    source_velocity_z,
     apply_source_velocity=True,
     apply_source_scalars=True,
 ):
     """Apply domain, obstacle and source constraints in the fixed overwrite order."""
-    u, v, w, p, T, smoke, fuel = BC.apply_all_BC(u, v, w, p, T, smoke, fuel, bc_config)
+    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
     if has_obstacle:
         u, v, w, smoke, fuel, flame = obstacle_bc.obstacle_bc(
-            u, v, w, smoke, fuel, flame,
-            obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+            u,
+            v,
+            w,
+            smoke,
+            fuel,
+            flame,
+            obstacle_mask,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
         )
 
     if has_source:
         u, v, w, T, smoke, fuel = source_bc.source_bc(
-            u, v, w, T, smoke, fuel,
-            source_mask, source_velocity_mask,
-            source_temperature, source_smoke, source_fuel,
-            source_velocity_x, source_velocity_y, source_velocity_z,
+            u,
+            v,
+            w,
+            T,
+            smoke,
+            fuel,
+            source_mask,
+            source_velocity_mask,
+            source_temperature,
+            source_smoke,
+            source_fuel,
+            source_velocity_x,
+            source_velocity_y,
+            source_velocity_z,
             dt,
             apply_velocity=apply_source_velocity,
             apply_scalars=apply_source_scalars,
@@ -74,20 +110,28 @@ def _initialise_solver(config):
     output_frame_count = 0
 
     section_start = perf_counter()
-    memory_tracker = helper_functions.MemoryUsageTracker("RAM", helper_functions._sample_process_memory_usage)
+    memory_tracker = helper_functions.MemoryUsageTracker(
+        "RAM", helper_functions._sample_process_memory_usage
+    )
     simulation_params = helper_functions.apply_config(config)
     if config is not None:
         simulations = config.get("simulations") or []
         if simulations:
             simulation_params["_simulation_cfg"] = simulations[0]
     update_data.rebuild_cpu_boundary_data(simulation_params)
-    cancel_flag_path = (((simulation_params.get("meta") or {}).get("cancel_flag_path")) or "").strip()
+    cancel_flag_path = (
+        ((simulation_params.get("meta") or {}).get("cancel_flag_path")) or ""
+    ).strip()
 
     available_cores = os.cpu_count() or 1
-    reserved_writer_cores = max(0, int(simulation_params.get("OUTPUT_FORWARDER_COUNT", 0)))
+    reserved_writer_cores = max(
+        0, int(simulation_params.get("OUTPUT_FORWARDER_COUNT", 0))
+    )
     cpu_count = max(1, available_cores - 2 - reserved_writer_cores)
     set_num_threads(cpu_count)
-    helper_functions._record_timing(timing_stats, "init_config", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_config", perf_counter() - section_start
+    )
     helper_functions._record_timing(
         timing_stats,
         "init_forces",
@@ -96,15 +140,26 @@ def _initialise_solver(config):
 
     print("################################################################")
     print("Initialise")
-    print("Cell count: ", int(simulation_params["NX"] * simulation_params["NY"] * simulation_params["NZ"]))
+    print(
+        "Cell count: ",
+        int(
+            simulation_params["NX"] * simulation_params["NY"] * simulation_params["NZ"]
+        ),
+    )
 
     section_start = perf_counter()
-    cpu_fields, cpu_constants = update_data.upload_simulation_state_to_cpu(simulation_params)
-    helper_functions._record_timing(timing_stats, "init_upload_fields", perf_counter() - section_start)
+    cpu_fields, cpu_constants = update_data.upload_simulation_state_to_cpu(
+        simulation_params
+    )
+    helper_functions._record_timing(
+        timing_stats, "init_upload_fields", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
     memory_tracker.sample()
-    helper_functions._record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_memory_sample", perf_counter() - section_start
+    )
 
     turbulence_angular_frequencies = np.asarray(
         simulation_params["force_field_data"]["turbulence"]["angular_frequencies"],
@@ -115,17 +170,29 @@ def _initialise_solver(config):
     _sync_host_field_views(host_fields, cpu_fields)
 
     section_start = perf_counter()
-    update_data.update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_constants, 0.0)
-    helper_functions._record_timing(timing_stats, "init_dynamic_boundaries", perf_counter() - section_start)
+    update_data.update_dynamic_boundary_data_on_cpu(
+        simulation_params, cpu_fields, cpu_constants, 0.0
+    )
+    helper_functions._record_timing(
+        timing_stats, "init_dynamic_boundaries", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
     memory_tracker.sample()
-    helper_functions._record_timing(timing_stats, "init_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_memory_sample", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["p"],
-        cpu_fields["T"], cpu_fields["smoke"], cpu_fields["fuel"], cpu_fields["flame"],
+        cpu_fields["u"],
+        cpu_fields["v"],
+        cpu_fields["w"],
+        cpu_fields["p"],
+        cpu_fields["T"],
+        cpu_fields["smoke"],
+        cpu_fields["fuel"],
+        cpu_fields["flame"],
         0.0,
         simulation_params["BC_CONFIG"],
         cpu_constants["HAS_OBSTACLE"],
@@ -152,7 +219,9 @@ def _initialise_solver(config):
     cpu_fields["fuel"] = fuel
     cpu_fields["flame"] = flame
     _sync_host_field_views(host_fields, cpu_fields)
-    helper_functions._record_timing(timing_stats, "init_apply_boundaries", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_apply_boundaries", perf_counter() - section_start
+    )
 
     t = 0.0
     section_start = perf_counter()
@@ -166,7 +235,9 @@ def _initialise_solver(config):
         cpu_constants,
         simulation_params["ANIMATION_STATE"],
     )
-    helper_functions._record_timing(timing_stats, "init_animated_state", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_animated_state", perf_counter() - section_start
+    )
 
     write_queue = None
     writer_threads = None
@@ -176,11 +247,22 @@ def _initialise_solver(config):
 
     section_start = perf_counter()
     dt, solver_diverged = time_step.compute_new_timestep_cpu(
-        cpu_fields["u"], cpu_fields["v"], cpu_fields["w"], cpu_fields["velocity_maxima"], fx_max, fy_max, fz_max,
-        cpu_constants["RHO"], cpu_constants["DELTA"], cpu_constants["NU"], simulation_params["CFL_MAX"],
+        cpu_fields["u"],
+        cpu_fields["v"],
+        cpu_fields["w"],
+        cpu_fields["velocity_maxima"],
+        fx_max,
+        fy_max,
+        fz_max,
+        cpu_constants["RHO"],
+        cpu_constants["DELTA"],
+        cpu_constants["NU"],
+        simulation_params["CFL_MAX"],
         max_dt=1.0 / simulation_params["OUTPUT_FPS"],
     )
-    helper_functions._record_timing(timing_stats, "init_timestep", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "init_timestep", perf_counter() - section_start
+    )
 
     return {
         "total_start_time": total_start_time,
@@ -230,6 +312,9 @@ def _run_time_step(state):
     u_tmp = cpu_fields["u_tmp"]
     v_tmp = cpu_fields["v_tmp"]
     w_tmp = cpu_fields["w_tmp"]
+    depart_x = cpu_fields["depart_x"]
+    depart_y = cpu_fields["depart_y"]
+    depart_z = cpu_fields["depart_z"]
     p = cpu_fields["p"]
     T = cpu_fields["T"]
     temperature_work = cpu_fields["temperature_work"]
@@ -248,8 +333,12 @@ def _run_time_step(state):
 
     if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
         section_start = perf_counter()
-        update_data.update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_constants, t)
-        helper_functions._record_timing(timing_stats, "loop_dynamic_boundaries", perf_counter() - section_start)
+        update_data.update_dynamic_boundary_data_on_cpu(
+            simulation_params, cpu_fields, cpu_constants, t
+        )
+        helper_functions._record_timing(
+            timing_stats, "loop_dynamic_boundaries", perf_counter() - section_start
+        )
 
     section_start = perf_counter()
     general_update_data.update_animated_constants(simulation_params, cpu_constants, t)
@@ -258,31 +347,54 @@ def _run_time_step(state):
         cpu_fields,
         t,
     )
-    helper_functions._record_timing(timing_stats, "loop_animated_state", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_animated_state", perf_counter() - section_start
+    )
 
     if turbulence_count > 0:
         section_start = perf_counter()
-        cpu_fields["turbulence_mix_factors"][:] = np.sin(turbulence_angular_frequencies * t)
-        helper_functions._record_timing(timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start)
+        cpu_fields["turbulence_mix_factors"][:] = np.sin(
+            turbulence_angular_frequencies * t
+        )
+        helper_functions._record_timing(
+            timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start
+        )
 
     section_start = perf_counter()
     forces.update_force_fields(
-        cpu_fields["Fx_base"], cpu_fields["Fy_base"], cpu_fields["Fz_base"],
-        cpu_fields["turbulence_Fx_a"], cpu_fields["turbulence_Fy_a"], cpu_fields["turbulence_Fz_a"],
-        cpu_fields["turbulence_Fx_b"], cpu_fields["turbulence_Fy_b"], cpu_fields["turbulence_Fz_b"],
+        cpu_fields["Fx_base"],
+        cpu_fields["Fy_base"],
+        cpu_fields["Fz_base"],
+        cpu_fields["turbulence_Fx_a"],
+        cpu_fields["turbulence_Fy_a"],
+        cpu_fields["turbulence_Fz_a"],
+        cpu_fields["turbulence_Fx_b"],
+        cpu_fields["turbulence_Fy_b"],
+        cpu_fields["turbulence_Fz_b"],
         cpu_fields["turbulence_amplitudes"],
         cpu_fields["turbulence_mix_factors"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),
         np.float32(animated_force["z"]),
-        cpu_fields["Fx"], cpu_fields["Fy"], cpu_fields["Fz"],
+        cpu_fields["Fx"],
+        cpu_fields["Fy"],
+        cpu_fields["Fz"],
     )
-    helper_functions._record_timing(timing_stats, "loop_force_fields", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_force_fields", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
-    forces.buoyancy_approximation(T, cpu_fields["Fz"], cpu_constants["BUOANCY_FACTOR"], cpu_constants["T_REFERENCE"])
-    helper_functions._record_timing(timing_stats, "loop_buoyancy", perf_counter() - section_start)
+    forces.buoyancy_approximation(
+        T,
+        cpu_fields["Fz"],
+        cpu_constants["BUOANCY_FACTOR"],
+        cpu_constants["T_REFERENCE"],
+    )
+    helper_functions._record_timing(
+        timing_stats, "loop_buoyancy", perf_counter() - section_start
+    )
 
     if cpu_constants["VORTICITY"] > 0.0:
         section_start = perf_counter()
@@ -297,7 +409,9 @@ def _run_time_step(state):
             cpu_fields["vorticity_magnitude"],
             cpu_constants["DELTA"],
         )
-        helper_functions._record_timing(timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start)
+        helper_functions._record_timing(
+            timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start
+        )
 
         section_start = perf_counter()
         vorticity.apply_vorticity_confinement(
@@ -312,7 +426,9 @@ def _run_time_step(state):
             cpu_constants["DELTA"],
             cpu_constants["VORTICITY"],
         )
-        helper_functions._record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
+        helper_functions._record_timing(
+            timing_stats, "loop_vorticity", perf_counter() - section_start
+        )
 
     section_start = perf_counter()
     if simulate_sparsely:
@@ -331,73 +447,113 @@ def _run_time_step(state):
             scalar_tile_padding,
         )
     else:
-        scalar_update.fill_active_scalar_tile_mask(cpu_fields["scalar_active_tiles"], np.bool_(True))
-        scalar_update.fill_active_scalar_tile_mask(cpu_fields["scalar_active_tiles_dilated"], np.bool_(True))
+        scalar_update.fill_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles"], np.bool_(True)
+        )
+        scalar_update.fill_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles_dilated"], np.bool_(True)
+        )
 
     advection_schemes.preserve_inactive_velocity_tiles(
-        u, v, w, u_work, v_work, w_work, cpu_fields["scalar_active_tiles_dilated"],
+        u,
+        v,
+        w,
+        u_work,
+        v_work,
+        w_work,
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     advection_schemes.advect_velocity_semi_lagrangian(
-        u, v, w, u_tmp, v_tmp, w_tmp, dt, cpu_constants["DELTA"], cpu_fields["scalar_active_tiles_dilated"],
+        u,
+        v,
+        w,
+        u_tmp,
+        v_tmp,
+        w_tmp,
+        depart_x,
+        depart_y,
+        depart_z,
+        dt,
+        cpu_constants["DELTA"],
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     advection_schemes.update_velocity_maccormack(
-        u, v, w, u_tmp, v_tmp, w_tmp,
-        p, dt, cpu_fields["Fx"], cpu_fields["Fy"], cpu_fields["Fz"], u_work, v_work, w_work,
-        cpu_constants["DELTA"], cpu_constants["RHO"], cpu_constants["NU"],
-        simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
-        np.float32(0.0),
+        u,
+        v,
+        w,
+        u_tmp,
+        v_tmp,
+        w_tmp,
+        depart_x,
+        depart_y,
+        depart_z,
+        dt,
+        cpu_fields["Fx"],
+        cpu_fields["Fy"],
+        cpu_fields["Fz"],
+        u_work,
+        v_work,
+        w_work,
+        cpu_constants["DELTA"],
+        cpu_constants["RHO"],
+        cpu_constants["NU"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
         cpu_fields["scalar_active_tiles_dilated"],
     )
-    helper_functions._record_timing(timing_stats, "loop_velocity", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_velocity", perf_counter() - section_start
+    )
 
     u, u_work = u_work, u
     v, v_work = v_work, v
     w, w_work = w_work, w
 
     section_start = perf_counter()
-    u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        u, v, w, p, T, smoke, fuel, flame,
-        dt,
-        simulation_params["BC_CONFIG"],
-        cpu_constants["HAS_OBSTACLE"],
-        cpu_fields["obstacle_mask"],
-        cpu_fields["obstacle_velocity_x"],
-        cpu_fields["obstacle_velocity_y"],
-        cpu_fields["obstacle_velocity_z"],
-        cpu_constants["HAS_SOURCE"],
-        cpu_fields["source_mask"],
-        cpu_fields["source_velocity_mask"],
-        cpu_fields["source_temperature"],
-        cpu_fields["source_smoke"],
-        cpu_fields["source_fuel"],
-        cpu_fields["source_velocity_x"],
-        cpu_fields["source_velocity_y"],
-        cpu_fields["source_velocity_z"],
-        apply_source_velocity=True,
-        apply_source_scalars=False,
-    )
-    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_velocity", perf_counter() - section_start)
-
-    section_start = perf_counter()
     p = pressure_solve.pressure_poisson(
-        u, v, w, p, T, cpu_fields["pressure_rhs"],
-        dt, cpu_fields["point_divergence"], cpu_fields["source_extra_pressure"],
-        cpu_constants["DELTA"], cpu_constants["RHO"], cpu_constants["EXPANSION_RATE"],
-        cpu_constants["T_REFERENCE"], simulation_params["MAX_ITER"],
+        u,
+        v,
+        w,
+        p,
+        T,
+        cpu_fields["pressure_rhs"],
+        dt,
+        cpu_fields["point_divergence"],
+        cpu_fields["source_extra_pressure"],
+        cpu_constants["DELTA"],
+        cpu_constants["RHO"],
+        cpu_constants["EXPANSION_RATE"],
+        cpu_constants["T_REFERENCE"],
+        simulation_params["MAX_ITER"],
     )
-    helper_functions._record_timing(timing_stats, "loop_pressure", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_pressure", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
-    u, v, w = pressure_solve.project_velocity(
-        u, v, w, p, cpu_fields["obstacle_mask"], dt,
-        cpu_constants["DELTA"], cpu_constants["RHO"],
+    pressure_solve.project_velocity_kernel(
+        u,
+        v,
+        w,
+        p,
+        cpu_fields["obstacle_mask"],
+        dt,
+        cpu_constants["DELTA"],
+        cpu_constants["RHO"],
     )
-    helper_functions._record_timing(timing_stats, "loop_projection", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_projection", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        u, v, w, p, T, smoke, fuel, flame,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
+        flame,
         dt,
         simulation_params["BC_CONFIG"],
         cpu_constants["HAS_OBSTACLE"],
@@ -417,24 +573,57 @@ def _run_time_step(state):
         apply_source_velocity=True,
         apply_source_scalars=False,
     )
-    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_apply_boundaries_pressure", perf_counter() - section_start
+    )
 
     section_start = perf_counter()
     scalar_update.preserve_inactive_scalar_tiles(
-        T, smoke, fuel, flame,
-        temperature_work, smoke_work, fuel_work, flame_work,
+        T,
+        smoke,
+        fuel,
+        flame,
+        temperature_work,
+        smoke_work,
+        fuel_work,
+        flame_work,
         cpu_fields["scalar_active_tiles_dilated"],
     )
     scalar_update.predict_scalar_fields_maccormack(
-        T, smoke, fuel, u, v, w, dt,
-        temperature_tmp, smoke_tmp, fuel_tmp,
+        T,
+        smoke,
+        fuel,
+        u,
+        v,
+        w,
+        dt,
+        temperature_tmp,
+        smoke_tmp,
+        fuel_tmp,
+        depart_x,
+        depart_y,
+        depart_z,
         cpu_constants["DELTA"],
         cpu_fields["scalar_active_tiles_dilated"],
     )
     scalar_update.update_scalar_fields_maccormack(
-        T, smoke, fuel, temperature_tmp, smoke_tmp, fuel_tmp,
-        u, v, w, dt,
-        temperature_work, smoke_work, fuel_work, flame_work,
+        T,
+        smoke,
+        fuel,
+        temperature_tmp,
+        smoke_tmp,
+        fuel_tmp,
+        depart_x,
+        depart_y,
+        depart_z,
+        u,
+        v,
+        w,
+        dt,
+        temperature_work,
+        smoke_work,
+        fuel_work,
+        flame_work,
         cpu_constants["DELTA"],
         cpu_constants["TEMPERATURE_DISSIPATION_RATE"],
         cpu_constants["TEMPERATURE_PRODUCTION_RATE"],
@@ -447,7 +636,9 @@ def _run_time_step(state):
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
         cpu_fields["scalar_active_tiles_dilated"],
     )
-    helper_functions._record_timing(timing_stats, "loop_scalars", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_scalars", perf_counter() - section_start
+    )
 
     T, temperature_work = temperature_work, T
     smoke, smoke_work = smoke_work, smoke
@@ -456,7 +647,14 @@ def _run_time_step(state):
 
     section_start = perf_counter()
     u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-        u, v, w, p, T, smoke, fuel, flame,
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
+        flame,
         dt,
         simulation_params["BC_CONFIG"],
         cpu_constants["HAS_OBSTACLE"],
@@ -476,7 +674,9 @@ def _run_time_step(state):
         apply_source_velocity=False,
         apply_source_scalars=True,
     )
-    helper_functions._record_timing(timing_stats, "loop_apply_boundaries_scalars", perf_counter() - section_start)
+    helper_functions._record_timing(
+        timing_stats, "loop_apply_boundaries_scalars", perf_counter() - section_start
+    )
 
     cpu_fields["u"] = u
     cpu_fields["v"] = v
@@ -509,10 +709,18 @@ def main(config=None):
     state = _initialise_solver(config)
 
     if state["solver_diverged"]:
-        print("ERROR: The solver diverged before output setup, stopping the simulation!")
+        print(
+            "ERROR: The solver diverged before output setup, stopping the simulation!"
+        )
     else:
         section_start = perf_counter()
-        write_queue, buffer_pool, writer_threads, shared_memory_blocks, _unused_output_staging = output_functions.setup_output(
+        (
+            write_queue,
+            buffer_pool,
+            writer_threads,
+            shared_memory_blocks,
+            _unused_output_staging,
+        ) = output_functions.setup_output(
             state["simulation_params"]["OUTPATH"],
             state["simulation_params"]["FRAME_START"],
             state["simulation_params"]["OUTPUT_BUFFER_VARIABLES"],
@@ -529,14 +737,18 @@ def main(config=None):
         state["write_queue"] = write_queue
         state["writer_threads"] = writer_threads
         state["shared_memory_blocks"] = shared_memory_blocks
-        helper_functions._record_timing(state["timing_stats"], "init_output_setup", perf_counter() - section_start)
+        helper_functions._record_timing(
+            state["timing_stats"], "init_output_setup", perf_counter() - section_start
+        )
 
         print("Start time iteration")
         helper_functions.emit_progress(0.0, state["t"])
 
         section_start = perf_counter()
         state["memory_tracker"].sample()
-        helper_functions._record_timing(state["timing_stats"], "loop_memory_sample", perf_counter() - section_start)
+        helper_functions._record_timing(
+            state["timing_stats"], "loop_memory_sample", perf_counter() - section_start
+        )
 
         next_output_time = 0.0
         output_index = 0
@@ -569,7 +781,9 @@ def main(config=None):
                     state["t"] / state["simulation_params"]["T_MAX"] * 100.0,
                     state["t"],
                 )
-            helper_functions._record_timing(state["timing_stats"], "loop_output", perf_counter() - section_start)
+            helper_functions._record_timing(
+                state["timing_stats"], "loop_output", perf_counter() - section_start
+            )
 
             state["t"] += state["dt"]
 
@@ -588,11 +802,17 @@ def main(config=None):
                 state["simulation_params"]["CFL_MAX"],
                 max_dt=1.0 / state["simulation_params"]["OUTPUT_FPS"],
             )
-            helper_functions._record_timing(state["timing_stats"], "loop_timestep", perf_counter() - section_start)
+            helper_functions._record_timing(
+                state["timing_stats"], "loop_timestep", perf_counter() - section_start
+            )
 
             section_start = perf_counter()
             state["memory_tracker"].sample()
-            helper_functions._record_timing(state["timing_stats"], "loop_memory_sample", perf_counter() - section_start)
+            helper_functions._record_timing(
+                state["timing_stats"],
+                "loop_memory_sample",
+                perf_counter() - section_start,
+            )
 
             if state["solver_diverged"]:
                 print("ERROR: The solver diverged, stopping the simulation!")
@@ -600,7 +820,9 @@ def main(config=None):
 
             state["dt"] = dt_new
             state["step_count"] += 1
-            helper_functions._record_timing(state["timing_stats"], "loop_total", perf_counter() - step_start)
+            helper_functions._record_timing(
+                state["timing_stats"], "loop_total", perf_counter() - step_start
+            )
 
         if state["write_queue"] is not None:
             section_start = perf_counter()
@@ -609,7 +831,9 @@ def main(config=None):
                 state["writer_threads"],
                 state["shared_memory_blocks"],
             )
-            helper_functions._record_timing(state["timing_stats"], "shutdown_output", perf_counter() - section_start)
+            helper_functions._record_timing(
+                state["timing_stats"], "shutdown_output", perf_counter() - section_start
+            )
 
     if state["solver_diverged"]:
         print("Simulation stopped after solver divergence.")
@@ -621,7 +845,9 @@ def main(config=None):
 
     section_start = perf_counter()
     state["memory_tracker"].sample()
-    helper_functions._record_timing(state["timing_stats"], "final_memory_sample", perf_counter() - section_start)
+    helper_functions._record_timing(
+        state["timing_stats"], "final_memory_sample", perf_counter() - section_start
+    )
     state["memory_tracker"].print_summary()
 
     total_runtime = perf_counter() - state["total_start_time"]

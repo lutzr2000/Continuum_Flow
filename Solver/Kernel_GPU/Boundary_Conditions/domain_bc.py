@@ -25,7 +25,7 @@ def _pressure_poisson_apply_neumann_bcs(p):
 
     The pressure Poisson solve uses homogeneous Neumann boundary conditions,
     meaning the pressure at the boundary is copied from the adjacent interior
-    cell. This kernel writes the boundary values after each Jacobi iteration so
+    cell. This kernel writes the boundary values after each iteration so
     the next iteration starts from a pressure field with valid boundary values.
 
     """

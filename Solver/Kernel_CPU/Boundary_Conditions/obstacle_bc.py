@@ -12,22 +12,28 @@ def build_obstacle_data(domain_cfg, obstacle_entries):
     host-side helpers, so the CPU kernel reuses them directly instead of
     duplicating that geometry pipeline.
     """
-    return general_obstacles.build_obstacle_data(domain_cfg, obstacle_entries, general_obstacles)
+    return general_obstacles.build_obstacle_data(
+        domain_cfg, obstacle_entries, general_obstacles
+    )
 
 
 def update_obstacle_mask(obstacle_data, time_value):
-    """Update the combined obstacle mask and wall velocities for the current simulation time."""
+    """
+    Update the combined obstacle mask and wall velocities for the current simulation time.
+    """
     runtime = obstacle_data.get("runtime")
     if runtime is None:
         return obstacle_data["mask"]
 
-    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = general_obstacles.update_dynamic_obstacle_data(
-        runtime,
-        time_value,
-        out_mask=obstacle_data["mask"],
-        out_velocity_x=obstacle_data["velocity_x"],
-        out_velocity_y=obstacle_data["velocity_y"],
-        out_velocity_z=obstacle_data["velocity_z"],
+    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = (
+        general_obstacles.update_dynamic_obstacle_data(
+            runtime,
+            time_value,
+            out_mask=obstacle_data["mask"],
+            out_velocity_x=obstacle_data["velocity_x"],
+            out_velocity_y=obstacle_data["velocity_y"],
+            out_velocity_z=obstacle_data["velocity_z"],
+        )
     )
     obstacle_data["mask"] = updated_mask
     obstacle_data["velocity_x"] = updated_velocity_x
@@ -38,8 +44,16 @@ def update_obstacle_mask(obstacle_data, time_value):
 
 @njit(cache=True, parallel=True)
 def _obstacle_bc_kernel_cpu(
-    u, v, w, smoke, fuel, flame,
-    mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+    u,
+    v,
+    w,
+    smoke,
+    fuel,
+    flame,
+    mask,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
 ):
     """
     Apply the obstacle overwrite rules over the whole volume on the CPU.
@@ -73,8 +87,16 @@ def _obstacle_bc_kernel_cpu(
 
 
 def obstacle_bc(
-    u, v, w, smoke, fuel, flame,
-    obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+    u,
+    v,
+    w,
+    smoke,
+    fuel,
+    flame,
+    obstacle_mask,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
 ):
     """
     Apply all obstacle boundary conditions to the CPU field state.
@@ -86,8 +108,16 @@ def obstacle_bc(
         return u, v, w, smoke, fuel, flame
 
     _obstacle_bc_kernel_cpu(
-        u, v, w, smoke, fuel, flame,
-        obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z,
+        u,
+        v,
+        w,
+        smoke,
+        fuel,
+        flame,
+        obstacle_mask,
+        obstacle_velocity_x,
+        obstacle_velocity_y,
+        obstacle_velocity_z,
     )
 
     return u, v, w, smoke, fuel, flame
