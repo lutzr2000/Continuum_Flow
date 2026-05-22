@@ -7,10 +7,7 @@ the live preview produces a RAM accumulation
 search for comments still in german
 sit down go through whole code
 layout with black formatter
-
-Solver: 
-VRAM active tiling?
-time CPU
+Timing
 Testing
 
 Documentation:

@@ -32,7 +32,7 @@ def pressure_equation_right_side(
                 authored_divergence = point_divergence[i, j, k]
                 extra_pressure_term = source_extra_pressure[i, j, k]
 
-                b[i, j, k] = rho_over_dt * (divergence + authored_divergence - thermal_divergence) - extra_pressure_term
+                b[i, j, k] = rho_over_dt * (divergence - authored_divergence - thermal_divergence) - extra_pressure_term
 
 
 def _remove_rhs_mean(b):

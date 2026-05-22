@@ -461,7 +461,6 @@ def _run_time_step(state, blockspergrid_3d):
         u, v, w, u_tmp, v_tmp, w_tmp,
         dt, gpu_fields["Fx"], gpu_fields["Fy"], gpu_fields["Fz"], u_work, v_work, w_work,
         gpu_constants["DELTA"], gpu_constants["RHO"], gpu_constants["NU"],
-        simulation_params["MAX_VELOCITY_INCREMENT_FACTOR"],
         np.float32(simulation_params["MACCORMACK_FACTOR"]),
         gpu_fields["scalar_active_tiles_dilated"],
     )
@@ -537,7 +536,7 @@ def _run_time_step(state, blockspergrid_3d):
         temperature_work, smoke_work, fuel_work, flame,
         gpu_fields["scalar_active_tiles_dilated"],
     )
-    scalar_update.predict_scalar_fields_maccormack[
+    scalar_update.predict_scalar_fields_semi_lagrangian[
         scalar_tile_blocks,
         kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](

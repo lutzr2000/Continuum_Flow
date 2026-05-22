@@ -6,7 +6,13 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 
 @cuda.jit(cache=True)
 def build_active_scalar_tile_mask(
-    T, smoke, fuel, flame, tile_mask, t_reference, activity_threshold,
+    T,
+    smoke,
+    fuel,
+    flame,
+    tile_mask,
+    t_reference,
+    activity_threshold,
 ):
     """
     Mark 4x4x4 tiles that currently contain meaningful scalar activity.
@@ -37,10 +43,10 @@ def build_active_scalar_tile_mask(
                     break
 
                 if (
-                    smoke[i, j, k] > activity_threshold or
-                    fuel[i, j, k] > activity_threshold or
-                    flame[i, j, k] > activity_threshold or
-                    abs(T[i, j, k] - t_reference) > activity_threshold
+                    smoke[i, j, k] > activity_threshold
+                    or fuel[i, j, k] > activity_threshold
+                    or flame[i, j, k] > activity_threshold
+                    or abs(T[i, j, k] - t_reference) > activity_threshold
                 ):
                     active = True
                     break
@@ -55,7 +61,9 @@ def build_active_scalar_tile_mask(
 
 @cuda.jit(cache=True)
 def dilate_active_scalar_tile_mask(tile_mask_in, tile_mask_out, padding_tiles):
-    """Expand active scalar tiles by a tile-radius buffer."""
+    """
+    Expand active scalar tiles by a tile-radius buffer.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_mask_in.shape
 
@@ -86,7 +94,9 @@ def dilate_active_scalar_tile_mask(tile_mask_in, tile_mask_out, padding_tiles):
 
 @cuda.jit(cache=True)
 def fill_active_scalar_tile_mask(tile_mask, value):
-    """Write one uniform activity value into the whole tile mask."""
+    """
+    Write one uniform activity value into the whole tile mask.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_mask.shape
 
@@ -98,7 +108,9 @@ def fill_active_scalar_tile_mask(tile_mask, value):
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _active_tile_cell_indices(field_shape):
-    """Map one active-tile launch to one cell index."""
+    """
+    Map one active-tile launch to one cell index.
+    """
     tile_i = cuda.blockIdx.x
     tile_j = cuda.blockIdx.y
     tile_k = cuda.blockIdx.z
@@ -117,10 +129,16 @@ def _active_tile_cell_indices(field_shape):
 def preserve_inactive_scalar_tiles(
     T, smoke, fuel, flame, T_out, smoke_out, fuel_out, flame_out, active_tile_mask
 ):
-    """Copy current scalar values into output buffers for inactive tiles."""
+    """
+    Copy current scalar values into output buffers for inactive tiles.
+    """
     tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(T.shape)
 
-    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
         return
     if i >= nx or j >= ny or k >= nz:
         return
@@ -134,15 +152,30 @@ def preserve_inactive_scalar_tiles(
 
 
 @cuda.jit(cache=True)
-def predict_scalar_fields_maccormack(
-    T, smoke, fuel, u, v, w, dt, predictor_T, predictor_smoke, predictor_fuel, delta, active_tile_mask
+def predict_scalar_fields_semi_lagrangian(
+    T,
+    smoke,
+    fuel,
+    u,
+    v,
+    w,
+    dt,
+    predictor_T,
+    predictor_smoke,
+    predictor_fuel,
+    delta,
+    active_tile_mask,
 ):
     """
-    Build the forward predictor state for the MacCormack scalar update.
+    Build the semi-Lagrangian predictor state for the scalar update.
     """
     tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
 
-    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
         return
     if active_tile_mask[tile_i, tile_j, tile_k] == 0:
         return
@@ -150,27 +183,60 @@ def predict_scalar_fields_maccormack(
         return
 
     x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
-        u, v, w,
-        float(i), float(j), float(k),
+        u,
+        v,
+        w,
+        float(i),
+        float(j),
+        float(k),
         dt / delta,
-        nx, ny, nz,
+        nx,
+        ny,
+        nz,
     )
 
-    predictor_T[i, j, k], predictor_smoke[i, j, k], predictor_fuel[i, j, k] = advection_schemes._sample_trilinear_vec3(
-        T, smoke, fuel,
-        x_depart, y_depart, z_depart,
-        nx, ny, nz,
+    predictor_T[i, j, k], predictor_smoke[i, j, k], predictor_fuel[i, j, k] = (
+        advection_schemes._sample_trilinear_vec3(
+            T,
+            smoke,
+            fuel,
+            x_depart,
+            y_depart,
+            z_depart,
+            nx,
+            ny,
+            nz,
+        )
     )
 
 
 @cuda.jit(cache=True)
 def update_scalar_fields_maccormack(
-    T, smoke, fuel, predictor_T, predictor_smoke, predictor_fuel,
-    u, v, w, dt, T_out, smoke_out, fuel_out, flame_out,
-    delta, temperature_dissipation_rate, temperature_production_rate,
-    smoke_dissipation_rate, smoke_production_rate,
-    fuel_burn_rate, fuel_ignition_temperature, minimum_oxygen_concentration, t_reference,
-    maccormack_factor, active_tile_mask
+    T,
+    smoke,
+    fuel,
+    predictor_T,
+    predictor_smoke,
+    predictor_fuel,
+    u,
+    v,
+    w,
+    dt,
+    T_out,
+    smoke_out,
+    fuel_out,
+    flame_out,
+    delta,
+    temperature_dissipation_rate,
+    temperature_production_rate,
+    smoke_dissipation_rate,
+    smoke_production_rate,
+    fuel_burn_rate,
+    fuel_ignition_temperature,
+    minimum_oxygen_concentration,
+    t_reference,
+    maccormack_factor,
+    active_tile_mask,
 ):
     """
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
@@ -182,7 +248,11 @@ def update_scalar_fields_maccormack(
     """
     tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
 
-    if tile_i >= active_tile_mask.shape[0] or tile_j >= active_tile_mask.shape[1] or tile_k >= active_tile_mask.shape[2]:
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
         return
     if active_tile_mask[tile_i, tile_j, tile_k] == 0:
         return
@@ -192,16 +262,28 @@ def update_scalar_fields_maccormack(
     dt_over_delta = dt / delta
 
     x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
-        u, v, w,
-        float(i), float(j), float(k),
+        u,
+        v,
+        w,
+        float(i),
+        float(j),
+        float(k),
         dt_over_delta,
-        nx, ny, nz,
+        nx,
+        ny,
+        nz,
     )
     x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
-        u, v, w,
-        float(i), float(j), float(k),
+        u,
+        v,
+        w,
+        float(i),
+        float(j),
+        float(k),
         dt_over_delta,
-        nx, ny, nz,
+        nx,
+        ny,
+        nz,
     )
 
     T_advected = predictor_T[i, j, k]
@@ -209,42 +291,60 @@ def update_scalar_fields_maccormack(
     fuel_advected = predictor_fuel[i, j, k]
 
     T_reverse, smoke_reverse, fuel_reverse = advection_schemes._sample_trilinear_vec3(
-        predictor_T, predictor_smoke, predictor_fuel,
-        x_forward, y_forward, z_forward,
-        nx, ny, nz,
+        predictor_T,
+        predictor_smoke,
+        predictor_fuel,
+        x_forward,
+        y_forward,
+        z_forward,
+        nx,
+        ny,
+        nz,
     )
 
     T_corrected = T_advected + maccormack_factor * (T[i, j, k] - T_reverse)
-    smoke_corrected = smoke_advected + maccormack_factor * (smoke[i, j, k] - smoke_reverse)
+    smoke_corrected = smoke_advected + maccormack_factor * (
+        smoke[i, j, k] - smoke_reverse
+    )
     fuel_corrected = fuel_advected + maccormack_factor * (fuel[i, j, k] - fuel_reverse)
 
     x0, y0, z0, x1, y1, z1, _, _, _ = advection_schemes._prepare_trilinear_coords(
         x_depart, y_depart, z_depart, nx, ny, nz
     )
-    T_lower, T_upper = advection_schemes._sample_cell_extrema_inner(T, x0, y0, z0, x1, y1, z1)
-    smoke_lower, smoke_upper = advection_schemes._sample_cell_extrema_inner(smoke, x0, y0, z0, x1, y1, z1)
-    fuel_lower, fuel_upper = advection_schemes._sample_cell_extrema_inner(fuel, x0, y0, z0, x1, y1, z1)
+    T_lower, T_upper = advection_schemes._sample_cell_extrema_inner(
+        T, x0, y0, z0, x1, y1, z1
+    )
+    smoke_lower, smoke_upper = advection_schemes._sample_cell_extrema_inner(
+        smoke, x0, y0, z0, x1, y1, z1
+    )
+    fuel_lower, fuel_upper = advection_schemes._sample_cell_extrema_inner(
+        fuel, x0, y0, z0, x1, y1, z1
+    )
 
     T_corrected = advection_schemes._clamp(T_corrected, T_lower, T_upper)
-    smoke_corrected = advection_schemes._clamp(smoke_corrected, smoke_lower, smoke_upper)
+    smoke_corrected = advection_schemes._clamp(
+        smoke_corrected, smoke_lower, smoke_upper
+    )
     fuel_corrected = advection_schemes._clamp(fuel_corrected, fuel_lower, fuel_upper)
 
     oxygen_center = 100.0 - smoke_corrected
 
     if (
-        T_corrected > fuel_ignition_temperature and
-        fuel_corrected > 0.0 and
-        oxygen_center >= minimum_oxygen_concentration
+        T_corrected > fuel_ignition_temperature
+        and fuel_corrected > 0.0
+        and oxygen_center >= minimum_oxygen_concentration
     ):
         fuel_source = -fuel_burn_rate * fuel_corrected
     else:
         fuel_source = 0.0
 
-    temperature_source = (
-        -temperature_dissipation_rate * (T_corrected - t_reference) +
-        temperature_production_rate * (-fuel_source)
+    temperature_source = -temperature_dissipation_rate * (
+        T_corrected - t_reference
+    ) + temperature_production_rate * (-fuel_source)
+    smoke_source = (
+        smoke_production_rate * (-fuel_source)
+        - smoke_dissipation_rate * smoke_corrected
     )
-    smoke_source = smoke_production_rate * (-fuel_source) - smoke_dissipation_rate * smoke_corrected
 
     T_updated = T_corrected + dt * temperature_source
     smoke_updated = smoke_corrected + dt * smoke_source

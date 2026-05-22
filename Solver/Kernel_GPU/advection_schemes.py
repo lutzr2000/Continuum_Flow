@@ -267,7 +267,6 @@ def update_velocity_maccormack(
     delta,
     rho,
     nu,
-    max_velocity_increment_factor,
     maccormack_factor,
     active_tile_mask,
 ):
