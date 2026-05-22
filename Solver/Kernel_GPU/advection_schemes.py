@@ -399,12 +399,6 @@ def update_velocity_maccormack(
     v_raw = corrected_v - diffusion_y + force_coeff * Fy[i, j, k]
     w_raw = corrected_w - diffusion_z + force_coeff * Fz[i, j, k]
 
-    # limiter
-    max_increment = max_velocity_increment_factor * delta / dt
-    du = min(max(u_raw - u_center, -max_increment), max_increment)
-    dv = min(max(v_raw - v_center, -max_increment), max_increment)
-    dw = min(max(w_raw - w_center, -max_increment), max_increment)
-
-    un[i, j, k] = u_center + du
-    vn[i, j, k] = v_center + dv
-    wn[i, j, k] = w_center + dw
+    un[i, j, k] = u_raw
+    vn[i, j, k] = v_raw
+    wn[i, j, k] = w_raw
