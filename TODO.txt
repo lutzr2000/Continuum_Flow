@@ -4,7 +4,6 @@ General:
 Make solver installable
 Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
-rename everything to continum flow
 Timing
 Testing
 

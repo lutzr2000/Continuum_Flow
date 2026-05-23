@@ -158,14 +158,12 @@ def _project_root_directory():
 
 
 def _resolve_python_executable():
-    candidate_paths = (
-        _project_root_directory() / "Continuum_Flow_env" / "Scripts" / "python.exe",
-        _project_root_directory() / "BlenderCFD_env" / "Scripts" / "python.exe",
+    python_executable = (
+        _project_root_directory() / "ContinuumFlow_env" / "Scripts" / "python.exe"
     )
-    for candidate_path in candidate_paths:
-        if candidate_path.exists():
-            return str(candidate_path)
-    raise FileNotFoundError(f"Python executable not found: {candidate_paths[0]}")
+    if python_executable.exists():
+        return str(python_executable)
+    raise FileNotFoundError(f"Python executable not found: {python_executable}")
 
 
 def _run_kernel(config_dict):

@@ -38,15 +38,9 @@ def _solver_python_executable():
     """
     Return the dedicated Continuum Flow solver Python executable.
     """
-    project_root = _project_root_directory()
-    candidate_paths = (
-        project_root / "Continuum_Flow_env" / "Scripts" / "python.exe",
-        project_root / "BlenderCFD_env" / "Scripts" / "python.exe",
-    )
-    for candidate_path in candidate_paths:
-        if candidate_path.exists():
-            return candidate_path.resolve()
-    return candidate_paths[0].resolve()
+    return (
+        _project_root_directory() / "ContinuumFlow_env" / "Scripts" / "python.exe"
+    ).resolve()
 
 
 def _register_module_aliases(module, module_name):
