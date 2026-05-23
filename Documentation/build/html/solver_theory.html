@@ -199,6 +199,7 @@
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Solver Theory</a></li>
 <li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best practive</a></li>
 </ul>
 
 </div>
@@ -407,7 +408,8 @@ solved as a Poisson problem:</p>
 \[\nabla^2 p = b\]</div>
 </div>
 <p>The right-hand side <span class="math notranslate nohighlight">\(b\)</span> is assembled from the divergence of the predicted
-velocity, an authored divergence source, and the thermal-expansion term:</p>
+velocity, an authored divergence source, a source-authored extra-pressure term,
+and the thermal-expansion term:</p>
 <div class="math-wrapper docutils container">
 <div class="math notranslate nohighlight">
 \[b =
@@ -416,11 +418,13 @@ velocity, an authored divergence source, and the thermal-expansion term:</p>
 \nabla \cdot \mathbf{u}
 + d_{\mathrm{authored}}
 - d_{\mathrm{thermal}}
-\right)\]</div>
+\right)
+- p_{\mathrm{extra}}\]</div>
 </div>
 <p>where <span class="math notranslate nohighlight">\(d_{\mathrm{authored}}\)</span> is an additional user-authored divergence
-source and <span class="math notranslate nohighlight">\(d_{\mathrm{thermal}}\)</span> is the thermal expansion term
-discussed below.</p>
+source, <span class="math notranslate nohighlight">\(p_{\mathrm{extra}}\)</span> is the additional pressure source term
+coming from source nodes, and <span class="math notranslate nohighlight">\(d_{\mathrm{thermal}}\)</span> is the thermal
+expansion term discussed below.</p>
 <p>The pressure field is solved iteratively with a red-black SOR method built on
 top of Gauss-Seidel updates. Each iteration updates alternating checkerboard
 cells and reapplies homogeneous Neumann boundary conditions, meaning the normal

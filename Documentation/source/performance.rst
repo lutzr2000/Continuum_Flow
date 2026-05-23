@@ -1,5 +1,3 @@
-.. _performance-section:
-
 Performance
 ===========
 

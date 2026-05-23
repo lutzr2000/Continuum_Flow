@@ -199,6 +199,7 @@
 <li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a></li>
 <li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best practive</a></li>
 </ul>
 
 </div>
@@ -380,13 +381,15 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/source_node.jpg"><img alt="_images/source_node.jpg" class="block-image-left" src="_images/source_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.</p>
+<p>The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.</p>
 <dl class="simple">
 <dt><strong>Fuel Concentration</strong></dt><dd><p>Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
 </dd>
 <dt><strong>Smoke Concentration</strong></dt><dd><p>Smoke concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
 </dd>
 <dt><strong>Temperature</strong></dt><dd><p>Temperature spawned within the source.</p>
+</dd>
+<dt><strong>Extra Pressure</strong></dt><dd><p>Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.</p>
 </dd>
 <dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>

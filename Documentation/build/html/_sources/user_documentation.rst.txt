@@ -182,7 +182,7 @@ Source
    :class: block-image-left
    :width: 300px
 
-The Source node defines where fluid, smoke, temperature and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
+The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
 
 **Fuel Concentration**
     Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.
@@ -192,6 +192,9 @@ The Source node defines where fluid, smoke, temperature and velocity are spawned
 
 **Temperature**
     Temperature spawned within the source.
+
+**Extra Pressure**
+    Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.

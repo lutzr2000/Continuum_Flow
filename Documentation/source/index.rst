@@ -1,13 +1,37 @@
 Continuum Flow
 ==============
+Bringing the fun of flow simulation to Blender!
 
-Continuum Flow is an extension for Blender that provides a new tool chain for simulating fire, smoke and air in general. The main goal of this project was to A: build a workflow that is more intuitive to use compared to Blenders native solver and B: provides more compute performance when simulating. While the former can be subjective and the software is build to the taste of myself, the performance can be measured and is compared in section :ref:`performance-section`. Continuum Flow is somewhere between 2-20 times faster than Blenders native solver, depending on the usage of CPU or GPU and the general simulation settings. Continuum Flow can run on CPU and GPU, even though only Nvidia GPUs are supported. The simulation definition is done via a custom node tree oriented at other commercial software.
+General
+-------
+This Addon allows for CPU and Nvidia-GPU based flow simulations within Blender. It is free and Open-Source! The goal is to make simulating things like smoke and fire in Blender faster, more intuitive and with that more fun! The solver can be somewhere between 1.5 and 3 times faster on CPU and between 9 and 18 times faster on GPU than Blenders Native solver. The addon is integrated into Blender and comes with its own custom node tree. Additionally the Addon comes with a few geometry nodes setups to post process the computed results and raise the quality of the results even higher. The solver is based on the great tutorial by Prof. Dr. Zhengtao Gao (https://drzgan.github.io/Python_CFD/intro.html) and on the methods presented in the paper "Stable fluids" (https://doi.org/10.1145/311535.311548).
 
-At this point i want to point out that large parts of the code was written with the support of AI. I made this solver as a hobby project and i am not an experienced developer. Bugs in this code are inevitable, please feel free to report them on GitHub. Additionally it is absolutly necessary to mention Prof. Dr. Zhengtao Gao, on whoms great learning course (https://drzgan.github.io/Python_CFD/intro.html) the basis of this solver is build. 
+Features
+--------
+- Simulating velocity, pressure, fire, smoke and temperature
+- Greatly improved performance compared to Blenders native solver
+- Directly integrated in Blender
+- Interaction with obstacles (stationary and movable)
+- Simple combustion model
+- Easy to set up
 
+Limitations
+-----------
+- GPU is only supported for Nvidia cards
+- No simulation of multi-phase flow (e.g. water)
+- No interaction with Blenders native force fields
+- No interaction with Blenders particle systems
+- Obstacles can not deform (so no shape keys or armatures)
 
-In :doc:`Installation <install>` the installation of Continuum Flow is explained. The :doc:`User Documentation <user_documentation>` explains the workflow and the functions of each custom node. :doc:`Custom Geometry Nodes <custom_geo_nodes>` explains the usage of Blenders native geometry node setups that can be used for post processing the simulation result. The :doc:`Solver Theory <solver_theory>` chapter explains the mathematical theory behind the solver and the :doc:`Performance <performance>` chapter contains a performance evaluation. Lastly, the :doc:`Examples <examples>` chapter contains short explanations for every example file provided.
+Disclaimers
+-----------
+- this is a hobby project, continued development is not guranteed, others are invited to participate
+- i am not a professional developer, large parts where developed with the support of CODEX (AI); i tried to make sure to document and organize the software well, but still => there will be bugs
+- currently the software is in beta => there will be bugs
+- some things in the software might change in the future
 
+Further sections
+----------------
 
 .. toctree::
    :maxdepth: 2
@@ -19,5 +43,4 @@ In :doc:`Installation <install>` the installation of Continuum Flow is explained
    solver_theory
    performance
    examples
-
-
+   best_practice
