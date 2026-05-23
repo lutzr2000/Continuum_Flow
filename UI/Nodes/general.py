@@ -1,12 +1,17 @@
-"""Core Continuum Flow nodes and shared node utilities, including domain, simulation, geometry, source, and obstacle nodes."""
-
 import bpy
 import importlib
 import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    FloatVectorProperty,
+    IntProperty,
+    PointerProperty,
+)
 from bpy.app.handlers import persistent
 
 MODULE_NAME_ALIASES = {
@@ -19,19 +24,25 @@ LEGACY_BAKE_RUNNING_KEY = "blendercfd_bake_running"
 
 
 def _ui_directory():
-    """Return the root UI directory."""
+    """
+    Return the root UI directory.
+    """
     if "__file__" in globals():
         return Path(__file__).resolve().parents[1]
     return (Path.cwd() / "UI").resolve()
 
 
 def _project_root_directory():
-    """Return the Continuum Flow project root directory."""
+    """
+    Return the Continuum Flow project root directory.
+    """
     return _ui_directory().parent
 
 
 def _solver_python_executable():
-    """Return the dedicated Continuum Flow solver Python executable."""
+    """
+    Return the dedicated Continuum Flow solver Python executable.
+    """
     project_root = _project_root_directory()
     candidate_paths = (
         project_root / "Continuum_Flow_env" / "Scripts" / "python.exe",
@@ -44,14 +55,18 @@ def _solver_python_executable():
 
 
 def _register_module_aliases(module, module_name):
-    """Expose a loaded module under both the new and legacy import names."""
+    """
+    Expose a loaded module under both the new and legacy import names.
+    """
     sys.modules[module_name] = module
     for alias in MODULE_NAME_ALIASES.get(module_name, ()):
         sys.modules[alias] = module
 
 
 def _load_ui_module(module_name, file_names, package_names=()):
-    """Load a sibling UI module across package, absolute, and file-based contexts."""
+    """
+    Load a sibling UI module across package, absolute, and file-based contexts.
+    """
     if isinstance(file_names, str):
         file_names = (file_names,)
     if isinstance(package_names, str):
@@ -114,7 +129,9 @@ _GPU_SOLVER_AVAILABLE_CACHE = None
 
 
 def _gpu_solver_available():
-    """Return whether a usable CUDA backend is available in the solver environment."""
+    """
+    Return whether a usable CUDA backend is available in the solver environment.
+    """
     global _GPU_SOLVER_AVAILABLE_CACHE
     if _GPU_SOLVER_AVAILABLE_CACHE is not None:
         return _GPU_SOLVER_AVAILABLE_CACHE
@@ -136,8 +153,7 @@ def _gpu_solver_available():
             timeout=5.0,
         )
         _GPU_SOLVER_AVAILABLE_CACHE = (
-            result.returncode == 0 and
-            result.stdout.strip() == "1"
+            result.returncode == 0 and result.stdout.strip() == "1"
         )
     except Exception:
         _GPU_SOLVER_AVAILABLE_CACHE = False
@@ -145,12 +161,18 @@ def _gpu_solver_available():
 
 
 def _window_manager_from_context(context=None):
-    """Return the current Blender window manager if available."""
-    return getattr(context, "window_manager", None) or getattr(bpy.context, "window_manager", None)
+    """
+    Return the current Blender window manager if available.
+    """
+    return getattr(context, "window_manager", None) or getattr(
+        bpy.context, "window_manager", None
+    )
 
 
 def set_bake_running(is_running, context=None):
-    """Store whether Continuum Flow currently has a bake running."""
+    """
+    Store whether Continuum Flow currently has a bake running.
+    """
     window_manager = _window_manager_from_context(context)
     if window_manager is None:
         return
@@ -164,25 +186,31 @@ def set_bake_running(is_running, context=None):
 
 
 def is_bake_running(context=None):
-    """Return whether Continuum Flow currently has a bake running."""
+    """
+    Return whether Continuum Flow currently has a bake running.
+    """
     window_manager = _window_manager_from_context(context)
     if window_manager is None:
         return False
     return bool(
-        window_manager.get(CONTINUUM_FLOW_BAKE_RUNNING_KEY, False) or
-        window_manager.get(LEGACY_BAKE_RUNNING_KEY, False)
+        window_manager.get(CONTINUUM_FLOW_BAKE_RUNNING_KEY, False)
+        or window_manager.get(LEGACY_BAKE_RUNNING_KEY, False)
     )
 
 
 class BlenderCFDBaseNode(bpy.types.Node):
-    """Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes."""
+    """
+    Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes.
+    """
 
     @classmethod
     def poll(cls, ntree):
         return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
 
     def _sync_node(self):
-        """Keep sockets or other lightweight node state in sync."""
+        """
+        Keep sockets or other lightweight node state in sync.
+        """
 
     def init(self, context):
         self._sync_node()
@@ -205,7 +233,9 @@ class BlenderCFDBaseNode(bpy.types.Node):
 
 
 def ensure_socket(collection, socket_type, name, multi_input=False):
-    """Return a socket, creating it on demand with optional multi-input support."""
+    """
+    Return a socket, creating it on demand with optional multi-input support.
+    """
     socket = collection.get(name)
     if socket is None:
         socket = collection.new(socket_type, name, use_multi_input=multi_input)
@@ -215,25 +245,40 @@ def ensure_socket(collection, socket_type, name, multi_input=False):
 
 
 def ensure_geometry_input(node):
-    """Ensure that a node exposes the standard multi-input geometry socket."""
-    return ensure_socket(node.inputs, "NodeSocketGeometry", "Geometry", multi_input=True)
+    """
+    Ensure that a node exposes the standard multi-input geometry socket.
+    """
+    return ensure_socket(
+        node.inputs, "NodeSocketGeometry", "Geometry", multi_input=True
+    )
 
 
 def ensure_named_output(node, socket_type, name):
-    """Ensure that a node exposes one named output socket of the given type."""
+    """
+    Ensure that a node exposes one named output socket of the given type.
+    """
     return ensure_socket(node.outputs, socket_type, name)
 
 
 def _active_blendercfd_tree(context):
-    """Return the active Continuum Flow node tree from the current editor context."""
+    """
+    Return the active Continuum Flow node tree from the current editor context.
+    """
     space_data = getattr(context, "space_data", None)
-    if space_data is None or getattr(space_data, "tree_type", "") != BlenderCFDNodeTree.bl_idname:
+    if (
+        space_data is None
+        or getattr(space_data, "tree_type", "") != BlenderCFDNodeTree.bl_idname
+    ):
         return None
-    return getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
+    return getattr(space_data, "edit_tree", None) or getattr(
+        space_data, "node_tree", None
+    )
 
 
 def _node_cursor_location(context):
-    """Return the preferred placement location for newly created nodes."""
+    """
+    Return the preferred placement location for newly created nodes.
+    """
     space_data = getattr(context, "space_data", None)
     cursor = getattr(space_data, "cursor_location", None)
     if cursor is None:
@@ -242,16 +287,22 @@ def _node_cursor_location(context):
 
 
 def _iter_blendercfd_node_trees():
-    """Yield all Continuum Flow node trees in the current file."""
+    """
+    Yield all Continuum Flow node trees in the current file.
+    """
     for node_tree in bpy.data.node_groups:
         if getattr(node_tree, "bl_idname", "") == BlenderCFDNodeTree.bl_idname:
             yield node_tree
 
 
 def _set_node_property_component(node, property_name, value, array_index):
-    """Assign one scalar F-curve value to a scalar or vector node property."""
+    """
+    Assign one scalar F-curve value to a scalar or vector node property.
+    """
     current_value = getattr(node, property_name)
-    is_vector_like = hasattr(current_value, "__len__") and not isinstance(current_value, (str, bytes))
+    is_vector_like = hasattr(current_value, "__len__") and not isinstance(
+        current_value, (str, bytes)
+    )
 
     if array_index < 0 or not is_vector_like:
         setattr(node, property_name, value)
@@ -265,7 +316,9 @@ def _set_node_property_component(node, property_name, value, array_index):
 
 
 def _iter_keyframeable_node_properties(node_tree):
-    """Yield writable Continuum Flow node properties that expose a valid RNA path."""
+    """
+    Yield writable Continuum Flow node properties that expose a valid RNA path.
+    """
     for node in getattr(node_tree, "nodes", ()):
         for prop in node.bl_rna.properties:
             if prop.identifier == "rna_type" or prop.is_readonly:
@@ -274,7 +327,9 @@ def _iter_keyframeable_node_properties(node_tree):
 
 
 def _iter_action_fcurves(action):
-    """Yield F-curves from legacy or layered Blender actions."""
+    """
+    Yield F-curves from legacy or layered Blender actions.
+    """
     if action is None:
         return
 
@@ -299,7 +354,9 @@ def _iter_action_fcurves(action):
 
 
 def _sync_node_tree_animation(node_tree, frame_value):
-    """Evaluate one Continuum Flow node-tree action and push values onto node properties."""
+    """
+    Evaluate one Continuum Flow node-tree action and push values onto node properties.
+    """
     animation_data = getattr(node_tree, "animation_data", None)
     action = getattr(animation_data, "action", None)
     if action is None:
@@ -342,11 +399,15 @@ def _sync_node_tree_animation(node_tree, frame_value):
             print(f"    {known_path}")
         print("  Action F-Curve paths:")
         for fcurve in fcurves:
-            print(f"    {getattr(fcurve, 'data_path', '')} [{int(getattr(fcurve, 'array_index', -1))}]")
+            print(
+                f"    {getattr(fcurve, 'data_path', '')} [{int(getattr(fcurve, 'array_index', -1))}]"
+            )
 
 
 def sync_all_blendercfd_node_animations(scene=None):
-    """Evaluate all Continuum Flow node-tree animations for the current frame."""
+    """
+    Evaluate all Continuum Flow node-tree animations for the current frame.
+    """
     if scene is None:
         scene = getattr(bpy.context, "scene", None)
     if scene is None:
@@ -358,7 +419,9 @@ def sync_all_blendercfd_node_animations(scene=None):
 
 
 def _tag_animation_editors_redraw():
-    """Refresh node editors after animation values were applied."""
+    """
+    Refresh node editors after animation values were applied.
+    """
     window_manager = _window_manager_from_context()
     if window_manager is None:
         return
@@ -374,13 +437,17 @@ def _tag_animation_editors_redraw():
 
 @persistent
 def blendercfd_frame_change_post(scene, _depsgraph):
-    """Force Continuum Flow custom node properties to follow their F-curves per frame."""
+    """
+    Force Continuum Flow custom node properties to follow their F-curves per frame.
+    """
     sync_all_blendercfd_node_animations(scene)
     _tag_animation_editors_redraw()
 
 
 class BlenderCFDDomainNode(BlenderCFDBaseNode):
-    """Node used to define the CFD domain resolution and boundary conditions."""
+    """
+    Node used to define the CFD domain resolution and boundary conditions.
+    """
 
     bl_idname = "BLENDERCFD_DOMAIN_NODE"
     bl_label = "Domain"
@@ -443,7 +510,9 @@ class BlenderCFDDomainNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
-    """Node used to store the physical coefficients of the CFD simulation."""
+    """
+    Node used to store the physical coefficients of the CFD simulation.
+    """
 
     bl_idname = "BLENDERCFD_PHYSICS_NODE"
     bl_label = "Physics"
@@ -453,9 +522,25 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
     bl_width_max = 360.0
     property_groups = (
         ("Fluid", ("fluid_density", "fluid_viscosity")),
-        ("Temperature", ("temperature_dissipation", "reference_temperature", "buoyancy", "expansion_rate")),
+        (
+            "Temperature",
+            (
+                "temperature_dissipation",
+                "reference_temperature",
+                "buoyancy",
+                "expansion_rate",
+            ),
+        ),
         ("Smoke", ("smoke_dissipation", "smoke_production_rate")),
-        ("Fuel", ("fuel_dissipation", "fuel_burn_rate", "fuel_ignition_temperature", "minimum_oxygen_concentration")),
+        (
+            "Fuel",
+            (
+                "fuel_dissipation",
+                "fuel_burn_rate",
+                "fuel_ignition_temperature",
+                "minimum_oxygen_concentration",
+            ),
+        ),
         ("Extras", ("vorticity",)),
     )
 
@@ -471,7 +556,7 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
     fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, precision=4, description="How quickly fuel is burned, lower means slower burning", options={"ANIMATABLE"})  # type: ignore
     fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite", options={"ANIMATABLE"})  # type: ignore
     minimum_oxygen_concentration: FloatProperty(name="Minimum Oxygen Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Minimum oxygen concentration required for fuel to burn", options={"ANIMATABLE"})  # type: ignore
-    vorticity: FloatProperty(name="Vorticity", default=0.1, min=0.0, precision=4, description="Amount of additional vorticity in the flow, zero is physically accurate, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
+    vorticity: FloatProperty(name="Vorticity", default=0.1, min=0.0, precision=4, description="Amount of additional vorticity in the flow, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
         ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Physics")
@@ -483,7 +568,9 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDSimulationNode(BlenderCFDBaseNode):
-    """Node used to collect all simulation-wide settings and input dependencies."""
+    """
+    Node used to collect all simulation-wide settings and input dependencies.
+    """
 
     bl_idname = "BLENDERCFD_SIMULATION_NODE"
     bl_label = "Simulation"
@@ -493,7 +580,15 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     bl_width_max = 420.0
     property_groups = (
         ("Time", ("start_frame", "end_frame", "cfl")),
-        ("Solver", ("iterations", "maccormack_factor", "simulate_sparsely", "adaptive_domain_threshold")),
+        (
+            "Solver",
+            (
+                "iterations",
+                "maccormack_factor",
+                "simulate_sparsely",
+                "adaptive_domain_threshold",
+            ),
+        ),
     )
 
     solver_backend: bpy.props.EnumProperty(
@@ -511,10 +606,14 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
     iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     maccormack_factor: FloatProperty(name="MacCormack Factor", default=0.25, min=0.0, max=0.5, soft_min=0.0, soft_max=0.5, precision=3, description="Higher values make the flow more swirly, but can produce artefacts", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
-    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.01, min=0.0, precision=6, description="cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
+    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.01, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
-        socket_type = BlenderCFDForceSocket.bl_idname if name == "Forces" else BlenderCFDLinkSocket.bl_idname
+        socket_type = (
+            BlenderCFDForceSocket.bl_idname
+            if name == "Forces"
+            else BlenderCFDLinkSocket.bl_idname
+        )
         return ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
 
     def _sync_node(self):
@@ -547,7 +646,9 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDSourceNode(BlenderCFDBaseNode):
-    """Node used to define a generic CFD source region and its scalar and velocity targets."""
+    """
+    Node used to define a generic CFD source region and its scalar and velocity targets.
+    """
 
     bl_idname = "BLENDERCFD_SOURCE_NODE"
     bl_label = "Source"
@@ -558,13 +659,17 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
     scalar_property_names = ("fuel", "smoke", "temperature", "extra_pressure")
     velocity_space_items = (
         ("WORLD", "World Space", "Apply the source velocity in world coordinates"),
-        ("LOCAL", "Local Space", "Apply the source velocity in each linked object's local coordinates"),
+        (
+            "LOCAL",
+            "Local Space",
+            "Apply the source velocity in each linked object's local coordinates",
+        ),
     )
 
     fuel: FloatProperty(name="Fuel Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Fuel emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Smoke emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
     temperature: FloatProperty(name="Temperature", default=300.0, min=0.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
-    extra_pressure: FloatProperty(name="Extra Pressure", default=0.0, precision=4, description="Additional pressure source term injected inside the source region", options={"ANIMATABLE"})  # type: ignore
+    extra_pressure: FloatProperty(name="Extra Pressure", default=0.0, precision=4, description="Additional pressure added in the source", options={"ANIMATABLE"})  # type: ignore
     velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 
@@ -585,7 +690,9 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDGeometryNode(BlenderCFDBaseNode):
-    """Node used to reference a Blender object as geometry inside the CFD graph."""
+    """
+    Node used to reference a Blender object as geometry inside the CFD graph.
+    """
 
     bl_idname = "BLENDERCFD_GEOMETRY_NODE"
     bl_label = "Geometry"
@@ -605,7 +712,9 @@ class BlenderCFDGeometryNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDObstacleNode(BlenderCFDBaseNode):
-    """Node used to define obstacle geometry inside the CFD domain."""
+    """
+    Node used to define obstacle geometry inside the CFD domain.
+    """
 
     bl_idname = "BLENDERCFD_OBSTACLE_NODE"
     bl_label = "Obstacle"
@@ -620,7 +729,9 @@ class BlenderCFDObstacleNode(BlenderCFDBaseNode):
 
 
 class BlenderCFDViewerNode(BlenderCFDBaseNode):
-    """Node used as a lightweight endpoint for inspecting simulation results."""
+    """
+    Node used as a lightweight endpoint for inspecting simulation results.
+    """
 
     bl_idname = "BLENDERCFD_VIEWER_NODE"
     bl_label = "Viewer"
@@ -650,7 +761,9 @@ class BlenderCFDViewerNode(BlenderCFDBaseNode):
 
 
 class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
-    """Add a ready-to-use Continuum Flow starter setup with the core nodes linked."""
+    """
+    Add a ready-to-use Continuum Flow starter setup with the core nodes linked.
+    """
 
     bl_idname = "blendercfd.add_basic_setup"
     bl_label = "Add Basic Continuum Flow Setup"
@@ -669,7 +782,11 @@ class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
         cursor_x, cursor_y = _node_cursor_location(context)
         node_specs = (
             ("domain", "BLENDERCFD_DOMAIN_NODE", (cursor_x - 520.0, cursor_y + 140.0)),
-            ("physics", "BLENDERCFD_PHYSICS_NODE", (cursor_x - 520.0, cursor_y - 140.0)),
+            (
+                "physics",
+                "BLENDERCFD_PHYSICS_NODE",
+                (cursor_x - 520.0, cursor_y - 140.0),
+            ),
             ("simulation", "BLENDERCFD_SIMULATION_NODE", (cursor_x - 120.0, cursor_y)),
             ("viewer", "BLENDERCFD_VIEWER_NODE", (cursor_x + 280.0, cursor_y + 120.0)),
             ("output", "BLENDERCFD_OUTPUT_NODE", (cursor_x + 280.0, cursor_y - 120.0)),

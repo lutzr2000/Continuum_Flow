@@ -1,5 +1,3 @@
-"""Host-side manager for persistent VDB writer worker processes used during bakes."""
-
 import json
 import queue
 import socketserver
@@ -8,19 +6,22 @@ import sys
 import threading
 from pathlib import Path
 
-
 DEFAULT_VDB_WRITER_PROCESS_COUNT = 4
 
 
 def _bake_directory():
-    """Return the local UI/Bake directory path."""
+    """
+    Return the local UI/Bake directory path.
+    """
     if "__file__" in globals():
         return Path(__file__).resolve().parent
     return (Path.cwd() / "UI" / "Bake").resolve()
 
 
 def _resolve_blender_python_executable():
-    """Return Blender's bundled python executable for VDB writer processes."""
+    """
+    Return Blender's bundled python executable for VDB writer processes.
+    """
     candidates = [
         Path(sys.executable),
         Path(sys.prefix) / "bin" / "python.exe",
@@ -37,7 +38,9 @@ def _resolve_blender_python_executable():
 
 
 class _VDBWriterProcess:
-    """One persistent UI-side VDB writer process."""
+    """
+    One persistent UI-side VDB writer process.
+    """
 
     def __init__(self, python_executable, writer_script):
         self._process = subprocess.Popen(
@@ -80,7 +83,9 @@ class _VDBWriterProcess:
 
 
 class _VDBWriterProcessPool:
-    """Round-robin pool of persistent UI-side VDB writer processes."""
+    """
+    Round-robin pool of persistent UI-side VDB writer processes.
+    """
 
     def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT):
         writer_script = _bake_directory() / "writer_worker.py"
@@ -115,7 +120,9 @@ class _ThreadingTCPServer(socketserver.ThreadingTCPServer):
 
 class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
     def handle(self):
-        """Handle one persistent kernel writer connection."""
+        """
+        Handle one persistent kernel writer connection.
+        """
         for raw_line in self.rfile:
             line = raw_line.decode("utf-8").strip()
             if not line:
@@ -135,9 +142,13 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
 
 
 class HostVDBWriterServer:
-    """Host endpoint that dispatches VDB write jobs to a process pool."""
+    """
+    Host endpoint that dispatches VDB write jobs to a process pool.
+    """
 
-    def __init__(self, host="127.0.0.1", writer_process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT):
+    def __init__(
+        self, host="127.0.0.1", writer_process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT
+    ):
         self.host = host
         self._writer_pool = _VDBWriterProcessPool(process_count=writer_process_count)
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)

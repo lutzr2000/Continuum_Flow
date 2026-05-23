@@ -1,15 +1,14 @@
-"""Core node tree definitions and add-menu categories for Continuum Flow."""
-
 import bpy
 from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
-
 
 NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
 NODE_CATEGORIES_ID = "BLENDERCFD_NODE_CATEGORIES"
 
 
 class BlenderCFDNodeTree(bpy.types.NodeTree):
-    """Custom node tree used as the main editor space for Continuum Flow nodes."""
+    """
+    Custom node tree used as the main editor space for Continuum Flow nodes.
+    """
 
     bl_idname = NODE_TREE_ID
     bl_label = "Continuum Flow Nodes"
@@ -17,17 +16,23 @@ class BlenderCFDNodeTree(bpy.types.NodeTree):
 
 
 class BlenderCFDNodeCategory(NodeCategory):
-    """Node category shown in the add menu of the Continuum Flow node tree."""
+    """
+    Node category shown in the add menu of the Continuum Flow node tree.
+    """
 
     @classmethod
     def poll(cls, context):
-        """Return whether the category should be visible in the current editor."""
+        """
+        Return whether the category should be visible in the current editor.
+        """
         space_data = getattr(context, "space_data", None)
         return space_data is not None and space_data.tree_type == NODE_TREE_ID
 
 
 def build_node_categories():
-    """Build the add menu categories for all registered Continuum Flow nodes."""
+    """
+    Build the add menu categories for all registered Continuum Flow nodes.
+    """
     return [
         BlenderCFDNodeCategory(
             "BLENDERCFD_NODES",
@@ -69,6 +74,4 @@ def build_node_categories():
     ]
 
 
-classes = (
-    BlenderCFDNodeTree,
-)
+classes = (BlenderCFDNodeTree,)

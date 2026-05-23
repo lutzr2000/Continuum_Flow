@@ -1,5 +1,3 @@
-"""Storage and import helpers for Continuum Flow bake output directories and VDB files."""
-
 import copy
 import shutil
 from datetime import datetime, timezone
@@ -7,7 +5,6 @@ from pathlib import Path
 
 import bpy
 from mathutils import Matrix
-
 
 _LAST_BAKE_CONFIG_DICT = None
 _BAKE_OUTPUT_DIRECTORY_PREFIX = ".continuum_flow_bake_"
@@ -21,7 +18,9 @@ _LEGACY_OUTPUT_PATH_KEY = "blendercfd_output_path"
 
 
 def _iter_simulation_dicts(config_dict):
-    """Yield only valid simulation dictionaries from one config payload."""
+    """
+    Yield only valid simulation dictionaries from one config payload.
+    """
     if not isinstance(config_dict, dict):
         return
     for simulation_cfg in config_dict.get("simulations", ()) or ():
@@ -30,7 +29,9 @@ def _iter_simulation_dicts(config_dict):
 
 
 def _iter_output_dicts(simulation_cfg):
-    """Yield only valid output dictionaries from one simulation entry."""
+    """
+    Yield only valid output dictionaries from one simulation entry.
+    """
     if not isinstance(simulation_cfg, dict):
         return
     for output_cfg in simulation_cfg.get("outputs", ()) or ():
@@ -39,7 +40,9 @@ def _iter_output_dicts(simulation_cfg):
 
 
 def _iter_viewer_dicts(simulation_cfg):
-    """Yield only valid viewer dictionaries from one simulation entry."""
+    """
+    Yield only valid viewer dictionaries from one simulation entry.
+    """
     if not isinstance(simulation_cfg, dict):
         return
     for viewer_cfg in simulation_cfg.get("viewers", ()) or ():
@@ -48,7 +51,9 @@ def _iter_viewer_dicts(simulation_cfg):
 
 
 def _tag_all_areas_redraw(context=None):
-    window_manager = getattr(context, "window_manager", None) if context is not None else None
+    window_manager = (
+        getattr(context, "window_manager", None) if context is not None else None
+    )
     if window_manager is None:
         window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
@@ -84,8 +89,8 @@ def _iter_output_directory_vdb_files(output_directory):
         if not child_directory.is_dir():
             continue
         if not (
-            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or
-            child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
+            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX)
+            or child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
         ):
             continue
         for vdb_file in sorted(child_directory.glob("*.vdb")):
@@ -113,13 +118,18 @@ def _path_is_same_or_within_directory(path_value, directory):
 
 def _display_output_directory_name(output_directory):
     output_directory = Path(output_directory)
-    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
+    if output_directory.name.startswith(
+        _BAKE_OUTPUT_DIRECTORY_PREFIX
+    ) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
         return output_directory.parent.name or output_directory.name
     return output_directory.name
 
 
 def _prepared_output_directory(base_output_path, bake_token):
-    return Path(base_output_path).resolve() / f"{_BAKE_OUTPUT_DIRECTORY_PREFIX}{bake_token}"
+    return (
+        Path(base_output_path).resolve()
+        / f"{_BAKE_OUTPUT_DIRECTORY_PREFIX}{bake_token}"
+    )
 
 
 def _bake_geometry_cache_directory(output_directory, bake_token):
@@ -129,13 +139,17 @@ def _bake_geometry_cache_directory(output_directory, bake_token):
 
 def _bake_cancel_flag_path(output_directory, bake_token):
     output_directory = Path(output_directory).resolve()
-    return _prepared_output_directory(output_directory, bake_token) / _BAKE_CANCEL_FILENAME
+    return (
+        _prepared_output_directory(output_directory, bake_token) / _BAKE_CANCEL_FILENAME
+    )
 
 
 def _cleanup_geometry_cache(config_dict):
     if not config_dict:
         return
-    geometry_cache_dir = (((config_dict.get("meta") or {}).get("geometry_cache_dir")) or "").strip()
+    geometry_cache_dir = (
+        ((config_dict.get("meta") or {}).get("geometry_cache_dir")) or ""
+    ).strip()
     if not geometry_cache_dir:
         return
 
@@ -162,7 +176,10 @@ def _cleanup_geometry_cache(config_dict):
         except OSError:
             break
 
-        if any(current_path == output_directory for output_directory in managed_output_directories):
+        if any(
+            current_path == output_directory
+            for output_directory in managed_output_directories
+        ):
             break
         current_path = current_path.parent
 
@@ -194,7 +211,9 @@ def _prepare_config_for_bake(config_dict, bake_token=None):
                 continue
             base_output_path = str(Path(output_path).resolve())
             output_cfg["base_output_path"] = base_output_path
-            output_cfg["output_path"] = str(_prepared_output_directory(base_output_path, bake_token))
+            output_cfg["output_path"] = str(
+                _prepared_output_directory(base_output_path, bake_token)
+            )
             if cancel_flag_path is None:
                 cancel_flag_path = _bake_cancel_flag_path(base_output_path, bake_token)
     if cancel_flag_path is not None:
@@ -279,8 +298,12 @@ def _object_matches_output_directory(volume_object, output_directory):
         return True
     if volume_object.get(_LEGACY_OUTPUT_PATH_KEY) == str(output_directory):
         return True
-    if volume_object.get(_AUTO_IMPORT_KEY) or volume_object.get(_LEGACY_AUTO_IMPORT_KEY):
-        return _volume_data_matches_output_directory(volume_object.data, output_directory)
+    if volume_object.get(_AUTO_IMPORT_KEY) or volume_object.get(
+        _LEGACY_AUTO_IMPORT_KEY
+    ):
+        return _volume_data_matches_output_directory(
+            volume_object.data, output_directory
+        )
     return False
 
 
@@ -297,9 +320,12 @@ def _remove_previous_baked_volume(output_directory):
         bpy.data.objects.remove(volume_object, do_unlink=True)
         removed_count += 1
     for volume_data in list(bpy.data.volumes):
-        if volume_data not in matched_volume_data and not _volume_data_matches_output_directory(
-            volume_data,
-            output_directory,
+        if (
+            volume_data not in matched_volume_data
+            and not _volume_data_matches_output_directory(
+                volume_data,
+                output_directory,
+            )
         ):
             continue
         try:
@@ -321,7 +347,9 @@ def _delete_baked_vdb_files(output_directory):
 
 
 def _remove_empty_bake_subdirectories(output_directory):
-    """Remove empty Continuum Flow bake subdirectories below one base output directory."""
+    """
+    Remove empty Continuum Flow bake subdirectories below one base output directory.
+    """
     output_directory = Path(output_directory).resolve()
     if not output_directory.exists() or not output_directory.is_dir():
         return 0
@@ -331,8 +359,8 @@ def _remove_empty_bake_subdirectories(output_directory):
         if not child_directory.is_dir():
             continue
         if not (
-            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or
-            child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
+            child_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX)
+            or child_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX)
         ):
             continue
         try:
@@ -347,7 +375,9 @@ def _remove_bake_output_directory(output_directory):
     output_directory = Path(output_directory).resolve()
     if not output_directory.exists() or not output_directory.is_dir():
         return
-    if output_directory.name.startswith(_BAKE_OUTPUT_DIRECTORY_PREFIX) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
+    if output_directory.name.startswith(
+        _BAKE_OUTPUT_DIRECTORY_PREFIX
+    ) or output_directory.name.startswith(_LEGACY_BAKE_OUTPUT_DIRECTORY_PREFIX):
         shutil.rmtree(output_directory, ignore_errors=True)
 
 
@@ -384,7 +414,9 @@ def _free_bake(context, config_dict=None, output_directories=None):
 
     if not cleanup_directories:
         cleanup_config = config_dict or _LAST_BAKE_CONFIG_DICT
-        cleanup_directories = _output_directories_from_config(cleanup_config) if cleanup_config else []
+        cleanup_directories = (
+            _output_directories_from_config(cleanup_config) if cleanup_config else []
+        )
 
     removed_volumes = 0
     deleted_files = 0
@@ -463,7 +495,9 @@ def _refresh_imported_vdb_sequence(output_directory, vdb_files, start_frame):
     for imported_object in _managed_volume_objects(output_directory):
         if imported_object.type != "VOLUME" or imported_object.data is None:
             continue
-        _apply_imported_volume_sequence_settings(imported_object.data, start_frame, len(vdb_files))
+        _apply_imported_volume_sequence_settings(
+            imported_object.data, start_frame, len(vdb_files)
+        )
         imported_object.data.filepath = str(first_file)
         _reload_volume_data(imported_object.data)
         _apply_imported_volume_object_settings(imported_object, output_directory)
@@ -479,13 +513,17 @@ def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
     volume_object = None
     try:
         volume_data.filepath = str(first_file)
-        _apply_imported_volume_sequence_settings(volume_data, start_frame, len(vdb_files))
+        _apply_imported_volume_sequence_settings(
+            volume_data, start_frame, len(vdb_files)
+        )
         _reload_volume_data(volume_data)
         volume_object = bpy.data.objects.new(volume_name, volume_data)
         _apply_imported_volume_object_settings(volume_object, output_directory)
         target_collection = _volume_collection_for_import()
         if target_collection is None:
-            raise RuntimeError("No active Blender collection is available for the imported volume.")
+            raise RuntimeError(
+                "No active Blender collection is available for the imported volume."
+            )
         target_collection.objects.link(volume_object)
         return 1
     except Exception:
@@ -502,7 +540,9 @@ def _import_baked_vdb_sequence(output_directory, vdb_files, start_frame):
 
 
 def _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame):
-    refreshed_count = _refresh_imported_vdb_sequence(output_directory, vdb_files, start_frame)
+    refreshed_count = _refresh_imported_vdb_sequence(
+        output_directory, vdb_files, start_frame
+    )
     if refreshed_count > 0:
         return refreshed_count
     return _import_baked_vdb_sequence(output_directory, vdb_files, start_frame)
@@ -513,7 +553,9 @@ def _iter_live_preview_output_entries(config_dict):
         viewers = tuple(_iter_viewer_dicts(simulation_cfg))
         if not viewers:
             continue
-        if not any(bool(viewer_cfg.get("live_preview", True)) for viewer_cfg in viewers):
+        if not any(
+            bool(viewer_cfg.get("live_preview", True)) for viewer_cfg in viewers
+        ):
             continue
         settings = simulation_cfg.get("settings") or {}
         start_frame = int(settings.get("start_frame", 1))
@@ -526,7 +568,11 @@ def _iter_live_preview_output_entries(config_dict):
 
 def _live_preview_refresh_interval(config_dict, default_fps=24):
     intervals = []
-    for _output_directory, _start_frame, output_cfg in _iter_live_preview_output_entries(config_dict):
+    for (
+        _output_directory,
+        _start_frame,
+        output_cfg,
+    ) in _iter_live_preview_output_entries(config_dict):
         try:
             output_fps = max(1.0, float(output_cfg.get("fps", default_fps)))
         except (TypeError, ValueError):
@@ -542,7 +588,9 @@ def _refresh_live_preview(config_dict, context=None, state=None):
     refreshed_count = 0
     latest_frame = None
 
-    for output_directory, start_frame, _output_cfg in _iter_live_preview_output_entries(config_dict):
+    for output_directory, start_frame, _output_cfg in _iter_live_preview_output_entries(
+        config_dict
+    ):
         if not output_directory.exists():
             continue
         vdb_files = _baked_vdb_files(output_directory)
@@ -551,14 +599,22 @@ def _refresh_live_preview(config_dict, context=None, state=None):
             continue
 
         output_key = str(output_directory)
-        previous_frame_count = int((preview_state.get(output_key) or {}).get("frame_count", 0))
+        previous_frame_count = int(
+            (preview_state.get(output_key) or {}).get("frame_count", 0)
+        )
         if frame_count <= previous_frame_count:
             continue
 
-        refreshed_count += _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame)
+        refreshed_count += _ensure_baked_vdb_sequence_imported(
+            output_directory, vdb_files, start_frame
+        )
         preview_state[output_key] = {"frame_count": frame_count}
         current_latest_frame = int(start_frame) + frame_count - 1
-        latest_frame = current_latest_frame if latest_frame is None else max(latest_frame, current_latest_frame)
+        latest_frame = (
+            current_latest_frame
+            if latest_frame is None
+            else max(latest_frame, current_latest_frame)
+        )
 
     if refreshed_count > 0:
         _refresh_after_live_preview_update(context=context, frame_value=latest_frame)
@@ -576,5 +632,7 @@ def _import_baked_vdbs(config_dict):
         if not vdb_files:
             continue
         start_frame = _start_frame_for_output_directory(config_dict, output_directory)
-        imported_count += _ensure_baked_vdb_sequence_imported(output_directory, vdb_files, start_frame)
+        imported_count += _ensure_baked_vdb_sequence_imported(
+            output_directory, vdb_files, start_frame
+        )
     return imported_count, missing_directories

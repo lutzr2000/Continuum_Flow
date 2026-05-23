@@ -1,5 +1,3 @@
-"""Worker process that receives JSON payloads and writes OpenVDB output files."""
-
 import json
 import os
 import sys
@@ -10,14 +8,18 @@ import openvdb
 
 
 def _as_vdb_input_array(array, dtype):
-    """Return an array layout that OpenVDB can consume without avoidable copies."""
+    """
+    Return an array layout that OpenVDB can consume without avoidable copies.
+    """
     if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
         return array
     return np.asarray(array, dtype=dtype, order="C")
 
 
 def _create_scalar_grid(storage_dtype):
-    """Create a scalar OpenVDB grid and configure its file storage precision."""
+    """
+    Create a scalar OpenVDB grid and configure its file storage precision.
+    """
     storage_dtype = np.dtype(storage_dtype)
     grid = openvdb.FloatGrid()
     if hasattr(grid, "saveFloatAsHalf"):
@@ -26,7 +28,9 @@ def _create_scalar_grid(storage_dtype):
 
 
 def _create_vector_grid(storage_dtype):
-    """Create a vector OpenVDB grid and configure its file storage precision."""
+    """
+    Create a vector OpenVDB grid and configure its file storage precision.
+    """
     storage_dtype = np.dtype(storage_dtype)
     for grid_class_name in ("Vec3SGrid", "VectorGrid", "Vec3fGrid"):
         grid_class = getattr(openvdb, grid_class_name, None)
@@ -40,12 +44,16 @@ def _create_vector_grid(storage_dtype):
 
 
 def _nonzero_mask(array, threshold):
-    """Return a boolean active mask for one scalar field."""
+    """
+    Return a boolean active mask for one scalar field.
+    """
     return np.abs(array) > float(threshold)
 
 
 def _load_shared_array(field_info):
-    """Open one shared-memory array view described by the writer payload."""
+    """
+    Open one shared-memory array view described by the writer payload.
+    """
     shm = shared_memory.SharedMemory(name=field_info["shm_name"])
     array = np.ndarray(
         tuple(field_info["shape"]),
@@ -56,7 +64,9 @@ def _load_shared_array(field_info):
 
 
 def _sparse_export_mask(payload):
-    """Build the shared sparse mask from smoke and flame fields when requested."""
+    """
+    Build the shared sparse mask from smoke and flame fields when requested.
+    """
     sparse_mask_fields = payload.get("sparse_mask_fields", {})
     if not sparse_mask_fields:
         return None, []
@@ -71,12 +81,18 @@ def _sparse_export_mask(payload):
         shm, array = _load_shared_array(field_info)
         open_shared_memory.append(shm)
         field_mask = _nonzero_mask(array, sparse_threshold)
-        sparse_mask = field_mask if sparse_mask is None else np.logical_or(sparse_mask, field_mask)
+        sparse_mask = (
+            field_mask
+            if sparse_mask is None
+            else np.logical_or(sparse_mask, field_mask)
+        )
     return sparse_mask, open_shared_memory
 
 
 def _array_for_export(array, dtype, sparse_mask=None, sparse=False):
-    """Prepare one field array for VDB export, applying sparse masking when requested."""
+    """
+    Prepare one field array for VDB export, applying sparse masking when requested.
+    """
     if sparse and sparse_mask is not None:
         masked_array = np.zeros(array.shape, dtype=dtype)
         copy_mask = sparse_mask
@@ -88,7 +104,9 @@ def _array_for_export(array, dtype, sparse_mask=None, sparse=False):
 
 
 def _grid_transform_from_payload(payload, shape):
-    """Build the OpenVDB transform that maps grid indices into Blender world space."""
+    """
+    Build the OpenVDB transform that maps grid indices into Blender world space.
+    """
     transform_info = payload.get("transform", {})
     voxel_size = float(transform_info.get("voxel_size", payload.get("delta", 1.0)))
     origin = transform_info.get("origin")
@@ -107,7 +125,9 @@ def _grid_transform_from_payload(payload, shape):
 
 
 def _open_grid_field_arrays(grid_info):
-    """Open all shared-memory arrays needed to build one VDB grid."""
+    """
+    Open all shared-memory arrays needed to build one VDB grid.
+    """
     field_arrays = {}
     open_shared_memory = []
     for field_name, field_info in grid_info.get("fields", {}).items():
@@ -118,10 +138,14 @@ def _open_grid_field_arrays(grid_info):
 
 
 def _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask):
-    """Assemble one scalar or vector array in the layout expected by OpenVDB."""
+    """
+    Assemble one scalar or vector array in the layout expected by OpenVDB.
+    """
     field_names = list(grid_info.get("fields", {}).keys())
     if grid_info.get("grid_type") == "vector":
-        array = np.stack([field_arrays[field_name] for field_name in field_names], axis=-1)
+        array = np.stack(
+            [field_arrays[field_name] for field_name in field_names], axis=-1
+        )
     else:
         array = field_arrays[field_names[0]]
 
@@ -134,7 +158,9 @@ def _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask):
 
 
 def write_vdb(payload):
-    """Create one VDB file from field data stored in shared memory."""
+    """
+    Create one VDB file from field data stored in shared memory.
+    """
     output_vdb_path = payload["output_path"]
     temporary_output_path = f"{output_vdb_path}.tmp"
     grids = []
@@ -154,10 +180,14 @@ def write_vdb(payload):
             else:
                 grid, grid_dtype = _create_scalar_grid(storage_dtype)
 
-            grid_array = _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask)
+            grid_array = _grid_array_for_export(
+                grid_info, field_arrays, grid_dtype, sparse_mask
+            )
             grid.name = str(grid_info["name"]).lower()
             grid.copyFromArray(grid_array)
-            grid.transform = _grid_transform_from_payload(payload, tuple(grid_info["shape"]))
+            grid.transform = _grid_transform_from_payload(
+                payload, tuple(grid_info["shape"])
+            )
             grids.append(grid)
 
         openvdb.write(temporary_output_path, grids=grids)
@@ -174,7 +204,9 @@ def write_vdb(payload):
 
 
 def main():
-    """Run a persistent JSON-lines VDB writer process."""
+    """
+    Run a persistent JSON-lines VDB writer process.
+    """
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -186,7 +218,9 @@ def main():
             write_vdb(json.loads(line))
             sys.stdout.write('{"status": "ok"}\n')
         except Exception as exc:
-            sys.stdout.write(json.dumps({"status": "error", "message": str(exc)}) + "\n")
+            sys.stdout.write(
+                json.dumps({"status": "error", "message": str(exc)}) + "\n"
+            )
         sys.stdout.flush()
 
 

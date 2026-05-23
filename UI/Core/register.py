@@ -1,5 +1,3 @@
-"""Core registration entrypoint for Continuum Flow UI classes and node categories."""
-
 import bpy
 import importlib.util
 import sys
@@ -19,40 +17,52 @@ MODULE_NAME_ALIASES = {
 
 
 def _register_module_aliases(module, module_name):
-    """Expose one loaded module under both the new and legacy import names."""
+    """
+    Expose one loaded module under both the new and legacy import names.
+    """
     sys.modules[module_name] = module
     for alias in MODULE_NAME_ALIASES.get(module_name, ()):
         sys.modules[alias] = module
 
 
 def _candidate_core_paths(file_names):
-    """Yield candidate paths for modules that live inside UI/Core."""
+    """
+    Yield candidate paths for modules that live inside UI/Core.
+    """
     for file_name in file_names:
         if "__file__" in globals():
             yield Path(__file__).resolve().with_name(file_name)
 
         current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
         if current_text is not None and current_text.filepath:
-            yield Path(bpy.path.abspath(current_text.filepath)).resolve().with_name(file_name)
+            yield Path(bpy.path.abspath(current_text.filepath)).resolve().with_name(
+                file_name
+            )
 
         yield (Path.cwd() / "UI" / "Core" / file_name).resolve()
 
 
 def _candidate_ui_paths(relative_path):
-    """Yield candidate paths for modules that live under the UI root."""
+    """
+    Yield candidate paths for modules that live under the UI root.
+    """
     relative_path = Path(relative_path)
     if "__file__" in globals():
         yield Path(__file__).resolve().parent.parent / relative_path
 
     current_text = getattr(getattr(bpy.context, "space_data", None), "text", None)
     if current_text is not None and current_text.filepath:
-        yield Path(bpy.path.abspath(current_text.filepath)).resolve().parent.parent / relative_path
+        yield Path(
+            bpy.path.abspath(current_text.filepath)
+        ).resolve().parent.parent / relative_path
 
     yield (Path.cwd() / "UI" / relative_path).resolve()
 
 
 def _load_module_from_candidates(candidate_paths, module_name, readable_name):
-    """Load a module from the first existing candidate path."""
+    """
+    Load a module from the first existing candidate path.
+    """
     seen = set()
     for candidate in candidate_paths:
         candidate_str = str(candidate)
@@ -72,11 +82,13 @@ def _load_module_from_candidates(candidate_paths, module_name, readable_name):
         spec.loader.exec_module(module)
         return module
 
-    raise ImportError(f"Keines dieser Module konnte geladen werden: {readable_name}")
+    raise ImportError(f"None of these modules could be loaded: {readable_name}")
 
 
 def _load_module(file_names, module_name):
-    """Load a UI/Core module from disk or from an open Blender text block."""
+    """
+    Load a UI/Core module from disk or from an open Blender text block.
+    """
     if isinstance(file_names, str):
         file_names = (file_names,)
 
@@ -95,11 +107,13 @@ def _load_module(file_names, module_name):
             return text_block.as_module()
 
     readable_names = ", ".join(file_names)
-    raise ImportError(f"Keines dieser Module konnte geladen werden: {readable_names}")
+    raise ImportError(f"None of these modules could be loaded: {readable_names}")
 
 
 def _load_module_from_relative_path(relative_path, module_name):
-    """Load a UI module from a path relative to the UI directory."""
+    """
+    Load a UI module from a path relative to the UI directory.
+    """
     return _load_module_from_candidates(
         _candidate_ui_paths(relative_path),
         module_name,
@@ -111,11 +125,21 @@ MODULES = {
     "node_tree": _load_module("node_tree.py", "continuum_flow_nodetree"),
     "sockets": _load_module("sockets.py", "continuum_flow_sockets"),
     "viewer": _load_module("viewer.py", "continuum_flow_viewer"),
-    "config": _load_module_from_relative_path(Path("Export") / "config.py", "continuum_flow_create_config_dict"),
-    "general_nodes": _load_module_from_relative_path(Path("Nodes") / "general.py", "continuum_flow_general_nodes"),
-    "force_nodes": _load_module_from_relative_path(Path("Nodes") / "forces.py", "continuum_flow_force_nodes"),
-    "output_node": _load_module_from_relative_path(Path("Nodes") / "output.py", "continuum_flow_output_node"),
-    "bake_runtime": _load_module_from_relative_path(Path("Nodes") / "bake_runtime.py", "continuum_flow_bake_runtime"),
+    "config": _load_module_from_relative_path(
+        Path("Export") / "config.py", "continuum_flow_create_config_dict"
+    ),
+    "general_nodes": _load_module_from_relative_path(
+        Path("Nodes") / "general.py", "continuum_flow_general_nodes"
+    ),
+    "force_nodes": _load_module_from_relative_path(
+        Path("Nodes") / "forces.py", "continuum_flow_force_nodes"
+    ),
+    "output_node": _load_module_from_relative_path(
+        Path("Nodes") / "output.py", "continuum_flow_output_node"
+    ),
+    "bake_runtime": _load_module_from_relative_path(
+        Path("Nodes") / "bake_runtime.py", "continuum_flow_bake_runtime"
+    ),
 }
 NODE_CLASSES = (
     *MODULES["general_nodes"].classes,
@@ -126,15 +150,23 @@ NODE_CLASSES = (
 
 
 def _remove_blendercfd_frame_change_handlers():
-    """Remove stale Continuum Flow frame-change handlers from previous reloads."""
+    """
+    Remove stale Continuum Flow frame-change handlers from previous reloads.
+    """
     handlers = bpy.app.handlers.frame_change_post
     kept_handlers = []
     for handler in handlers:
         handler_name = getattr(handler, "__name__", "")
         handler_module = getattr(handler, "__module__", "")
-        if handler_name in {"blendercfd_frame_change_post", "continuum_flow_frame_change_post"}:
+        if handler_name in {
+            "blendercfd_frame_change_post",
+            "continuum_flow_frame_change_post",
+        }:
             continue
-        if "blendercfd_general_nodes" in handler_module or "continuum_flow_general_nodes" in handler_module:
+        if (
+            "blendercfd_general_nodes" in handler_module
+            or "continuum_flow_general_nodes" in handler_module
+        ):
             continue
         kept_handlers.append(handler)
 
@@ -143,7 +175,9 @@ def _remove_blendercfd_frame_change_handlers():
 
 
 def _reregister_classes(classes):
-    """Unregister and register one class sequence to survive Blender reloads."""
+    """
+    Unregister and register one class sequence to survive Blender reloads.
+    """
     for cls in classes:
         try:
             bpy.utils.unregister_class(cls)
@@ -153,7 +187,9 @@ def _reregister_classes(classes):
 
 
 def _unregister_classes(classes):
-    """Unregister one class sequence in reverse order."""
+    """
+    Unregister one class sequence in reverse order.
+    """
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
@@ -162,7 +198,9 @@ def _unregister_classes(classes):
 
 
 def register():
-    """Register node tree classes, node classes, and add-menu categories."""
+    """
+    Register node tree classes, node classes, and add-menu categories.
+    """
     _remove_blendercfd_frame_change_handlers()
     _reregister_classes(MODULES["node_tree"].classes)
     _reregister_classes(MODULES["sockets"].classes)
@@ -198,7 +236,9 @@ def register():
 
 
 def unregister():
-    """Unregister menu categories and all Continuum Flow UI classes."""
+    """
+    Unregister menu categories and all Continuum Flow UI classes.
+    """
     _remove_blendercfd_frame_change_handlers()
 
     try:

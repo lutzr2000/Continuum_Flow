@@ -1,5 +1,3 @@
-"""Runtime helpers and operators for starting, monitoring, and cancelling Continuum Flow bakes."""
-
 import importlib.util
 import json
 import queue
@@ -12,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 
 import bpy
+
 try:
     import continuum_flow_general_nodes as GeneralNodes
 except ImportError:
@@ -80,7 +79,9 @@ _SOLVER_DIVERGENCE_MESSAGES = (
 
 
 def _gpu_solver_available():
-    """Return whether a usable CUDA backend is available in the solver environment."""
+    """
+    Return whether a usable CUDA backend is available in the solver environment.
+    """
     try:
         python_executable = _resolve_python_executable()
         result = subprocess.run(
@@ -106,7 +107,11 @@ def _draw_blendercfd_status_progress(header, context):
     row.ui_units_x = 20
     split = row.split(factor=0.65, align=True)
     progress_row = split.row(align=True)
-    progress_row.progress(factor=_STATUS_PROGRESS_FACTOR, text=f"{_STATUS_PROGRESS_PERCENT:.1f}%", type="BAR")
+    progress_row.progress(
+        factor=_STATUS_PROGRESS_FACTOR,
+        text=f"{_STATUS_PROGRESS_PERCENT:.1f}%",
+        type="BAR",
+    )
     eta_row = split.row(align=True)
     eta_row.ui_units_x = 7
     eta_row.label(text=_STATUS_PROGRESS_ETA or _STATUS_PROGRESS_ETA_PLACEHOLDER)
@@ -143,7 +148,9 @@ def _solver_backend_from_config(config_dict):
 
 
 def _kernel_directory(solver_backend="GPU"):
-    kernel_folder = "Kernel_CPU" if str(solver_backend).upper() == "CPU" else "Kernel_GPU"
+    kernel_folder = (
+        "Kernel_CPU" if str(solver_backend).upper() == "CPU" else "Kernel_GPU"
+    )
     if "__file__" in globals():
         return Path(__file__).resolve().parents[2] / "Solver" / kernel_folder
     return (Path.cwd() / "Solver" / kernel_folder).resolve()
@@ -171,7 +178,11 @@ def _run_kernel(config_dict):
     solver_backend = _solver_backend_from_config(config_dict)
     kernel_dir = _kernel_directory(solver_backend)
     project_root = _project_root_directory()
-    kernel_module = "Solver.Kernel_CPU.kernel" if solver_backend == "CPU" else "Solver.Kernel_GPU.kernel"
+    kernel_module = (
+        "Solver.Kernel_CPU.kernel"
+        if solver_backend == "CPU"
+        else "Solver.Kernel_GPU.kernel"
+    )
     bootstrap_code = (
         "import json, sys; "
         "sys.path.insert(0, sys.argv[1]); "
@@ -199,7 +210,9 @@ def _run_kernel(config_dict):
                 kernel_output = ""
         process.wait(timeout=5.0)
         detail = f" Kernel startup output:\n{kernel_output}" if kernel_output else ""
-        raise RuntimeError(f"Kernel process exited before accepting the bake config.{detail}") from exc
+        raise RuntimeError(
+            f"Kernel process exited before accepting the bake config.{detail}"
+        ) from exc
     return process, python_executable
 
 
@@ -207,10 +220,16 @@ def _handle_kernel_output_line(line, output_tail):
     output_tail.append(line.rstrip())
     if len(output_tail) > 40:
         del output_tail[0]
-    if line.startswith(PROGRESS_EVENT_PREFIX) or line.startswith(LEGACY_PROGRESS_EVENT_PREFIX):
+    if line.startswith(PROGRESS_EVENT_PREFIX) or line.startswith(
+        LEGACY_PROGRESS_EVENT_PREFIX
+    ):
         try:
-            prefix = PROGRESS_EVENT_PREFIX if line.startswith(PROGRESS_EVENT_PREFIX) else LEGACY_PROGRESS_EVENT_PREFIX
-            payload = json.loads(line[len(prefix):])
+            prefix = (
+                PROGRESS_EVENT_PREFIX
+                if line.startswith(PROGRESS_EVENT_PREFIX)
+                else LEGACY_PROGRESS_EVENT_PREFIX
+            )
+            payload = json.loads(line[len(prefix) :])
             return max(0.0, min(100.0, float(payload.get("percent", 0.0))))
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
@@ -274,7 +293,9 @@ def _start_bake_session(config_dict):
 
 
 class BlenderCFD_OT_bake(bpy.types.Operator):
-    """Operator that exports the active node tree config and starts the kernel."""
+    """
+    Operator that exports the active node tree config and starts the kernel.
+    """
 
     bl_idname = "blendercfd.bake"
     bl_label = "Bake Continuum Flow"
@@ -311,7 +332,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                 if percent is not None:
                     self._progress_percent = percent
                     self._progress_factor = percent / 100.0
-                    _set_status_progress_values(percent, self._progress_eta_text(percent))
+                    _set_status_progress_values(
+                        percent, self._progress_eta_text(percent)
+                    )
                 divergence_message = _solver_divergence_message_from_line(payload)
                 if divergence_message is not None:
                     self._solver_divergence_message = divergence_message
@@ -421,7 +444,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._cancel_requested = True
         if not self._config_dict:
             return
-        cancel_flag_path = (((self._config_dict.get("meta") or {}).get("cancel_flag_path")) or "").strip()
+        cancel_flag_path = (
+            ((self._config_dict.get("meta") or {}).get("cancel_flag_path")) or ""
+        ).strip()
         if not cancel_flag_path:
             return
         try:
@@ -440,10 +465,10 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         process = self._session["process"]
         return_code = process.poll()
         if (
-            return_code is None and
-            self._live_preview_enabled and
-            self._live_preview_interval is not None and
-            perf_counter() >= self._next_live_preview_sync_at
+            return_code is None
+            and self._live_preview_enabled
+            and self._live_preview_interval is not None
+            and perf_counter() >= self._next_live_preview_sync_at
         ):
             try:
                 BakeStorage._refresh_live_preview(
@@ -453,11 +478,16 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                 )
             except Exception as exc:
                 if not self._live_preview_warning_reported:
-                    self.report({"WARNING"}, f"Live preview was disabled after a refresh failed: {exc}")
+                    self.report(
+                        {"WARNING"},
+                        f"Live preview was disabled after a refresh failed: {exc}",
+                    )
                     self._live_preview_warning_reported = True
                 self._live_preview_enabled = False
             finally:
-                self._next_live_preview_sync_at = perf_counter() + float(self._live_preview_interval)
+                self._next_live_preview_sync_at = perf_counter() + float(
+                    self._live_preview_interval
+                )
         if return_code is None:
             return {"RUNNING_MODAL"}
         self._drain_kernel_output()
@@ -467,7 +497,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         cancel_requested = self._cancel_requested
         self._cleanup_bake(context)
         if reader_error:
-            self.report({"ERROR"}, f"Bake failed while reading kernel output: {reader_error}")
+            self.report(
+                {"ERROR"}, f"Bake failed while reading kernel output: {reader_error}"
+            )
             return {"CANCELLED"}
         if return_code != 0:
             self.report(
@@ -476,10 +508,14 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             )
             return {"CANCELLED"}
         try:
-            imported_count, missing_directories = BakeStorage._import_baked_vdbs(config_dict)
+            imported_count, missing_directories = BakeStorage._import_baked_vdbs(
+                config_dict
+            )
         except Exception as exc:
             if solver_divergence_message is not None:
-                self.report({"WARNING"}, f"{solver_divergence_message} VDB import failed: {exc}")
+                self.report(
+                    {"WARNING"}, f"{solver_divergence_message} VDB import failed: {exc}"
+                )
             else:
                 self.report({"WARNING"}, f"Bake finished, but VDB import failed: {exc}")
             return {"FINISHED"}
@@ -490,9 +526,15 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                     f"{solver_divergence_message} Imported {imported_count} VDB volume(s) up to that point.",
                 )
             elif missing_directories:
-                self.report({"WARNING"}, f"{solver_divergence_message} No VDB output directory was found.")
+                self.report(
+                    {"WARNING"},
+                    f"{solver_divergence_message} No VDB output directory was found.",
+                )
             else:
-                self.report({"WARNING"}, f"{solver_divergence_message} No VDB files were found to import.")
+                self.report(
+                    {"WARNING"},
+                    f"{solver_divergence_message} No VDB files were found to import.",
+                )
             return {"FINISHED"}
         if cancel_requested:
             if imported_count > 0:
@@ -501,21 +543,38 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
                     f"Continuum Flow bake cancelled. Imported {imported_count} VDB volume(s) up to that point.",
                 )
             elif missing_directories:
-                self.report({"WARNING"}, "Continuum Flow bake cancelled. No VDB output directory was found.")
+                self.report(
+                    {"WARNING"},
+                    "Continuum Flow bake cancelled. No VDB output directory was found.",
+                )
             else:
-                self.report({"WARNING"}, "Continuum Flow bake cancelled. No VDB files were found to import.")
+                self.report(
+                    {"WARNING"},
+                    "Continuum Flow bake cancelled. No VDB files were found to import.",
+                )
             return {"FINISHED"}
         if imported_count > 0:
-            self.report({"INFO"}, f"Bake finished. Imported {imported_count} VDB volume(s).")
+            self.report(
+                {"INFO"}, f"Bake finished. Imported {imported_count} VDB volume(s)."
+            )
         elif missing_directories:
-            self.report({"WARNING"}, "Bake finished, but no VDB output directory was found.")
+            self.report(
+                {"WARNING"}, "Bake finished, but no VDB output directory was found."
+            )
         else:
-            self.report({"WARNING"}, "Bake finished, but no VDB files were found to import.")
+            self.report(
+                {"WARNING"}, "Bake finished, but no VDB files were found to import."
+            )
         return {"FINISHED"}
 
     def execute(self, context):
-        hinted_output_directory = BakeStorage._resolve_output_directory_hint(self.output_path_hint)
-        if hinted_output_directory is not None and BakeStorage._output_directory_has_vdbs(hinted_output_directory):
+        hinted_output_directory = BakeStorage._resolve_output_directory_hint(
+            self.output_path_hint
+        )
+        if (
+            hinted_output_directory is not None
+            and BakeStorage._output_directory_has_vdbs(hinted_output_directory)
+        ):
             removed_volumes, deleted_files = BakeStorage._free_bake(
                 context,
                 output_directories=(hinted_output_directory,),
@@ -529,19 +588,25 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         resolve_node_tree = getattr(BlenderCFDConfigModule, "_resolve_node_tree", None)
         node_tree = resolve_node_tree(context) if callable(resolve_node_tree) else None
         if tree_has_invalid_links(node_tree):
-            self.report({"ERROR"}, "Bake disabled: invalid socket connection in the node tree.")
+            self.report(
+                {"ERROR"}, "Bake disabled: invalid socket connection in the node tree."
+            )
             return {"CANCELLED"}
 
         global _ACTIVE_BAKE_OPERATOR
         bake_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         geometry_output_directory = hinted_output_directory or _project_root_directory()
-        geometry_cache_dir = BakeStorage._bake_geometry_cache_directory(geometry_output_directory, bake_token)
+        geometry_cache_dir = BakeStorage._bake_geometry_cache_directory(
+            geometry_output_directory, bake_token
+        )
         try:
             live_config_dict = BlenderCFDConfigModule.build_config_dict(
                 context,
                 geometry_storage_dir=str(geometry_cache_dir),
             )
-            live_config_dict.setdefault("meta", {})["geometry_cache_dir"] = str(geometry_cache_dir)
+            live_config_dict.setdefault("meta", {})["geometry_cache_dir"] = str(
+                geometry_cache_dir
+            )
         except Exception as exc:
             shutil.rmtree(geometry_cache_dir, ignore_errors=True)
             self.report({"ERROR"}, f"Bake failed: {exc}")
@@ -551,9 +616,14 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             if active_operator is not None and active_operator._session is not None:
                 BakeStorage._cleanup_geometry_cache(live_config_dict)
                 active_operator._request_cancel()
-                self.report({"INFO"}, "Bake cancellation requested. Press Free Bake again after the bake stops.")
+                self.report(
+                    {"INFO"},
+                    "Bake cancellation requested. Press Free Bake again after the bake stops.",
+                )
                 return {"FINISHED"}
-            removed_volumes, deleted_files = BakeStorage._free_bake(context, config_dict=live_config_dict)
+            removed_volumes, deleted_files = BakeStorage._free_bake(
+                context, config_dict=live_config_dict
+            )
             BakeStorage._cleanup_geometry_cache(live_config_dict)
             self.report(
                 {"INFO"},
@@ -561,20 +631,27 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             )
             return {"FINISHED"}
         try:
-            self._config_dict = BakeStorage._prepare_config_for_bake(live_config_dict, bake_token=bake_token)
+            self._config_dict = BakeStorage._prepare_config_for_bake(
+                live_config_dict, bake_token=bake_token
+            )
             self._session = _start_bake_session(self._config_dict)
         except ModuleNotFoundError as exc:
             BakeStorage._cleanup_geometry_cache(live_config_dict)
             set_bake_running(False, context=context)
             missing_module = getattr(exc, "name", None) or str(exc)
-            self.report({"ERROR"}, f"Bake failed: missing Python module '{missing_module}' in {sys.executable}")
+            self.report(
+                {"ERROR"},
+                f"Bake failed: missing Python module '{missing_module}' in {sys.executable}",
+            )
             return {"CANCELLED"}
         except Exception as exc:
             BakeStorage._cleanup_geometry_cache(live_config_dict)
             set_bake_running(False, context=context)
             self.report({"ERROR"}, f"Bake failed: {exc}")
             return {"CANCELLED"}
-        BakeStorage._set_bake_state_active(True, context=context, config_dict=self._config_dict)
+        BakeStorage._set_bake_state_active(
+            True, context=context, config_dict=self._config_dict
+        )
         set_bake_running(True, context=context)
         self._output_tail = []
         self._progress_percent = 0.0
@@ -587,7 +664,9 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         self._cancel_requested = False
         self._bake_started_at = perf_counter()
         self._live_preview_state = {}
-        self._live_preview_interval = BakeStorage._live_preview_refresh_interval(self._config_dict)
+        self._live_preview_interval = BakeStorage._live_preview_refresh_interval(
+            self._config_dict
+        )
         self._live_preview_enabled = self._live_preview_interval is not None
         self._next_live_preview_sync_at = perf_counter()
         self._live_preview_warning_reported = False
@@ -596,13 +675,17 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         timer_interval = 0.1
         if self._live_preview_interval is not None:
             timer_interval = min(timer_interval, float(self._live_preview_interval))
-        self._timer = context.window_manager.event_timer_add(timer_interval, window=context.window)
+        self._timer = context.window_manager.event_timer_add(
+            timer_interval, window=context.window
+        )
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
 
 class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
-    """Cancel the currently running Continuum Flow bake from the status bar."""
+    """
+    Cancel the currently running Continuum Flow bake from the status bar.
+    """
 
     bl_idname = "blendercfd.cancel_bake"
     bl_label = "Cancel Continuum Flow Bake"

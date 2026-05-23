@@ -1,10 +1,9 @@
-"""UI node definition for Continuum Flow output settings and the bake/free-bake button."""
-
 import importlib.util
 import sys
 from pathlib import Path
 
 import bpy
+
 try:
     import continuum_flow_general_nodes as GeneralNodes
 except ImportError:
@@ -56,7 +55,9 @@ is_bake_running = GeneralNodes.is_bake_running
 
 
 class BlenderCFDOutputNode(bpy.types.Node):
-    """Node used to configure which simulation results should be written to disk."""
+    """
+    Node used to configure which simulation results should be written to disk.
+    """
 
     bl_idname = "BLENDERCFD_OUTPUT_NODE"
     bl_label = "Output"
@@ -78,8 +79,16 @@ class BlenderCFDOutputNode(bpy.types.Node):
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(
-            ("float16", "Half (float16)", "Write VDB grids with 16-bit floating point values"),
-            ("float32", "Full (float32)", "Write VDB grids with 32-bit floating point values"),
+            (
+                "float16",
+                "Half (float16)",
+                "Write VDB grids with 16-bit floating point values",
+            ),
+            (
+                "float32",
+                "Full (float32)",
+                "Write VDB grids with 32-bit floating point values",
+            ),
         ),
         default="float16",
     )
@@ -147,7 +156,10 @@ class BlenderCFDOutputNode(bpy.types.Node):
             simulation_node = getattr(link, "from_node", None)
             if simulation_node is None:
                 continue
-            if getattr(simulation_node, "bl_idname", "") == "BLENDERCFD_SIMULATION_NODE":
+            if (
+                getattr(simulation_node, "bl_idname", "")
+                == "BLENDERCFD_SIMULATION_NODE"
+            ):
                 return simulation_node
         return None
 
@@ -178,8 +190,12 @@ class BlenderCFDOutputNode(bpy.types.Node):
             self._draw_field_row(fields_col, export_attr, sparse_attr, label=label)
         layout.prop(self, "output_path")
         layout.separator()
-        resolved_output_path = bpy.path.abspath(self.output_path) if self.output_path else ""
-        button_is_free_bake = bool(resolved_output_path) and BakeStorage._output_directory_has_vdbs(resolved_output_path)
+        resolved_output_path = (
+            bpy.path.abspath(self.output_path) if self.output_path else ""
+        )
+        button_is_free_bake = bool(
+            resolved_output_path
+        ) and BakeStorage._output_directory_has_vdbs(resolved_output_path)
         has_invalid_links = tree_has_invalid_links(getattr(self, "id_data", None))
         bake_disable_reason = self._bake_disable_reason()
         if has_invalid_links:
@@ -188,9 +204,9 @@ class BlenderCFDOutputNode(bpy.types.Node):
             layout.label(text=bake_disable_reason, icon="ERROR")
         button_row = layout.row()
         button_row.enabled = (
-            (not is_bake_running(context)) and
-            not has_invalid_links and
-            bake_disable_reason is None
+            (not is_bake_running(context))
+            and not has_invalid_links
+            and bake_disable_reason is None
         )
         operator = button_row.operator(
             BakeRuntime.BlenderCFD_OT_bake.bl_idname,
@@ -200,6 +216,4 @@ class BlenderCFDOutputNode(bpy.types.Node):
         operator.output_path_hint = self.output_path
 
 
-classes = (
-    BlenderCFDOutputNode,
-)
+classes = (BlenderCFDOutputNode,)

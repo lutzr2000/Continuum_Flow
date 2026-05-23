@@ -1,10 +1,7 @@
-"""Viewport preview drawing and viewer operators for Continuum Flow."""
-
 import bpy
 import gpu
 import math
 from gpu_extras.batch import batch_for_shader
-
 
 _DRAW_HANDLER = None
 _ACTIVE_DOMAIN_REF = None
@@ -20,7 +17,9 @@ _FORCE_NODE_IDS = {
 
 
 def _tag_view3d_redraw():
-    """Request a redraw for all visible 3D viewports."""
+    """
+    Request a redraw for all visible 3D viewports.
+    """
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
         return
@@ -35,7 +34,9 @@ def _tag_view3d_redraw():
 
 
 def _tag_viewer_ui_redraw():
-    """Request a redraw for node editors and properties so viewer buttons update immediately."""
+    """
+    Request a redraw for node editors and properties so viewer buttons update immediately.
+    """
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
         return
@@ -50,7 +51,9 @@ def _tag_viewer_ui_redraw():
 
 
 def _view3d_overlays_visible():
-    """Return whether overlays are enabled in the currently drawing 3D view."""
+    """
+    Return whether overlays are enabled in the currently drawing 3D view.
+    """
     space_data = getattr(bpy.context, "space_data", None)
     if space_data is None or getattr(space_data, "type", "") != "VIEW_3D":
         return True
@@ -61,7 +64,9 @@ def _view3d_overlays_visible():
 
 
 def _domain_node_reference(domain_node):
-    """Return a stable reference for one domain node across redraws and undo."""
+    """
+    Return a stable reference for one domain node across redraws and undo.
+    """
     node_tree = getattr(domain_node, "id_data", None)
     if node_tree is None:
         return None
@@ -72,7 +77,9 @@ def _domain_node_reference(domain_node):
 
 
 def _resolve_domain_reference(domain_reference):
-    """Resolve one stored domain-node reference back to a live node object."""
+    """
+    Resolve one stored domain-node reference back to a live node object.
+    """
     if not domain_reference:
         return None
     node_tree = bpy.data.node_groups.get(domain_reference.get("node_tree_name", ""))
@@ -82,7 +89,9 @@ def _resolve_domain_reference(domain_reference):
 
 
 def _domain_dimensions(domain_node):
-    """Return the world-space domain dimensions derived from the node settings."""
+    """
+    Return the world-space domain dimensions derived from the node settings.
+    """
     if not _is_valid_domain_node(domain_node):
         raise ValueError("Domain preview node is no longer valid.")
     return (
@@ -93,7 +102,9 @@ def _domain_dimensions(domain_node):
 
 
 def _is_valid_domain_node(domain_node):
-    """Return whether one Blender domain node can still be accessed safely."""
+    """
+    Return whether one Blender domain node can still be accessed safely.
+    """
     if domain_node is None:
         return False
     try:
@@ -111,7 +122,9 @@ def _is_valid_domain_node(domain_node):
 
 
 def _domain_center(domain_node):
-    """Return the world-space center of the domain preview box."""
+    """
+    Return the world-space center of the domain preview box.
+    """
     origin_x, origin_y, origin_z = _domain_origin(domain_node)
     width, depth, height = _domain_dimensions(domain_node)
     return (
@@ -122,13 +135,17 @@ def _domain_center(domain_node):
 
 
 def _domain_origin(domain_node):
-    """Return the world-space coordinate of grid index (0, 0, 0)."""
+    """
+    Return the world-space coordinate of grid index (0, 0, 0).
+    """
     width, depth, _height = _domain_dimensions(domain_node)
     return (-(width * 0.5), -(depth * 0.5), 0.0)
 
 
 def _box_segments(min_corner, max_corner):
-    """Build the line segments for a wireframe box."""
+    """
+    Build the line segments for a wireframe box.
+    """
     x0, y0, z0 = min_corner
     x1, y1, z1 = max_corner
 
@@ -143,9 +160,18 @@ def _box_segments(min_corner, max_corner):
         (x0, y1, z1),
     )
     edges = (
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     )
 
     segments = []
@@ -155,16 +181,20 @@ def _box_segments(min_corner, max_corner):
 
 
 def _vector_length(vector):
-    """Return the Euclidean length of a 3D vector."""
+    """
+    Return the Euclidean length of a 3D vector.
+    """
     return (
-        float(vector[0]) * float(vector[0]) +
-        float(vector[1]) * float(vector[1]) +
-        float(vector[2]) * float(vector[2])
+        float(vector[0]) * float(vector[0])
+        + float(vector[1]) * float(vector[1])
+        + float(vector[2]) * float(vector[2])
     ) ** 0.5
 
 
 def _normalize_vector(vector, fallback=(0.0, 0.0, 1.0)):
-    """Return a normalised 3D vector or the fallback when it is degenerate."""
+    """
+    Return a normalised 3D vector or the fallback when it is degenerate.
+    """
     length = _vector_length(vector)
     if length <= 1.0e-12:
         return fallback
@@ -176,7 +206,9 @@ def _normalize_vector(vector, fallback=(0.0, 0.0, 1.0)):
 
 
 def _vector_scale(vector, scale):
-    """Scale a 3D vector by one scalar."""
+    """
+    Scale a 3D vector by one scalar.
+    """
     return (
         float(vector[0]) * float(scale),
         float(vector[1]) * float(scale),
@@ -185,7 +217,9 @@ def _vector_scale(vector, scale):
 
 
 def _vector_add(a, b):
-    """Add two 3D vectors."""
+    """
+    Add two 3D vectors.
+    """
     return (
         float(a[0]) + float(b[0]),
         float(a[1]) + float(b[1]),
@@ -194,7 +228,9 @@ def _vector_add(a, b):
 
 
 def _cross(a, b):
-    """Return the cross product of two 3D vectors."""
+    """
+    Return the cross product of two 3D vectors.
+    """
     return (
         float(a[1]) * float(b[2]) - float(a[2]) * float(b[1]),
         float(a[2]) * float(b[0]) - float(a[0]) * float(b[2]),
@@ -203,7 +239,9 @@ def _cross(a, b):
 
 
 def _build_basis_from_normal(normal):
-    """Build two orthonormal tangent vectors for one normal direction."""
+    """
+    Build two orthonormal tangent vectors for one normal direction.
+    """
     normal = _normalize_vector(normal)
     helper = (0.0, 0.0, 1.0) if abs(normal[2]) < 0.9 else (0.0, 1.0, 0.0)
     tangent_x = _normalize_vector(_cross(normal, helper), fallback=(1.0, 0.0, 0.0))
@@ -212,7 +250,9 @@ def _build_basis_from_normal(normal):
 
 
 def _circle_segments(center, normal, radius, segments=48):
-    """Build line segments for a circle around one center and normal."""
+    """
+    Build line segments for a circle around one center and normal.
+    """
     radius = max(float(radius), 0.0)
     if radius <= 1.0e-12:
         return []
@@ -237,17 +277,24 @@ def _circle_segments(center, normal, radius, segments=48):
 
 
 def _crosshair_segments(center, size):
-    """Build a small 3D crosshair around one point."""
+    """
+    Build a small 3D crosshair around one point.
+    """
     size = max(float(size), 0.0)
     return [
-        _vector_add(center, (-size, 0.0, 0.0)), _vector_add(center, (size, 0.0, 0.0)),
-        _vector_add(center, (0.0, -size, 0.0)), _vector_add(center, (0.0, size, 0.0)),
-        _vector_add(center, (0.0, 0.0, -size)), _vector_add(center, (0.0, 0.0, size)),
+        _vector_add(center, (-size, 0.0, 0.0)),
+        _vector_add(center, (size, 0.0, 0.0)),
+        _vector_add(center, (0.0, -size, 0.0)),
+        _vector_add(center, (0.0, size, 0.0)),
+        _vector_add(center, (0.0, 0.0, -size)),
+        _vector_add(center, (0.0, 0.0, size)),
     ]
 
 
 def _arrow_segments(start, vector, head_scale=0.18):
-    """Build one line arrow from start along vector."""
+    """
+    Build one line arrow from start along vector.
+    """
     end = _vector_add(start, vector)
     length = _vector_length(vector)
     if length <= 1.0e-12:
@@ -260,14 +307,21 @@ def _arrow_segments(start, vector, head_scale=0.18):
     head_base = _vector_add(end, _vector_scale(direction, -head_length))
 
     lines = [start, end]
-    for tangent in (tangent_x, tangent_y, _vector_scale(tangent_x, -1.0), _vector_scale(tangent_y, -1.0)):
+    for tangent in (
+        tangent_x,
+        tangent_y,
+        _vector_scale(tangent_x, -1.0),
+        _vector_scale(tangent_y, -1.0),
+    ):
         head_point = _vector_add(head_base, _vector_scale(tangent, head_width))
         lines.extend((end, head_point))
     return lines
 
 
 def _linked_simulation_nodes_from_force(force_node):
-    """Resolve downstream simulation nodes connected to one force node."""
+    """
+    Resolve downstream simulation nodes connected to one force node.
+    """
     socket = force_node.outputs.get("Force")
     if socket is None or not socket.is_linked:
         return []
@@ -284,7 +338,9 @@ def _linked_simulation_nodes_from_force(force_node):
 
 
 def _linked_domain_from_force(force_node):
-    """Resolve the linked domain node for one force node when available."""
+    """
+    Resolve the linked domain node for one force node when available.
+    """
     for simulation_node in _linked_simulation_nodes_from_force(force_node):
         domain_node = _linked_domain_from_simulation(simulation_node)
         if domain_node is not None:
@@ -293,7 +349,9 @@ def _linked_domain_from_force(force_node):
 
 
 def _active_force_node():
-    """Return the currently active Continuum Flow force node from any node editor."""
+    """
+    Return the currently active Continuum Flow force node from any node editor.
+    """
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
         return None
@@ -306,7 +364,10 @@ def _active_force_node():
             if area.type != "NODE_EDITOR":
                 continue
             space = getattr(area.spaces, "active", None)
-            if space is None or getattr(space, "tree_type", "") != "BLENDERCFD_NODE_TREE":
+            if (
+                space is None
+                or getattr(space, "tree_type", "") != "BLENDERCFD_NODE_TREE"
+            ):
                 continue
             edit_tree = getattr(space, "edit_tree", None)
             if edit_tree is None:
@@ -320,7 +381,9 @@ def _active_force_node():
 
 
 def _force_preview_scale(force_node):
-    """Choose a reasonable glyph size for one force node."""
+    """
+    Choose a reasonable glyph size for one force node.
+    """
     domain_node = _linked_domain_from_force(force_node)
     if domain_node is not None:
         width, depth, height = _domain_dimensions(domain_node)
@@ -329,16 +392,26 @@ def _force_preview_scale(force_node):
 
 
 def _force_preview_geometry(force_node):
-    """Build viewport line geometry for the active force node."""
+    """
+    Build viewport line geometry for the active force node.
+    """
     node_type = getattr(force_node, "bl_idname", "")
     preview_scale = _force_preview_scale(force_node)
 
     if node_type == "BLENDERCFD_FORCE_CONSTANT_NODE":
         domain_node = _linked_domain_from_force(force_node)
-        center = _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
-        force_vector = (float(force_node.fx), float(force_node.fy), float(force_node.fz))
+        center = (
+            _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
+        )
+        force_vector = (
+            float(force_node.fx),
+            float(force_node.fy),
+            float(force_node.fz),
+        )
         lines = _crosshair_segments(center, preview_scale * 0.18)
-        lines.extend(_arrow_segments(center, _vector_scale(force_vector, preview_scale * 0.2)))
+        lines.extend(
+            _arrow_segments(center, _vector_scale(force_vector, preview_scale * 0.2))
+        )
         return lines
 
     if node_type == "BLENDERCFD_FORCE_POINT_NODE":
@@ -352,7 +425,9 @@ def _force_preview_geometry(force_node):
 
     if node_type == "BLENDERCFD_FORCE_SWIRL_NODE":
         center = tuple(float(component) for component in force_node.origin[:3])
-        axis = _normalize_vector(tuple(float(component) for component in force_node.axis[:3]))
+        axis = _normalize_vector(
+            tuple(float(component) for component in force_node.axis[:3])
+        )
         radius = float(force_node.radius)
         strength = float(force_node.strength)
         axis_length = max(radius, preview_scale)
@@ -362,7 +437,12 @@ def _force_preview_geometry(force_node):
         lines.extend(_circle_segments(center, (1.0, 0.0, 0.0), radius))
         lines.extend(_arrow_segments(center, _vector_scale(axis, axis_length)))
         tangent_x, tangent_y = _build_basis_from_normal(axis)
-        swirl_point = _vector_add(center, _vector_scale(tangent_x, max(min(radius, preview_scale * 1.25), preview_scale * 0.45)))
+        swirl_point = _vector_add(
+            center,
+            _vector_scale(
+                tangent_x, max(min(radius, preview_scale * 1.25), preview_scale * 0.45)
+            ),
+        )
         swirl_dir = _vector_scale(tangent_y, preview_scale * 0.2 * strength)
         lines.extend(_arrow_segments(swirl_point, swirl_dir))
         return lines
@@ -374,7 +454,9 @@ def _force_preview_geometry(force_node):
 
 
 def _build_preview_segments(domain_node):
-    """Build the preview line data for the full domain and one sample cell."""
+    """
+    Build the preview line data for the full domain and one sample cell.
+    """
     width, depth, height = _domain_dimensions(domain_node)
     resolution = float(domain_node.resolution)
     origin_x, origin_y, origin_z = _domain_origin(domain_node)
@@ -395,7 +477,9 @@ def _build_preview_segments(domain_node):
 
 
 def _draw_preview():
-    """Draw the active domain preview in the 3D viewport."""
+    """
+    Draw the active domain preview in the 3D viewport.
+    """
     active_domain = _resolve_domain_reference(_ACTIVE_DOMAIN_REF)
     if not _is_valid_domain_node(active_domain):
         disable_domain_preview()
@@ -425,7 +509,9 @@ def _draw_preview():
 
 
 def _draw_force_preview():
-    """Draw the active force-node preview in the 3D viewport."""
+    """
+    Draw the active force-node preview in the 3D viewport.
+    """
     force_node = _active_force_node()
     if force_node is None:
         return
@@ -449,19 +535,25 @@ def _draw_force_preview():
 
 
 def enable_domain_preview(domain_node):
-    """Enable the preview for the given domain node."""
+    """
+    Enable the preview for the given domain node.
+    """
     global _DRAW_HANDLER, _ACTIVE_DOMAIN_REF
 
     _ACTIVE_DOMAIN_REF = _domain_node_reference(domain_node)
     if _DRAW_HANDLER is None:
-        _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_preview, (), "WINDOW", "POST_VIEW")
+        _DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(
+            _draw_preview, (), "WINDOW", "POST_VIEW"
+        )
     _set_all_viewer_preview_flags(active=True)
     _tag_view3d_redraw()
     _tag_viewer_ui_redraw()
 
 
 def disable_domain_preview():
-    """Disable any active domain preview."""
+    """
+    Disable any active domain preview.
+    """
     global _DRAW_HANDLER, _ACTIVE_DOMAIN_REF
 
     _ACTIVE_DOMAIN_REF = None
@@ -474,7 +566,9 @@ def disable_domain_preview():
 
 
 def domain_preview_enabled(domain_node=None):
-    """Return whether a domain preview is active, optionally for one specific domain node."""
+    """
+    Return whether a domain preview is active, optionally for one specific domain node.
+    """
     active_domain = _resolve_domain_reference(_ACTIVE_DOMAIN_REF)
     if active_domain is None:
         return False
@@ -482,11 +576,15 @@ def domain_preview_enabled(domain_node=None):
         return True
     active_reference = _domain_node_reference(active_domain)
     target_reference = _domain_node_reference(domain_node)
-    return bool(active_reference and target_reference and active_reference == target_reference)
+    return bool(
+        active_reference and target_reference and active_reference == target_reference
+    )
 
 
 def viewer_domain_preview_enabled(viewer_node):
-    """Return whether the given viewer node currently controls the active domain preview."""
+    """
+    Return whether the given viewer node currently controls the active domain preview.
+    """
     if viewer_node is None:
         return False
     domain_node = _linked_domain_from_viewer(viewer_node)
@@ -496,19 +594,25 @@ def viewer_domain_preview_enabled(viewer_node):
 
 
 def _set_all_viewer_preview_flags(active=False):
-    """Synchronise the domain-preview toggle text across all viewer nodes."""
+    """
+    Synchronise the domain-preview toggle text across all viewer nodes.
+    """
     for node_tree in bpy.data.node_groups:
         for node in getattr(node_tree, "nodes", ()):
             if getattr(node, "bl_idname", "") != "BLENDERCFD_VIEWER_NODE":
                 continue
             try:
-                node.domain_preview_active = bool(active and viewer_domain_preview_enabled(node))
+                node.domain_preview_active = bool(
+                    active and viewer_domain_preview_enabled(node)
+                )
             except Exception:
                 pass
 
 
 def _force_preview_timer():
-    """Keep the force preview responsive to node selection and property edits."""
+    """
+    Keep the force preview responsive to node selection and property edits.
+    """
     if _FORCE_DRAW_HANDLER is None:
         return None
     _tag_view3d_redraw()
@@ -516,11 +620,15 @@ def _force_preview_timer():
 
 
 def enable_force_preview():
-    """Enable automatic previews for the currently selected force node."""
+    """
+    Enable automatic previews for the currently selected force node.
+    """
     global _FORCE_DRAW_HANDLER, _FORCE_TIMER_REGISTERED
 
     if _FORCE_DRAW_HANDLER is None:
-        _FORCE_DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(_draw_force_preview, (), "WINDOW", "POST_VIEW")
+        _FORCE_DRAW_HANDLER = bpy.types.SpaceView3D.draw_handler_add(
+            _draw_force_preview, (), "WINDOW", "POST_VIEW"
+        )
     if not _FORCE_TIMER_REGISTERED:
         bpy.app.timers.register(_force_preview_timer, first_interval=0.25)
         _FORCE_TIMER_REGISTERED = True
@@ -528,7 +636,9 @@ def enable_force_preview():
 
 
 def disable_force_preview():
-    """Disable the automatic force preview overlay."""
+    """
+    Disable the automatic force preview overlay.
+    """
     global _FORCE_DRAW_HANDLER, _FORCE_TIMER_REGISTERED
 
     if _FORCE_DRAW_HANDLER is not None:
@@ -539,20 +649,27 @@ def disable_force_preview():
 
 
 def _linked_domain_from_simulation(simulation_node):
-    """Resolve the linked domain node connected to the simulation node."""
+    """
+    Resolve the linked domain node connected to the simulation node.
+    """
     socket = simulation_node.inputs.get("Domain")
     if socket is None or not socket.is_linked:
         return None
 
     for link in socket.links:
         from_node = getattr(link, "from_node", None)
-        if from_node is not None and getattr(from_node, "bl_idname", "") == "BLENDERCFD_DOMAIN_NODE":
+        if (
+            from_node is not None
+            and getattr(from_node, "bl_idname", "") == "BLENDERCFD_DOMAIN_NODE"
+        ):
             return from_node
     return None
 
 
 def _linked_domain_from_viewer(node):
-    """Resolve the domain node by traversing the viewer's result input."""
+    """
+    Resolve the domain node by traversing the viewer's result input.
+    """
     socket = node.inputs.get("Result")
     if socket is None or not socket.is_linked:
         return None
@@ -571,7 +688,9 @@ def _linked_domain_from_viewer(node):
 
 
 class BlenderCFD_OT_viewer_toggle_domain(bpy.types.Operator):
-    """Toggle the linked domain preview in the 3D viewport."""
+    """
+    Toggle the linked domain preview in the 3D viewport.
+    """
 
     bl_idname = "blendercfd.viewer_toggle_domain"
     bl_label = "Toggle Domain Preview"
@@ -597,6 +716,4 @@ class BlenderCFD_OT_viewer_toggle_domain(bpy.types.Operator):
         return {"FINISHED"}
 
 
-classes = (
-    BlenderCFD_OT_viewer_toggle_domain,
-)
+classes = (BlenderCFD_OT_viewer_toggle_domain,)

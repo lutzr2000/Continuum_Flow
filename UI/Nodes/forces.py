@@ -1,6 +1,5 @@
-"""Continuum Flow force nodes with shared socket and UI behavior."""
-
 import bpy
+
 try:
     import continuum_flow_general_nodes as GeneralNodes
 except ImportError:
@@ -13,7 +12,9 @@ is_bake_running = GeneralNodes.is_bake_running
 
 
 class _BlenderCFDBaseForceNode(GeneralNodes.BlenderCFDBaseNode):
-    """Shared socket and property drawing helpers for force nodes."""
+    """
+    Shared socket and property drawing helpers for force nodes.
+    """
 
     draw_property_names = ()
 
@@ -34,7 +35,9 @@ class _BlenderCFDBaseForceNode(GeneralNodes.BlenderCFDBaseNode):
 
 
 class BlenderCFDForceConstantNode(_BlenderCFDBaseForceNode):
-    """Node used to define a constant force vector for the CFD simulation."""
+    """
+    Node used to define a constant force vector for the CFD simulation.
+    """
 
     bl_idname = "BLENDERCFD_FORCE_CONSTANT_NODE"
     bl_label = "Force Constant"
@@ -50,7 +53,9 @@ class BlenderCFDForceConstantNode(_BlenderCFDBaseForceNode):
 
 
 class BlenderCFDForceSwirlNode(_BlenderCFDBaseForceNode):
-    """Node used to define a swirl force around an origin and axis."""
+    """
+    Node used to define a swirl force around an origin and axis.
+    """
 
     bl_idname = "BLENDERCFD_FORCE_SWIRL_NODE"
     bl_label = "Force Swirl"
@@ -67,7 +72,9 @@ class BlenderCFDForceSwirlNode(_BlenderCFDBaseForceNode):
 
 
 class BlenderCFDForcePointNode(_BlenderCFDBaseForceNode):
-    """Node used to define a smoothed divergence source around one origin."""
+    """
+    Node used to define a smoothed divergence source around one origin.
+    """
 
     bl_idname = "BLENDERCFD_FORCE_POINT_NODE"
     bl_label = "Force Point"
@@ -77,13 +84,15 @@ class BlenderCFDForcePointNode(_BlenderCFDBaseForceNode):
     bl_width_max = 340.0
     draw_property_names = ("strength", "origin", "radius")
 
-    strength: FloatProperty(name="Strength", default=0.0, description="Strength of force", options={"ANIMATABLE"})  # type: ignore
+    strength: FloatProperty(name="Strength", default=0.0, description="Strength of force, negative values attract flow, positive push it away", options={"ANIMATABLE"})  # type: ignore
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the point force", options={"ANIMATABLE"})  # type: ignore
     radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius in which the force is applied", options={"ANIMATABLE"})  # type: ignore
 
 
 class BlenderCFDForceTurbulenceNode(_BlenderCFDBaseForceNode):
-    """Node used to define a procedural turbulence force field."""
+    """
+    Node used to define a procedural turbulence force field.
+    """
 
     bl_idname = "BLENDERCFD_FORCE_TURBULENCE_NODE"
     bl_label = "Force Turbulence"

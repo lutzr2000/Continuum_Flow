@@ -1,8 +1,5 @@
-"""Core Continuum Flow socket types and link validation helpers."""
-
 import bpy
 from bpy.props import IntProperty
-
 
 _INVALID_SOCKET_COLOR = (0.95, 0.20, 0.20, 1.0)
 
@@ -32,6 +29,9 @@ _SOCKET_ROLE_BY_SOCKET_IDNAME = {
 
 
 def _socket_role(socket):
+    """
+    Return the semantic Continuum Flow role associated with a socket.
+    """
     node = getattr(socket, "node", None)
     node_idname = getattr(node, "bl_idname", "")
     role = _SOCKET_ROLE_BY_NODE_AND_NAME.get((node_idname, getattr(socket, "name", "")))
@@ -41,6 +41,9 @@ def _socket_role(socket):
 
 
 def _is_valid_link(link):
+    """
+    Return whether a node link connects sockets that share the same role.
+    """
     from_socket = getattr(link, "from_socket", None)
     to_socket = getattr(link, "to_socket", None)
     if from_socket is None or to_socket is None:
@@ -54,6 +57,9 @@ def _is_valid_link(link):
 
 
 def _socket_has_invalid_links(socket):
+    """
+    Return whether a socket participates in any invalid Continuum Flow links.
+    """
     try:
         return any(not _is_valid_link(link) for link in socket.links)
     except Exception:
@@ -61,6 +67,9 @@ def _socket_has_invalid_links(socket):
 
 
 def tree_has_invalid_links(node_tree):
+    """
+    Return whether a node tree contains any invalid Continuum Flow links.
+    """
     if node_tree is None:
         return False
     try:
@@ -70,7 +79,9 @@ def tree_has_invalid_links(node_tree):
 
 
 class BlenderCFDIntSocket(bpy.types.NodeSocket):
-    """Integer socket used by Continuum Flow nodes to expose bounded scalar values."""
+    """
+    Integer socket used by Continuum Flow nodes to expose bounded scalar values.
+    """
 
     bl_idname = "BLENDERCFD_INT_SOCKET"
     bl_label = "Continuum Flow Integer"
@@ -85,65 +96,87 @@ class BlenderCFDIntSocket(bpy.types.NodeSocket):
     )
 
     def draw(self, context, layout, node, text):
-        """Draw the socket UI in the node editor."""
+        """
+        Draw the socket UI in the node editor.
+        """
         if self.is_output or self.is_linked:
             layout.label(text=text)
         else:
             layout.prop(self, "value", text=text)
 
     def draw_color(self, context, node):
-        """Return the display color of the socket."""
+        """
+        Return the display color of the socket.
+        """
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.90, 0.55, 0.20, 1.0)
 
 
 class BlenderCFDLinkSocket(bpy.types.NodeSocket):
-    """Generic link socket used to connect logical Continuum Flow node outputs."""
+    """
+    Generic link socket used to connect logical Continuum Flow node outputs.
+    """
 
     bl_idname = "BLENDERCFD_LINK_SOCKET"
     bl_label = "Continuum Flow Link"
 
     def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
+        """
+        Draw the socket label in the node editor.
+        """
         layout.label(text=text)
 
     def draw_color(self, context, node):
-        """Return the display color of the socket."""
+        """
+        Return the display color of the socket.
+        """
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.90, 0.55, 0.20, 1.0)
 
 
 class BlenderCFDForceSocket(bpy.types.NodeSocket):
-    """Dedicated socket used for force-related links in the Continuum Flow graph."""
+    """
+    Dedicated socket used for force-related links in the Continuum Flow graph.
+    """
 
     bl_idname = "BLENDERCFD_FORCE_SOCKET"
     bl_label = "Continuum Flow Force"
 
     def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
+        """
+        Draw the socket label in the node editor.
+        """
         layout.label(text=text)
 
     def draw_color(self, context, node):
-        """Return the display color of the socket."""
+        """
+        Return the display color of the socket.
+        """
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.45, 0.65, 0.95, 1.0)
 
 
 class BlenderCFDResultSocket(bpy.types.NodeSocket):
-    """Result socket used by the simulation node to expose the final output link."""
+    """
+    Result socket used by the simulation node to expose the final output link.
+    """
 
     bl_idname = "BLENDERCFD_RESULT_SOCKET"
     bl_label = "Continuum Flow Result"
 
     def draw(self, context, layout, node, text):
-        """Draw the socket label in the node editor."""
+        """
+        Draw the socket label in the node editor.
+        """
         layout.label(text=text)
 
     def draw_color(self, context, node):
-        """Return the display color of the socket."""
+        """
+        Return the display color of the socket.
+        """
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.65, 0.35, 0.85, 1.0)
