@@ -240,22 +240,74 @@
         <article role="main" id="furo-main-content">
           <section id="performance">
 <h1>Performance<a class="headerlink" href="#performance" title="Link to this heading">¶</a></h1>
-<p>This section collects performance guidance for both development and practical usage.</p>
-<p>Suggested topics for this chapter:</p>
+<p>To access the performance of the solver the three example files rising smoke, camp fire and car drift are simulated at different grid resolutions on the same machine. Additionally for the examples rising smoke and camp fire the setup is also matched as closely as possible within Blenders native solver to compare performance.</p>
+<p>Machine used for testing:</p>
 <ul class="simple">
-<li><p>CPU vs GPU tradeoffs</p></li>
-<li><p>Memory considerations</p></li>
-<li><p>Scene complexity limits</p></li>
-<li><p>Bottlenecks during export, simulation, and writing</p></li>
-<li><p>Optimization tips</p></li>
+<li><p>OS: Windows 11</p></li>
+<li><p>CPU: Intel Core i9-14900KF</p></li>
+<li><p>RAM: 64 GB</p></li>
+<li><p>Disk: NVMe SSD Viper VP4300L 2TB</p></li>
+<li><p>GPU: NVIDIA GeForce RTX 5080</p></li>
 </ul>
-<section id="runtime-notes">
-<h2>Runtime Notes<a class="headerlink" href="#runtime-notes" title="Link to this heading">¶</a></h2>
-<p>Document which parts of the pipeline are typically the most expensive and how that changes with scene size.</p>
+<section id="solve-time">
+<h2>Solve time<a class="headerlink" href="#solve-time" title="Link to this heading">¶</a></h2>
+<p>Plotting here solve time against simulated cell size. Keep in mind that decreasing the cell size by a factor of two creates 8 times more cells, drastically increasing compute cost.</p>
+<p>01 rising smoke</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/01_rising_smoke_scaling_time.png"><img alt="_images/01_rising_smoke_scaling_time.png" class="block-image-left" src="_images/01_rising_smoke_scaling_time.png" style="width: 600px;" />
+</a>
+</figure>
+<p>02 camp fire</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/02_camp_fire_scaling_time.png"><img alt="_images/02_camp_fire_scaling_time.png" class="block-image-left" src="_images/02_camp_fire_scaling_time.png" style="width: 600px;" />
+</a>
+</figure>
+<p>05 car drift</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/05_car_drift_scaling_time.png"><img alt="_images/05_car_drift_scaling_time.png" class="block-image-left" src="_images/05_car_drift_scaling_time.png" style="width: 600px;" />
+</a>
+</figure>
+<p>Continuum flow consistently outperforms Blenders native solver even on CPU. GPU solves are significantly faster.</p>
 </section>
-<section id="optimization-guide">
-<h2>Optimization Guide<a class="headerlink" href="#optimization-guide" title="Link to this heading">¶</a></h2>
-<p>Add concrete recommendations for improving simulation speed and stability.</p>
+<section id="v-ram-usage">
+<h2>(V)RAM usage<a class="headerlink" href="#v-ram-usage" title="Link to this heading">¶</a></h2>
+<p>Here (V)RAM usage is plotted again against cell size. Here Blenders native results are not included because i could not track them properly.</p>
+<p>01 rising smoke</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/01_rising_smoke_scaling_RAM.png"><img alt="_images/01_rising_smoke_scaling_RAM.png" class="block-image-left" src="_images/01_rising_smoke_scaling_RAM.png" style="width: 600px;" />
+</a>
+</figure>
+<p>02 camp fire</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/02_camp_fire_scaling_RAM.png"><img alt="_images/02_camp_fire_scaling_RAM.png" class="block-image-left" src="_images/02_camp_fire_scaling_RAM.png" style="width: 600px;" />
+</a>
+</figure>
+<p>05 car drift</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/05_car_drift_scaling_RAM.png"><img alt="_images/05_car_drift_scaling_RAM.png" class="block-image-left" src="_images/05_car_drift_scaling_RAM.png" style="width: 600px;" />
+</a>
+</figure>
+<p>The GPU solver needs more VRAM han the CPU solver needs RAM at lower resolutions (effectivly (V)RAM usage is related to cell count which is related to resolution). At higher resolutions the GPU solver needs slightly less VRAM than the CPU needs RAM. Usually systems have les VRAM than RAM. If your GPU runs out of VRAM the solver will use RAM from shared memory, but this is significantly slower (Still faster than pure CPU runs in many cases).</p>
+</section>
+<section id="realtime-simulation">
+<h2>Realtime simulation<a class="headerlink" href="#realtime-simulation" title="Link to this heading">¶</a></h2>
+<p>Here the ratio of solve time (the time it actually took to simulate the result) to simulated time (the length of the simulation) is plotted. A value of one (the black dotted line) means simulated in realtime. Values smaller mean simualted faster than realtime, larger mean slower than realtime. Mind the log axis!</p>
+<p>01 rising smoke</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/01_rising_smoke_ratios.png"><img alt="_images/01_rising_smoke_ratios.png" class="block-image-left" src="_images/01_rising_smoke_ratios.png" style="width: 600px;" />
+</a>
+</figure>
+<p>02 camp fire</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/02_camp_fire_ratios.png"><img alt="_images/02_camp_fire_ratios.png" class="block-image-left" src="_images/02_camp_fire_ratios.png" style="width: 600px;" />
+</a>
+</figure>
+<p>05 car drift</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/05_car_drift_ratios.png"><img alt="_images/05_car_drift_ratios.png" class="block-image-left" src="_images/05_car_drift_ratios.png" style="width: 600px;" />
+</a>
+</figure>
+<p>The GPU sovler can even simulate at realtime on very small cell sizes (meaning large cell count). Please keep in mind that simulation speed is also related to the velocity of the flow. Faster flow takes longer to simulate.</p>
 </section>
 </section>
 
@@ -315,8 +367,9 @@
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">Performance</a><ul>
-<li><a class="reference internal" href="#runtime-notes">Runtime Notes</a></li>
-<li><a class="reference internal" href="#optimization-guide">Optimization Guide</a></li>
+<li><a class="reference internal" href="#solve-time">Solve time</a></li>
+<li><a class="reference internal" href="#v-ram-usage">(V)RAM usage</a></li>
+<li><a class="reference internal" href="#realtime-simulation">Realtime simulation</a></li>
 </ul>
 </li>
 </ul>

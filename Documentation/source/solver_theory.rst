@@ -1,6 +1,9 @@
 Solver Theory
 =============
 
+REWRITE THIS!!!!
+
+
 This section describes the numerical model used by the Continuum flow solver. The
 simulation is based on the incompressible Navier-Stokes equations and uses a
 regular Cartesian grid with a finite-difference discretization. The goal is not

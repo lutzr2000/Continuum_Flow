@@ -262,11 +262,15 @@
 </dd>
 <dt><strong>End Frame</strong></dt><dd><p>The frame at which the simulation ends.</p>
 </dd>
-<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your simulation diverges go lower. The maximum value is one.</p>
+<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which means the solver is faster. In many cases gowing for a big value here is good since it decreases the simulation time. In some occasions the visual quality will suffer under big CFL numbers. Refer to best practices for more information.</p>
 </dd>
-<dt><strong>Itterations</strong></dt><dd><p>Number of pressure itterations. Usually the default of four is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.</p>
+<dt><strong>Itterations</strong></dt><dd><p>Number of pressure itterations. Usually the default of ten is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.</p>
 </dd>
-<dt><strong>Scheme</strong></dt><dd><p>The advection scheme used in the solver. The first order upwind scheme is more stable but less swirkly and supresses detail in the flow. The second order upwind scheme is sharper but can become unstable. Most of the time you can test with the first order uwpind scheme and when you are happy with your simulation setup switch to second order upwind.</p>
+<dt><strong>MacCormack Factor</strong></dt><dd><p>For the purpose of this factor refer to the theory documentation. In general larger values make the flow more swirly and detailed, but can introduce artefacts.</p>
+</dd>
+<dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blenders native adaptive domain setting. Only simulates cells containing smoke, fuel or fire. Can greatly improve performance when activated in many cases. In some cases it is worth it to run it off, refer to the best practice section.</p>
+</dd>
+<dt><strong>Threshold</strong></dt><dd><p>Threshold for when a cell is considered empty for the adaptive domain.</p>
 </dd>
 </dl>
 </section>
@@ -391,9 +395,9 @@ Free Bake: Deletes the baked data</p>
 </dd>
 <dt><strong>Extra Pressure</strong></dt><dd><p>Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.</p>
 </dd>
-<dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
-</dd>
 <dt><strong>Space</strong></dt><dd><p>Choose whether the source velocity is interpreted in world coordinates or in the local coordinate system of each linked geometry object. With multiple geometry inputs in local space, each object applies the same authored velocity vector in its own local axes.</p>
+</dd>
+<dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>
 </dl>
 </section>
@@ -411,6 +415,15 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_constant_node.jpg"><img alt="_images/force_constant_node.jpg" class="block-image-left" src="_images/force_constant_node.jpg" style="width: 300px;" />
 </a>
 </figure>
+<p>Adds constant forcing to the whole domain.</p>
+<dl class="simple">
+<dt><strong>Fx</strong></dt><dd><p>Strength of force in x-direction</p>
+</dd>
+<dt><strong>Fy</strong></dt><dd><p>Strength of force in y-direction</p>
+</dd>
+<dt><strong>Fz</strong></dt><dd><p>Strength of force in z-direction</p>
+</dd>
+</dl>
 </section>
 <section id="force-turbulence">
 <h3>Force-Turbulence<a class="headerlink" href="#force-turbulence" title="Link to this heading">¶</a></h3>
@@ -418,6 +431,17 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_turbulence_node.jpg"><img alt="_images/force_turbulence_node.jpg" class="block-image-left" src="_images/force_turbulence_node.jpg" style="width: 300px;" />
 </a>
 </figure>
+<p>Adds turbulent forcing to the domain.</p>
+<dl class="simple">
+<dt><strong>Scale</strong></dt><dd><p>Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.</p>
+</dd>
+<dt><strong>Frequency</strong></dt><dd><p>How quickly the turbulence field alternates. Larger values alternate quicker</p>
+</dd>
+<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of turbulence</p>
+</dd>
+<dt><strong>Seed</strong></dt><dd><p>Random seed for turbulence field generation.</p>
+</dd>
+</dl>
 </section>
 <section id="force-swirl">
 <h3>Force-Swirl<a class="headerlink" href="#force-swirl" title="Link to this heading">¶</a></h3>
@@ -425,6 +449,17 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_swirl_node.jpg"><img alt="_images/force_swirl_node.jpg" class="block-image-left" src="_images/force_swirl_node.jpg" style="width: 300px;" />
 </a>
 </figure>
+<p>Adds swirly forcing to your simulation.</p>
+<dl class="simple">
+<dt><strong>Strength</strong></dt><dd><p>How strong the swirl is supposed to be.</p>
+</dd>
+<dt><strong>Origin</strong></dt><dd><p>Origin point of the swirl motion.</p>
+</dd>
+<dt><strong>Axis</strong></dt><dd><p>Axis for the swirl. The flow will rotate around the line defined by Axis and Origin.</p>
+</dd>
+<dt><strong>Radius</strong></dt><dd><p>Radius within which the swirl motion should be applied</p>
+</dd>
+</dl>
 </section>
 <section id="force-point">
 <h3>Force-Point<a class="headerlink" href="#force-point" title="Link to this heading">¶</a></h3>
@@ -432,6 +467,15 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_point_node.jpg"><img alt="_images/force_point_node.jpg" class="block-image-left" src="_images/force_point_node.jpg" style="width: 300px;" />
 </a>
 </figure>
+<p>Adds a point force that can attract flow or push it away.</p>
+<dl class="simple">
+<dt><strong>Strength</strong></dt><dd><p>Negative values mean attraction, positive pushing the flow away.</p>
+</dd>
+<dt><strong>Origin</strong></dt><dd><p>Origin of the point force.</p>
+</dd>
+<dt><strong>Radius</strong></dt><dd><p>Radius at which the force is still in effect.</p>
+</dd>
+</dl>
 </section>
 </section>
 </section>

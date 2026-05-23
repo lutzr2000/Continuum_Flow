@@ -33,14 +33,19 @@ This is the core node of every simulation. It controls the frame range for your 
     The frame at which the simulation ends.
 
 **CFL**
-    This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which can become unstable and lead to solver divergence. Smaller CFL values mean smaller time steps which are more stable but take longer to simulate. When using the first order upwind scheme usually a value of 0.9 is fine, when using the second order upwind scheme you might have to reduce the CFL value to 0.5. There are no universal laws when to use which CFL value. When your simulation diverges go lower. The maximum value is one.
+    This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which means the solver is faster. In many cases gowing for a big value here is good since it decreases the simulation time. In some occasions the visual quality will suffer under big CFL numbers. Refer to best practices for more information.
 
 **Itterations**
-    Number of pressure itterations. Usually the default of four is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.
+    Number of pressure itterations. Usually the default of ten is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.
 
-**Scheme**
-    The advection scheme used in the solver. The first order upwind scheme is more stable but less swirkly and supresses detail in the flow. The second order upwind scheme is sharper but can become unstable. Most of the time you can test with the first order uwpind scheme and when you are happy with your simulation setup switch to second order upwind.
+**MacCormack Factor**
+    For the purpose of this factor refer to the theory documentation. In general larger values make the flow more swirly and detailed, but can introduce artefacts.
 
+**Adaptive Domain**
+    Similar to Blenders native adaptive domain setting. Only simulates cells containing smoke, fuel or fire. Can greatly improve performance when activated in many cases. In some cases it is worth it to run it off, refer to the best practice section.
+
+**Threshold**
+    Threshold for when a cell is considered empty for the adaptive domain.
 
 Domain
 ~~~~~~
@@ -196,11 +201,11 @@ The Source node defines where fluid, smoke, temperature, pressure and velocity a
 **Extra Pressure**
     Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.
 
-**Velocity**
-    Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.
-
 **Space**
     Choose whether the source velocity is interpreted in world coordinates or in the local coordinate system of each linked geometry object. With multiple geometry inputs in local space, each object applies the same authored velocity vector in its own local axes.
+
+**Velocity**
+    Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.
 
 
 Geometry
@@ -220,12 +225,39 @@ Force-Constant
    :class: block-image-left
    :width: 300px
 
+Adds constant forcing to the whole domain.
+
+**Fx**
+    Strength of force in x-direction
+
+**Fy**
+    Strength of force in y-direction
+
+**Fz**
+    Strength of force in z-direction
+
+
 Force-Turbulence
 ~~~~~~~~~~~~~~~~
 
 .. figure:: ../images/force_turbulence_node.jpg
    :class: block-image-left
    :width: 300px
+
+Adds turbulent forcing to the domain.
+
+**Scale**
+    Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.
+
+**Frequency**
+    How quickly the turbulence field alternates. Larger values alternate quicker
+
+**Amplitude**
+    Amplitude of turbulence
+
+**Seed**
+    Random seed for turbulence field generation.
+
 
 Force-Swirl
 ~~~~~~~~~~~
@@ -234,9 +266,35 @@ Force-Swirl
    :class: block-image-left
    :width: 300px
 
+Adds swirly forcing to your simulation.
+
+**Strength**
+    How strong the swirl is supposed to be.
+
+**Origin**
+    Origin point of the swirl motion.
+
+**Axis**
+    Axis for the swirl. The flow will rotate around the line defined by Axis and Origin.
+
+**Radius**
+    Radius within which the swirl motion should be applied
+
+
 Force-Point
 ~~~~~~~~~~~
 
 .. figure:: ../images/force_point_node.jpg
    :class: block-image-left
    :width: 300px
+
+Adds a point force that can attract flow or push it away.
+
+**Strength**
+    Negative values mean attraction, positive pushing the flow away.
+
+**Origin**
+    Origin of the point force.
+
+**Radius**
+    Radius at which the force is still in effect.
