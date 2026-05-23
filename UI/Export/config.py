@@ -24,7 +24,6 @@ except ImportError:
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules["continuum_flow_geometry_export"] = module
-        sys.modules["blendercfd_geometry_export"] = module
         spec.loader.exec_module(module)
         GeometryExport = module
 
@@ -46,12 +45,11 @@ except ImportError:
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules["continuum_flow_general_nodes_export"] = module
-        sys.modules["blendercfd_general_nodes_export"] = module
         spec.loader.exec_module(module)
         GeneralNodes = module
 
 
-NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
+NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 
 
 def _safe_float_vector(value):
@@ -170,7 +168,7 @@ def _sync_sampled_custom_node_animations(scene, context=None):
     sync_fn = getattr(
         GeneralNodes,
         "sync_all_continuum_flow_node_animations",
-        getattr(GeneralNodes, "sync_all_blendercfd_node_animations", None),
+        None,
     )
     if callable(sync_fn):
         sync_fn(scene)
@@ -306,7 +304,7 @@ def _resolve_simulation_output_fps(simulation_node, context=None):
     Resolve the FPS that defines frame-to-time conversion for one simulation.
     """
     output_nodes = _linked_output_nodes(
-        simulation_node, "Result", "BLENDERCFD_OUTPUT_NODE"
+        simulation_node, "Result", "CONTINUUM_FLOW_OUTPUT_NODE"
     )
     if output_nodes:
         return max(1, int(getattr(output_nodes[0], "fps", 24)))
@@ -333,7 +331,7 @@ def _linked_geometry_nodes(node):
     """
     Return linked geometry nodes for source and obstacle nodes.
     """
-    return _linked_input_nodes(node, "Geometry", "BLENDERCFD_GEOMETRY_NODE")
+    return _linked_input_nodes(node, "Geometry", "CONTINUUM_FLOW_GEOMETRY_NODE")
 
 
 def _sample_geometry_object_transforms(
@@ -412,21 +410,21 @@ _PHYSICS_SECTION_FIELDS = {
     "extras": (("vorticity", "vorticity", float, 0.0),),
 }
 _FORCE_NODE_FIELDS = {
-    "BLENDERCFD_FORCE_CONSTANT_NODE": (
+    "CONTINUUM_FLOW_FORCE_CONSTANT_NODE": (
         ("force", (("x", "fx"), ("y", "fy"), ("z", "fz"))),
     ),
-    "BLENDERCFD_FORCE_SWIRL_NODE": (
+    "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
         ("strength", "strength", float, 0.0),
         ("origin", "origin", _safe_float_vector, None),
         ("axis", "axis", _safe_float_vector, None),
         ("radius", "radius", float, 0.0),
     ),
-    "BLENDERCFD_FORCE_POINT_NODE": (
+    "CONTINUUM_FLOW_FORCE_POINT_NODE": (
         ("strength", "strength", float, 0.0),
         ("origin", "origin", _safe_float_vector, None),
         ("radius", "radius", float, 0.0),
     ),
-    "BLENDERCFD_FORCE_TURBULENCE_NODE": (
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
         ("scale", "scale", float, 0.0),
         ("frequency", "frequency", float, 0.0),
         ("amplitude", "amplitude", float, 0.0),
@@ -692,24 +690,24 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
     Build a grouped config entry for one simulation node.
     """
     domain_nodes = _linked_input_nodes(
-        simulation_node, "Domain", "BLENDERCFD_DOMAIN_NODE"
+        simulation_node, "Domain", "CONTINUUM_FLOW_DOMAIN_NODE"
     )
     physics_nodes = _linked_input_nodes(
-        simulation_node, "Physics", "BLENDERCFD_PHYSICS_NODE"
+        simulation_node, "Physics", "CONTINUUM_FLOW_PHYSICS_NODE"
     )
     source_nodes = _linked_input_nodes(
-        simulation_node, "Source", "BLENDERCFD_SOURCE_NODE"
+        simulation_node, "Source", "CONTINUUM_FLOW_SOURCE_NODE"
     )
     obstacle_nodes = _linked_input_nodes(
-        simulation_node, "Obstacles", "BLENDERCFD_OBSTACLE_NODE"
+        simulation_node, "Obstacles", "CONTINUUM_FLOW_OBSTACLE_NODE"
     )
     force_nodes = _linked_input_nodes(simulation_node, "Forces")
 
     output_nodes = _linked_output_nodes(
-        simulation_node, "Result", "BLENDERCFD_OUTPUT_NODE"
+        simulation_node, "Result", "CONTINUUM_FLOW_OUTPUT_NODE"
     )
     viewer_nodes = _linked_output_nodes(
-        simulation_node, "Result", "BLENDERCFD_VIEWER_NODE"
+        simulation_node, "Result", "CONTINUUM_FLOW_VIEWER_NODE"
     )
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
@@ -795,7 +793,7 @@ def _collect_tree_geometry_nodes(node_tree):
     """
     geometry_entries = []
     for node in node_tree.nodes:
-        if getattr(node, "bl_idname", "") != "BLENDERCFD_GEOMETRY_NODE":
+        if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_GEOMETRY_NODE":
             continue
         source_object = getattr(node, "source_object", None)
         geometry_entries.append(
@@ -855,7 +853,7 @@ def build_config_dict(context=None, geometry_storage_dir=None):
     simulation_nodes = [
         node
         for node in node_tree.nodes
-        if getattr(node, "bl_idname", "") == "BLENDERCFD_SIMULATION_NODE"
+        if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE"
     ]
 
     config_dict = {
@@ -891,12 +889,12 @@ def export_config_dict(context=None):
     return file_path, config_dict
 
 
-class BlenderCFD_OT_export_config_dict(bpy.types.Operator):
+class ContinuumFlow_OT_export_config_dict(bpy.types.Operator):
     """
     Export the evaluated Continuum Flow node tree to JSON.
     """
 
-    bl_idname = "blendercfd.export_config_dict"
+    bl_idname = "continuum_flow.export_config_dict"
     bl_label = "Export Config Dict"
     bl_description = (
         "Evaluate the Continuum Flow node tree and write a JSON config file"
@@ -916,4 +914,4 @@ class BlenderCFD_OT_export_config_dict(bpy.types.Operator):
         return {"FINISHED"}
 
 
-classes = (BlenderCFD_OT_export_config_dict,)
+classes = (ContinuumFlow_OT_export_config_dict,)

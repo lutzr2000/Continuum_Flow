@@ -14,13 +14,8 @@ from bpy.props import (
 )
 from bpy.app.handlers import persistent
 
-MODULE_NAME_ALIASES = {
-    "continuum_flow_nodetree": ("blendercfd_nodetree",),
-    "continuum_flow_sockets": ("blendercfd_sockets",),
-    "continuum_flow_viewer": ("blendercfd_viewer",),
-}
+MODULE_NAME_ALIASES = {}
 CONTINUUM_FLOW_BAKE_RUNNING_KEY = "continuum_flow_bake_running"
-LEGACY_BAKE_RUNNING_KEY = "blendercfd_bake_running"
 
 
 def _ui_directory():
@@ -56,7 +51,7 @@ def _solver_python_executable():
 
 def _register_module_aliases(module, module_name):
     """
-    Expose a loaded module under both the new and legacy import names.
+    Expose a loaded module under its canonical import name.
     """
     sys.modules[module_name] = module
     for alias in MODULE_NAME_ALIASES.get(module_name, ()):
@@ -106,7 +101,7 @@ _node_tree_module = _load_ui_module(
     "Core/node_tree.py",
     (".Core.node_tree", "UI.Core.node_tree", "Core.node_tree"),
 )
-BlenderCFDNodeTree = _node_tree_module.BlenderCFDNodeTree
+ContinuumFlowNodeTree = _node_tree_module.ContinuumFlowNodeTree
 
 _sockets_module = _load_ui_module(
     "continuum_flow_sockets",
@@ -114,16 +109,16 @@ _sockets_module = _load_ui_module(
     (".Core.sockets", "UI.Core.sockets", "Core.sockets"),
 )
 
-BlenderCFDViewerModule = _load_ui_module(
+ContinuumFlowViewerModule = _load_ui_module(
     "continuum_flow_viewer",
     "Core/viewer.py",
     (".Core.viewer", "UI.Core.viewer", "Core.viewer"),
 )
 
-BlenderCFDForceSocket = _sockets_module.BlenderCFDForceSocket
-BlenderCFDIntSocket = _sockets_module.BlenderCFDIntSocket
-BlenderCFDLinkSocket = _sockets_module.BlenderCFDLinkSocket
-BlenderCFDResultSocket = _sockets_module.BlenderCFDResultSocket
+ContinuumFlowForceSocket = _sockets_module.ContinuumFlowForceSocket
+ContinuumFlowIntSocket = _sockets_module.ContinuumFlowIntSocket
+ContinuumFlowLinkSocket = _sockets_module.ContinuumFlowLinkSocket
+ContinuumFlowResultSocket = _sockets_module.ContinuumFlowResultSocket
 _SYNC_DEBUGGED_ACTIONS = set()
 _GPU_SOLVER_AVAILABLE_CACHE = None
 
@@ -179,10 +174,8 @@ def set_bake_running(is_running, context=None):
 
     if is_running:
         window_manager[CONTINUUM_FLOW_BAKE_RUNNING_KEY] = True
-        window_manager[LEGACY_BAKE_RUNNING_KEY] = True
     else:
         window_manager.pop(CONTINUUM_FLOW_BAKE_RUNNING_KEY, None)
-        window_manager.pop(LEGACY_BAKE_RUNNING_KEY, None)
 
 
 def is_bake_running(context=None):
@@ -192,20 +185,17 @@ def is_bake_running(context=None):
     window_manager = _window_manager_from_context(context)
     if window_manager is None:
         return False
-    return bool(
-        window_manager.get(CONTINUUM_FLOW_BAKE_RUNNING_KEY, False)
-        or window_manager.get(LEGACY_BAKE_RUNNING_KEY, False)
-    )
+    return bool(window_manager.get(CONTINUUM_FLOW_BAKE_RUNNING_KEY, False))
 
 
-class BlenderCFDBaseNode(bpy.types.Node):
+class ContinuumFlowBaseNode(bpy.types.Node):
     """
     Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes.
     """
 
     @classmethod
     def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+        return ntree.bl_idname == ContinuumFlowNodeTree.bl_idname
 
     def _sync_node(self):
         """
@@ -260,14 +250,14 @@ def ensure_named_output(node, socket_type, name):
     return ensure_socket(node.outputs, socket_type, name)
 
 
-def _active_blendercfd_tree(context):
+def _active_continuum_flow_tree(context):
     """
     Return the active Continuum Flow node tree from the current editor context.
     """
     space_data = getattr(context, "space_data", None)
     if (
         space_data is None
-        or getattr(space_data, "tree_type", "") != BlenderCFDNodeTree.bl_idname
+        or getattr(space_data, "tree_type", "") != ContinuumFlowNodeTree.bl_idname
     ):
         return None
     return getattr(space_data, "edit_tree", None) or getattr(
@@ -286,12 +276,12 @@ def _node_cursor_location(context):
     return (float(cursor[0]), float(cursor[1]))
 
 
-def _iter_blendercfd_node_trees():
+def _iter_continuum_flow_node_trees():
     """
     Yield all Continuum Flow node trees in the current file.
     """
     for node_tree in bpy.data.node_groups:
-        if getattr(node_tree, "bl_idname", "") == BlenderCFDNodeTree.bl_idname:
+        if getattr(node_tree, "bl_idname", "") == ContinuumFlowNodeTree.bl_idname:
             yield node_tree
 
 
@@ -404,7 +394,7 @@ def _sync_node_tree_animation(node_tree, frame_value):
             )
 
 
-def sync_all_blendercfd_node_animations(scene=None):
+def sync_all_continuum_flow_node_animations(scene=None):
     """
     Evaluate all Continuum Flow node-tree animations for the current frame.
     """
@@ -414,7 +404,7 @@ def sync_all_blendercfd_node_animations(scene=None):
         return
 
     frame_value = float(getattr(scene, "frame_current", 0))
-    for node_tree in _iter_blendercfd_node_trees():
+    for node_tree in _iter_continuum_flow_node_trees():
         _sync_node_tree_animation(node_tree, frame_value)
 
 
@@ -436,20 +426,20 @@ def _tag_animation_editors_redraw():
 
 
 @persistent
-def blendercfd_frame_change_post(scene, _depsgraph):
+def continuum_flow_frame_change_post(scene, _depsgraph):
     """
     Force Continuum Flow custom node properties to follow their F-curves per frame.
     """
-    sync_all_blendercfd_node_animations(scene)
+    sync_all_continuum_flow_node_animations(scene)
     _tag_animation_editors_redraw()
 
 
-class BlenderCFDDomainNode(BlenderCFDBaseNode):
+class ContinuumFlowDomainNode(ContinuumFlowBaseNode):
     """
     Node used to define the CFD domain resolution and boundary conditions.
     """
 
-    bl_idname = "BLENDERCFD_DOMAIN_NODE"
+    bl_idname = "CONTINUUM_FLOW_DOMAIN_NODE"
     bl_label = "Domain"
     bl_icon = "MESH_GRID"
     bl_width_default = 220.0
@@ -488,7 +478,7 @@ class BlenderCFDDomainNode(BlenderCFDBaseNode):
     z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
 
     def _sync_node(self):
-        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Domain")
+        ensure_named_output(self, ContinuumFlowIntSocket.bl_idname, "Domain")
 
     def _draw_boundary_controls(self, layout, label, condition_attr, velocity_attr):
         box = layout.box()
@@ -509,12 +499,12 @@ class BlenderCFDDomainNode(BlenderCFDBaseNode):
             self._draw_boundary_controls(layout, *boundary_args)
 
 
-class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
+class ContinuumFlowPhysicsNode(ContinuumFlowBaseNode):
     """
     Node used to store the physical coefficients of the CFD simulation.
     """
 
-    bl_idname = "BLENDERCFD_PHYSICS_NODE"
+    bl_idname = "CONTINUUM_FLOW_PHYSICS_NODE"
     bl_label = "Physics"
     bl_icon = "MOD_PHYSICS"
     bl_width_default = 220.0
@@ -559,7 +549,7 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
     vorticity: FloatProperty(name="Vorticity", default=0.1, min=0.0, precision=4, description="Amount of additional vorticity in the flow, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
-        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Physics")
+        ensure_named_output(self, ContinuumFlowIntSocket.bl_idname, "Physics")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
@@ -567,12 +557,12 @@ class BlenderCFDPhysicsNode(BlenderCFDBaseNode):
             self._draw_group(layout, title, property_names)
 
 
-class BlenderCFDSimulationNode(BlenderCFDBaseNode):
+class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
     """
     Node used to collect all simulation-wide settings and input dependencies.
     """
 
-    bl_idname = "BLENDERCFD_SIMULATION_NODE"
+    bl_idname = "CONTINUUM_FLOW_SIMULATION_NODE"
     bl_label = "Simulation"
     bl_icon = "TIME"
     bl_width_default = 260.0
@@ -610,9 +600,9 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
-            BlenderCFDForceSocket.bl_idname
+            ContinuumFlowForceSocket.bl_idname
             if name == "Forces"
-            else BlenderCFDLinkSocket.bl_idname
+            else ContinuumFlowLinkSocket.bl_idname
         )
         return ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
 
@@ -622,7 +612,7 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
         self._ensure_input_socket("Obstacles")
         self._ensure_input_socket("Source", multi_input=True)
         self._ensure_input_socket("Forces", multi_input=True)
-        ensure_named_output(self, BlenderCFDResultSocket.bl_idname, "Result")
+        ensure_named_output(self, ContinuumFlowResultSocket.bl_idname, "Result")
 
     def init(self, context):
         scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
@@ -645,12 +635,12 @@ class BlenderCFDSimulationNode(BlenderCFDBaseNode):
             self._draw_group(layout, title, property_names)
 
 
-class BlenderCFDSourceNode(BlenderCFDBaseNode):
+class ContinuumFlowSourceNode(ContinuumFlowBaseNode):
     """
     Node used to define a generic CFD source region and its scalar and velocity targets.
     """
 
-    bl_idname = "BLENDERCFD_SOURCE_NODE"
+    bl_idname = "CONTINUUM_FLOW_SOURCE_NODE"
     bl_label = "Source"
     bl_icon = "LIGHT_SUN"
     bl_width_default = 220.0
@@ -675,7 +665,7 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
 
     def _sync_node(self):
         ensure_geometry_input(self)
-        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Source")
+        ensure_named_output(self, ContinuumFlowIntSocket.bl_idname, "Source")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
@@ -689,12 +679,12 @@ class BlenderCFDSourceNode(BlenderCFDBaseNode):
         velocity_col.prop(self, "velocity", text="")
 
 
-class BlenderCFDGeometryNode(BlenderCFDBaseNode):
+class ContinuumFlowGeometryNode(ContinuumFlowBaseNode):
     """
     Node used to reference a Blender object as geometry inside the CFD graph.
     """
 
-    bl_idname = "BLENDERCFD_GEOMETRY_NODE"
+    bl_idname = "CONTINUUM_FLOW_GEOMETRY_NODE"
     bl_label = "Geometry"
     bl_icon = "OUTLINER_OB_MESH"
     bl_width_default = 220.0
@@ -711,12 +701,12 @@ class BlenderCFDGeometryNode(BlenderCFDBaseNode):
         layout.prop(self, "source_object", text="Object")
 
 
-class BlenderCFDObstacleNode(BlenderCFDBaseNode):
+class ContinuumFlowObstacleNode(ContinuumFlowBaseNode):
     """
     Node used to define obstacle geometry inside the CFD domain.
     """
 
-    bl_idname = "BLENDERCFD_OBSTACLE_NODE"
+    bl_idname = "CONTINUUM_FLOW_OBSTACLE_NODE"
     bl_label = "Obstacle"
     bl_icon = "CUBE"
     bl_width_default = 220.0
@@ -725,15 +715,15 @@ class BlenderCFDObstacleNode(BlenderCFDBaseNode):
 
     def _sync_node(self):
         ensure_geometry_input(self)
-        ensure_named_output(self, BlenderCFDIntSocket.bl_idname, "Obstacle")
+        ensure_named_output(self, ContinuumFlowIntSocket.bl_idname, "Obstacle")
 
 
-class BlenderCFDViewerNode(BlenderCFDBaseNode):
+class ContinuumFlowViewerNode(ContinuumFlowBaseNode):
     """
     Node used as a lightweight endpoint for inspecting simulation results.
     """
 
-    bl_idname = "BLENDERCFD_VIEWER_NODE"
+    bl_idname = "CONTINUUM_FLOW_VIEWER_NODE"
     bl_label = "Viewer"
     bl_icon = "HIDE_OFF"
     bl_width_default = 180.0
@@ -743,53 +733,53 @@ class BlenderCFDViewerNode(BlenderCFDBaseNode):
     live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
 
     def _sync_node(self):
-        ensure_socket(self.inputs, BlenderCFDResultSocket.bl_idname, "Result")
+        ensure_socket(self.inputs, ContinuumFlowResultSocket.bl_idname, "Result")
 
     def free(self):
         self.domain_preview_active = False
-        BlenderCFDViewerModule.disable_domain_preview()
+        ContinuumFlowViewerModule.disable_domain_preview()
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
         col.operator(
-            "blendercfd.viewer_toggle_domain",
+            "continuum_flow.viewer_toggle_domain",
             text="Hide Domain" if bool(self.domain_preview_active) else "Show Domain",
             icon="HIDE_ON" if bool(self.domain_preview_active) else "HIDE_OFF",
         )
         col.prop(self, "live_preview")
 
 
-class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
+class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
     """
     Add a ready-to-use Continuum Flow starter setup with the core nodes linked.
     """
 
-    bl_idname = "blendercfd.add_basic_setup"
+    bl_idname = "continuum_flow.add_basic_setup"
     bl_label = "Add Basic Continuum Flow Setup"
     bl_description = "Create a starter setup with Domain, Physics, Simulation, Viewer, and Output already connected"
 
     @classmethod
     def poll(cls, context):
-        return _active_blendercfd_tree(context) is not None
+        return _active_continuum_flow_tree(context) is not None
 
     def execute(self, context):
-        node_tree = _active_blendercfd_tree(context)
+        node_tree = _active_continuum_flow_tree(context)
         if node_tree is None:
             self.report({"ERROR"}, "Open a Continuum Flow node tree first.")
             return {"CANCELLED"}
 
         cursor_x, cursor_y = _node_cursor_location(context)
         node_specs = (
-            ("domain", "BLENDERCFD_DOMAIN_NODE", (cursor_x - 520.0, cursor_y + 140.0)),
+            ("domain", "CONTINUUM_FLOW_DOMAIN_NODE", (cursor_x - 520.0, cursor_y + 140.0)),
             (
                 "physics",
-                "BLENDERCFD_PHYSICS_NODE",
+                "CONTINUUM_FLOW_PHYSICS_NODE",
                 (cursor_x - 520.0, cursor_y - 140.0),
             ),
-            ("simulation", "BLENDERCFD_SIMULATION_NODE", (cursor_x - 120.0, cursor_y)),
-            ("viewer", "BLENDERCFD_VIEWER_NODE", (cursor_x + 280.0, cursor_y + 120.0)),
-            ("output", "BLENDERCFD_OUTPUT_NODE", (cursor_x + 280.0, cursor_y - 120.0)),
+            ("simulation", "CONTINUUM_FLOW_SIMULATION_NODE", (cursor_x - 120.0, cursor_y)),
+            ("viewer", "CONTINUUM_FLOW_VIEWER_NODE", (cursor_x + 280.0, cursor_y + 120.0)),
+            ("output", "CONTINUUM_FLOW_OUTPUT_NODE", (cursor_x + 280.0, cursor_y - 120.0)),
         )
 
         for node in node_tree.nodes:
@@ -824,29 +814,12 @@ class BlenderCFD_OT_add_basic_setup(bpy.types.Operator):
 
 
 classes = (
-    BlenderCFDDomainNode,
-    BlenderCFDPhysicsNode,
-    BlenderCFDSimulationNode,
-    BlenderCFDSourceNode,
-    BlenderCFDGeometryNode,
-    BlenderCFDObstacleNode,
-    BlenderCFDViewerNode,
-    BlenderCFD_OT_add_basic_setup,
+    ContinuumFlowDomainNode,
+    ContinuumFlowPhysicsNode,
+    ContinuumFlowSimulationNode,
+    ContinuumFlowSourceNode,
+    ContinuumFlowGeometryNode,
+    ContinuumFlowObstacleNode,
+    ContinuumFlowViewerNode,
+    ContinuumFlow_OT_add_basic_setup,
 )
-
-ContinuumFlowNodeTree = BlenderCFDNodeTree
-ContinuumFlowForceSocket = BlenderCFDForceSocket
-ContinuumFlowIntSocket = BlenderCFDIntSocket
-ContinuumFlowLinkSocket = BlenderCFDLinkSocket
-ContinuumFlowResultSocket = BlenderCFDResultSocket
-ContinuumFlowBaseNode = BlenderCFDBaseNode
-ContinuumFlowDomainNode = BlenderCFDDomainNode
-ContinuumFlowPhysicsNode = BlenderCFDPhysicsNode
-ContinuumFlowSimulationNode = BlenderCFDSimulationNode
-ContinuumFlowSourceNode = BlenderCFDSourceNode
-ContinuumFlowGeometryNode = BlenderCFDGeometryNode
-ContinuumFlowObstacleNode = BlenderCFDObstacleNode
-ContinuumFlowViewerNode = BlenderCFDViewerNode
-ContinuumFlow_OT_add_basic_setup = BlenderCFD_OT_add_basic_setup
-sync_all_continuum_flow_node_animations = sync_all_blendercfd_node_animations
-continuum_flow_frame_change_post = blendercfd_frame_change_post

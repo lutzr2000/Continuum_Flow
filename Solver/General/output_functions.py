@@ -242,7 +242,7 @@ def shutdown_output(write_queue, writer_threads, shared_memory_blocks):
 
 def _domain_origin_from_shape(shape, delta):
     """
-    Return the world-space origin used by the BlenderCFD domain preview.
+    Return the world-space origin used by the Continuum Flow domain preview.
     """
     nx, ny, _nz = shape
     return (

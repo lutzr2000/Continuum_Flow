@@ -4,26 +4,26 @@ from bpy.props import IntProperty
 _INVALID_SOCKET_COLOR = (0.95, 0.20, 0.20, 1.0)
 
 _SOCKET_ROLE_BY_NODE_AND_NAME = {
-    ("BLENDERCFD_DOMAIN_NODE", "Domain"): "domain",
-    ("BLENDERCFD_PHYSICS_NODE", "Physics"): "physics",
-    ("BLENDERCFD_OBSTACLE_NODE", "Obstacle"): "obstacles",
-    ("BLENDERCFD_SOURCE_NODE", "Source"): "source",
-    ("BLENDERCFD_SIMULATION_NODE", "Domain"): "domain",
-    ("BLENDERCFD_SIMULATION_NODE", "Physics"): "physics",
-    ("BLENDERCFD_SIMULATION_NODE", "Obstacles"): "obstacles",
-    ("BLENDERCFD_SIMULATION_NODE", "Source"): "source",
-    ("BLENDERCFD_SIMULATION_NODE", "Forces"): "forces",
-    ("BLENDERCFD_SIMULATION_NODE", "Result"): "result",
-    ("BLENDERCFD_OUTPUT_NODE", "Result"): "result",
-    ("BLENDERCFD_VIEWER_NODE", "Result"): "result",
-    ("BLENDERCFD_GEOMETRY_NODE", "Geometry"): "geometry",
-    ("BLENDERCFD_SOURCE_NODE", "Geometry"): "geometry",
-    ("BLENDERCFD_OBSTACLE_NODE", "Geometry"): "geometry",
+    ("CONTINUUM_FLOW_DOMAIN_NODE", "Domain"): "domain",
+    ("CONTINUUM_FLOW_PHYSICS_NODE", "Physics"): "physics",
+    ("CONTINUUM_FLOW_OBSTACLE_NODE", "Obstacle"): "obstacles",
+    ("CONTINUUM_FLOW_SOURCE_NODE", "Source"): "source",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Domain"): "domain",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Physics"): "physics",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Obstacles"): "obstacles",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Source"): "source",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Forces"): "forces",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Result"): "result",
+    ("CONTINUUM_FLOW_OUTPUT_NODE", "Result"): "result",
+    ("CONTINUUM_FLOW_VIEWER_NODE", "Result"): "result",
+    ("CONTINUUM_FLOW_GEOMETRY_NODE", "Geometry"): "geometry",
+    ("CONTINUUM_FLOW_SOURCE_NODE", "Geometry"): "geometry",
+    ("CONTINUUM_FLOW_OBSTACLE_NODE", "Geometry"): "geometry",
 }
 
 _SOCKET_ROLE_BY_SOCKET_IDNAME = {
-    "BLENDERCFD_FORCE_SOCKET": "forces",
-    "BLENDERCFD_RESULT_SOCKET": "result",
+    "CONTINUUM_FLOW_FORCE_SOCKET": "forces",
+    "CONTINUUM_FLOW_RESULT_SOCKET": "result",
     "NodeSocketGeometry": "geometry",
 }
 
@@ -78,12 +78,12 @@ def tree_has_invalid_links(node_tree):
         return False
 
 
-class BlenderCFDIntSocket(bpy.types.NodeSocket):
+class ContinuumFlowIntSocket(bpy.types.NodeSocket):
     """
     Integer socket used by Continuum Flow nodes to expose bounded scalar values.
     """
 
-    bl_idname = "BLENDERCFD_INT_SOCKET"
+    bl_idname = "CONTINUUM_FLOW_INT_SOCKET"
     bl_label = "Continuum Flow Integer"
 
     value: IntProperty(  # type: ignore
@@ -113,12 +113,12 @@ class BlenderCFDIntSocket(bpy.types.NodeSocket):
         return (0.90, 0.55, 0.20, 1.0)
 
 
-class BlenderCFDLinkSocket(bpy.types.NodeSocket):
+class ContinuumFlowLinkSocket(bpy.types.NodeSocket):
     """
     Generic link socket used to connect logical Continuum Flow node outputs.
     """
 
-    bl_idname = "BLENDERCFD_LINK_SOCKET"
+    bl_idname = "CONTINUUM_FLOW_LINK_SOCKET"
     bl_label = "Continuum Flow Link"
 
     def draw(self, context, layout, node, text):
@@ -136,12 +136,12 @@ class BlenderCFDLinkSocket(bpy.types.NodeSocket):
         return (0.90, 0.55, 0.20, 1.0)
 
 
-class BlenderCFDForceSocket(bpy.types.NodeSocket):
+class ContinuumFlowForceSocket(bpy.types.NodeSocket):
     """
     Dedicated socket used for force-related links in the Continuum Flow graph.
     """
 
-    bl_idname = "BLENDERCFD_FORCE_SOCKET"
+    bl_idname = "CONTINUUM_FLOW_FORCE_SOCKET"
     bl_label = "Continuum Flow Force"
 
     def draw(self, context, layout, node, text):
@@ -159,12 +159,12 @@ class BlenderCFDForceSocket(bpy.types.NodeSocket):
         return (0.45, 0.65, 0.95, 1.0)
 
 
-class BlenderCFDResultSocket(bpy.types.NodeSocket):
+class ContinuumFlowResultSocket(bpy.types.NodeSocket):
     """
     Result socket used by the simulation node to expose the final output link.
     """
 
-    bl_idname = "BLENDERCFD_RESULT_SOCKET"
+    bl_idname = "CONTINUUM_FLOW_RESULT_SOCKET"
     bl_label = "Continuum Flow Result"
 
     def draw(self, context, layout, node, text):
@@ -183,8 +183,8 @@ class BlenderCFDResultSocket(bpy.types.NodeSocket):
 
 
 classes = (
-    BlenderCFDIntSocket,
-    BlenderCFDLinkSocket,
-    BlenderCFDForceSocket,
-    BlenderCFDResultSocket,
+    ContinuumFlowIntSocket,
+    ContinuumFlowLinkSocket,
+    ContinuumFlowForceSocket,
+    ContinuumFlowResultSocket,
 )

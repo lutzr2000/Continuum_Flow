@@ -11,10 +11,7 @@ from time import perf_counter
 
 import bpy
 
-try:
-    import continuum_flow_general_nodes as GeneralNodes
-except ImportError:
-    import blendercfd_general_nodes as GeneralNodes
+import continuum_flow_general_nodes as GeneralNodes
 from bpy.props import StringProperty
 
 
@@ -47,15 +44,14 @@ def _load_sibling_module(module_name, file_name, legacy_names=()):
 BakeStorage = _load_sibling_module(
     "continuum_flow_bake_storage",
     "bake_storage.py",
-    legacy_names=("blendercfd_bake_storage",),
 )
 
-BlenderCFDConfigModule = GeneralNodes._load_ui_module(
+ContinuumFlowConfigModule = GeneralNodes._load_ui_module(
     "continuum_flow_create_config_dict",
     str(Path("Export") / "config.py"),
     (".Export.config", "UI.Export.config", "Export.config"),
 )
-BlenderCFDHostWriterModule = GeneralNodes._load_ui_module(
+ContinuumFlowHostWriterModule = GeneralNodes._load_ui_module(
     "continuum_flow_host_writer",
     "Bake/writer_manager.py",
     (".Bake.writer_manager", "UI.Bake.writer_manager", "Bake.writer_manager"),
@@ -65,7 +61,6 @@ tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links
 set_bake_running = GeneralNodes.set_bake_running
 
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
-LEGACY_PROGRESS_EVENT_PREFIX = "__BLENDERCFD_PROGRESS__ "
 _STATUS_PROGRESS_PERCENT = 0.0
 _STATUS_PROGRESS_FACTOR = 0.0
 _STATUS_PROGRESS_ETA = ""
@@ -99,7 +94,7 @@ def _gpu_solver_available():
         return False
 
 
-def _draw_blendercfd_status_progress(header, context):
+def _draw_continuum_flow_status_progress(header, context):
     layout = header.layout
     layout.separator_spacer()
     layout.label(text="Continuum Flow Bake:")
@@ -116,7 +111,7 @@ def _draw_blendercfd_status_progress(header, context):
     eta_row.ui_units_x = 7
     eta_row.label(text=_STATUS_PROGRESS_ETA or _STATUS_PROGRESS_ETA_PLACEHOLDER)
     row = layout.row(align=True)
-    row.operator("blendercfd.cancel_bake", text="", icon="PANEL_CLOSE", emboss=False)
+    row.operator("continuum_flow.cancel_bake", text="", icon="PANEL_CLOSE", emboss=False)
     layout.separator_spacer()
 
 
@@ -220,16 +215,9 @@ def _handle_kernel_output_line(line, output_tail):
     output_tail.append(line.rstrip())
     if len(output_tail) > 40:
         del output_tail[0]
-    if line.startswith(PROGRESS_EVENT_PREFIX) or line.startswith(
-        LEGACY_PROGRESS_EVENT_PREFIX
-    ):
+    if line.startswith(PROGRESS_EVENT_PREFIX):
         try:
-            prefix = (
-                PROGRESS_EVENT_PREFIX
-                if line.startswith(PROGRESS_EVENT_PREFIX)
-                else LEGACY_PROGRESS_EVENT_PREFIX
-            )
-            payload = json.loads(line[len(prefix) :])
+            payload = json.loads(line[len(PROGRESS_EVENT_PREFIX) :])
             return max(0.0, min(100.0, float(payload.get("percent", 0.0))))
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
@@ -266,7 +254,7 @@ def _read_kernel_output(process, output_queue):
 
 
 def _start_bake_session(config_dict):
-    writer_server = BlenderCFDHostWriterModule.HostVDBWriterServer(
+    writer_server = ContinuumFlowHostWriterModule.HostVDBWriterServer(
         writer_process_count=_writer_process_count_from_config(config_dict)
     )
     writer_server.start()
@@ -292,12 +280,12 @@ def _start_bake_session(config_dict):
     }
 
 
-class BlenderCFD_OT_bake(bpy.types.Operator):
+class ContinuumFlow_OT_bake(bpy.types.Operator):
     """
     Operator that exports the active node tree config and starts the kernel.
     """
 
-    bl_idname = "blendercfd.bake"
+    bl_idname = "continuum_flow.bake"
     bl_label = "Bake Continuum Flow"
     bl_description = "Start the Continuum Flow bake process"
     output_path_hint: StringProperty(default="", options={"SKIP_SAVE"})  # type: ignore
@@ -353,7 +341,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
     def _set_status_progress(self, context):
         if self._workspace is None:
             self._workspace = context.workspace
-        self._workspace.status_text_set(_draw_blendercfd_status_progress)
+        self._workspace.status_text_set(_draw_continuum_flow_status_progress)
         self._tag_status_bar_redraw(context)
 
     def _clear_status_progress(self, context):
@@ -585,7 +573,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             )
             return {"FINISHED"}
 
-        resolve_node_tree = getattr(BlenderCFDConfigModule, "_resolve_node_tree", None)
+        resolve_node_tree = getattr(ContinuumFlowConfigModule, "_resolve_node_tree", None)
         node_tree = resolve_node_tree(context) if callable(resolve_node_tree) else None
         if tree_has_invalid_links(node_tree):
             self.report(
@@ -600,7 +588,7 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
             geometry_output_directory, bake_token
         )
         try:
-            live_config_dict = BlenderCFDConfigModule.build_config_dict(
+            live_config_dict = ContinuumFlowConfigModule.build_config_dict(
                 context,
                 geometry_storage_dir=str(geometry_cache_dir),
             )
@@ -682,12 +670,12 @@ class BlenderCFD_OT_bake(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
 
-class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
+class ContinuumFlow_OT_cancel_bake(bpy.types.Operator):
     """
     Cancel the currently running Continuum Flow bake from the status bar.
     """
 
-    bl_idname = "blendercfd.cancel_bake"
+    bl_idname = "continuum_flow.cancel_bake"
     bl_label = "Cancel Continuum Flow Bake"
     bl_description = "Cancel the currently running Continuum Flow bake"
 
@@ -703,6 +691,6 @@ class BlenderCFD_OT_cancel_bake(bpy.types.Operator):
 
 
 classes = (
-    BlenderCFD_OT_bake,
-    BlenderCFD_OT_cancel_bake,
+    ContinuumFlow_OT_bake,
+    ContinuumFlow_OT_cancel_bake,
 )

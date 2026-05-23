@@ -1,11 +1,11 @@
 import bpy
 from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
 
-NODE_TREE_ID = "BLENDERCFD_NODE_TREE"
-NODE_CATEGORIES_ID = "BLENDERCFD_NODE_CATEGORIES"
+NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
+NODE_CATEGORIES_ID = "CONTINUUM_FLOW_NODE_CATEGORIES"
 
 
-class BlenderCFDNodeTree(bpy.types.NodeTree):
+class ContinuumFlowNodeTree(bpy.types.NodeTree):
     """
     Custom node tree used as the main editor space for Continuum Flow nodes.
     """
@@ -15,7 +15,7 @@ class BlenderCFDNodeTree(bpy.types.NodeTree):
     bl_icon = "FORCE_TURBULENCE"
 
 
-class BlenderCFDNodeCategory(NodeCategory):
+class ContinuumFlowNodeCategory(NodeCategory):
     """
     Node category shown in the add menu of the Continuum Flow node tree.
     """
@@ -34,37 +34,37 @@ def build_node_categories():
     Build the add menu categories for all registered Continuum Flow nodes.
     """
     return [
-        BlenderCFDNodeCategory(
-            "BLENDERCFD_NODES",
+        ContinuumFlowNodeCategory(
+            "CONTINUUM_FLOW_NODES",
             "Continuum Flow",
             items=[
-                NodeItem("BLENDERCFD_DOMAIN_NODE"),
-                NodeItem("BLENDERCFD_GEOMETRY_NODE"),
-                NodeItem("BLENDERCFD_OUTPUT_NODE"),
-                NodeItem("BLENDERCFD_PHYSICS_NODE"),
-                NodeItem("BLENDERCFD_SIMULATION_NODE"),
-                NodeItem("BLENDERCFD_SOURCE_NODE"),
-                NodeItem("BLENDERCFD_OBSTACLE_NODE"),
-                NodeItem("BLENDERCFD_VIEWER_NODE"),
+                NodeItem("CONTINUUM_FLOW_DOMAIN_NODE"),
+                NodeItem("CONTINUUM_FLOW_GEOMETRY_NODE"),
+                NodeItem("CONTINUUM_FLOW_OUTPUT_NODE"),
+                NodeItem("CONTINUUM_FLOW_PHYSICS_NODE"),
+                NodeItem("CONTINUUM_FLOW_SIMULATION_NODE"),
+                NodeItem("CONTINUUM_FLOW_SOURCE_NODE"),
+                NodeItem("CONTINUUM_FLOW_OBSTACLE_NODE"),
+                NodeItem("CONTINUUM_FLOW_VIEWER_NODE"),
             ],
         ),
-        BlenderCFDNodeCategory(
-            "BLENDERCFD_FORCES",
+        ContinuumFlowNodeCategory(
+            "CONTINUUM_FLOW_FORCES",
             "Forces",
             items=[
-                NodeItem("BLENDERCFD_FORCE_CONSTANT_NODE"),
-                NodeItem("BLENDERCFD_FORCE_SWIRL_NODE"),
-                NodeItem("BLENDERCFD_FORCE_POINT_NODE"),
-                NodeItem("BLENDERCFD_FORCE_TURBULENCE_NODE"),
+                NodeItem("CONTINUUM_FLOW_FORCE_CONSTANT_NODE"),
+                NodeItem("CONTINUUM_FLOW_FORCE_SWIRL_NODE"),
+                NodeItem("CONTINUUM_FLOW_FORCE_POINT_NODE"),
+                NodeItem("CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"),
             ],
         ),
-        BlenderCFDNodeCategory(
-            "BLENDERCFD_PRESETS",
+        ContinuumFlowNodeCategory(
+            "CONTINUUM_FLOW_PRESETS",
             "Presets",
             items=[
                 NodeItemCustom(
                     draw=lambda _item, layout, _context: layout.operator(
-                        "blendercfd.add_basic_setup",
+                        "continuum_flow.add_basic_setup",
                         text="Basic Continuum Flow Setup",
                         icon="FORCE_TURBULENCE",
                     ),
@@ -74,4 +74,4 @@ def build_node_categories():
     ]
 
 
-classes = (BlenderCFDNodeTree,)
+classes = (ContinuumFlowNodeTree,)

@@ -1,7 +1,6 @@
 import numpy as np
 
 POINT_FORCE_NODE_TYPES = {
-    "BLENDERCFD_FORCE_POINT_NODE",
     "CONTINUUM_FLOW_FORCE_POINT_NODE",
 }
 
@@ -402,17 +401,14 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     for force_cfg in force_entries or ():
         node_type = force_cfg.get("node_type", "")
         if node_type in {
-            "BLENDERCFD_FORCE_TURBULENCE_NODE",
             "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
         }:
             forcing_turbulence(force_state, shape, delta, force_cfg, dtype)
         elif node_type in {
-            "BLENDERCFD_FORCE_CONSTANT_NODE",
             "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
         }:
             forcing_constant(force_state, force_cfg, dtype)
         elif node_type in {
-            "BLENDERCFD_FORCE_SWIRL_NODE",
             "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
         }:
             forcing_swirl(force_state, shape, delta, force_cfg, dtype)

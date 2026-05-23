@@ -9,10 +9,10 @@ _FORCE_DRAW_HANDLER = None
 _FORCE_TIMER_REGISTERED = False
 _FORCE_COLOR = (0.45, 0.65, 0.95, 1.0)
 _FORCE_NODE_IDS = {
-    "BLENDERCFD_FORCE_CONSTANT_NODE",
-    "BLENDERCFD_FORCE_SWIRL_NODE",
-    "BLENDERCFD_FORCE_POINT_NODE",
-    "BLENDERCFD_FORCE_TURBULENCE_NODE",
+    "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
+    "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
+    "CONTINUUM_FLOW_FORCE_POINT_NODE",
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
 }
 
 
@@ -108,7 +108,7 @@ def _is_valid_domain_node(domain_node):
     if domain_node is None:
         return False
     try:
-        if getattr(domain_node, "bl_idname", "") != "BLENDERCFD_DOMAIN_NODE":
+        if getattr(domain_node, "bl_idname", "") != "CONTINUUM_FLOW_DOMAIN_NODE":
             return False
         if getattr(domain_node, "id_data", None) is None:
             return False
@@ -331,7 +331,7 @@ def _linked_simulation_nodes_from_force(force_node):
         to_node = getattr(link, "to_node", None)
         if to_node is None:
             continue
-        if getattr(to_node, "bl_idname", "") != "BLENDERCFD_SIMULATION_NODE":
+        if getattr(to_node, "bl_idname", "") != "CONTINUUM_FLOW_SIMULATION_NODE":
             continue
         simulation_nodes.append(to_node)
     return simulation_nodes
@@ -366,7 +366,7 @@ def _active_force_node():
             space = getattr(area.spaces, "active", None)
             if (
                 space is None
-                or getattr(space, "tree_type", "") != "BLENDERCFD_NODE_TREE"
+                or getattr(space, "tree_type", "") != "CONTINUUM_FLOW_NODE_TREE"
             ):
                 continue
             edit_tree = getattr(space, "edit_tree", None)
@@ -398,7 +398,7 @@ def _force_preview_geometry(force_node):
     node_type = getattr(force_node, "bl_idname", "")
     preview_scale = _force_preview_scale(force_node)
 
-    if node_type == "BLENDERCFD_FORCE_CONSTANT_NODE":
+    if node_type == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
         domain_node = _linked_domain_from_force(force_node)
         center = (
             _domain_center(domain_node) if domain_node is not None else (0.0, 0.0, 0.0)
@@ -414,7 +414,7 @@ def _force_preview_geometry(force_node):
         )
         return lines
 
-    if node_type == "BLENDERCFD_FORCE_POINT_NODE":
+    if node_type == "CONTINUUM_FLOW_FORCE_POINT_NODE":
         center = tuple(float(component) for component in force_node.origin[:3])
         radius = float(force_node.radius)
         lines = _crosshair_segments(center, preview_scale * 0.2)
@@ -423,7 +423,7 @@ def _force_preview_geometry(force_node):
         lines.extend(_circle_segments(center, (1.0, 0.0, 0.0), radius))
         return lines
 
-    if node_type == "BLENDERCFD_FORCE_SWIRL_NODE":
+    if node_type == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
         center = tuple(float(component) for component in force_node.origin[:3])
         axis = _normalize_vector(
             tuple(float(component) for component in force_node.axis[:3])
@@ -447,7 +447,7 @@ def _force_preview_geometry(force_node):
         lines.extend(_arrow_segments(swirl_point, swirl_dir))
         return lines
 
-    if node_type == "BLENDERCFD_FORCE_TURBULENCE_NODE":
+    if node_type == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
         return []
 
     return []
@@ -599,7 +599,7 @@ def _set_all_viewer_preview_flags(active=False):
     """
     for node_tree in bpy.data.node_groups:
         for node in getattr(node_tree, "nodes", ()):
-            if getattr(node, "bl_idname", "") != "BLENDERCFD_VIEWER_NODE":
+            if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_VIEWER_NODE":
                 continue
             try:
                 node.domain_preview_active = bool(
@@ -660,7 +660,7 @@ def _linked_domain_from_simulation(simulation_node):
         from_node = getattr(link, "from_node", None)
         if (
             from_node is not None
-            and getattr(from_node, "bl_idname", "") == "BLENDERCFD_DOMAIN_NODE"
+            and getattr(from_node, "bl_idname", "") == "CONTINUUM_FLOW_DOMAIN_NODE"
         ):
             return from_node
     return None
@@ -678,7 +678,7 @@ def _linked_domain_from_viewer(node):
         simulation_node = getattr(link, "from_node", None)
         if simulation_node is None:
             continue
-        if getattr(simulation_node, "bl_idname", "") != "BLENDERCFD_SIMULATION_NODE":
+        if getattr(simulation_node, "bl_idname", "") != "CONTINUUM_FLOW_SIMULATION_NODE":
             continue
 
         domain_node = _linked_domain_from_simulation(simulation_node)
@@ -687,12 +687,12 @@ def _linked_domain_from_viewer(node):
     return None
 
 
-class BlenderCFD_OT_viewer_toggle_domain(bpy.types.Operator):
+class ContinuumFlow_OT_viewer_toggle_domain(bpy.types.Operator):
     """
     Toggle the linked domain preview in the 3D viewport.
     """
 
-    bl_idname = "blendercfd.viewer_toggle_domain"
+    bl_idname = "continuum_flow.viewer_toggle_domain"
     bl_label = "Toggle Domain Preview"
     bl_description = "Toggle the linked Continuum Flow domain viewport preview"
 
@@ -716,4 +716,4 @@ class BlenderCFD_OT_viewer_toggle_domain(bpy.types.Operator):
         return {"FINISHED"}
 
 
-classes = (BlenderCFD_OT_viewer_toggle_domain,)
+classes = (ContinuumFlow_OT_viewer_toggle_domain,)

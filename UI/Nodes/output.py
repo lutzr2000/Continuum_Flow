@@ -4,10 +4,7 @@ from pathlib import Path
 
 import bpy
 
-try:
-    import continuum_flow_general_nodes as GeneralNodes
-except ImportError:
-    import blendercfd_general_nodes as GeneralNodes
+import continuum_flow_general_nodes as GeneralNodes
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
 
@@ -40,26 +37,24 @@ def _load_sibling_module(module_name, file_name, legacy_names=()):
 BakeRuntime = _load_sibling_module(
     "continuum_flow_bake_runtime",
     "bake_runtime.py",
-    legacy_names=("blendercfd_bake_runtime",),
 )
 BakeStorage = _load_sibling_module(
     "continuum_flow_bake_storage",
     "bake_storage.py",
-    legacy_names=("blendercfd_bake_storage",),
 )
 
-BlenderCFDNodeTree = GeneralNodes.BlenderCFDNodeTree
-BlenderCFDResultSocket = GeneralNodes.BlenderCFDResultSocket
+ContinuumFlowNodeTree = GeneralNodes.ContinuumFlowNodeTree
+ContinuumFlowResultSocket = GeneralNodes.ContinuumFlowResultSocket
 tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links
 is_bake_running = GeneralNodes.is_bake_running
 
 
-class BlenderCFDOutputNode(bpy.types.Node):
+class ContinuumFlowOutputNode(bpy.types.Node):
     """
     Node used to configure which simulation results should be written to disk.
     """
 
-    bl_idname = "BLENDERCFD_OUTPUT_NODE"
+    bl_idname = "CONTINUUM_FLOW_OUTPUT_NODE"
     bl_label = "Output"
     bl_icon = "OUTPUT"
     bl_width_default = 260.0
@@ -108,12 +103,12 @@ class BlenderCFDOutputNode(bpy.types.Node):
 
     @classmethod
     def poll(cls, ntree):
-        return ntree.bl_idname == BlenderCFDNodeTree.bl_idname
+        return ntree.bl_idname == ContinuumFlowNodeTree.bl_idname
 
     def _ensure_input_socket(self):
         socket = self.inputs.get("Result")
         if socket is None:
-            socket = self.inputs.new(BlenderCFDResultSocket.bl_idname, "Result")
+            socket = self.inputs.new(ContinuumFlowResultSocket.bl_idname, "Result")
         return socket
 
     def _sync_input_socket(self):
@@ -158,7 +153,7 @@ class BlenderCFDOutputNode(bpy.types.Node):
                 continue
             if (
                 getattr(simulation_node, "bl_idname", "")
-                == "BLENDERCFD_SIMULATION_NODE"
+                == "CONTINUUM_FLOW_SIMULATION_NODE"
             ):
                 return simulation_node
         return None
@@ -209,11 +204,11 @@ class BlenderCFDOutputNode(bpy.types.Node):
             and bake_disable_reason is None
         )
         operator = button_row.operator(
-            BakeRuntime.BlenderCFD_OT_bake.bl_idname,
+            BakeRuntime.ContinuumFlow_OT_bake.bl_idname,
             text="Free Bake" if button_is_free_bake else "Bake",
             icon="TRASH" if button_is_free_bake else "RENDER_STILL",
         )
         operator.output_path_hint = self.output_path
 
 
-classes = (BlenderCFDOutputNode,)
+classes = (ContinuumFlowOutputNode,)

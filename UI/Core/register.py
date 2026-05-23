@@ -4,21 +4,12 @@ import sys
 from pathlib import Path
 from nodeitems_utils import register_node_categories, unregister_node_categories
 
-MODULE_NAME_ALIASES = {
-    "continuum_flow_nodetree": ("blendercfd_nodetree",),
-    "continuum_flow_sockets": ("blendercfd_sockets",),
-    "continuum_flow_viewer": ("blendercfd_viewer",),
-    "continuum_flow_create_config_dict": ("blendercfd_create_config_dict",),
-    "continuum_flow_general_nodes": ("blendercfd_general_nodes",),
-    "continuum_flow_force_nodes": ("blendercfd_force_nodes",),
-    "continuum_flow_output_node": ("blendercfd_output_node",),
-    "continuum_flow_bake_runtime": ("blendercfd_bake_runtime",),
-}
+MODULE_NAME_ALIASES = {}
 
 
 def _register_module_aliases(module, module_name):
     """
-    Expose one loaded module under both the new and legacy import names.
+    Expose one loaded module under its canonical import name.
     """
     sys.modules[module_name] = module
     for alias in MODULE_NAME_ALIASES.get(module_name, ()):
@@ -149,7 +140,7 @@ NODE_CLASSES = (
 )
 
 
-def _remove_blendercfd_frame_change_handlers():
+def _remove_continuum_flow_frame_change_handlers():
     """
     Remove stale Continuum Flow frame-change handlers from previous reloads.
     """
@@ -159,14 +150,10 @@ def _remove_blendercfd_frame_change_handlers():
         handler_name = getattr(handler, "__name__", "")
         handler_module = getattr(handler, "__module__", "")
         if handler_name in {
-            "blendercfd_frame_change_post",
             "continuum_flow_frame_change_post",
         }:
             continue
-        if (
-            "blendercfd_general_nodes" in handler_module
-            or "continuum_flow_general_nodes" in handler_module
-        ):
+        if "continuum_flow_general_nodes" in handler_module:
             continue
         kept_handlers.append(handler)
 
@@ -201,7 +188,7 @@ def register():
     """
     Register node tree classes, node classes, and add-menu categories.
     """
-    _remove_blendercfd_frame_change_handlers()
+    _remove_continuum_flow_frame_change_handlers()
     _reregister_classes(MODULES["node_tree"].classes)
     _reregister_classes(MODULES["sockets"].classes)
     _reregister_classes(NODE_CLASSES)
@@ -222,14 +209,14 @@ def register():
     frame_change_handler = getattr(
         MODULES["general_nodes"],
         "continuum_flow_frame_change_post",
-        getattr(MODULES["general_nodes"], "blendercfd_frame_change_post", None),
+        None,
     )
     if frame_change_handler is not None:
         bpy.app.handlers.frame_change_post.append(frame_change_handler)
     sync_animations = getattr(
         MODULES["general_nodes"],
         "sync_all_continuum_flow_node_animations",
-        getattr(MODULES["general_nodes"], "sync_all_blendercfd_node_animations", None),
+        None,
     )
     if callable(sync_animations):
         sync_animations(getattr(bpy.context, "scene", None))
@@ -239,7 +226,7 @@ def unregister():
     """
     Unregister menu categories and all Continuum Flow UI classes.
     """
-    _remove_blendercfd_frame_change_handlers()
+    _remove_continuum_flow_frame_change_handlers()
 
     try:
         unregister_node_categories(MODULES["node_tree"].NODE_CATEGORIES_ID)
