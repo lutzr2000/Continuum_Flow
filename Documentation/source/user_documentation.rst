@@ -110,7 +110,7 @@ This node controls the general physics parameters of the simulation.
     How much smoke is produced when burning.
 
 **Fuel Dissipation**
-    The rate at which fuel dissipates. Higher values mean faster dissipation.
+    The rate at which fuel dissipates even without combustion. Higher values mean faster decay of the fuel field.
 
 **Fuel Burn Rate**
     How quickly fuel burns away when ignited. Higher values mean faster burning.

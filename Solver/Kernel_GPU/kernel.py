@@ -758,6 +758,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_constants["TEMPERATURE_PRODUCTION_RATE"],
         gpu_constants["SMOKE_DISSIPATION_RATE"],
         gpu_constants["SMOKE_PRODUCTION_RATE"],
+        gpu_constants["FUEL_DISSIPATION_RATE"],
         gpu_constants["FUEL_BURN_RATE"],
         gpu_constants["FUEL_IGNITION_TEMPERATURE"],
         gpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],

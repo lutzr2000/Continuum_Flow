@@ -159,6 +159,9 @@ def build_solver_constants(simulation_params, precision_dtype, force_field_data)
         "SMOKE_PRODUCTION_RATE": precision_dtype.type(
             simulation_params["SMOKE_PRODUCTION_RATE"]
         ),
+        "FUEL_DISSIPATION_RATE": precision_dtype.type(
+            simulation_params["FUEL_DISSIPATION_RATE"]
+        ),
         "FUEL_BURN_RATE": precision_dtype.type(simulation_params["FUEL_BURN_RATE"]),
         "FUEL_IGNITION_TEMPERATURE": precision_dtype.type(
             simulation_params["FUEL_IGNITION_TEMPERATURE"]

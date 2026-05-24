@@ -629,6 +629,7 @@ def _run_time_step(state):
         cpu_constants["TEMPERATURE_PRODUCTION_RATE"],
         cpu_constants["SMOKE_DISSIPATION_RATE"],
         cpu_constants["SMOKE_PRODUCTION_RATE"],
+        cpu_constants["FUEL_DISSIPATION_RATE"],
         cpu_constants["FUEL_BURN_RATE"],
         cpu_constants["FUEL_IGNITION_TEMPERATURE"],
         cpu_constants["MINIMUM_OXYGEN_CONCENTRATION"],

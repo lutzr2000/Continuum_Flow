@@ -35,6 +35,7 @@ PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
     "expansion_rate": "EXPANSION_RATE",
     "smoke_dissipation": "SMOKE_DISSIPATION_RATE",
     "smoke_production_rate": "SMOKE_PRODUCTION_RATE",
+    "fuel_dissipation": "FUEL_DISSIPATION_RATE",
     "fuel_burn_rate": "FUEL_BURN_RATE",
     "fuel_ignition_temperature": "FUEL_IGNITION_TEMPERATURE",
     "minimum_oxygen_concentration": "MINIMUM_OXYGEN_CONCENTRATION",
@@ -255,6 +256,9 @@ _ANIMATED_CONSTANT_DEFAULTS = {
     ),
     "SMOKE_PRODUCTION_RATE": lambda physics_cfg: float(
         physics_cfg["smoke"].get("production_rate", 1.0)
+    ),
+    "FUEL_DISSIPATION_RATE": lambda physics_cfg: float(
+        physics_cfg["fuel"].get("dissipation", 0.0)
     ),
     "FUEL_BURN_RATE": lambda physics_cfg: float(physics_cfg["fuel"]["burn_rate"]),
     "FUEL_IGNITION_TEMPERATURE": lambda physics_cfg: float(
@@ -839,6 +843,7 @@ def apply_config(config):
         "TEMPERATURE_PRODUCTION_RATE": 1.0,
         "SMOKE_DISSIPATION_RATE": physics_constants["SMOKE_DISSIPATION_RATE"],
         "SMOKE_PRODUCTION_RATE": physics_constants["SMOKE_PRODUCTION_RATE"],
+        "FUEL_DISSIPATION_RATE": physics_constants["FUEL_DISSIPATION_RATE"],
         "FUEL_BURN_RATE": physics_constants["FUEL_BURN_RATE"],
         "FUEL_IGNITION_TEMPERATURE": physics_constants["FUEL_IGNITION_TEMPERATURE"],
         "MINIMUM_OXYGEN_CONCENTRATION": physics_constants[
