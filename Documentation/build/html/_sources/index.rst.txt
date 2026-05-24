@@ -4,7 +4,7 @@ Bringing the fun of flow simulation to Blender!
 
 General
 -------
-This Addon allows for CPU and Nvidia-GPU based flow simulations within Blender. It is free and Open-Source! The goal is to make simulating things like smoke and fire in Blender faster, more intuitive and with that more fun! The solver can be somewhere between 1.5 and 3 times faster on CPU and between 9 and 18 times faster on GPU than Blenders Native solver. The addon is integrated into Blender and comes with its own custom node tree. Additionally the Addon comes with a few geometry nodes setups to post process the computed results and raise the quality of the results even higher. The solver is based on the great tutorial by Prof. Dr. Zhengtao Gao (https://drzgan.github.io/Python_CFD/intro.html) and on the methods presented in the paper "Stable fluids" (https://doi.org/10.1145/311535.311548).
+This Addon allows for CPU and NVIDIA-GPU based flow simulations within Blender. It is free and Open-Source! The goal is to make simulating things like smoke and fire in Blender faster, more intuitive and with that more fun! The solver can be somewhere between 1.5 and 3 times faster on CPU and between 9 and 18 times faster on GPU than Blenders Native solver. The addon is integrated into Blender and comes with its own custom node tree. Additionally the Addon comes with a few geometry nodes setups to post process the computed results and raise the quality of the results even higher. The solver is based on the great tutorial by Prof. Dr. Zhengtao Gao (https://drzgan.github.io/Python_CFD/intro.html) and on the methods presented in the paper "Stable fluids" (https://doi.org/10.1145/311535.311548).
 
 Features
 --------

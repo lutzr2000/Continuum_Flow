@@ -243,7 +243,7 @@
 <p>Bringing the fun of flow simulation to Blender!</p>
 <section id="general">
 <h2>General<a class="headerlink" href="#general" title="Link to this heading">¶</a></h2>
-<p>This Addon allows for CPU and Nvidia-GPU based flow simulations within Blender. It is free and Open-Source! The goal is to make simulating things like smoke and fire in Blender faster, more intuitive and with that more fun! The solver can be somewhere between 1.5 and 3 times faster on CPU and between 9 and 18 times faster on GPU than Blenders Native solver. The addon is integrated into Blender and comes with its own custom node tree. Additionally the Addon comes with a few geometry nodes setups to post process the computed results and raise the quality of the results even higher. The solver is based on the great tutorial by Prof. Dr. Zhengtao Gao (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) and on the methods presented in the paper “Stable fluids” (<a class="reference external" href="https://doi.org/10.1145/311535.311548">https://doi.org/10.1145/311535.311548</a>).</p>
+<p>This Addon allows for CPU and NVIDIA-GPU based flow simulations within Blender. It is free and Open-Source! The goal is to make simulating things like smoke and fire in Blender faster, more intuitive and with that more fun! The solver can be somewhere between 1.5 and 3 times faster on CPU and between 9 and 18 times faster on GPU than Blenders Native solver. The addon is integrated into Blender and comes with its own custom node tree. Additionally the Addon comes with a few geometry nodes setups to post process the computed results and raise the quality of the results even higher. The solver is based on the great tutorial by Prof. Dr. Zhengtao Gao (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) and on the methods presented in the paper “Stable fluids” (<a class="reference external" href="https://doi.org/10.1145/311535.311548">https://doi.org/10.1145/311535.311548</a>).</p>
 </section>
 <section id="features">
 <h2>Features<a class="headerlink" href="#features" title="Link to this heading">¶</a></h2>
@@ -294,15 +294,15 @@
 <li class="toctree-l1"><a class="reference internal" href="custom_geo_nodes.html">Custom Geometry Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="solver_theory.html#governing-equations">Governing Equations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#finite-difference-discretization">Finite-Difference Discretization</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#semi-lagrangian-and-maccormack-advection">Semi-Lagrangian and MacCormack Advection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#pressure-solve-and-enforcing-incompressibility">Pressure Solve and Enforcing Incompressibility</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#buoyancy">Buoyancy</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#thermal-expansion">Thermal Expansion</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#general-solution-procedure">General Solution Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#discretization">Discretization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#advection-procedure">Advection Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#pressure-solve">Pressure Solve</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#velocity-projection">Velocity Projection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#scalar-fields">Scalar Fields</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#time-step">Time Step</a></li>
 <li class="toctree-l2"><a class="reference internal" href="solver_theory.html#vorticity">Vorticity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#scalar-fields-temperature-smoke-and-fuel">Scalar Fields: Temperature, Smoke and Fuel</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#solution-procedure">Solution Procedure</a></li>
-<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#boundary-conditions-and-practical-notes">Boundary Conditions and Practical Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="solver_theory.html#bouancy">Bouancy</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a><ul>

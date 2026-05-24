@@ -240,375 +240,148 @@
         <article role="main" id="furo-main-content">
           <section id="solver-theory">
 <h1>Solver Theory<a class="headerlink" href="#solver-theory" title="Link to this heading">¶</a></h1>
-<p>REWRITE THIS!!!!</p>
-<p>This section describes the numerical model used by the Continuum flow solver. The
-simulation is based on the incompressible Navier-Stokes equations and uses a
-regular Cartesian grid with a finite-difference discretization. The goal is not
-to reproduce every detail of real fluid physics, but to provide a stable and
-fast solver for visually convincing smoke and fire effects.</p>
+<p>This section describes the numerical model used by the Continuum flow solver. The simulation is based on the incompressible Navier-Stokes equations and uses a regular Cartesian grid with a finite-difference discretization. The goal is not to reproduce every detail of real fluid physics, but to provide a stable and fast solver for visually convincing smoke and fire effects. The solver simulates the following fields:</p>
+<ul class="simple">
+<li><p>velocity vector field in x,y,z-diretions, denoted by: <span class="math notranslate nohighlight">\(\vec{u}\)</span></p></li>
+<li><p>pressure scalar field, denoted by: <span class="math notranslate nohighlight">\(p\)</span></p></li>
+<li><p>temperature scalar field, denoted by: <span class="math notranslate nohighlight">\(\theta\)</span></p></li>
+<li><p>scalar fields like smoke, flame and fuel denoted by <span class="math notranslate nohighlight">\(\phi\)</span></p></li>
+</ul>
 <section id="governing-equations">
 <h2>Governing Equations<a class="headerlink" href="#governing-equations" title="Link to this heading">¶</a></h2>
-<p>The solver starts from the incompressible Navier-Stokes equations in vector
-form.</p>
 <p>Conservation of mass:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\nabla \cdot \mathbf{u} = 0\]</div>
+<div class="math-wrapper docutils container" id="equation-eq-continuity">
+<div class="math notranslate nohighlight" id="equation-eq-continuity">
+<span class="eqno">(1)<a class="headerlink" href="#equation-eq-continuity" title="Link to this equation">¶</a></span>\[\nabla \cdot \vec{u} = 0\]</div>
 </div>
 <p>Conservation of momentum:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\frac{\partial \mathbf{u}}{\partial t}
-+ \left( \mathbf{u} \cdot \nabla \right) \mathbf{u}
+<div class="math-wrapper docutils container" id="equation-eq-momentum">
+<div class="math notranslate nohighlight" id="equation-eq-momentum">
+<span class="eqno">(2)<a class="headerlink" href="#equation-eq-momentum" title="Link to this equation">¶</a></span>\[\frac{\partial \vec{u}}{\partial t}
++ \left( \vec{u} \cdot \nabla \right) \vec{u}
 = -\frac{1}{\rho} \nabla p
-+ \nu \nabla^2 \mathbf{u}
-+ \mathbf{f}\]</div>
++ \nu \nabla^2 \vec{u}
++ \vec{f}\]</div>
 </div>
-<p>Here, <span class="math notranslate nohighlight">\(\mathbf{u}\)</span> is the velocity field, <span class="math notranslate nohighlight">\(p\)</span> is the pressure,
-<span class="math notranslate nohighlight">\(\rho\)</span> is the fluid density, <span class="math notranslate nohighlight">\(\nu\)</span> is the kinematic viscosity and
-<span class="math notranslate nohighlight">\(\mathbf{f}\)</span> contains external forces such as buoyancy, turbulence and
-user-authored force fields.</p>
+<p>In equation <a class="reference internal" href="#equation-eq-continuity">(1)</a> the scalar multiplication of the nabla operator with the velocity vector field <span class="math notranslate nohighlight">\(\vec{u}\)</span> denotes the divergence of that vector field. In equation <a class="reference internal" href="#equation-eq-momentum">(2)</a> <span class="math notranslate nohighlight">\(t\)</span> denotes time, <span class="math notranslate nohighlight">\(\rho\)</span> denotes density, <span class="math notranslate nohighlight">\(\nu\)</span> denotes viscocity and <span class="math notranslate nohighlight">\(\vec{f}\)</span> denotes an additional force vector field.</p>
+<p>In every flow simulation at least pressure and velocity need to be computed. They are coupled, but there is no single equation to compute pressure. To construct the equation for pressure we take the divergence of equation <a class="reference internal" href="#equation-eq-momentum">(2)</a>. This becomes then a poisson equation of form:</p>
+<div class="math-wrapper docutils container" id="equation-eq-poisson-pressure">
+<div class="math notranslate nohighlight" id="equation-eq-poisson-pressure">
+<span class="eqno">(3)<a class="headerlink" href="#equation-eq-poisson-pressure" title="Link to this equation">¶</a></span>\[\nabla^2 p = b\]</div>
+</div>
+<p>with <span class="math notranslate nohighlight">\(b\)</span> being the right hand side. This is an additional equation we can use for computing pressure. In the next section the solution procedure is described in further detail.</p>
 </section>
-<section id="finite-difference-discretization">
-<h2>Finite-Difference Discretization<a class="headerlink" href="#finite-difference-discretization" title="Link to this heading">¶</a></h2>
-<p>The simulation domain is discretized into a uniform grid with cell spacing
-<span class="math notranslate nohighlight">\(\Delta\)</span>. All derivatives are approximated directly on this grid by finite
-differences.</p>
-<p>For a scalar quantity <span class="math notranslate nohighlight">\(\phi\)</span>, the solver uses central differences for
-diffusion and for most derivatives appearing in the pressure equation:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\frac{\partial \phi}{\partial x}
-\approx \frac{\phi_{i+1,j,k} - \phi_{i-1,j,k}}{2\Delta}\]</div>
-</div>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\frac{\partial^2 \phi}{\partial x^2}
-\approx \frac{\phi_{i+1,j,k} - 2\phi_{i,j,k} + \phi_{i-1,j,k}}{\Delta^2}\]</div>
-</div>
-<p>The three-dimensional Laplacian is built from the sum of the second
-derivatives in <span class="math notranslate nohighlight">\(x\)</span>, <span class="math notranslate nohighlight">\(y\)</span> and <span class="math notranslate nohighlight">\(z\)</span>. The viscous term in the
-momentum equation therefore becomes a standard 7-point stencil on the grid.</p>
-<p>Time integration is explicit for advection, diffusion and force application. A
-stable timestep is chosen automatically from the most restrictive of three
-limits:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\Delta t_{\mathrm{conv}}
-= \min \left(
-\frac{\mathrm{CFL}\,\Delta}{|u|_{\max}},
-\frac{\mathrm{CFL}\,\Delta}{|v|_{\max}},
-\frac{\mathrm{CFL}\,\Delta}{|w|_{\max}}
-\right)\]</div>
-</div>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\Delta t_{\mathrm{diff}} = \frac{\Delta^2}{6\nu}\]</div>
-</div>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\Delta t_{\mathrm{force}}
-= \min \left(
-\frac{\mathrm{CFL}\,\Delta\,\rho}{|F_x|_{\max}},
-\frac{\mathrm{CFL}\,\Delta\,\rho}{|F_y|_{\max}},
-\frac{\mathrm{CFL}\,\Delta\,\rho}{|F_z|_{\max}}
-\right)\]</div>
-</div>
-<p>The final timestep is</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\Delta t = \min\left(
-\Delta t_{\mathrm{conv}},
-\Delta t_{\mathrm{diff}},
-\Delta t_{\mathrm{force}}
-\right)\]</div>
-</div>
-<p>and is additionally clamped to the current output interval.</p>
+<section id="general-solution-procedure">
+<h2>General Solution Procedure<a class="headerlink" href="#general-solution-procedure" title="Link to this heading">¶</a></h2>
+<p>When running the simulation the solver initalises a flow field and then starts the time itteration. In the time itteration the following procedure is done:</p>
+<ol class="arabic simple">
+<li><p>Update all parameters, force fields, sources and osbtacles</p></li>
+<li><p>Compute vorticiry forces</p></li>
+<li><p>WHen using the adaptive Domain option, building the active mask</p></li>
+<li><p>Compute the semi-lagrangian advection</p></li>
+<li><p>Apply MacCormacks correction</p></li>
+<li><p>Build the right-hand-side (rhs) <span class="math notranslate nohighlight">\(b\)</span> of the pressure poisson equation <a class="reference internal" href="#equation-eq-poisson-pressure">(3)</a></p></li>
+<li><p>Solve the pressure poisson equation</p></li>
+<li><p>Use pressure for the velocity projection</p></li>
+<li><p>Apply boundary conditions</p></li>
+<li><p>Advect the scalar fields with semi-lagrangian advection</p></li>
+<li><p>Apply MacCormacks correction for scalar variables</p></li>
+<li><p>Apply boundary conditions again</p></li>
+<li><p>Optional: Output data</p></li>
+<li><p>Compute new stable time step</p></li>
+</ol>
+<p>Repeat</p>
 </section>
-<section id="semi-lagrangian-and-maccormack-advection">
-<h2>Semi-Lagrangian and MacCormack Advection<a class="headerlink" href="#semi-lagrangian-and-maccormack-advection" title="Link to this heading">¶</a></h2>
-<p>The nonlinear transport term <span class="math notranslate nohighlight">\((\mathbf{u}\cdot\nabla)\mathbf{u}\)</span> is the
-most delicate part of the update. In the current solver, both velocity and
-scalar transport are handled with a semi-Lagrangian backtracing scheme followed
-by a MacCormack correction step. This is more stable than a purely explicit
-high-order finite-difference advection and less diffusive than a plain
-first-order semi-Lagrangian pass.</p>
-<section id="semi-lagrangian-predictor">
-<h3>Semi-Lagrangian Predictor<a class="headerlink" href="#semi-lagrangian-predictor" title="Link to this heading">¶</a></h3>
-<p>For each cell center, the solver traces a departure position backward through
-the current velocity field:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\mathbf{x}_d = \mathbf{x}_{i,j,k} - \Delta t \, \mathbf{u}(\mathbf{x}_{i,j,k})\]</div>
+<section id="discretization">
+<h2>Discretization<a class="headerlink" href="#discretization" title="Link to this heading">¶</a></h2>
+<p>The equations above are describing continuus fluids (hence the nem Continuum Flow) as differential equations. In practical application we can not solve analytically and have to rely on numerics. In this solver finite difference approximation is used for computing the derivatives. This means the whole simulation volume (domain) is subdivided into a grid with uniform resolution <span class="math notranslate nohighlight">\(\Delta\)</span> resulting in a grid with <span class="math notranslate nohighlight">\(n_x \cdot n_y \cdot n_z\)</span> grid cells. For every cell a value for all fields needs to be computed. The derivatives for pressure, diffusion processes and vorticity are computing using the following approximations:</p>
+<p>A one dimnensional first derivative in the x-direction is computed using central differencing:</p>
+<div class="math-wrapper docutils container" id="equation-eq-central-first-derivative">
+<div class="math notranslate nohighlight" id="equation-eq-central-first-derivative">
+<span class="eqno">(4)<a class="headerlink" href="#equation-eq-central-first-derivative" title="Link to this equation">¶</a></span>\[\frac{\partial f}{\partial x}\Big|_i
+\approx
+\frac{f_{i+1} - f_{i-1}}{2\Delta x}\]</div>
 </div>
-<p>The traced position is evaluated in grid coordinates and sampled with trilinear
-interpolation. In implementation, the backtrace is split into a few small
-substeps to make the characteristic integration more robust in strongly varying
-flow fields.</p>
-<p>For a transported quantity <span class="math notranslate nohighlight">\(\phi\)</span>, the predictor therefore becomes</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\phi^\star_{i,j,k} = \phi^n(\mathbf{x}_d)\]</div>
+<p>A one dimnensional second derivative in the x-direction with central differencing:</p>
+<div class="math-wrapper docutils container" id="equation-eq-central-second-derivative">
+<div class="math notranslate nohighlight" id="equation-eq-central-second-derivative">
+<span class="eqno">(5)<a class="headerlink" href="#equation-eq-central-second-derivative" title="Link to this equation">¶</a></span>\[\frac{\partial^2 f}{\partial x^2}\Big|_i
+\approx
+\frac{f_{i+1} - 2f_i + f_{i-1}}{\Delta x^2}\]</div>
 </div>
-<p>The same idea is applied component-wise to the velocity field.</p>
 </section>
-<section id="maccormack-correction">
-<h3>MacCormack Correction<a class="headerlink" href="#maccormack-correction" title="Link to this heading">¶</a></h3>
-<p>The pure semi-Lagrangian predictor is very robust, but it tends to smooth out
-detail. To recover sharper structures, the solver adds a MacCormack-style
-correction. After the backward predictor, a forward trace through the predictor
-field estimates the local transport error:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\phi^{\mathrm{rev}}_{i,j,k} = \phi^\star(\mathbf{x}_f)\]</div>
-</div>
-<p>The corrected value is then</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\phi^{n+1}_{i,j,k}
+<section id="advection-procedure">
+<h2>Advection Procedure<a class="headerlink" href="#advection-procedure" title="Link to this heading">¶</a></h2>
+<p>The treatment of flow advection is critical for flow simulation. It can be a strict constrain on the time step. To avoid this here semi-lagrangian advection is used which allows for very larger time steps and thus fast simualtions.</p>
+<p>We first ask: Where has this fluid been a time interval of <span class="math notranslate nohighlight">\(\Delta t\)</span> ago? This is called backtracing. In this solver the backtracing is actually subdivided into three substeps to allow for curvature of the path.</p>
+<div class="math-wrapper docutils container" id="equation-eq-backtracing">
+<div class="math notranslate nohighlight" id="equation-eq-backtracing">
+<span class="eqno">(6)<a class="headerlink" href="#equation-eq-backtracing" title="Link to this equation">¶</a></span>\[\mathbf{x}_{\mathrm{old}}
 =
-\phi^\star_{i,j,k}
-+
-\kappa
-\left(
-\phi^n_{i,j,k} - \phi^{\mathrm{rev}}_{i,j,k}
-\right)\]</div>
+\mathbf{x}
+-
+\Delta t \, \mathbf{u}(\mathbf{x})\]</div>
 </div>
-<p>where <span class="math notranslate nohighlight">\(\kappa\)</span> is the user-controlled MacCormack factor.</p>
-<p>To avoid overshoots and new extrema, the corrected result is clamped to the
-value range of the departure cell used by the semi-Lagrangian sample. This is
-important for both visual stability and bounded fields such as smoke and fuel.</p>
-</section>
-<section id="velocity-update-around-the-advection-step">
-<h3>Velocity Update Around the Advection Step<a class="headerlink" href="#velocity-update-around-the-advection-step" title="Link to this heading">¶</a></h3>
-<p>For velocity, the corrected advective update is not the final value yet.
-Diffusion and external forces are added explicitly:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\mathbf{u}^{\dagger}
+<p>Next we take the quantity <span class="math notranslate nohighlight">\(q\)</span> (velocity, smoke, temperature, …) we found at this backtraced position and move it to the departure cell.</p>
+<div class="math-wrapper docutils container" id="equation-eq-semi-lagrangian-update">
+<div class="math notranslate nohighlight" id="equation-eq-semi-lagrangian-update">
+<span class="eqno">(7)<a class="headerlink" href="#equation-eq-semi-lagrangian-update" title="Link to this equation">¶</a></span>\[q^{*}(\mathbf{x})
 =
-\mathbf{u}^{\mathrm{adv}}
+q^n(\mathbf{x}_{\mathrm{old}})\]</div>
+</div>
+<p>Since our backtracing position <span class="math notranslate nohighlight">\(x_{old}\)</span> will never end up exactly in a cell center, we need to interpolate the quantity <span class="math notranslate nohighlight">\(q\)</span> at the position we end up through backtracing. This introduces numerical diffusion, meaning the flow becomes less swirly and in VFX terms: Boring to look at.</p>
+<p>To migitate this we apply MacCormacks correction:</p>
+<div class="math-wrapper docutils container" id="equation-eq-maccormack-correction">
+<div class="math notranslate nohighlight" id="equation-eq-maccormack-correction">
+<span class="eqno">(8)<a class="headerlink" href="#equation-eq-maccormack-correction" title="Link to this equation">¶</a></span>\[q'
+=
+q^{*}
 +
-\nu \Delta t \, \nabla^2 \mathbf{u}
-+
-\frac{\Delta t}{\rho}\mathbf{f}\]</div>
-</div>
-<p>The implementation also limits the per-step velocity increment to avoid large
-single-step jumps in highly forced setups. Pressure is not applied in this
-predictor stage; incompressibility is enforced afterwards with a dedicated
-pressure projection.</p>
-</section>
-</section>
-<section id="pressure-solve-and-enforcing-incompressibility">
-<h2>Pressure Solve and Enforcing Incompressibility<a class="headerlink" href="#pressure-solve-and-enforcing-incompressibility" title="Link to this heading">¶</a></h2>
-<p>After the velocity predictor and boundary update, the solver computes a
-pressure field that removes the remaining divergence. The pressure equation is
-solved as a Poisson problem:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\nabla^2 p = b\]</div>
-</div>
-<p>The right-hand side <span class="math notranslate nohighlight">\(b\)</span> is assembled from the divergence of the predicted
-velocity, an authored divergence source, a source-authored extra-pressure term,
-and the thermal-expansion term:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[b =
-\frac{\rho}{\Delta t}
+\alpha
 \left(
-\nabla \cdot \mathbf{u}
-+ d_{\mathrm{authored}}
-- d_{\mathrm{thermal}}
-\right)
-- p_{\mathrm{extra}}\]</div>
-</div>
-<p>where <span class="math notranslate nohighlight">\(d_{\mathrm{authored}}\)</span> is an additional user-authored divergence
-source, <span class="math notranslate nohighlight">\(p_{\mathrm{extra}}\)</span> is the additional pressure source term
-coming from source nodes, and <span class="math notranslate nohighlight">\(d_{\mathrm{thermal}}\)</span> is the thermal
-expansion term discussed below.</p>
-<p>The pressure field is solved iteratively with a red-black SOR method built on
-top of Gauss-Seidel updates. Each iteration updates alternating checkerboard
-cells and reapplies homogeneous Neumann boundary conditions, meaning the normal
-pressure gradient at the domain boundary is zero. In discrete form, boundary
-pressure values are copied from the adjacent interior cells.</p>
-<p>Because a Poisson equation with pure Neumann boundary conditions only defines
-pressure up to an arbitrary constant, the discrete right-hand side must be
-compatible. The solver therefore subtracts the mean value of <span class="math notranslate nohighlight">\(b\)</span> before
-starting the iterations, which removes the null-space inconsistency.</p>
-<p>The number of pressure iterations is user-controlled. Higher values improve the
-enforcement of incompressibility, while lower values are faster but can make the
-motion softer or less stable.</p>
-</section>
-<section id="buoyancy">
-<h2>Buoyancy<a class="headerlink" href="#buoyancy" title="Link to this heading">¶</a></h2>
-<p>Buoyancy is modeled with a Boussinesq-style approximation. Instead of solving a
-fully variable-density flow, the solver assumes that density differences are
-small and only matter in the body-force term. The buoyancy force is applied in
-the vertical direction:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[F_z \leftarrow F_z + g \, \beta \, (T - T_{\mathrm{ref}})\]</div>
-</div>
-<p>Here, <span class="math notranslate nohighlight">\(g = 9.81\)</span>, <span class="math notranslate nohighlight">\(\beta\)</span> is the user-controlled buoyancy factor,
-<span class="math notranslate nohighlight">\(T\)</span> is the local temperature and <span class="math notranslate nohighlight">\(T_{\mathrm{ref}}\)</span> is the
-reference temperature. If a cell is hotter than the reference temperature, the
-vertical force becomes positive and the fluid rises. If it is colder, the force
-becomes negative and the fluid sinks.</p>
-<p>This is a deliberate simplification. The solver does not compute a full
-equation of state, but this approximation is efficient and gives intuitive
-control over rising hot smoke and sinking cold fluid.</p>
-</section>
-<section id="thermal-expansion">
-<h2>Thermal Expansion<a class="headerlink" href="#thermal-expansion" title="Link to this heading">¶</a></h2>
-<p>Thermal expansion is modeled separately from buoyancy. Instead of only pushing
-hot fluid upward, the solver also allows hot regions to act as volumetric
-sources in the pressure projection step. Here it is important to note that we deviate from real physics here. The implementation is done via an artificial
-divergence term:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[d_{\mathrm{thermal}} =
-\alpha \, (T - T_{\mathrm{ref}})\]</div>
-</div>
-<p>where <span class="math notranslate nohighlight">\(\alpha\)</span> is the user-controlled expansion rate. This term appears
-in the pressure right-hand side with a negative sign:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[b \sim \frac{\rho}{\Delta t}
-\left(
-\nabla \cdot \mathbf{u}
-+ d_{\mathrm{authored}}
-- d_{\mathrm{thermal}}
+   q^n - q^{**}
 \right)\]</div>
 </div>
-<p>As a result, temperatures above the reference temperature reduce the pressure
-right-hand side locally and create outward motion after the projection. In
-visual terms, hot regions do not only rise because of buoyancy, they also
-expand and push neighboring fluid away.</p>
+<p>Here <span class="math notranslate nohighlight">\(q^{n+1}\)</span> is the quantity at the next time step and <span class="math notranslate nohighlight">\(q^{n}\)</span> is the quantity from the current time step. <span class="math notranslate nohighlight">\(q^{*}\)</span> is the quantity we computed with semi lagrangian advection and <span class="math notranslate nohighlight">\(q^{**}\)</span> is the reversly advected velocity field. If there is no numerical diffusion <span class="math notranslate nohighlight">\(q^{n}\)</span> and <span class="math notranslate nohighlight">\(q^{**}\)</span> would be equal and the whole term would cancel out. In practice it never is and thus we use it for correction. <span class="math notranslate nohighlight">\(\alpha\)</span> determines the strength of this correction. This correction can produce visual artefacts.</p>
+</section>
+<section id="pressure-solve">
+<h2>Pressure Solve<a class="headerlink" href="#pressure-solve" title="Link to this heading">¶</a></h2>
+<p>To compute pressure we solve the discreized version of equation <a class="reference internal" href="#equation-eq-poisson-pressure">(3)</a>. First we need to compute the rhs <span class="math notranslate nohighlight">\(b\)</span>. In accordance with “Stable fluids” (<a class="reference external" href="https://doi.org/10.1145/311535.311548">https://doi.org/10.1145/311535.311548</a>) we neglect non linear terms of the <a class="reference internal" href="#equation-eq-momentum">(2)</a> equation and only compute <span class="math notranslate nohighlight">\(b\)</span> as:</p>
+<div class="math-wrapper docutils container" id="equation-eq-pressure-rhs">
+<div class="math notranslate nohighlight" id="equation-eq-pressure-rhs">
+<span class="eqno">(9)<a class="headerlink" href="#equation-eq-pressure-rhs" title="Link to this equation">¶</a></span>\[b
+=
+\nabla \cdot \vec{u'}\]</div>
+</div>
+<p>Here <span class="math notranslate nohighlight">\(u'\)</span> is the previously advected velocity field. Additional divergence terms can be added optionally like thermal divergence, divgerence due to the point force or an extra pressure term added by sources.</p>
+<p>Equation <a class="reference internal" href="#equation-eq-poisson-pressure">(3)</a> is then solved by a red-black-Gauss-Seidel solver for as many itterations as specified by the users. In every itteration the Neumann boundary conditions for pressure are applied. Since the absolute level of pressure is not defined with only Neumman boundary conditions we substract <span class="math notranslate nohighlight">\(b-\bar{b}\)</span>. We remove the mean of <span class="math notranslate nohighlight">\(b\)</span> to improve stability of the pressure field.</p>
+</section>
+<section id="velocity-projection">
+<h2>Velocity Projection<a class="headerlink" href="#velocity-projection" title="Link to this heading">¶</a></h2>
+<p>In accordance with “Stable fluids” (<a class="reference external" href="https://doi.org/10.1145/311535.311548">https://doi.org/10.1145/311535.311548</a>) we then project the velocity to be divergence free using the following projection:</p>
+<div class="math-wrapper docutils container" id="equation-eq-pressure-projection">
+<div class="math notranslate nohighlight" id="equation-eq-pressure-projection">
+<span class="eqno">(10)<a class="headerlink" href="#equation-eq-pressure-projection" title="Link to this equation">¶</a></span>\[\mathbf{u}^{\,n+1}
+=
+\mathbf{u}'
+-
+\frac{\Delta t}{\rho}
+\nabla p\]</div>
+</div>
+<p>With this we have computed a new pressure and velocity field for the time step.</p>
+</section>
+<section id="scalar-fields">
+<h2>Scalar Fields<a class="headerlink" href="#scalar-fields" title="Link to this heading">¶</a></h2>
+<p>The scalar fields are primarly advected through the field as passive scalars. We neglect diffusion for the quantitys fuel, smoke and temperature.</p>
+</section>
+<section id="time-step">
+<h2>Time Step<a class="headerlink" href="#time-step" title="Link to this heading">¶</a></h2>
 </section>
 <section id="vorticity">
 <h2>Vorticity<a class="headerlink" href="#vorticity" title="Link to this heading">¶</a></h2>
-<p>Vorticity is used to recover small-scale swirling motion that is often damped by
-grid discretization and by the numerically diffusive transport schemes. The
-solver first computes the vorticity vector</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\boldsymbol{\omega} = \nabla \times \mathbf{u}\]</div>
-</div>
-<p>with components</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\omega_x = \frac{\partial w}{\partial y} - \frac{\partial v}{\partial z},
-\qquad
-\omega_y = \frac{\partial u}{\partial z} - \frac{\partial w}{\partial x},
-\qquad
-\omega_z = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}\]</div>
-</div>
-<p>using central differences on the grid. From this, the vorticity magnitude</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[|\boldsymbol{\omega}| =
-\sqrt{\omega_x^2 + \omega_y^2 + \omega_z^2}\]</div>
-</div>
-<p>is evaluated in each fluid cell.</p>
-<p>The user-facing vorticity setting does not change the physical viscosity.
-Instead, it adds a vorticity-confinement force that re-injects rotational
-energy into regions where vortices already exist. The method computes the
-normalized gradient of vorticity magnitude</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\mathbf{N} =
-\frac{\nabla |\boldsymbol{\omega}|}{|\nabla |\boldsymbol{\omega}||}\]</div>
-</div>
-<p>and then applies the force</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\mathbf{f}_{\mathrm{vc}} = \epsilon \, (\mathbf{N} \times \boldsymbol{\omega})\]</div>
-</div>
-<p>where <span class="math notranslate nohighlight">\(\epsilon\)</span> is the vorticity strength chosen by the user.</p>
-<p>Intuitively, <span class="math notranslate nohighlight">\(\mathbf{N}\)</span> points from regions of weaker rotation toward
-regions of stronger rotation. The cross product with <span class="math notranslate nohighlight">\(\boldsymbol{\omega}\)</span>
-creates a force that wraps around existing vortices and sharpens them. This
-helps the flow keep visually pleasing curls and rolling structures, especially
-in smoke simulations where first-order advection would otherwise smooth them
-out.</p>
-<p>The confinement force is only applied in fluid cells and is skipped near solid
-obstacles and very close to the domain boundary, where the required stencil
-would be incomplete.</p>
 </section>
-<section id="scalar-fields-temperature-smoke-and-fuel">
-<h2>Scalar Fields: Temperature, Smoke and Fuel<a class="headerlink" href="#scalar-fields-temperature-smoke-and-fuel" title="Link to this heading">¶</a></h2>
-<p>The scalar fields temperature, smoke and fuel are all transported by the
-projected velocity field with the same semi-Lagrangian predictor plus
-MacCormack correction used for velocity. After the advection stage, each field
-receives simple source and dissipation terms.</p>
-<p>Fuel burns only when the temperature in a cell exceeds the ignition threshold:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[\begin{split}S_{\mathrm{fuel}} =
-\begin{cases}
--k_{\mathrm{burn}} \, f, &amp; T &gt; T_{\mathrm{ignition}} \\
-0, &amp; \text{otherwise}
-\end{cases}\end{split}\]</div>
-</div>
-<p>The temperature source combines dissipation toward the reference temperature and
-heat release from burning fuel:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[S_T =
--k_T (T - T_{\mathrm{ref}})
-+ q_T (-S_{\mathrm{fuel}})\]</div>
-</div>
-<p>Smoke is produced from burning fuel and dissipates over time:</p>
-<div class="math-wrapper docutils container">
-<div class="math notranslate nohighlight">
-\[S_{\mathrm{smoke}} =
-q_{\mathrm{smoke}} (-S_{\mathrm{fuel}})
-- k_{\mathrm{smoke}}\]</div>
-</div>
-<p>These source terms are intentionally simple. They are designed for direct
-artistic control instead of chemically accurate combustion.</p>
-</section>
-<section id="solution-procedure">
-<h2>Solution Procedure<a class="headerlink" href="#solution-procedure" title="Link to this heading">¶</a></h2>
-<p>For each simulation substep, the solver advances the system in the following
-order:</p>
-<ol class="arabic simple">
-<li><p>Update dynamic masks, animated constants and time-dependent force inputs.</p></li>
-<li><p>Assemble the body-force field from authored forces and turbulence.</p></li>
-<li><p>Add buoyancy to the vertical force component.</p></li>
-<li><p>Optionally compute vorticity diagnostics and add vorticity-confinement
-forces.</p></li>
-<li><p>Advect velocity with the semi-Lagrangian predictor and apply the MacCormack
-correction, diffusion and body forces.</p></li>
-<li><p>Apply velocity, obstacle and source boundary conditions to the predicted
-velocity field.</p></li>
-<li><p>Build and solve the pressure Poisson equation from that predicted field.</p></li>
-<li><p>Project velocity with the solved pressure to enforce incompressibility.</p></li>
-<li><p>Reapply boundary conditions after projection.</p></li>
-<li><p>Advect and update temperature, smoke, fuel and flame with the projected
-velocity field.</p></li>
-<li><p>Write output if the simulation time reached the next output point.</p></li>
-<li><p>Recompute a stable timestep from the updated state.</p></li>
-</ol>
-<p>This ordering is important because the solver now follows a projection-method
-pipeline: forces and diffusion first build an intermediate velocity, and the
-pressure solve then removes its divergence. Temperature affects buoyancy
-through the body-force term and affects thermal expansion through the pressure
-right-hand side, so the scalar state from the previous substep directly shapes
-the current velocity predictor and projection.</p>
-</section>
-<section id="boundary-conditions-and-practical-notes">
-<h2>Boundary Conditions and Practical Notes<a class="headerlink" href="#boundary-conditions-and-practical-notes" title="Link to this heading">¶</a></h2>
-<p>The solver works on interior cells and handles boundaries explicitly. Pressure
-uses zero-gradient boundary conditions during the Poisson solve. Velocity and
-scalar fields are overwritten where necessary by the configured domain,
-obstacle and source conditions.</p>
-<p>The semi-Lagrangian sampler clamps traced positions to the valid grid range,
-and the MacCormack correction is limited with local extrema clamps. Together,
-these two safeguards keep the higher-detail transport step robust even near the
-domain boundary.</p>
-<p>To improve stability further, the velocity update also limits the maximum
-per-step velocity change in strongly forced regions.</p>
+<section id="bouancy">
+<h2>Bouancy<a class="headerlink" href="#bouancy" title="Link to this heading">¶</a></h2>
 </section>
 </section>
 
@@ -669,20 +442,15 @@ per-step velocity change in strongly forced regions.</p>
             <ul>
 <li><a class="reference internal" href="#">Solver Theory</a><ul>
 <li><a class="reference internal" href="#governing-equations">Governing Equations</a></li>
-<li><a class="reference internal" href="#finite-difference-discretization">Finite-Difference Discretization</a></li>
-<li><a class="reference internal" href="#semi-lagrangian-and-maccormack-advection">Semi-Lagrangian and MacCormack Advection</a><ul>
-<li><a class="reference internal" href="#semi-lagrangian-predictor">Semi-Lagrangian Predictor</a></li>
-<li><a class="reference internal" href="#maccormack-correction">MacCormack Correction</a></li>
-<li><a class="reference internal" href="#velocity-update-around-the-advection-step">Velocity Update Around the Advection Step</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#pressure-solve-and-enforcing-incompressibility">Pressure Solve and Enforcing Incompressibility</a></li>
-<li><a class="reference internal" href="#buoyancy">Buoyancy</a></li>
-<li><a class="reference internal" href="#thermal-expansion">Thermal Expansion</a></li>
+<li><a class="reference internal" href="#general-solution-procedure">General Solution Procedure</a></li>
+<li><a class="reference internal" href="#discretization">Discretization</a></li>
+<li><a class="reference internal" href="#advection-procedure">Advection Procedure</a></li>
+<li><a class="reference internal" href="#pressure-solve">Pressure Solve</a></li>
+<li><a class="reference internal" href="#velocity-projection">Velocity Projection</a></li>
+<li><a class="reference internal" href="#scalar-fields">Scalar Fields</a></li>
+<li><a class="reference internal" href="#time-step">Time Step</a></li>
 <li><a class="reference internal" href="#vorticity">Vorticity</a></li>
-<li><a class="reference internal" href="#scalar-fields-temperature-smoke-and-fuel">Scalar Fields: Temperature, Smoke and Fuel</a></li>
-<li><a class="reference internal" href="#solution-procedure">Solution Procedure</a></li>
-<li><a class="reference internal" href="#boundary-conditions-and-practical-notes">Boundary Conditions and Practical Notes</a></li>
+<li><a class="reference internal" href="#bouancy">Bouancy</a></li>
 </ul>
 </li>
 </ul>
