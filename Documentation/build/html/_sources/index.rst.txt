@@ -17,7 +17,7 @@ Features
 
 Limitations
 -----------
-- GPU is only supported for Nvidia cards
+- GPU is only supported for NVIDIA GPUs
 - No simulation of multi-phase flow (e.g. water)
 - No interaction with Blenders native force fields
 - No interaction with Blenders particle systems

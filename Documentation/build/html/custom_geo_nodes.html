@@ -173,7 +173,7 @@
           <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
         </button>
       </div>
-      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
         <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
       </label>
     </div>
@@ -233,13 +233,29 @@
               <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
             </button>
           </div>
-          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
             <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
           </label>
         </div>
         <article role="main" id="furo-main-content">
           <section id="custom-geometry-nodes">
 <h1>Custom Geometry Nodes<a class="headerlink" href="#custom-geometry-nodes" title="Link to this heading">¶</a></h1>
+<p>Continuum Flow not only provides a simulation suite for flow simulation but also further tools to post process and enhance the results based on geometry nodes. These node setups are all build on Blenders default geometry nodes and can be customized to your liking. You can also freely use them on any other simulation result from other solvers.</p>
+<p>Here it is important to mention that i did not come up with these node setups on my own, so some great tutorials need mentioning here:</p>
+<p>DefaultCube (<a class="reference external" href="https://www.youtube.com/watch?v=U6QeP8eFWRQ">https://www.youtube.com/watch?v=U6QeP8eFWRQ</a>)
+…</p>
+<section id="resimulate">
+<h2>Resimulate<a class="headerlink" href="#resimulate" title="Link to this heading">¶</a></h2>
+<p>Allows you to retrace a field (like smoke) through the already computed velocity field.</p>
+</section>
+<section id="edge-fade">
+<h2>Edge Fade<a class="headerlink" href="#edge-fade" title="Link to this heading">¶</a></h2>
+<p>Allows for fade of smoke density towards the edges when a field reaches the domain boundary.</p>
+</section>
+<section id="particle-advect">
+<h2>Particle Advect<a class="headerlink" href="#particle-advect" title="Link to this heading">¶</a></h2>
+<p>Can be used to advect particles through the flow.</p>
+</section>
 </section>
 
         </article>
@@ -285,8 +301,29 @@
         
       </footer>
     </div>
-    <aside class="toc-drawer no-toc">
+    <aside class="toc-drawer">
       
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Custom Geometry Nodes</a><ul>
+<li><a class="reference internal" href="#resimulate">Resimulate</a></li>
+<li><a class="reference internal" href="#edge-fade">Edge Fade</a></li>
+<li><a class="reference internal" href="#particle-advect">Particle Advect</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
       
       
     </aside>

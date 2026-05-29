@@ -240,14 +240,15 @@
         <article role="main" id="furo-main-content">
           <section id="user-documentation">
 <h1>User Documentation<a class="headerlink" href="#user-documentation" title="Link to this heading">¶</a></h1>
+<p>Here all nodes provided by Continuum Flow are documented. For some physical parameters you can refer to the theory section to better understand what they are doing.</p>
 <section id="general-workflow">
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
-<p>Mention which fields exist all in the flow and what they are, especially fuel</p>
-<p>Images for every node</p>
+<p>In general Continuum Flows workflow is node based. After installing there will be a new editor in the editor options on the top left (where you also find things like UV-Editor,…). Go there and create a new node tree. Now you can start setting up your simulation.</p>
+<p>The solver simulates multiple fields. Things like velocity, pressure and temperature are self explaining. One additional field transported by the flow is fuel which can lead to burning when enough temperature is reached. Another one is smoke which can either be spawned by a source or can be created through burning. Flames are also created when burning and produce additional temperature.</p>
 </section>
 <section id="nodes">
 <h2>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">¶</a></h2>
-<p>Mention node tree preset here</p>
+<p>To avoid a tedious setup a node tree preset is provided which an be found when pressing shift-a (like all other nodes). This node tree preset contains the minimum amound of nodes necesarry for simulation.</p>
 <section id="simulation">
 <h3>Simulation<a class="headerlink" href="#simulation" title="Link to this heading">¶</a></h3>
 <figure class="align-default">

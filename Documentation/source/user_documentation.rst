@@ -1,18 +1,16 @@
 User Documentation
 ==================
-
+Here all nodes provided by Continuum Flow are documented. For some physical parameters you can refer to the theory section to better understand what they are doing.
 
 General Workflow
 ----------------
+In general Continuum Flows workflow is node based. After installing there will be a new editor in the editor options on the top left (where you also find things like UV-Editor,...). Go there and create a new node tree. Now you can start setting up your simulation. 
 
-Mention which fields exist all in the flow and what they are, especially fuel
-
-Images for every node
+The solver simulates multiple fields. Things like velocity, pressure and temperature are self explaining. One additional field transported by the flow is fuel which can lead to burning when enough temperature is reached. Another one is smoke which can either be spawned by a source or can be created through burning. Flames are also created when burning and produce additional temperature.
 
 Nodes
 -----
-
-Mention node tree preset here
+To avoid a tedious setup a node tree preset is provided which an be found when pressing shift-a (like all other nodes). This node tree preset contains the minimum amound of nodes necesarry for simulation.
 
 Simulation
 ~~~~~~~~~~

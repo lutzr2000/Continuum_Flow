@@ -13,13 +13,18 @@ General:
 extra for GPU:
 
 - a NVIDIA GPU
-- Cuda Toolkit (LINK)
+- CUDA Toolkit (https://developer.nvidia.com/cuda-downloads)
 
-CPU
----
+When you want to use the GPU it is recommended to install the CUDA toolkit first.
 
+Steps
+-----
 
-
-
-GPU
----
+1. Download the code from the repository (LINK)
+2. Open Blender>Edit>Preferences>Add-ons
+3. Select the little downwards arrow in the top left and select "Install from disk"
+4. Navigate to the .zip on your computer and select it => hit the button "Install from disk" on he bottom right
+5. Go back to the Add-ons section in the preferences and look for Continuum Flow
+6. Display more options with the right poining arrow besides the name
+7. Hit "Install python enviroment", this might take a moment and requieres an internet connection
+8. Wait until the Addon says CPU (and optional GPU) is ready

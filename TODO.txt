@@ -6,6 +6,7 @@ Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
 Timing
 Testing
+Make node tree protected by default
 
 Documentation:
 finish docu in general

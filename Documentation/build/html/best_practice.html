@@ -240,6 +240,15 @@
         <article role="main" id="furo-main-content">
           <section id="best-practive">
 <h1>Best practive<a class="headerlink" href="#best-practive" title="Link to this heading">¶</a></h1>
+<p>In this last section a few tips for working with Continuum Flow are collected</p>
+<ul class="simple">
+<li><p>The most important rule: when something looks weird or the solver diverges try to reduce the CFL number. This sadly comes with the cost of slower compute time but it can often fix issues.</p></li>
+<li><p>While a large CFL value is desirable for quick simulations, some cases really profit from lower CFL values, like the 04 explosion example</p></li>
+<li><p>When starting your simulation setup, start with low resolutions and only go higher towards the end of your itteration procedure</p></li>
+<li><p>Only output the data you really need, saving volume grids can produce very large amounts of data really fast, this can fill up your disk and slow the solver</p></li>
+<li><p>when doing your final high res simulation turn off the “live preview”, this frees up RAM for the solver</p></li>
+</ul>
+<p>With these tips i wish you fun gathering experiences with Continuum Flow!</p>
 </section>
 
         </article>
