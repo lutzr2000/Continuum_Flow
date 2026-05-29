@@ -1,13 +1,13 @@
-Best practive
+Best Practice
 =============
 
-In this last section a few tips for working with Continuum Flow are collected
+In this final section, a few tips for working with Continuum Flow are collected.
 
-- The most important rule: when something looks weird or the solver diverges try to reduce the CFL number. This sadly comes with the cost of slower compute time but it can often fix issues.
-- While a large CFL value is desirable for quick simulations, some cases really profit from lower CFL values, like the 04 explosion example
-- When starting your simulation setup, start with low resolutions and only go higher towards the end of your itteration procedure
-- Only output the data you really need, saving volume grids can produce very large amounts of data really fast, this can fill up your disk and slow the solver
-- when doing your final high res simulation turn off the "live preview", this frees up RAM for the solver
+- The most important rule: when something looks weird or the solver diverges, try reducing the CFL number. This sadly comes at the cost of longer compute times, but it can often fix issues.
+- While a large CFL value is desirable for quick simulations, some cases really benefit from lower CFL values, like the 04 explosion example.
+- When setting up your simulation, start with low resolutions and only go higher towards the end of your iteration procedure.
+- Only output the data you really need. Saving volume grids can produce very large amounts of data very quickly, which can fill up your disk and slow the solver down.
+- When doing your final high-resolution simulation, turn off the "live preview". This frees up RAM for the solver.
 
-With these tips i wish you fun gathering experiences with Continuum Flow!
+With these tips, I wish you fun and success while gathering experience with Continuum Flow!
 

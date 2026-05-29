@@ -1,7 +1,7 @@
 Solver Theory
 =============
 
-This section describes the numerical model used by the Continuum flow solver. The simulation is based on the incompressible Navier-Stokes equations and uses a regular Cartesian grid with a finite-difference discretization. The goal is not to reproduce every detail of real fluid physics, but to provide a stable and fast solver for visually convincing smoke and fire effects. The solver simulates the following fields:
+This section describes the numerical model used by the Continuum Flow solver. The simulation is based on the incompressible Navier-Stokes equations and uses a regular Cartesian grid with a finite-difference discretization. The goal is not to reproduce every detail of real fluid physics, but to provide a stable and fast solver for visually convincing smoke and fire effects. The solver simulates the following fields:
 
 - velocity vector field in x-, y-, and z-directions, denoted by: :math:`\vec{u}`
 - pressure scalar field, denoted by: :math:`p`
@@ -45,7 +45,7 @@ with :math:`b` being the right hand side. This is an additional equation we can 
 General Solution Procedure
 --------------------------
  
-When running the simulation the solver initializes a flow field and then starts the time iteration. In the time iteration the following procedure is done:
+When running the simulation, the solver initializes a flow field and then starts the time iteration. During the time iteration, the following procedure is performed:
 
 1. Update all parameters, force fields, sources, and obstacles
 2. Compute vorticity forces
@@ -68,7 +68,7 @@ Repeat
 Discretization
 --------------
 
-The equations above describe continuous fluids (hence the name Continuum Flow) as differential equations. In practical application we cannot solve them analytically and have to rely on numerics. In this solver finite difference approximation is used for computing the derivatives. This means the whole simulation volume (domain) is subdivided into a grid with uniform resolution :math:`\Delta`, resulting in a grid with :math:`n_x \cdot n_y \cdot n_z` grid cells. For every cell a value for all fields needs to be computed. The derivatives for pressure, diffusion processes, and vorticity are computed using the following approximations:
+The equations above describe continuous fluids, hence the name Continuum Flow, as differential equations. In practice, we cannot solve them analytically and therefore have to rely on numerical methods. In this solver, finite-difference approximation is used to compute the derivatives. This means the whole simulation volume, the domain, is subdivided into a grid with uniform resolution :math:`\Delta`, resulting in a grid with :math:`n_x \cdot n_y \cdot n_z` cells. For every cell, a value for all fields needs to be computed. The derivatives for pressure, diffusion processes, and vorticity are computed using the following approximations:
 
 A one-dimensional first derivative in the x-direction is computed using central differencing:
 
@@ -94,7 +94,7 @@ Advection Procedure
 
 The treatment of flow advection is critical for flow simulation. It can be a strict constraint on the time step. To avoid this, semi-Lagrangian advection is used here, which allows for much larger time steps and thus fast simulations.
 
-We first ask: Where has this fluid been a time interval of :math:`\Delta t` ago? This is called backtracing. In this solver the backtracing is actually subdivided into three substeps to allow for curvature of the path.
+We first ask: where was this fluid a time interval of :math:`\Delta t` ago? This is called backtracing. In this solver, the backtracing is subdivided into three substeps to allow for curvature of the path.
 
 .. math::
    :label: eq-backtracing
@@ -105,7 +105,7 @@ We first ask: Where has this fluid been a time interval of :math:`\Delta t` ago?
    -
    \Delta t \, \vec{u}(\mathbf{x})
 
-Next we take the quantity :math:`q` (velocity, smoke, temperature, ...) we found at this backtraced position and move it to the departure cell.
+Next, we take the quantity :math:`q` (velocity, smoke, temperature, ...) found at this backtraced position and move it to the departure cell.
 
 .. math::
    :label: eq-semi_lagrangian_update
@@ -114,7 +114,7 @@ Next we take the quantity :math:`q` (velocity, smoke, temperature, ...) we found
    =
    q^n(\mathbf{x}_{\mathrm{old}})
 
-Since our backtracing position :math:`\mathbf{x}_{\mathrm{old}}` will never end up exactly in a cell center, we need to interpolate the quantity :math:`q` at the position where we end up through backtracing. This introduces numerical diffusion, meaning the flow becomes less swirly and, in VFX terms, boring to look at.
+Since our backtracing position :math:`\mathbf{x}_{\mathrm{old}}` will never end up exactly at a cell center, we need to interpolate the quantity :math:`q` at the position reached through backtracing. This introduces numerical diffusion, meaning the flow becomes less swirly and, in VFX terms, less interesting to look at.
 
 To mitigate this we apply MacCormack's correction:
 
@@ -130,7 +130,7 @@ To mitigate this we apply MacCormack's correction:
       q^n - q^{**}
    \right)
 
-Here :math:`q^{n+1}` is the quantity at the next time step and :math:`q^{n}` is the quantity from the current time step. :math:`q^{*}` is the quantity we computed with semi-Lagrangian advection and :math:`q^{**}` is the reversely advected velocity field. If there is no numerical diffusion, :math:`q^{n}` and :math:`q^{**}` would be equal and the whole term would cancel out. In practice this is never the case, and thus we use it for correction. :math:`\alpha` determines the strength of this correction. This correction can produce visual artefacts.
+Here :math:`q^{n+1}` is the quantity at the next time step and :math:`q^{n}` is the quantity from the current time step. :math:`q^{*}` is the quantity we computed with semi-Lagrangian advection and :math:`q^{**}` is the reversely advected velocity field. If there is no numerical diffusion, :math:`q^{n}` and :math:`q^{**}` would be equal and the whole term would cancel out. In practice, this is never the case, and thus we use it for correction. :math:`\alpha` determines the strength of this correction. This correction can produce visual artifacts.
 
 
 Pressure Solve

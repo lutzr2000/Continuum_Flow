@@ -1,16 +1,16 @@
 User Documentation
 ==================
-Here all nodes provided by Continuum Flow are documented. For some physical parameters you can refer to the theory section to better understand what they are doing.
+All nodes provided by Continuum Flow are documented here. For some physical parameters, you can refer to the theory section to better understand what they do.
 
 General Workflow
 ----------------
-In general Continuum Flows workflow is node based. After installing there will be a new editor in the editor options on the top left (where you also find things like UV-Editor,...). Go there and create a new node tree. Now you can start setting up your simulation. 
+In general, Continuum Flow's workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.
 
-The solver simulates multiple fields. Things like velocity, pressure and temperature are self explaining. One additional field transported by the flow is fuel which can lead to burning when enough temperature is reached. Another one is smoke which can either be spawned by a source or can be created through burning. Flames are also created when burning and produce additional temperature.
+The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
 Nodes
 -----
-To avoid a tedious setup a node tree preset is provided which an be found when pressing shift-a (like all other nodes). This node tree preset contains the minimum amound of nodes necesarry for simulation.
+To avoid a tedious setup, a node tree preset is provided, which can be found by pressing Shift+A, like all other nodes. This node tree preset contains the minimum number of nodes necessary for a simulation.
 
 Simulation
 ~~~~~~~~~~
@@ -19,10 +19,10 @@ Simulation
    :class: block-image-left
    :width: 300px
 
-This is the core node of every simulation. It controls the frame range for your simulation and general sovler parameters.
+This is the core node of every simulation. It controls the frame range for your simulation and general solver parameters.
 
 **CPU/GPU**
-    Lets you choose if you want to simulate on CPU or GPU. Only Nvidia GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable. 
+    Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.
 
 **Start Frame**
     The frame at which the simulation starts.
@@ -31,16 +31,16 @@ This is the core node of every simulation. It controls the frame range for your 
     The frame at which the simulation ends.
 
 **CFL**
-    This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which means the solver is faster. In many cases gowing for a big value here is good since it decreases the simulation time. In some occasions the visual quality will suffer under big CFL numbers. Refer to best practices for more information.
+    This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers. Refer to the best-practice section for more information.
 
-**Itterations**
-    Number of pressure itterations. Usually the default of ten is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.
+**Iterations**
+    Number of pressure iterations. Usually the default of ten is fine. Smaller values can be faster but may become unstable. Larger values are more stable but take longer.
 
 **MacCormack Factor**
-    For the purpose of this factor refer to the theory documentation. In general larger values make the flow more swirly and detailed, but can introduce artefacts.
+    For the purpose of this factor, refer to the theory documentation. In general, larger values make the flow more swirly and detailed, but can introduce artifacts.
 
 **Adaptive Domain**
-    Similar to Blenders native adaptive domain setting. Only simulates cells containing smoke, fuel or fire. Can greatly improve performance when activated in many cases. In some cases it is worth it to run it off, refer to the best practice section.
+    Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance. In some cases, however, it is worth turning it off. Refer to the best-practice section.
 
 **Threshold**
     Threshold for when a cell is considered empty for the adaptive domain.
@@ -71,7 +71,7 @@ This node controls the size and resolution of your simulation domain. The domain
     Outflow: fluid can leave the domain.
     Inflow: fluid can enter the domain at a given velocity.
     Slip Wall: frictionless wall.
-    Wall: wall with friction
+    Wall: wall with friction.
 
 
 Physics
@@ -95,8 +95,8 @@ This node controls the general physics parameters of the simulation.
 **Reference Temperature**
     Air cooler than this temperature will sink down, while warmer air will rise.
 
-**Bouyancy**
-    Amount of bouancy. Increasing this value means warm air will rise faster and cold air will sink faster.
+**Buoyancy**
+    Amount of buoyancy. Increasing this value means warm air will rise faster and cold air will sink faster.
 
 **Expansion Rate**
     How much warm air expands. Increasing this leads to more expansion due to heat.
@@ -130,13 +130,13 @@ Viewer
    :class: block-image-left
    :width: 300px
 
-This node lets you view the simulation domain in the viewprt.
+This node lets you view the simulation domain in the viewport.
 
 **Show/Hide Domain**
     Shows or hides the domain.
 
 **Live Preview**
-    When activated the simulation can be seen in the viewport while simulating.  
+    When activated, the simulation can be seen in the viewport while simulating.
 
 
 Output
@@ -152,20 +152,20 @@ This node lets you specify the output of your simulation. It is worth paying som
     The frame rate at which data is saved. Defaults to your scene frame rate.
 
 **Writers**
-    Amount of Writer CPU processes. Especially when simulating on GPU large amounts of data is calculated fast and needs additional compute power to be saved. Usually the default value of four is fine.
+    Number of writer CPU processes. Especially when simulating on the GPU, large amounts of data are calculated quickly and need additional compute power to be saved. Usually, the default value of four is fine.
 
 **Precision**
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
 **Fields**
-    Lets you select which of the fields available you want to save. The additional checkbox "sparse" can reduce the file size significantly in fields like fuel, flame and density since they usually do not fill the complete domain. If you select sparse for velocity, temperature or pressure the data is only saved in fields that also contain density. Be aware that in a simulation without any smoke a sparse velocity field is empty.
+    Lets you select which of the available fields you want to save. The additional checkbox "sparse" can reduce the file size significantly for fields like fuel, flame, and density, since they usually do not fill the complete domain. If you select sparse for velocity, temperature, or pressure, the data is only saved in cells that also contain density. Be aware that in a simulation without any smoke, a sparse velocity field is empty.
 
 **Path**
     Path on your disk where to save the data. You can use the usual Blender file browser.
 
 **Bake/Free Bake**
-    Bake: Starts the simulation
-    Free Bake: Deletes the baked data
+    Bake: starts the simulation.
+    Free Bake: deletes the baked data.
 
 
 Obstacle
@@ -175,7 +175,7 @@ Obstacle
    :class: block-image-left
    :width: 300px
 
-This node turns geometry into an obstacle. It expects geometry node as input and accepts multiple inputs.
+This node turns geometry into an obstacle. It expects a geometry node as input and accepts multiple inputs.
 
 
 Source
@@ -213,7 +213,7 @@ Geometry
    :class: block-image-left
    :width: 300px
 
-Simple node that lets you pick geometry. Can be plugged into the source or obstacle node.
+Simple node that lets you pick geometry. It can be plugged into the source or obstacle node.
 
 
 Force-Constant
@@ -226,13 +226,13 @@ Force-Constant
 Adds constant forcing to the whole domain.
 
 **Fx**
-    Strength of force in x-direction
+    Strength of the force in the x-direction.
 
 **Fy**
-    Strength of force in y-direction
+    Strength of the force in the y-direction.
 
 **Fz**
-    Strength of force in z-direction
+    Strength of the force in the z-direction.
 
 
 Force-Turbulence
@@ -248,10 +248,10 @@ Adds turbulent forcing to the domain.
     Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.
 
 **Frequency**
-    How quickly the turbulence field alternates. Larger values alternate quicker
+    How quickly the turbulence field alternates. Larger values alternate more quickly.
 
 **Amplitude**
-    Amplitude of turbulence
+    Amplitude of the turbulence.
 
 **Seed**
     Random seed for turbulence field generation.
@@ -276,7 +276,7 @@ Adds swirly forcing to your simulation.
     Axis for the swirl. The flow will rotate around the line defined by Axis and Origin.
 
 **Radius**
-    Radius within which the swirl motion should be applied
+    Radius within which the swirl motion should be applied.
 
 
 Force-Point
@@ -289,7 +289,7 @@ Force-Point
 Adds a point force that can attract flow or push it away.
 
 **Strength**
-    Negative values mean attraction, positive pushing the flow away.
+    Negative values mean attraction, while positive values push the flow away.
 
 **Origin**
     Origin of the point force.

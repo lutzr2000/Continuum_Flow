@@ -7,10 +7,8 @@ the live preview produces a RAM accumulation
 Timing
 Testing
 Make node tree protected by default
+Reduce VRAM usage
+Improve Output performance
 
-Documentation:
-finish docu in general
-documentation best practices or tips section
-performance compare in campfire, drift and rising smoke
 
 

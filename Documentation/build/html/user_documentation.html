@@ -199,7 +199,7 @@
 <li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a></li>
 <li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
-<li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best practive</a></li>
+<li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best Practice</a></li>
 </ul>
 
 </div>
@@ -240,36 +240,36 @@
         <article role="main" id="furo-main-content">
           <section id="user-documentation">
 <h1>User Documentation<a class="headerlink" href="#user-documentation" title="Link to this heading">¶</a></h1>
-<p>Here all nodes provided by Continuum Flow are documented. For some physical parameters you can refer to the theory section to better understand what they are doing.</p>
+<p>All nodes provided by Continuum Flow are documented here. For some physical parameters, you can refer to the theory section to better understand what they do.</p>
 <section id="general-workflow">
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
-<p>In general Continuum Flows workflow is node based. After installing there will be a new editor in the editor options on the top left (where you also find things like UV-Editor,…). Go there and create a new node tree. Now you can start setting up your simulation.</p>
-<p>The solver simulates multiple fields. Things like velocity, pressure and temperature are self explaining. One additional field transported by the flow is fuel which can lead to burning when enough temperature is reached. Another one is smoke which can either be spawned by a source or can be created through burning. Flames are also created when burning and produce additional temperature.</p>
+<p>In general, Continuum Flow’s workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.</p>
+<p>The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.</p>
 </section>
 <section id="nodes">
 <h2>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">¶</a></h2>
-<p>To avoid a tedious setup a node tree preset is provided which an be found when pressing shift-a (like all other nodes). This node tree preset contains the minimum amound of nodes necesarry for simulation.</p>
+<p>To avoid a tedious setup, a node tree preset is provided, which can be found by pressing Shift+A, like all other nodes. This node tree preset contains the minimum number of nodes necessary for a simulation.</p>
 <section id="simulation">
 <h3>Simulation<a class="headerlink" href="#simulation" title="Link to this heading">¶</a></h3>
 <figure class="align-default">
 <a class="block-image-left reference internal image-reference" href="_images/simulation_node.jpg"><img alt="_images/simulation_node.jpg" class="block-image-left" src="_images/simulation_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>This is the core node of every simulation. It controls the frame range for your simulation and general sovler parameters.</p>
+<p>This is the core node of every simulation. It controls the frame range for your simulation and general solver parameters.</p>
 <dl class="simple">
-<dt><strong>CPU/GPU</strong></dt><dd><p>Lets you choose if you want to simulate on CPU or GPU. Only Nvidia GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.</p>
+<dt><strong>CPU/GPU</strong></dt><dd><p>Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.</p>
 </dd>
 <dt><strong>Start Frame</strong></dt><dd><p>The frame at which the simulation starts.</p>
 </dd>
 <dt><strong>End Frame</strong></dt><dd><p>The frame at which the simulation ends.</p>
 </dd>
-<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determins how big or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps which means the solver is faster. In many cases gowing for a big value here is good since it decreases the simulation time. In some occasions the visual quality will suffer under big CFL numbers. Refer to best practices for more information.</p>
+<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers. Refer to the best-practice section for more information.</p>
 </dd>
-<dt><strong>Itterations</strong></dt><dd><p>Number of pressure itterations. Usually the default of ten is fine. Smaller values can be faster but become unstable. Larger values are more stable but take longer.</p>
+<dt><strong>Iterations</strong></dt><dd><p>Number of pressure iterations. Usually the default of ten is fine. Smaller values can be faster but may become unstable. Larger values are more stable but take longer.</p>
 </dd>
-<dt><strong>MacCormack Factor</strong></dt><dd><p>For the purpose of this factor refer to the theory documentation. In general larger values make the flow more swirly and detailed, but can introduce artefacts.</p>
+<dt><strong>MacCormack Factor</strong></dt><dd><p>For the purpose of this factor, refer to the theory documentation. In general, larger values make the flow more swirly and detailed, but can introduce artifacts.</p>
 </dd>
-<dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blenders native adaptive domain setting. Only simulates cells containing smoke, fuel or fire. Can greatly improve performance when activated in many cases. In some cases it is worth it to run it off, refer to the best practice section.</p>
+<dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blender’s native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance. In some cases, however, it is worth turning it off. Refer to the best-practice section.</p>
 </dd>
 <dt><strong>Threshold</strong></dt><dd><p>Threshold for when a cell is considered empty for the adaptive domain.</p>
 </dd>
@@ -295,7 +295,7 @@
 Outflow: fluid can leave the domain.
 Inflow: fluid can enter the domain at a given velocity.
 Slip Wall: frictionless wall.
-Wall: wall with friction</p>
+Wall: wall with friction.</p>
 </dd>
 </dl>
 </section>
@@ -315,7 +315,7 @@ Wall: wall with friction</p>
 </dd>
 <dt><strong>Reference Temperature</strong></dt><dd><p>Air cooler than this temperature will sink down, while warmer air will rise.</p>
 </dd>
-<dt><strong>Bouyancy</strong></dt><dd><p>Amount of bouancy. Increasing this value means warm air will rise faster and cold air will sink faster.</p>
+<dt><strong>Buoyancy</strong></dt><dd><p>Amount of buoyancy. Increasing this value means warm air will rise faster and cold air will sink faster.</p>
 </dd>
 <dt><strong>Expansion Rate</strong></dt><dd><p>How much warm air expands. Increasing this leads to more expansion due to heat.</p>
 </dd>
@@ -341,11 +341,11 @@ Wall: wall with friction</p>
 <a class="block-image-left reference internal image-reference" href="_images/viewer_node.jpg"><img alt="_images/viewer_node.jpg" class="block-image-left" src="_images/viewer_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>This node lets you view the simulation domain in the viewprt.</p>
+<p>This node lets you view the simulation domain in the viewport.</p>
 <dl class="simple">
 <dt><strong>Show/Hide Domain</strong></dt><dd><p>Shows or hides the domain.</p>
 </dd>
-<dt><strong>Live Preview</strong></dt><dd><p>When activated the simulation can be seen in the viewport while simulating.</p>
+<dt><strong>Live Preview</strong></dt><dd><p>When activated, the simulation can be seen in the viewport while simulating.</p>
 </dd>
 </dl>
 </section>
@@ -359,16 +359,16 @@ Wall: wall with friction</p>
 <dl class="simple">
 <dt><strong>FPS</strong></dt><dd><p>The frame rate at which data is saved. Defaults to your scene frame rate.</p>
 </dd>
-<dt><strong>Writers</strong></dt><dd><p>Amount of Writer CPU processes. Especially when simulating on GPU large amounts of data is calculated fast and needs additional compute power to be saved. Usually the default value of four is fine.</p>
+<dt><strong>Writers</strong></dt><dd><p>Number of writer CPU processes. Especially when simulating on the GPU, large amounts of data are calculated quickly and need additional compute power to be saved. Usually, the default value of four is fine.</p>
 </dd>
 <dt><strong>Precision</strong></dt><dd><p>The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.</p>
 </dd>
-<dt><strong>Fields</strong></dt><dd><p>Lets you select which of the fields available you want to save. The additional checkbox “sparse” can reduce the file size significantly in fields like fuel, flame and density since they usually do not fill the complete domain. If you select sparse for velocity, temperature or pressure the data is only saved in fields that also contain density. Be aware that in a simulation without any smoke a sparse velocity field is empty.</p>
+<dt><strong>Fields</strong></dt><dd><p>Lets you select which of the available fields you want to save. The additional checkbox “sparse” can reduce the file size significantly for fields like fuel, flame, and density, since they usually do not fill the complete domain. If you select sparse for velocity, temperature, or pressure, the data is only saved in cells that also contain density. Be aware that in a simulation without any smoke, a sparse velocity field is empty.</p>
 </dd>
 <dt><strong>Path</strong></dt><dd><p>Path on your disk where to save the data. You can use the usual Blender file browser.</p>
 </dd>
-<dt><strong>Bake/Free Bake</strong></dt><dd><p>Bake: Starts the simulation
-Free Bake: Deletes the baked data</p>
+<dt><strong>Bake/Free Bake</strong></dt><dd><p>Bake: starts the simulation.
+Free Bake: deletes the baked data.</p>
 </dd>
 </dl>
 </section>
@@ -378,7 +378,7 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/obstacle_node.jpg"><img alt="_images/obstacle_node.jpg" class="block-image-left" src="_images/obstacle_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>This node turns geometry into an obstacle. It expects geometry node as input and accepts multiple inputs.</p>
+<p>This node turns geometry into an obstacle. It expects a geometry node as input and accepts multiple inputs.</p>
 </section>
 <section id="source">
 <h3>Source<a class="headerlink" href="#source" title="Link to this heading">¶</a></h3>
@@ -408,7 +408,7 @@ Free Bake: Deletes the baked data</p>
 <a class="block-image-left reference internal image-reference" href="_images/geometry_node.jpg"><img alt="_images/geometry_node.jpg" class="block-image-left" src="_images/geometry_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>Simple node that lets you pick geometry. Can be plugged into the source or obstacle node.</p>
+<p>Simple node that lets you pick geometry. It can be plugged into the source or obstacle node.</p>
 </section>
 <section id="force-constant">
 <h3>Force-Constant<a class="headerlink" href="#force-constant" title="Link to this heading">¶</a></h3>
@@ -418,11 +418,11 @@ Free Bake: Deletes the baked data</p>
 </figure>
 <p>Adds constant forcing to the whole domain.</p>
 <dl class="simple">
-<dt><strong>Fx</strong></dt><dd><p>Strength of force in x-direction</p>
+<dt><strong>Fx</strong></dt><dd><p>Strength of the force in the x-direction.</p>
 </dd>
-<dt><strong>Fy</strong></dt><dd><p>Strength of force in y-direction</p>
+<dt><strong>Fy</strong></dt><dd><p>Strength of the force in the y-direction.</p>
 </dd>
-<dt><strong>Fz</strong></dt><dd><p>Strength of force in z-direction</p>
+<dt><strong>Fz</strong></dt><dd><p>Strength of the force in the z-direction.</p>
 </dd>
 </dl>
 </section>
@@ -436,9 +436,9 @@ Free Bake: Deletes the baked data</p>
 <dl class="simple">
 <dt><strong>Scale</strong></dt><dd><p>Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.</p>
 </dd>
-<dt><strong>Frequency</strong></dt><dd><p>How quickly the turbulence field alternates. Larger values alternate quicker</p>
+<dt><strong>Frequency</strong></dt><dd><p>How quickly the turbulence field alternates. Larger values alternate more quickly.</p>
 </dd>
-<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of turbulence</p>
+<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of the turbulence.</p>
 </dd>
 <dt><strong>Seed</strong></dt><dd><p>Random seed for turbulence field generation.</p>
 </dd>
@@ -458,7 +458,7 @@ Free Bake: Deletes the baked data</p>
 </dd>
 <dt><strong>Axis</strong></dt><dd><p>Axis for the swirl. The flow will rotate around the line defined by Axis and Origin.</p>
 </dd>
-<dt><strong>Radius</strong></dt><dd><p>Radius within which the swirl motion should be applied</p>
+<dt><strong>Radius</strong></dt><dd><p>Radius within which the swirl motion should be applied.</p>
 </dd>
 </dl>
 </section>
@@ -470,7 +470,7 @@ Free Bake: Deletes the baked data</p>
 </figure>
 <p>Adds a point force that can attract flow or push it away.</p>
 <dl class="simple">
-<dt><strong>Strength</strong></dt><dd><p>Negative values mean attraction, positive pushing the flow away.</p>
+<dt><strong>Strength</strong></dt><dd><p>Negative values mean attraction, while positive values push the flow away.</p>
 </dd>
 <dt><strong>Origin</strong></dt><dd><p>Origin of the point force.</p>
 </dd>
