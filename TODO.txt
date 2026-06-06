@@ -9,6 +9,5 @@ Testing
 Make node tree protected by default
 Reduce VRAM usage
 Improve Output performance
-
-
+Add geometry nodes for adding parent velocity for moving referenc frame
 

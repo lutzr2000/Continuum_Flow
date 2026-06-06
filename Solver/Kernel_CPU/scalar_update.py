@@ -279,9 +279,9 @@ def update_scalar_fields_maccormack(
                     smoke_dissipation_rate * smoke_corrected
                 )
 
-                T_updated = T_corrected + dt * temperature_source
-                smoke_updated = smoke_corrected + dt * smoke_source
-                fuel_updated = fuel_corrected + dt * fuel_source
+                T_updated = T_corrected + dt/delta * temperature_source
+                smoke_updated = smoke_corrected + dt/delta * smoke_source
+                fuel_updated = fuel_corrected + dt/delta * fuel_source
 
                 T_out[i, j, k] = max(T_updated, 0.0)
                 smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
