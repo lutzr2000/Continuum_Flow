@@ -9,19 +9,9 @@ from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_3D, volume_blocks_
 
 
 @cuda.jit(cache=True)
-def _clear_source_fields_kernel(
-    source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_extra_pressure,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
-):
+def _clear_source_mask_kernel(source_mask):
     """
-    Update the full source masks and target fields by clearing all cells.
+    Clear one aggregate or per-source mask on the GPU.
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = source_mask.shape
@@ -30,27 +20,12 @@ def _clear_source_fields_kernel(
         return
 
     source_mask[i, j, k] = False
-    source_velocity_mask[i, j, k] = False
-    source_temperature[i, j, k] = 0.0
-    source_smoke[i, j, k] = 0.0
-    source_fuel[i, j, k] = 0.0
-    source_extra_pressure[i, j, k] = 0.0
-    source_velocity_x[i, j, k] = 0.0
-    source_velocity_y[i, j, k] = 0.0
-    source_velocity_z[i, j, k] = 0.0
 
 
 @cuda.jit(cache=True)
 def _sample_source_entry_cuda(
     source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_extra_pressure,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
+    entry_mask,
     base,
     delta,
     ox,
@@ -77,14 +52,6 @@ def _sample_source_entry_cuda(
     m21,
     m22,
     m23,
-    temperature_value,
-    smoke_value,
-    fuel_value,
-    extra_pressure_value,
-    has_velocity_target,
-    velocity_x_value,
-    velocity_y_value,
-    velocity_z_value,
 ):
     """
     Update one source region by backward-sampling a source object on the GPU.
@@ -113,88 +80,136 @@ def _sample_source_entry_cuda(
     if not (0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]):
         return
 
+    entry_mask[i, j, k] = True
     source_mask[i, j, k] = True
 
-    if source_temperature[i, j, k] < temperature_value:
-        source_temperature[i, j, k] = temperature_value
-    if source_smoke[i, j, k] < smoke_value:
-        source_smoke[i, j, k] = smoke_value
-    if source_fuel[i, j, k] < fuel_value:
-        source_fuel[i, j, k] = fuel_value
-    source_extra_pressure[i, j, k] += extra_pressure_value
 
-    if has_velocity_target:
-        source_velocity_mask[i, j, k] = True
-        source_velocity_x[i, j, k] = velocity_x_value
-        source_velocity_y[i, j, k] = velocity_y_value
-        source_velocity_z[i, j, k] = velocity_z_value
+@cuda.jit(device=True, inline=True, cache=True)
+def resolve_source_cell_targets(
+    i,
+    j,
+    k,
+    source_entry_masks,
+    source_temperature_values,
+    source_smoke_values,
+    source_fuel_values,
+    source_velocity_enabled,
+    source_velocity_x_values,
+    source_velocity_y_values,
+    source_velocity_z_values,
+):
+    """
+    Resolve the authored source targets for one cell by scanning all source masks.
+    """
+    source_temperature_value = 0.0
+    source_smoke_value = 0.0
+    source_fuel_value = 0.0
+    velocity_x_value = 0.0
+    velocity_y_value = 0.0
+    velocity_z_value = 0.0
+    has_velocity_target = False
+
+    source_count = source_entry_masks.shape[0]
+    for source_idx in range(source_count):
+        if not source_entry_masks[source_idx, i, j, k]:
+            continue
+
+        temperature_value = source_temperature_values[source_idx]
+        smoke_value = source_smoke_values[source_idx]
+        fuel_value = source_fuel_values[source_idx]
+
+        if source_temperature_value < temperature_value:
+            source_temperature_value = temperature_value
+        if source_smoke_value < smoke_value:
+            source_smoke_value = smoke_value
+        if source_fuel_value < fuel_value:
+            source_fuel_value = fuel_value
+
+        if source_velocity_enabled[source_idx]:
+            has_velocity_target = True
+            velocity_x_value = source_velocity_x_values[source_idx]
+            velocity_y_value = source_velocity_y_values[source_idx]
+            velocity_z_value = source_velocity_z_values[source_idx]
+
+    return (
+        source_temperature_value,
+        source_smoke_value,
+        source_fuel_value,
+        has_velocity_target,
+        velocity_x_value,
+        velocity_y_value,
+        velocity_z_value,
+    )
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def accumulate_source_extra_pressure(
+    i,
+    j,
+    k,
+    source_entry_masks,
+    source_extra_pressure_values,
+):
+    """
+    Accumulate the authored extra pressure from all sources covering one cell.
+    """
+    extra_pressure_term = 0.0
+    source_count = source_entry_masks.shape[0]
+
+    for source_idx in range(source_count):
+        if source_entry_masks[source_idx, i, j, k]:
+            extra_pressure_term += source_extra_pressure_values[source_idx]
+
+    return extra_pressure_term
 
 
 def build_source_data(domain_cfg, source_entries):
     """
-    build persistent source target fields from exported source nodes.
-
-    Multiple source nodes are merged with a max operation per scalar field.
-    Velocity targets are written directly so later overlapping sources override
-    earlier ones component-wise.
-
+    Build per-source masks and authored values from exported source nodes.
     """
     return general_sources.build_source_data(domain_cfg, source_entries, obstacles)
 
 
 def prepare_source_data_for_gpu(source_data):
     """
-    Upload static local voxel masks for dynamic source sampling on the GPU.
+    Prepare animated source runtime data so it can be reused on the GPU.
     """
-    if not source_data.get("is_animated", False):
-        source_data["gpu_ready"] = False
-        return source_data
-    for runtime_entry in source_data.get("runtime_entries", ()):
-        obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
+    if source_data.get("has_dynamic_masks", False):
+        for runtime_entry in source_data.get("runtime_entries", ()):
+            obstacles.prepare_dynamic_runtime_for_gpu(runtime_entry["runtime"])
     source_data["gpu_ready"] = True
     return source_data
 
 
 def update_source_data_gpu(source_data, gpu_fields, time_value):
     """
-    Rebuild dynamic source masks and fields directly on the GPU.
+    Rebuild dynamic source masks directly on the GPU and sync compact source values.
     """
-    if not source_data.get("is_animated", False):
-        source_data["last_has_source"] = bool(np.any(source_data["mask"]))
-        return source_data
     if not source_data.get("gpu_ready"):
         prepare_source_data_for_gpu(source_data)
 
+    if not source_data.get("has_dynamic_masks", False):
+        source_data["last_has_source"] = bool(np.any(source_data["mask"]))
+        return source_data
+
     source_mask = gpu_fields["source_mask"]
-    source_velocity_mask = gpu_fields["source_velocity_mask"]
-    source_temperature = gpu_fields["source_temperature"]
-    source_smoke = gpu_fields["source_smoke"]
-    source_fuel = gpu_fields["source_fuel"]
-    source_extra_pressure = gpu_fields["source_extra_pressure"]
-    source_velocity_x = gpu_fields["source_velocity_x"]
-    source_velocity_y = gpu_fields["source_velocity_y"]
-    source_velocity_z = gpu_fields["source_velocity_z"]
-    _clear_source_fields_kernel[
+    _clear_source_mask_kernel[
         volume_blocks_per_grid(source_mask.shape, THREADS_PER_BLOCK_3D),
         THREADS_PER_BLOCK_3D,
-    ](
-        source_mask,
-        source_velocity_mask,
-        source_temperature,
-        source_smoke,
-        source_fuel,
-        source_extra_pressure,
-        source_velocity_x,
-        source_velocity_y,
-        source_velocity_z,
-    )
+    ](source_mask)
 
     any_source = False
-    for runtime_entry in source_data.get("runtime_entries", ()):
+    for source_idx, runtime_entry in enumerate(source_data.get("runtime_entries", ())):
         runtime = runtime_entry["runtime"]
         shape = runtime["shape"]
         origin = np.asarray(runtime["origin"], dtype=np.float32)
         delta = np.float32(runtime["delta"])
+        entry_mask = gpu_fields["source_entry_masks"][source_idx]
+
+        _clear_source_mask_kernel[
+            volume_blocks_per_grid(entry_mask.shape, THREADS_PER_BLOCK_3D),
+            THREADS_PER_BLOCK_3D,
+        ](entry_mask)
 
         for obj in runtime.get("objects", ()):
             local_mask_device = obj.get("local_mask_device")
@@ -206,14 +221,9 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
             )
             if not state["active"]:
                 continue
-            ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
 
+            ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
             any_source = True
-            resolved_velocity = general_sources.resolve_runtime_entry_velocity(
-                runtime_entry,
-                time_value,
-                obstacles,
-            )
             inv = state["inv"]
             sx = int(ix1 - ix0 + 1)
             sy = int(iy1 - iy0 + 1)
@@ -223,14 +233,7 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
 
             _sample_source_entry_cuda[blocks, THREADS_PER_BLOCK_3D](
                 source_mask,
-                source_velocity_mask,
-                source_temperature,
-                source_smoke,
-                source_fuel,
-                source_extra_pressure,
-                source_velocity_x,
-                source_velocity_y,
-                source_velocity_z,
+                entry_mask,
                 local_mask_device,
                 delta,
                 np.float32(origin[0]),
@@ -257,14 +260,6 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
                 np.float32(inv[2, 1]),
                 np.float32(inv[2, 2]),
                 np.float32(inv[2, 3]),
-                np.float32(runtime_entry["temperature"]),
-                np.float32(runtime_entry["smoke"]),
-                np.float32(runtime_entry["fuel"]),
-                np.float32(runtime_entry.get("extra_pressure", 0.0)),
-                bool(runtime_entry["has_velocity_target"]),
-                np.float32(resolved_velocity[0]),
-                np.float32(resolved_velocity[1]),
-                np.float32(resolved_velocity[2]),
             )
 
     source_data["last_has_source"] = bool(any_source)
@@ -273,27 +268,14 @@ def update_source_data_gpu(source_data, gpu_fields, time_value):
 
 def update_source_data(source_data, time_value):
     """
-    Rebuild source masks and persistent source target fields for the current time.
+    Rebuild source masks for the current time without allocating per-cell value fields.
     """
-    source_active_mask = source_data["mask"]
-    velocity_active_mask = source_data["velocity_mask"]
-    temperature_field = source_data["temperature"]
-    smoke_field = source_data["smoke"]
-    fuel_field = source_data["fuel"]
-    extra_pressure_field = source_data["extra_pressure"]
-    velocity_x_field = source_data["velocity_x"]
-    velocity_y_field = source_data["velocity_y"]
-    velocity_z_field = source_data["velocity_z"]
+    if not source_data.get("has_dynamic_masks", False):
+        return general_sources.rebuild_source_mask(source_data)
 
+    source_active_mask = source_data["mask"]
     source_active_mask.fill(False)
-    velocity_active_mask.fill(False)
-    temperature_field.fill(0.0)
-    smoke_field.fill(0.0)
-    fuel_field.fill(0.0)
-    extra_pressure_field.fill(0.0)
-    velocity_x_field.fill(0.0)
-    velocity_y_field.fill(0.0)
-    velocity_z_field.fill(0.0)
+    any_source = False
 
     for runtime_entry in source_data.get("runtime_entries", ()):
         source_mask = obstacles.update_dynamic_mask(
@@ -304,32 +286,10 @@ def update_source_data(source_data, time_value):
         if not np.any(source_mask):
             continue
 
-        resolved_velocity = general_sources.resolve_runtime_entry_velocity(
-            runtime_entry,
-            time_value,
-            obstacles,
-        )
         source_active_mask |= source_mask
-        temperature_field[source_mask] = np.maximum(
-            temperature_field[source_mask],
-            runtime_entry["temperature"],
-        )
-        smoke_field[source_mask] = np.maximum(
-            smoke_field[source_mask],
-            runtime_entry["smoke"],
-        )
-        fuel_field[source_mask] = np.maximum(
-            fuel_field[source_mask],
-            runtime_entry["fuel"],
-        )
-        extra_pressure_field[source_mask] += runtime_entry.get("extra_pressure", 0.0)
+        any_source = True
 
-        if runtime_entry["has_velocity_target"]:
-            velocity_active_mask[source_mask] = True
-            velocity_x_field[source_mask] = resolved_velocity[0]
-            velocity_y_field[source_mask] = resolved_velocity[1]
-            velocity_z_field[source_mask] = resolved_velocity[2]
-
+    source_data["last_has_source"] = bool(any_source)
     return source_data
 
 
@@ -342,24 +302,20 @@ def source_bc_kernel(
     smoke,
     fuel,
     source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
+    source_entry_masks,
+    source_temperature_values,
+    source_smoke_values,
+    source_fuel_values,
+    source_velocity_enabled,
+    source_velocity_x_values,
+    source_velocity_y_values,
+    source_velocity_z_values,
     dt,
     apply_velocity,
     apply_scalars,
 ):
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
-
-    Each thread checks one source cell, sets the configured source velocity,
-    keeps temperature above the configured minimum and injects smoke/fuel
-    according to the authored per-second emission rates.
-
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = source_mask.shape
@@ -370,18 +326,42 @@ def source_bc_kernel(
     if not source_mask[i, j, k]:
         return
 
-    source_temperature_value = source_temperature[i, j, k]
-    # Boost authored source rates so the emitted volume reads denser visually.
-    source_smoke_rate = 10.0 * source_smoke[i, j, k]
-    source_fuel_rate = 10.0 * source_fuel[i, j, k]
+    (
+        source_temperature_value,
+        source_smoke_value,
+        source_fuel_value,
+        has_velocity_target,
+        velocity_x_value,
+        velocity_y_value,
+        velocity_z_value,
+    ) = resolve_source_cell_targets(
+        i,
+        j,
+        k,
+        source_entry_masks,
+        source_temperature_values,
+        source_smoke_values,
+        source_fuel_values,
+        source_velocity_enabled,
+        source_velocity_x_values,
+        source_velocity_y_values,
+        source_velocity_z_values,
+    )
 
-    if apply_velocity and source_velocity_mask[i, j, k]:
-        u[i, j, k] = source_velocity_x[i, j, k]
-        v[i, j, k] = source_velocity_y[i, j, k]
-        w[i, j, k] = source_velocity_z[i, j, k]
+    if apply_velocity and has_velocity_target:
+        u[i, j, k] = velocity_x_value
+        v[i, j, k] = velocity_y_value
+        w[i, j, k] = velocity_z_value
 
     if apply_scalars:
         if T[i, j, k] < source_temperature_value:
             T[i, j, k] = source_temperature_value
-        smoke[i, j, k] = min(max(smoke[i, j, k] + dt * source_smoke_rate, 0.0), 100.0)
-        fuel[i, j, k] = min(max(fuel[i, j, k] + dt * source_fuel_rate, 0.0), 100.0)
+
+        smoke[i, j, k] = min(
+            max(smoke[i, j, k] + dt * 10.0 * source_smoke_value, 0.0),
+            100.0,
+        )
+        fuel[i, j, k] = min(
+            max(fuel[i, j, k] + dt * 10.0 * source_fuel_value, 0.0),
+            100.0,
+        )

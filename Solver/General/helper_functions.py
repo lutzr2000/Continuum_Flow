@@ -304,7 +304,7 @@ def _source_temperature_max(source_data):
     """
     Return the maximum source temperature across static and animated sources.
     """
-    source_temperature_max = float(np.max(source_data["temperature"]))
+    source_temperature_max = 0.0
     for runtime_entry in source_data.get("runtime_entries", ()):
         source_temperature_max = max(
             source_temperature_max,

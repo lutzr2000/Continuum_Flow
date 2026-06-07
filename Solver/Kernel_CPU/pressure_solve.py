@@ -13,7 +13,9 @@ def pressure_equation_right_side(
     b,
     dt,
     point_divergence,
-    source_extra_pressure,
+    source_mask,
+    source_entry_masks,
+    source_extra_pressure_values,
     delta,
     rho,
     expansion_rate,
@@ -40,7 +42,12 @@ def pressure_equation_right_side(
                 divergence = du_dx + dv_dy + dw_dz
                 thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
                 authored_divergence = point_divergence[i, j, k]
-                extra_pressure_term = source_extra_pressure[i, j, k]
+                extra_pressure_term = 0.0
+
+                if source_mask[i, j, k]:
+                    for source_idx in range(source_entry_masks.shape[0]):
+                        if source_entry_masks[source_idx, i, j, k]:
+                            extra_pressure_term += source_extra_pressure_values[source_idx]
 
                 b[i, j, k] = (
                     rho_over_dt
@@ -117,7 +124,9 @@ def pressure_poisson(
     b,
     dt,
     point_divergence,
-    source_extra_pressure,
+    source_mask,
+    source_entry_masks,
+    source_extra_pressure_values,
     delta,
     rho,
     expansion_rate,
@@ -137,7 +146,9 @@ def pressure_poisson(
         b,
         dt,
         point_divergence,
-        source_extra_pressure,
+        source_mask,
+        source_entry_masks,
+        source_extra_pressure_values,
         delta,
         rho,
         expansion_rate,

@@ -78,6 +78,98 @@ def resolve_runtime_entry_velocity(runtime_entry, time_value, obstacles_backend)
     return resolve_local_space_velocity(authored_velocity, state["matrix"])
 
 
+def apply_initial_source_conditions(u, v, w, T, source_data):
+    """
+    Apply source-authored initial velocity and temperature directly to solver fields.
+    """
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        source_mask = runtime_entry.get("mask")
+        if source_mask is None or not np.any(source_mask):
+            continue
+
+        if runtime_entry.get("has_velocity_target", False):
+            u[source_mask] = runtime_entry.get("initial_velocity_x", 0.0)
+            v[source_mask] = runtime_entry.get("initial_velocity_y", 0.0)
+            w[source_mask] = runtime_entry.get("initial_velocity_z", 0.0)
+
+        T[source_mask] = np.maximum(T[source_mask], runtime_entry.get("temperature", 0.0))
+
+    return u, v, w, T
+
+
+def build_runtime_entry_payload(source_data, time_value, obstacles_backend):
+    """
+    Convert runtime entries into compact per-source masks and value arrays.
+    """
+    source_mask = np.asarray(source_data["mask"])
+    source_shape = source_mask.shape
+    runtime_entries = tuple(source_data.get("runtime_entries", ()))
+    source_count = len(runtime_entries)
+
+    entry_masks = np.zeros((source_count,) + source_shape, dtype=np.bool_)
+    temperature_values = np.zeros(source_count, dtype=np.float32)
+    smoke_values = np.zeros(source_count, dtype=np.float32)
+    fuel_values = np.zeros(source_count, dtype=np.float32)
+    extra_pressure_values = np.zeros(source_count, dtype=np.float32)
+    velocity_enabled = np.zeros(source_count, dtype=np.bool_)
+    velocity_x_values = np.zeros(source_count, dtype=np.float32)
+    velocity_y_values = np.zeros(source_count, dtype=np.float32)
+    velocity_z_values = np.zeros(source_count, dtype=np.float32)
+
+    for source_idx, runtime_entry in enumerate(runtime_entries):
+        entry_masks[source_idx] = np.asarray(runtime_entry["mask"], dtype=np.bool_)
+        temperature_values[source_idx] = np.float32(runtime_entry.get("temperature", 0.0))
+        smoke_values[source_idx] = np.float32(runtime_entry.get("smoke", 0.0))
+        fuel_values[source_idx] = np.float32(runtime_entry.get("fuel", 0.0))
+        extra_pressure_values[source_idx] = np.float32(
+            runtime_entry.get("extra_pressure", 0.0)
+        )
+
+        has_velocity_target = bool(runtime_entry.get("has_velocity_target", False))
+        velocity_enabled[source_idx] = has_velocity_target
+        if has_velocity_target:
+            resolved_velocity = resolve_runtime_entry_velocity(
+                runtime_entry,
+                time_value,
+                obstacles_backend,
+            )
+            velocity_x_values[source_idx] = np.float32(resolved_velocity[0])
+            velocity_y_values[source_idx] = np.float32(resolved_velocity[1])
+            velocity_z_values[source_idx] = np.float32(resolved_velocity[2])
+
+    return {
+        "source_mask": source_mask,
+        "entry_masks": entry_masks,
+        "temperature_values": temperature_values,
+        "smoke_values": smoke_values,
+        "fuel_values": fuel_values,
+        "extra_pressure_values": extra_pressure_values,
+        "velocity_enabled": velocity_enabled,
+        "velocity_x_values": velocity_x_values,
+        "velocity_y_values": velocity_y_values,
+        "velocity_z_values": velocity_z_values,
+    }
+
+
+def rebuild_source_mask(source_data):
+    """
+    Rebuild the aggregate source mask from all per-source masks.
+    """
+    aggregate_mask = source_data["mask"]
+    aggregate_mask.fill(False)
+
+    any_source = False
+    for runtime_entry in source_data.get("runtime_entries", ()):
+        entry_mask = runtime_entry.get("mask")
+        if entry_mask is None or not np.any(entry_mask):
+            continue
+        aggregate_mask |= entry_mask
+        any_source = True
+
+    source_data["last_has_source"] = bool(any_source)
+    return source_data
+
+
 def build_source_data(domain_cfg, source_entries, obstacles_backend):
     """
     Build persistent source target fields from exported source nodes.
@@ -94,17 +186,10 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
-    temperature_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    smoke_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    fuel_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    extra_pressure_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    velocity_x_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    velocity_y_field = np.zeros((nx, ny, nz), dtype=np.float32)
-    velocity_z_field = np.zeros((nx, ny, nz), dtype=np.float32)
     source_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
-    velocity_active_mask = np.zeros((nx, ny, nz), dtype=np.bool_)
     runtime_entries = []
     has_animation = False
+    has_dynamic_masks = False
 
     for source_entry in source_entries:
         if source_entry.get("shape") != "mesh":
@@ -154,6 +239,9 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
             has_animation = has_animation or bool(
                 source_runtime.get("is_animated", False) or source_animations
             )
+            has_dynamic_masks = has_dynamic_masks or bool(
+                source_runtime.get("is_animated", False)
+            )
 
             if not np.any(source_mask):
                 continue
@@ -161,36 +249,15 @@ def build_source_data(domain_cfg, source_entries, obstacles_backend):
             resolved_velocity = resolve_runtime_entry_velocity(
                 runtime_entry, 0.0, obstacles_backend
             )
+            runtime_entry["initial_velocity_x"] = np.float32(resolved_velocity[0])
+            runtime_entry["initial_velocity_y"] = np.float32(resolved_velocity[1])
+            runtime_entry["initial_velocity_z"] = np.float32(resolved_velocity[2])
             source_active_mask |= source_mask
-            temperature_field[source_mask] = np.maximum(
-                temperature_field[source_mask],
-                source_temperature,
-            )
-            smoke_field[source_mask] = np.maximum(
-                smoke_field[source_mask],
-                source_smoke,
-            )
-            fuel_field[source_mask] = np.maximum(
-                fuel_field[source_mask],
-                source_fuel,
-            )
-            extra_pressure_field[source_mask] += source_extra_pressure
-            if has_velocity_target:
-                velocity_active_mask[source_mask] = True
-                velocity_x_field[source_mask] = resolved_velocity[0]
-                velocity_y_field[source_mask] = resolved_velocity[1]
-                velocity_z_field[source_mask] = resolved_velocity[2]
 
     return {
         "mask": source_active_mask,
-        "velocity_mask": velocity_active_mask,
-        "temperature": temperature_field,
-        "smoke": smoke_field,
-        "fuel": fuel_field,
-        "extra_pressure": extra_pressure_field,
-        "velocity_x": velocity_x_field,
-        "velocity_y": velocity_y_field,
-        "velocity_z": velocity_z_field,
         "runtime_entries": runtime_entries,
         "is_animated": bool(has_animation),
+        "has_dynamic_masks": bool(has_dynamic_masks),
+        "last_has_source": bool(np.any(source_active_mask)),
     }

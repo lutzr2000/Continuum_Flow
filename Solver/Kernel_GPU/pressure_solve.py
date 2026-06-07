@@ -1,6 +1,7 @@
 import numpy as np
 from numba import cuda
 
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
@@ -16,7 +17,9 @@ def pressure_equation_right_side(
     b,
     dt,
     point_divergence,
-    source_extra_pressure,
+    source_mask,
+    source_entry_masks,
+    source_extra_pressure_values,
     delta,
     rho,
     expansion_rate,
@@ -50,7 +53,15 @@ def pressure_equation_right_side(
     # ------------Artifical thermal divergence-------------------
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
     authored_divergence = point_divergence[i, j, k]
-    extra_pressure_term = source_extra_pressure[i, j, k]
+    extra_pressure_term = 0.0
+    if source_mask[i, j, k]:
+        extra_pressure_term = source_bc.accumulate_source_extra_pressure(
+            i,
+            j,
+            k,
+            source_entry_masks,
+            source_extra_pressure_values,
+        )
 
     # ------------Right hand side-------------------
     b[i, j, k] = (
@@ -259,7 +270,9 @@ def pressure_poisson(
     b,
     dt,
     point_divergence,
-    source_extra_pressure,
+    source_mask,
+    source_entry_masks,
+    source_extra_pressure_values,
     delta,
     rho,
     expansion_rate,
@@ -286,7 +299,9 @@ def pressure_poisson(
         b,
         dt,
         point_divergence,
-        source_extra_pressure,
+        source_mask,
+        source_entry_masks,
+        source_extra_pressure_values,
         delta,
         rho,
         expansion_rate,

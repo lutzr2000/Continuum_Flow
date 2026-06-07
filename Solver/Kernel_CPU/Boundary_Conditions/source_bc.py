@@ -6,54 +6,9 @@ import Solver.General.sources as general_sources
 
 
 @njit(cache=True, parallel=True)
-def _clear_source_fields_cpu(
-    source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_extra_pressure,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
-):
-    """
-    Clear all persistent source target fields in one parallel volume sweep.
-    """
-    total_size = source_mask.size
-    source_mask_flat = source_mask.reshape(total_size)
-    source_velocity_mask_flat = source_velocity_mask.reshape(total_size)
-    source_temperature_flat = source_temperature.reshape(total_size)
-    source_smoke_flat = source_smoke.reshape(total_size)
-    source_fuel_flat = source_fuel.reshape(total_size)
-    source_extra_pressure_flat = source_extra_pressure.reshape(total_size)
-    source_velocity_x_flat = source_velocity_x.reshape(total_size)
-    source_velocity_y_flat = source_velocity_y.reshape(total_size)
-    source_velocity_z_flat = source_velocity_z.reshape(total_size)
-
-    for idx in prange(total_size):
-        source_mask_flat[idx] = False
-        source_velocity_mask_flat[idx] = False
-        source_temperature_flat[idx] = 0.0
-        source_smoke_flat[idx] = 0.0
-        source_fuel_flat[idx] = 0.0
-        source_extra_pressure_flat[idx] = 0.0
-        source_velocity_x_flat[idx] = 0.0
-        source_velocity_y_flat[idx] = 0.0
-        source_velocity_z_flat[idx] = 0.0
-
-
-@njit(cache=True, parallel=True)
 def _sample_source_entry_cpu(
     source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_extra_pressure,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
+    entry_mask,
     base,
     delta,
     ox,
@@ -69,18 +24,12 @@ def _sample_source_entry_cpu(
     base_oy,
     base_oz,
     inv,
-    temperature_value,
-    smoke_value,
-    fuel_value,
-    extra_pressure_value,
-    has_velocity_target,
-    velocity_x_value,
-    velocity_y_value,
-    velocity_z_value,
 ):
     """
-    Sample one dynamic source entry into the persistent source target fields.
+    Sample one dynamic source entry into its own boolean mask and the aggregate mask.
     """
+    entry_mask.fill(False)
+
     bn_x, bn_y, bn_z = base.shape
     sx = ix1 - ix0 + 1
     sy = iy1 - iy0 + 1
@@ -109,92 +58,48 @@ def _sample_source_entry_cpu(
         ):
             continue
 
+        entry_mask[i, j, k] = True
         source_mask[i, j, k] = True
-
-        if source_temperature[i, j, k] < temperature_value:
-            source_temperature[i, j, k] = temperature_value
-        if source_smoke[i, j, k] < smoke_value:
-            source_smoke[i, j, k] = smoke_value
-        if source_fuel[i, j, k] < fuel_value:
-            source_fuel[i, j, k] = fuel_value
-        source_extra_pressure[i, j, k] += extra_pressure_value
-
-        if has_velocity_target:
-            source_velocity_mask[i, j, k] = True
-            source_velocity_x[i, j, k] = velocity_x_value
-            source_velocity_y[i, j, k] = velocity_y_value
-            source_velocity_z[i, j, k] = velocity_z_value
 
 
 def build_source_data(domain_cfg, source_entries):
     """
-    Build persistent source target fields from exported source nodes.
-
-    Multiple source nodes are merged with a max operation per scalar field.
-    Velocity targets are written directly so later overlapping sources override
-    earlier ones component-wise.
+    Build per-source masks and authored values from exported source nodes.
     """
     return general_sources.build_source_data(domain_cfg, source_entries, obstacles)
 
 
 def update_source_data(source_data, time_value):
     """
-    Rebuild source masks and persistent source target fields for the current time.
+    Rebuild source masks for the current time without allocating per-cell value fields.
     """
+    if not source_data.get("has_dynamic_masks", False):
+        return general_sources.rebuild_source_mask(source_data)
+
     source_active_mask = source_data["mask"]
-    velocity_active_mask = source_data["velocity_mask"]
-    temperature_field = source_data["temperature"]
-    smoke_field = source_data["smoke"]
-    fuel_field = source_data["fuel"]
-    extra_pressure_field = source_data["extra_pressure"]
-    velocity_x_field = source_data["velocity_x"]
-    velocity_y_field = source_data["velocity_y"]
-    velocity_z_field = source_data["velocity_z"]
-
-    _clear_source_fields_cpu(
-        source_active_mask,
-        velocity_active_mask,
-        temperature_field,
-        smoke_field,
-        fuel_field,
-        extra_pressure_field,
-        velocity_x_field,
-        velocity_y_field,
-        velocity_z_field,
-    )
-
+    source_active_mask.fill(False)
     any_source = False
+
     for runtime_entry in source_data.get("runtime_entries", ()):
         runtime = runtime_entry["runtime"]
         shape = runtime["shape"]
         origin = np.asarray(runtime["origin"], dtype=np.float32)
         delta = np.float32(runtime["delta"])
+        entry_mask = runtime_entry["mask"]
 
         for obj in runtime.get("objects", ()):
             state = obstacles._resolve_dynamic_object_state(
                 obj, time_value, delta, origin, shape
             )
             if not state["active"]:
+                entry_mask.fill(False)
                 continue
 
-            any_source = True
-            resolved_velocity = general_sources.resolve_runtime_entry_velocity(
-                runtime_entry,
-                time_value,
-                obstacles,
-            )
             ix0, ix1, iy0, iy1, iz0, iz1 = state["index_bounds"]
             base_origin = obj["local_origin"]
             _sample_source_entry_cpu(
                 source_active_mask,
-                velocity_active_mask,
-                temperature_field,
-                smoke_field,
-                fuel_field,
-                extra_pressure_field,
-                velocity_x_field,
-                velocity_y_field,
-                velocity_z_field,
+                entry_mask,
                 obj["local_mask"],
                 delta,
                 np.float32(origin[0]),
@@ -210,15 +115,10 @@ def update_source_data(source_data, time_value):
                 np.float32(base_origin[1]),
                 np.float32(base_origin[2]),
                 state["inv"],
-                np.float32(runtime_entry["temperature"]),
-                np.float32(runtime_entry["smoke"]),
-                np.float32(runtime_entry["fuel"]),
-                np.float32(runtime_entry.get("extra_pressure", 0.0)),
-                bool(runtime_entry["has_velocity_target"]),
-                np.float32(resolved_velocity[0]),
-                np.float32(resolved_velocity[1]),
-                np.float32(resolved_velocity[2]),
             )
+
+            if np.any(entry_mask):
+                any_source = True
 
     source_data["last_has_source"] = bool(any_source)
     return source_data
@@ -233,13 +133,14 @@ def _source_bc_kernel_cpu(
     smoke,
     fuel,
     source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
+    source_entry_masks,
+    source_temperature_values,
+    source_smoke_values,
+    source_fuel_values,
+    source_velocity_enabled,
+    source_velocity_x_values,
+    source_velocity_y_values,
+    source_velocity_z_values,
     dt,
     apply_velocity,
     apply_scalars,
@@ -255,37 +156,63 @@ def _source_bc_kernel_cpu(
     smoke_flat = smoke.reshape(total_size)
     fuel_flat = fuel.reshape(total_size)
     source_mask_flat = source_mask.reshape(total_size)
-    source_velocity_mask_flat = source_velocity_mask.reshape(total_size)
-    source_temperature_flat = source_temperature.reshape(total_size)
-    source_smoke_flat = source_smoke.reshape(total_size)
-    source_fuel_flat = source_fuel.reshape(total_size)
-    source_velocity_x_flat = source_velocity_x.reshape(total_size)
-    source_velocity_y_flat = source_velocity_y.reshape(total_size)
-    source_velocity_z_flat = source_velocity_z.reshape(total_size)
+    source_count = source_entry_masks.shape[0]
+    nx, ny, nz = source_mask.shape
 
     for idx in prange(total_size):
         if not source_mask_flat[idx]:
             continue
 
-        if apply_velocity and source_velocity_mask_flat[idx]:
-            u_flat[idx] = source_velocity_x_flat[idx]
-            v_flat[idx] = source_velocity_y_flat[idx]
-            w_flat[idx] = source_velocity_z_flat[idx]
+        i = idx // (ny * nz)
+        remainder = idx % (ny * nz)
+        j = remainder // nz
+        k = remainder % nz
+
+        source_temperature_value = 0.0
+        source_smoke_value = 0.0
+        source_fuel_value = 0.0
+        velocity_x_value = 0.0
+        velocity_y_value = 0.0
+        velocity_z_value = 0.0
+        has_velocity_target = False
+
+        for source_idx in range(source_count):
+            if not source_entry_masks[source_idx, i, j, k]:
+                continue
+
+            temperature_value = source_temperature_values[source_idx]
+            smoke_value = source_smoke_values[source_idx]
+            fuel_value = source_fuel_values[source_idx]
+
+            if source_temperature_value < temperature_value:
+                source_temperature_value = temperature_value
+            if source_smoke_value < smoke_value:
+                source_smoke_value = smoke_value
+            if source_fuel_value < fuel_value:
+                source_fuel_value = fuel_value
+
+            if source_velocity_enabled[source_idx]:
+                has_velocity_target = True
+                velocity_x_value = source_velocity_x_values[source_idx]
+                velocity_y_value = source_velocity_y_values[source_idx]
+                velocity_z_value = source_velocity_z_values[source_idx]
+
+        if apply_velocity and has_velocity_target:
+            u_flat[idx] = velocity_x_value
+            v_flat[idx] = velocity_y_value
+            w_flat[idx] = velocity_z_value
 
         if apply_scalars:
-            source_temperature_value = source_temperature_flat[idx]
-            # Boost authored source rates so the emitted volume reads denser visually.
-            source_smoke_rate = 10.0 * source_smoke_flat[idx]
-            source_fuel_rate = 10.0 * source_fuel_flat[idx]
-
             if T_flat[idx] < source_temperature_value:
                 T_flat[idx] = source_temperature_value
 
             smoke_flat[idx] = min(
-                max(smoke_flat[idx] + dt * source_smoke_rate, 0.0), 100.0
+                max(smoke_flat[idx] + dt * 10.0 * source_smoke_value, 0.0),
+                100.0,
             )
             fuel_flat[idx] = min(
-                max(fuel_flat[idx] + dt * source_fuel_rate, 0.0), 100.0
+                max(fuel_flat[idx] + dt * 10.0 * source_fuel_value, 0.0),
+                100.0,
             )
 
 
@@ -297,22 +224,20 @@ def source_bc(
     smoke,
     fuel,
     source_mask,
-    source_velocity_mask,
-    source_temperature,
-    source_smoke,
-    source_fuel,
-    source_velocity_x,
-    source_velocity_y,
-    source_velocity_z,
+    source_entry_masks,
+    source_temperature_values,
+    source_smoke_values,
+    source_fuel_values,
+    source_velocity_enabled,
+    source_velocity_x_values,
+    source_velocity_y_values,
+    source_velocity_z_values,
     dt,
     apply_velocity=True,
     apply_scalars=True,
 ):
     """
     Apply all source boundary conditions to the CPU field state.
-
-    Velocity can be imposed directly and scalar source terms can be injected
-    independently so the caller can match the GPU source-application flow.
     """
     if source_mask.size == 0 or not np.any(source_mask):
         return u, v, w, T, smoke, fuel
@@ -325,13 +250,14 @@ def source_bc(
         smoke,
         fuel,
         source_mask,
-        source_velocity_mask,
-        source_temperature,
-        source_smoke,
-        source_fuel,
-        source_velocity_x,
-        source_velocity_y,
-        source_velocity_z,
+        source_entry_masks,
+        source_temperature_values,
+        source_smoke_values,
+        source_fuel_values,
+        source_velocity_enabled,
+        source_velocity_x_values,
+        source_velocity_y_values,
+        source_velocity_z_values,
         dt,
         apply_velocity,
         apply_scalars,

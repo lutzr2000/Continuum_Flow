@@ -2,6 +2,7 @@ import numpy as np
 
 import Solver.General.forcing as forcing
 import Solver.General.helper_functions as helper_functions
+import Solver.General.sources as general_sources
 
 
 def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
@@ -87,30 +88,9 @@ def build_initial_host_state(
         source_prepare(source_field_data)
 
     source_mask_host = np.asarray(source_field_data["mask"])
-    source_velocity_mask_host = np.asarray(source_field_data["velocity_mask"])
-    source_temperature_host = np.asarray(
-        source_field_data["temperature"], dtype=precision_dtype
+    u, v, w, T = general_sources.apply_initial_source_conditions(
+        u, v, w, T, source_field_data
     )
-    source_smoke_host = np.asarray(source_field_data["smoke"], dtype=precision_dtype)
-    source_fuel_host = np.asarray(source_field_data["fuel"], dtype=precision_dtype)
-    source_extra_pressure_host = np.asarray(
-        source_field_data["extra_pressure"], dtype=precision_dtype
-    )
-    source_velocity_x_host = np.asarray(
-        source_field_data["velocity_x"], dtype=precision_dtype
-    )
-    source_velocity_y_host = np.asarray(
-        source_field_data["velocity_y"], dtype=precision_dtype
-    )
-    source_velocity_z_host = np.asarray(
-        source_field_data["velocity_z"], dtype=precision_dtype
-    )
-
-    u[source_velocity_mask_host] = source_velocity_x_host[source_velocity_mask_host]
-    v[source_velocity_mask_host] = source_velocity_y_host[source_velocity_mask_host]
-    w[source_velocity_mask_host] = source_velocity_z_host[source_velocity_mask_host]
-
-    T = np.maximum(T, source_temperature_host)
     return {
         "precision_dtype": precision_dtype,
         "shape": (nx, ny, nz),
@@ -129,14 +109,6 @@ def build_initial_host_state(
         "obstacle_velocity_y": obstacle_velocity_y_host,
         "obstacle_velocity_z": obstacle_velocity_z_host,
         "source_mask": source_mask_host,
-        "source_velocity_mask": source_velocity_mask_host,
-        "source_temperature": source_temperature_host,
-        "source_smoke": source_smoke_host,
-        "source_fuel": source_fuel_host,
-        "source_extra_pressure": source_extra_pressure_host,
-        "source_velocity_x": source_velocity_x_host,
-        "source_velocity_y": source_velocity_y_host,
-        "source_velocity_z": source_velocity_z_host,
     }
 
 

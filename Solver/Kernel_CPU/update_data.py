@@ -1,5 +1,6 @@
 import numpy as np
 
+import Solver.General.sources as general_sources
 import Solver.General.update_data as general_update_data
 import Solver.Kernel_CPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
@@ -28,6 +29,11 @@ def upload_simulation_state_to_cpu(simulation_params):
     nx, ny, nz = host_state["shape"]
     force_field_data = host_state["force_field_data"]
     turbulence_data = host_state["turbulence_data"]
+    source_payload = general_sources.build_runtime_entry_payload(
+        simulation_params["source_field_data"],
+        0.0,
+        source_bc.obstacles,
+    )
     active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
 
     cpu_fields = {
@@ -91,16 +97,31 @@ def upload_simulation_state_to_cpu(simulation_params):
         "obstacle_velocity_y": host_state["obstacle_velocity_y"],
         "obstacle_velocity_z": host_state["obstacle_velocity_z"],
 
-        # Dynamic source masks and source target values.
+        # Dynamic source masks and compact per-source authored values.
         "source_mask": host_state["source_mask"],
-        "source_velocity_mask": host_state["source_velocity_mask"],
-        "source_temperature": host_state["source_temperature"],
-        "source_smoke": host_state["source_smoke"],
-        "source_fuel": host_state["source_fuel"],
-        "source_extra_pressure": host_state["source_extra_pressure"],
-        "source_velocity_x": host_state["source_velocity_x"],
-        "source_velocity_y": host_state["source_velocity_y"],
-        "source_velocity_z": host_state["source_velocity_z"],
+        "source_entry_masks": source_payload["entry_masks"],
+        "source_temperature_values": np.asarray(
+            source_payload["temperature_values"], dtype=precision_dtype
+        ),
+        "source_smoke_values": np.asarray(
+            source_payload["smoke_values"], dtype=precision_dtype
+        ),
+        "source_fuel_values": np.asarray(
+            source_payload["fuel_values"], dtype=precision_dtype
+        ),
+        "source_extra_pressure_values": np.asarray(
+            source_payload["extra_pressure_values"], dtype=precision_dtype
+        ),
+        "source_velocity_enabled": source_payload["velocity_enabled"],
+        "source_velocity_x_values": np.asarray(
+            source_payload["velocity_x_values"], dtype=precision_dtype
+        ),
+        "source_velocity_y_values": np.asarray(
+            source_payload["velocity_y_values"], dtype=precision_dtype
+        ),
+        "source_velocity_z_values": np.asarray(
+            source_payload["velocity_z_values"], dtype=precision_dtype
+        ),
 
         # Sparse simulation masks.
         "scalar_active_tiles": np.zeros(active_tile_shape, dtype=np.bool_),
@@ -119,20 +140,40 @@ def upload_simulation_state_to_cpu(simulation_params):
     return cpu_fields, cpu_constants
 
 
-def _sync_cpu_source_fields(source_field_data, cpu_fields):
-    cpu_fields["source_mask"] = source_field_data["mask"]
-    cpu_fields["source_velocity_mask"] = source_field_data["velocity_mask"]
-    cpu_fields["source_temperature"] = source_field_data["temperature"]
-    cpu_fields["source_smoke"] = source_field_data["smoke"]
-    cpu_fields["source_fuel"] = source_field_data["fuel"]
-    cpu_fields["source_extra_pressure"] = source_field_data["extra_pressure"]
-    cpu_fields["source_velocity_x"] = source_field_data["velocity_x"]
-    cpu_fields["source_velocity_y"] = source_field_data["velocity_y"]
-    cpu_fields["source_velocity_z"] = source_field_data["velocity_z"]
+def _sync_cpu_source_fields(source_field_data, cpu_fields, time_value=0.0):
+    source_payload = general_sources.build_runtime_entry_payload(
+        source_field_data,
+        time_value,
+        source_bc.obstacles,
+    )
+    cpu_fields["source_mask"] = source_payload["source_mask"]
+    cpu_fields["source_entry_masks"] = source_payload["entry_masks"]
+    cpu_fields["source_temperature_values"] = source_payload["temperature_values"]
+    cpu_fields["source_smoke_values"] = source_payload["smoke_values"]
+    cpu_fields["source_fuel_values"] = source_payload["fuel_values"]
+    cpu_fields["source_extra_pressure_values"] = source_payload["extra_pressure_values"]
+    cpu_fields["source_velocity_enabled"] = source_payload["velocity_enabled"]
+    cpu_fields["source_velocity_x_values"] = source_payload["velocity_x_values"]
+    cpu_fields["source_velocity_y_values"] = source_payload["velocity_y_values"]
+    cpu_fields["source_velocity_z_values"] = source_payload["velocity_z_values"]
 
-
-def _update_cpu_source_data(source_field_data, _cpu_fields, time_value):
+def _update_cpu_source_data(source_field_data, cpu_fields, time_value):
     source_bc.update_source_data(source_field_data, time_value)
+    source_payload = general_sources.build_runtime_entry_payload(
+        source_field_data,
+        time_value,
+        source_bc.obstacles,
+    )
+    cpu_fields["source_mask"] = source_payload["source_mask"]
+    cpu_fields["source_entry_masks"] = source_payload["entry_masks"]
+    cpu_fields["source_temperature_values"] = source_payload["temperature_values"]
+    cpu_fields["source_smoke_values"] = source_payload["smoke_values"]
+    cpu_fields["source_fuel_values"] = source_payload["fuel_values"]
+    cpu_fields["source_extra_pressure_values"] = source_payload["extra_pressure_values"]
+    cpu_fields["source_velocity_enabled"] = source_payload["velocity_enabled"]
+    cpu_fields["source_velocity_x_values"] = source_payload["velocity_x_values"]
+    cpu_fields["source_velocity_y_values"] = source_payload["velocity_y_values"]
+    cpu_fields["source_velocity_z_values"] = source_payload["velocity_z_values"]
 
 
 def _sync_cpu_force_fields(force_field_data, cpu_fields):
@@ -147,7 +188,6 @@ def update_animated_source_force_values(simulation_params, cpu_fields, time_valu
         cpu_fields,
         time_value,
         source_updater=_update_cpu_source_data,
-        source_sync=_sync_cpu_source_fields,
         force_updater=_sync_cpu_force_fields,
     )
 
@@ -168,6 +208,5 @@ def update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_const
 
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None and source_field_data.get("is_animated", False):
-        source_bc.update_source_data(source_field_data, time_value)
-        _sync_cpu_source_fields(source_field_data, cpu_fields)
+        _update_cpu_source_data(source_field_data, cpu_fields, time_value)
         cpu_constants["HAS_SOURCE"] = bool(np.any(source_field_data["mask"]))

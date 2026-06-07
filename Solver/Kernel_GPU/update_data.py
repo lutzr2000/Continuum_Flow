@@ -1,6 +1,7 @@
 import numpy as np
 from numba import cuda
 
+import Solver.General.sources as general_sources
 import Solver.General.update_data as general_update_data
 import Solver.Kernel_GPU.Boundary_Conditions.obstacles as obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
@@ -39,6 +40,11 @@ def upload_simulation_state_to_gpu(simulation_params):
     nx, ny, nz = host_state["shape"]
     force_field_data = host_state["force_field_data"]
     turbulence_data = host_state["turbulence_data"]
+    source_payload = general_sources.build_runtime_entry_payload(
+        simulation_params["source_field_data"],
+        0.0,
+        obstacles,
+    )
     active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
 
     # Reuse three full-volume scratch buffers across vorticity, velocity
@@ -145,29 +151,30 @@ def upload_simulation_state_to_gpu(simulation_params):
         "obstacle_velocity_z": cuda.to_device(
             np.asarray(host_state["obstacle_velocity_z"], dtype=GPU_FIELD_DTYPE)
         ),
-        # Dynamic source masks and source target values.
+        # Dynamic source masks and compact per-source authored values.
         "source_mask": cuda.to_device(host_state["source_mask"]),
-        "source_velocity_mask": cuda.to_device(host_state["source_velocity_mask"]),
-        "source_temperature": cuda.to_device(
-            np.asarray(host_state["source_temperature"], dtype=GPU_FIELD_DTYPE)
+        "source_entry_masks": cuda.to_device(source_payload["entry_masks"]),
+        "source_temperature_values": cuda.to_device(
+            np.asarray(source_payload["temperature_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_smoke": cuda.to_device(
-            np.asarray(host_state["source_smoke"], dtype=GPU_FIELD_DTYPE)
+        "source_smoke_values": cuda.to_device(
+            np.asarray(source_payload["smoke_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_fuel": cuda.to_device(
-            np.asarray(host_state["source_fuel"], dtype=GPU_FIELD_DTYPE)
+        "source_fuel_values": cuda.to_device(
+            np.asarray(source_payload["fuel_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_extra_pressure": cuda.to_device(
-            np.asarray(host_state["source_extra_pressure"], dtype=GPU_FIELD_DTYPE)
+        "source_extra_pressure_values": cuda.to_device(
+            np.asarray(source_payload["extra_pressure_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_velocity_x": cuda.to_device(
-            np.asarray(host_state["source_velocity_x"], dtype=GPU_FIELD_DTYPE)
+        "source_velocity_enabled": cuda.to_device(source_payload["velocity_enabled"]),
+        "source_velocity_x_values": cuda.to_device(
+            np.asarray(source_payload["velocity_x_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_velocity_y": cuda.to_device(
-            np.asarray(host_state["source_velocity_y"], dtype=GPU_FIELD_DTYPE)
+        "source_velocity_y_values": cuda.to_device(
+            np.asarray(source_payload["velocity_y_values"], dtype=GPU_FIELD_DTYPE)
         ),
-        "source_velocity_z": cuda.to_device(
-            np.asarray(host_state["source_velocity_z"], dtype=GPU_FIELD_DTYPE)
+        "source_velocity_z_values": cuda.to_device(
+            np.asarray(source_payload["velocity_z_values"], dtype=GPU_FIELD_DTYPE)
         ),
         # Temporary timestep maxima storage.
         "velocity_maxima": cuda.device_array(3, dtype=np.float32),
@@ -184,8 +191,35 @@ def upload_simulation_state_to_gpu(simulation_params):
 
 def _update_gpu_source_data(source_field_data, gpu_fields, time_value):
     """
-    Update animated source field targets and upload the current values to the GPU.
+    Update animated source masks and compact authored values on the GPU.
     """
+    source_payload = general_sources.build_runtime_entry_payload(
+        source_field_data,
+        time_value,
+        obstacles,
+    )
+    gpu_fields["source_temperature_values"].copy_to_device(
+        np.asarray(source_payload["temperature_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_smoke_values"].copy_to_device(
+        np.asarray(source_payload["smoke_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_fuel_values"].copy_to_device(
+        np.asarray(source_payload["fuel_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_extra_pressure_values"].copy_to_device(
+        np.asarray(source_payload["extra_pressure_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_velocity_enabled"].copy_to_device(source_payload["velocity_enabled"])
+    gpu_fields["source_velocity_x_values"].copy_to_device(
+        np.asarray(source_payload["velocity_x_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_velocity_y_values"].copy_to_device(
+        np.asarray(source_payload["velocity_y_values"], dtype=GPU_FIELD_DTYPE)
+    )
+    gpu_fields["source_velocity_z_values"].copy_to_device(
+        np.asarray(source_payload["velocity_z_values"], dtype=GPU_FIELD_DTYPE)
+    )
     source_bc.update_source_data_gpu(source_field_data, gpu_fields, time_value)
 
 
