@@ -10,4 +10,4 @@ Make node tree protected by default
 Reduce VRAM usage
 Improve Output performance
 Add geometry nodes for adding parent velocity for moving referenc frame
-
+Currently source mask creates way to many fields because all source masks for velocity, temperature, .. are pre computed. instead build only the source mask and write the values only when necessarry; how to handle differnet sources? Different masks? Bool masks should be cheap?
