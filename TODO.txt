@@ -2,11 +2,20 @@ TODO
 
 General:
 Make solver installable
-Geometry nodes domain edge fade
 the live preview produces a RAM accumulation
-Timing
-Testing
 Make node tree protected by default
-Reduce VRAM usage
+
+Performance:
 Improve Output performance
-Add geometry nodes for adding parent velocity for moving referenc frame
+Make number of substeps adjustable in backtrace?
+
+Reduce VRAM usage
+In the forces there is potential for vram reduction: Turbulence force simplification, only one field that simply has alternating amlitude between minus and plus max amplitude with a sinus
+Force arrays seem redundant at some points in general?
+
+Maybe also compute the obstacle velocity inplace to save the pre allocated arrays for obstalce velocity?
+
+Lazy allocation of scalar fields
+Lazy allocation for turbulence force, also unify turbulence force array for multiple turbulence forces
+
+Create diagram for field overlap to better understand which fields need to exsit overlapping?

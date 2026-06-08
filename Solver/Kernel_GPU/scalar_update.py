@@ -185,21 +185,9 @@ def predict_scalar_fields_semi_lagrangian(
     if i >= nx or j >= ny or k >= nz:
         return
 
-    x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
-        u,
-        v,
-        w,
-        float(i),
-        float(j),
-        float(k),
-        dt / delta,
-        nx,
-        ny,
-        nz,
-    )
-    depart_x[i, j, k] = x_depart
-    depart_y[i, j, k] = y_depart
-    depart_z[i, j, k] = z_depart
+    x_depart = depart_x[i, j, k]
+    y_depart = depart_y[i, j, k]
+    z_depart = depart_z[i, j, k]
 
     predictor_T[i, j, k], predictor_smoke[i, j, k], predictor_fuel[i, j, k] = (
         advection_schemes._sample_trilinear_vec3(
