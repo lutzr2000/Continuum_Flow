@@ -148,9 +148,6 @@ def upload_simulation_state_to_gpu(simulation_params):
         "turbulence_Fz": cuda.to_device(
             np.asarray(turbulence_data["Fz"], dtype=GPU_FIELD_DTYPE)
         ),
-        "turbulence_amplitudes": cuda.to_device(
-            np.asarray(turbulence_data["amplitudes"], dtype=GPU_FIELD_DTYPE)
-        ),
         "turbulence_signed_amplitudes": cuda.to_device(
             np.zeros(len(turbulence_data["angular_frequencies"]), dtype=GPU_FIELD_DTYPE)
         ),
@@ -234,13 +231,10 @@ def _update_gpu_source_data(source_field_data, gpu_fields, time_value):
 
 def _sync_gpu_force_fields(force_field_data, gpu_fields):
     """
-    Upload animated force field scalars and divergence data to the GPU buffers.
+    Upload animated divergence data to the GPU force buffers.
     """
     gpu_fields["point_divergence"].copy_to_device(
         np.asarray(force_field_data["point_divergence"], dtype=GPU_FIELD_DTYPE)
-    )
-    gpu_fields["turbulence_amplitudes"].copy_to_device(
-        np.asarray(force_field_data["turbulence"]["amplitudes"], dtype=GPU_FIELD_DTYPE)
     )
 
 

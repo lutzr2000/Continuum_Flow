@@ -2,6 +2,7 @@ TODO
 
 General:
 Make solver installable
+Rescale Force magnitudes
 the live preview produces a RAM accumulation
 
 Performance:
