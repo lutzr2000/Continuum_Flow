@@ -4,6 +4,7 @@ General:
 Make solver installable
 Rescale Force magnitudes
 the live preview produces a RAM accumulation
+Dissipation still inconsistent with resolution?
 
 Performance:
 Improve Output performance
