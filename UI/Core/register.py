@@ -142,23 +142,33 @@ NODE_CLASSES = (
 
 def _remove_continuum_flow_frame_change_handlers():
     """
-    Remove stale Continuum Flow frame-change handlers from previous reloads.
+    Remove stale Continuum Flow app handlers from previous reloads.
     """
-    handlers = bpy.app.handlers.frame_change_post
-    kept_handlers = []
-    for handler in handlers:
-        handler_name = getattr(handler, "__name__", "")
-        handler_module = getattr(handler, "__module__", "")
-        if handler_name in {
-            "continuum_flow_frame_change_post",
-        }:
-            continue
-        if "continuum_flow_general_nodes" in handler_module:
-            continue
-        kept_handlers.append(handler)
+    handler_groups = (
+        (
+            bpy.app.handlers.frame_change_post,
+            {"continuum_flow_frame_change_post"},
+            {"continuum_flow_general_nodes"},
+        ),
+        (
+            bpy.app.handlers.depsgraph_update_post,
+            {"continuum_flow_ensure_fake_user_post"},
+            {"continuum_flow_nodetree"},
+        ),
+    )
+    for handlers, handler_names, module_name_parts in handler_groups:
+        kept_handlers = []
+        for handler in handlers:
+            handler_name = getattr(handler, "__name__", "")
+            handler_module = getattr(handler, "__module__", "")
+            if handler_name in handler_names:
+                continue
+            if any(module_name_part in handler_module for module_name_part in module_name_parts):
+                continue
+            kept_handlers.append(handler)
 
-    if len(kept_handlers) != len(handlers):
-        handlers[:] = kept_handlers
+        if len(kept_handlers) != len(handlers):
+            handlers[:] = kept_handlers
 
 
 def _reregister_classes(classes):
@@ -206,6 +216,20 @@ def register():
         MODULES["node_tree"].NODE_CATEGORIES_ID,
         MODULES["node_tree"].build_node_categories(),
     )
+    ensure_fake_user = getattr(
+        MODULES["node_tree"],
+        "ensure_fake_user_for_continuum_flow_trees",
+        None,
+    )
+    if callable(ensure_fake_user):
+        ensure_fake_user()
+    fake_user_handler = getattr(
+        MODULES["node_tree"],
+        "continuum_flow_ensure_fake_user_post",
+        None,
+    )
+    if fake_user_handler is not None:
+        bpy.app.handlers.depsgraph_update_post.append(fake_user_handler)
     frame_change_handler = getattr(
         MODULES["general_nodes"],
         "continuum_flow_frame_change_post",

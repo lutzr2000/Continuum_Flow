@@ -1,4 +1,5 @@
 import bpy
+from bpy.app.handlers import persistent
 from nodeitems_utils import NodeCategory, NodeItem, NodeItemCustom
 
 NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
@@ -13,6 +14,25 @@ class ContinuumFlowNodeTree(bpy.types.NodeTree):
     bl_idname = NODE_TREE_ID
     bl_label = "Continuum Flow Nodes"
     bl_icon = "FORCE_TURBULENCE"
+
+
+def ensure_fake_user_for_continuum_flow_trees():
+    """
+    Keep all Continuum Flow node trees protected from accidental data-block purge.
+    """
+    for node_tree in bpy.data.node_groups:
+        if getattr(node_tree, "bl_idname", "") != NODE_TREE_ID:
+            continue
+        if not getattr(node_tree, "use_fake_user", False):
+            node_tree.use_fake_user = True
+
+
+@persistent
+def continuum_flow_ensure_fake_user_post(_scene=None, _depsgraph=None):
+    """
+    Apply the fake user flag to newly created Continuum Flow node trees.
+    """
+    ensure_fake_user_for_continuum_flow_trees()
 
 
 class ContinuumFlowNodeCategory(NodeCategory):

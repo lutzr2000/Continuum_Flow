@@ -3,18 +3,31 @@ TODO
 General:
 Make solver installable
 the live preview produces a RAM accumulation
-Make node tree protected by default
 
 Performance:
 Improve Output performance
-Make number of substeps adjustable in backtrace?
 
 Reduce VRAM usage
 Force arrays seem redundant at some points in general?
-
-Maybe also compute the obstacle velocity inplace to save the pre allocated arrays for obstalce velocity?
-
-Lazy allocation of scalar fields
 Lazy allocation for turbulence force, also unify turbulence force array for multiple turbulence forces
 
-Create diagram for field overlap to better understand which fields need to exsit overlapping?
+Lazy allocation obstacle velocity?
+if obstalce velocity != 0
+
+
+Lazy scalar allocation:
+
+Temperatur:
+if t_source - t_ref != 0
+if fuel > 0
+compute bouancy in place
+
+Flame:
+if fuel > 0
+
+Fuel:
+if fuel > 0
+
+Smoke:
+if smoke > 0
+if fuel > 0
