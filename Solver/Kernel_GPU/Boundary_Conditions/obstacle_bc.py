@@ -38,6 +38,7 @@ def obstacle_bc_kernel(
     fuel,
     flame,
     mask,
+    has_obstacle_velocity,
     obstacle_velocity_x,
     obstacle_velocity_y,
     obstacle_velocity_z,
@@ -56,9 +57,14 @@ def obstacle_bc_kernel(
         return
 
     if mask[i, j, k]:
-        u[i, j, k] = obstacle_velocity_x[i, j, k]
-        v[i, j, k] = obstacle_velocity_y[i, j, k]
-        w[i, j, k] = obstacle_velocity_z[i, j, k]
+        if has_obstacle_velocity:
+            u[i, j, k] = obstacle_velocity_x[i, j, k]
+            v[i, j, k] = obstacle_velocity_y[i, j, k]
+            w[i, j, k] = obstacle_velocity_z[i, j, k]
+        else:
+            u[i, j, k] = 0.0
+            v[i, j, k] = 0.0
+            w[i, j, k] = 0.0
         smoke[i, j, k] = 0.0
         fuel[i, j, k] = 0.0
         flame[i, j, k] = 0.0

@@ -10,8 +10,3 @@ Improve Output performance
 Reduce VRAM usage
 Force arrays seem redundant at some points in general?
 unify turbulence force array for multiple turbulence forces
-
-Lazy allocation obstacle velocity?
-if obstalce velocity != 0
-
-Try sparse vram arrays again, maybe possible, look into codex chat

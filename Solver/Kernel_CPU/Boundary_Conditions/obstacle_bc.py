@@ -86,6 +86,32 @@ def _obstacle_bc_kernel_cpu(
         flame_flat[idx] = 0.0
 
 
+@njit(cache=True, parallel=True)
+def _obstacle_bc_zero_velocity_kernel_cpu(u, v, w, smoke, fuel, flame, mask):
+    """
+    Apply the obstacle overwrite rules when all obstacle wall velocities are zero.
+    """
+    total_size = mask.size
+    u_flat = u.reshape(total_size)
+    v_flat = v.reshape(total_size)
+    w_flat = w.reshape(total_size)
+    smoke_flat = smoke.reshape(total_size)
+    fuel_flat = fuel.reshape(total_size)
+    flame_flat = flame.reshape(total_size)
+    mask_flat = mask.reshape(total_size)
+
+    for idx in prange(total_size):
+        if not mask_flat[idx]:
+            continue
+
+        u_flat[idx] = 0.0
+        v_flat[idx] = 0.0
+        w_flat[idx] = 0.0
+        smoke_flat[idx] = 0.0
+        fuel_flat[idx] = 0.0
+        flame_flat[idx] = 0.0
+
+
 def obstacle_bc(
     u,
     v,
@@ -107,17 +133,32 @@ def obstacle_bc(
     if obstacle_mask.size == 0 or not np.any(obstacle_mask):
         return u, v, w, smoke, fuel, flame
 
-    _obstacle_bc_kernel_cpu(
-        u,
-        v,
-        w,
-        smoke,
-        fuel,
-        flame,
-        obstacle_mask,
-        obstacle_velocity_x,
-        obstacle_velocity_y,
-        obstacle_velocity_z,
-    )
+    if (
+        obstacle_velocity_x is None
+        or obstacle_velocity_y is None
+        or obstacle_velocity_z is None
+    ):
+        _obstacle_bc_zero_velocity_kernel_cpu(
+            u,
+            v,
+            w,
+            smoke,
+            fuel,
+            flame,
+            obstacle_mask,
+        )
+    else:
+        _obstacle_bc_kernel_cpu(
+            u,
+            v,
+            w,
+            smoke,
+            fuel,
+            flame,
+            obstacle_mask,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
+        )
 
     return u, v, w, smoke, fuel, flame

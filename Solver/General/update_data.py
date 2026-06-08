@@ -5,6 +5,20 @@ import Solver.General.helper_functions as helper_functions
 import Solver.General.sources as general_sources
 
 
+def has_nonzero_obstacle_velocity(obstacle_data):
+    """
+    Return whether any obstacle cell currently carries a non-zero wall velocity.
+    """
+    if obstacle_data is None:
+        return False
+
+    for axis_name in ("velocity_x", "velocity_y", "velocity_z"):
+        axis_values = obstacle_data.get(axis_name)
+        if axis_values is not None and np.any(axis_values != 0.0):
+            return True
+    return False
+
+
 def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
     """
     Rebuild obstacle/source runtime data through backend-specific builders.
@@ -29,6 +43,9 @@ def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
     simulation_params["obstacle_mask"] = obstacle_data["mask"]
     simulation_params["source_field_data"] = source_field_data
     simulation_params["HAS_OBSTACLE"] = bool(np.any(obstacle_data["mask"]))
+    simulation_params["HAS_OBSTACLE_VELOCITY"] = has_nonzero_obstacle_velocity(
+        obstacle_data
+    )
     simulation_params["HAS_SOURCE"] = bool(np.any(source_field_data["mask"]))
     simulation_params["HAS_DYNAMIC_BOUNDARIES"] = bool(
         obstacle_data.get("is_animated", False)
@@ -73,15 +90,20 @@ def build_initial_host_state(
         obstacle_prepare(obstacle_data)
 
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
-    obstacle_velocity_x_host = np.asarray(
-        obstacle_data["velocity_x"], dtype=precision_dtype
-    )
-    obstacle_velocity_y_host = np.asarray(
-        obstacle_data["velocity_y"], dtype=precision_dtype
-    )
-    obstacle_velocity_z_host = np.asarray(
-        obstacle_data["velocity_z"], dtype=precision_dtype
-    )
+    obstacle_has_velocity = has_nonzero_obstacle_velocity(obstacle_data)
+    obstacle_velocity_x_host = None
+    obstacle_velocity_y_host = None
+    obstacle_velocity_z_host = None
+    if obstacle_has_velocity:
+        obstacle_velocity_x_host = np.asarray(
+            obstacle_data["velocity_x"], dtype=precision_dtype
+        )
+        obstacle_velocity_y_host = np.asarray(
+            obstacle_data["velocity_y"], dtype=precision_dtype
+        )
+        obstacle_velocity_z_host = np.asarray(
+            obstacle_data["velocity_z"], dtype=precision_dtype
+        )
 
     source_field_data = simulation_params["source_field_data"]
     if source_prepare is not None:
@@ -105,6 +127,7 @@ def build_initial_host_state(
         "force_field_data": force_field_data,
         "turbulence_data": turbulence_data,
         "obstacle_mask": obstacle_mask_host,
+        "obstacle_has_velocity": obstacle_has_velocity,
         "obstacle_velocity_x": obstacle_velocity_x_host,
         "obstacle_velocity_y": obstacle_velocity_y_host,
         "obstacle_velocity_z": obstacle_velocity_z_host,
@@ -157,6 +180,9 @@ def build_solver_constants(simulation_params, precision_dtype, force_field_data)
         "FORCE_Z_MAX": precision_dtype.type(force_field_data["max_abs"][2]),
         "HAS_SOURCE": simulation_params["HAS_SOURCE"],
         "HAS_OBSTACLE": simulation_params["HAS_OBSTACLE"],
+        "HAS_OBSTACLE_VELOCITY": simulation_params.get(
+            "HAS_OBSTACLE_VELOCITY", False
+        ),
         "HAS_FORCE": simulation_params["HAS_FORCE"],
     }
 

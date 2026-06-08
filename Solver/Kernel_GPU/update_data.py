@@ -10,6 +10,38 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 GPU_FIELD_DTYPE = np.dtype(np.float32)
 
 
+def _create_dummy_obstacle_velocity_fields():
+    """
+    Create tiny placeholder device arrays for the zero-velocity obstacle path.
+    """
+    zero = np.zeros(1, dtype=GPU_FIELD_DTYPE)
+    return cuda.to_device(zero), cuda.to_device(zero), cuda.to_device(zero)
+
+
+def _set_gpu_obstacle_velocity_fields(gpu_fields, obstacle_data=None):
+    """
+    Switch GPU obstacle velocity storage between full-volume and dummy buffers.
+    """
+    has_velocity = general_update_data.has_nonzero_obstacle_velocity(obstacle_data)
+    if has_velocity:
+        gpu_fields["obstacle_velocity_x"] = cuda.to_device(
+            np.asarray(obstacle_data["velocity_x"], dtype=GPU_FIELD_DTYPE)
+        )
+        gpu_fields["obstacle_velocity_y"] = cuda.to_device(
+            np.asarray(obstacle_data["velocity_y"], dtype=GPU_FIELD_DTYPE)
+        )
+        gpu_fields["obstacle_velocity_z"] = cuda.to_device(
+            np.asarray(obstacle_data["velocity_z"], dtype=GPU_FIELD_DTYPE)
+        )
+    else:
+        (
+            gpu_fields["obstacle_velocity_x"],
+            gpu_fields["obstacle_velocity_y"],
+            gpu_fields["obstacle_velocity_z"],
+        ) = _create_dummy_obstacle_velocity_fields()
+    return has_velocity
+
+
 def _prepare_gpu_obstacle_data(obstacle_data):
     """
     Prepare animated obstacle runtime data so it can be reused on the GPU.
@@ -57,6 +89,21 @@ def upload_simulation_state_to_gpu(simulation_params):
     depart_x = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
     depart_y = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
     depart_z = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    (
+        obstacle_velocity_x,
+        obstacle_velocity_y,
+        obstacle_velocity_z,
+    ) = _create_dummy_obstacle_velocity_fields()
+    if host_state["obstacle_has_velocity"]:
+        obstacle_velocity_x = cuda.to_device(
+            np.asarray(host_state["obstacle_velocity_x"], dtype=GPU_FIELD_DTYPE)
+        )
+        obstacle_velocity_y = cuda.to_device(
+            np.asarray(host_state["obstacle_velocity_y"], dtype=GPU_FIELD_DTYPE)
+        )
+        obstacle_velocity_z = cuda.to_device(
+            np.asarray(host_state["obstacle_velocity_z"], dtype=GPU_FIELD_DTYPE)
+        )
 
     gpu_fields = {
         # Primary velocity state and scratch buffers.
@@ -133,15 +180,9 @@ def upload_simulation_state_to_gpu(simulation_params):
         ),
         # Dynamic obstacle mask and obstacle wall velocities.
         "obstacle_mask": cuda.to_device(host_state["obstacle_mask"]),
-        "obstacle_velocity_x": cuda.to_device(
-            np.asarray(host_state["obstacle_velocity_x"], dtype=GPU_FIELD_DTYPE)
-        ),
-        "obstacle_velocity_y": cuda.to_device(
-            np.asarray(host_state["obstacle_velocity_y"], dtype=GPU_FIELD_DTYPE)
-        ),
-        "obstacle_velocity_z": cuda.to_device(
-            np.asarray(host_state["obstacle_velocity_z"], dtype=GPU_FIELD_DTYPE)
-        ),
+        "obstacle_velocity_x": obstacle_velocity_x,
+        "obstacle_velocity_y": obstacle_velocity_y,
+        "obstacle_velocity_z": obstacle_velocity_z,
         # Dynamic source masks and compact per-source authored values.
         "source_mask": cuda.to_device(host_state["source_mask"]),
         "source_entry_masks": cuda.to_device(source_payload["entry_masks"]),
@@ -176,6 +217,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         GPU_FIELD_DTYPE,
         force_field_data,
     )
+    gpu_constants["HAS_OBSTACLE_VELOCITY"] = bool(host_state["obstacle_has_velocity"])
 
     return gpu_fields, gpu_constants
 
@@ -254,6 +296,17 @@ def update_dynamic_boundary_data_on_gpu(
         and obstacle_data.get("runtime") is not None
         and obstacle_data.get("is_animated", False)
     ):
+        has_obstacle_velocity = obstacles.runtime_has_active_obstacle_velocity(
+            obstacle_data["runtime"],
+            time_value,
+        )
+        if has_obstacle_velocity and gpu_fields["obstacle_velocity_x"].shape != obstacle_data["velocity_x"].shape:
+            _set_gpu_obstacle_velocity_fields(gpu_fields, obstacle_data)
+        elif (
+            not has_obstacle_velocity
+            and gpu_fields["obstacle_velocity_x"].size != 1
+        ):
+            _set_gpu_obstacle_velocity_fields(gpu_fields)
         obstacles.update_dynamic_obstacle_data_gpu(
             obstacle_data["runtime"],
             time_value,
@@ -261,10 +314,12 @@ def update_dynamic_boundary_data_on_gpu(
             gpu_fields["obstacle_velocity_x"],
             gpu_fields["obstacle_velocity_y"],
             gpu_fields["obstacle_velocity_z"],
+            write_velocity=has_obstacle_velocity,
         )
         gpu_constants["HAS_OBSTACLE"] = bool(
             obstacle_data["runtime"].get("last_has_obstacle", False)
         )
+        gpu_constants["HAS_OBSTACLE_VELOCITY"] = bool(has_obstacle_velocity)
 
     source_field_data = simulation_params.get("source_field_data")
     if source_field_data is not None and source_field_data.get("is_animated", False):
