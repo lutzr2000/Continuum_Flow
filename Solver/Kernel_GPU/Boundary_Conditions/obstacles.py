@@ -13,25 +13,6 @@ update_dynamic_obstacle_data = general_obstacles.update_dynamic_obstacle_data
 _resolve_dynamic_object_state = general_obstacles._resolve_dynamic_object_state
 
 
-def runtime_has_active_obstacle_velocity(runtime_data, time_value):
-    """
-    Return whether any active obstacle object has a non-zero transform rate now.
-    """
-    shape = runtime_data["shape"]
-    origin = np.asarray(runtime_data["origin"], dtype=np.float32)
-    delta = np.float32(runtime_data["delta"])
-
-    for obj in runtime_data["objects"]:
-        state = general_obstacles._resolve_dynamic_object_state(
-            obj, time_value, delta, origin, shape
-        )
-        if not state["active"]:
-            continue
-        if np.any(state["matrix_rate"][:3, :] != 0.0):
-            return True
-    return False
-
-
 @cuda.jit(cache=True)
 def _clear_obstacle_fields_cuda(mask, velocity_x, velocity_y, velocity_z):
     """

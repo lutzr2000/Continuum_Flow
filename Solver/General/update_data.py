@@ -19,6 +19,23 @@ def has_nonzero_obstacle_velocity(obstacle_data):
     return False
 
 
+def requires_obstacle_velocity_allocation(obstacle_data):
+    """
+    Return whether obstacle velocity fields are needed at any point in the sim.
+    """
+    if obstacle_data is None:
+        return False
+
+    if has_nonzero_obstacle_velocity(obstacle_data):
+        return True
+
+    runtime = obstacle_data.get("runtime")
+    if runtime is not None and obstacle_data.get("is_animated", False):
+        return True
+
+    return False
+
+
 def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
     """
     Rebuild obstacle/source runtime data through backend-specific builders.
@@ -43,8 +60,8 @@ def rebuild_boundary_data(simulation_params, obstacle_builder, source_builder):
     simulation_params["obstacle_mask"] = obstacle_data["mask"]
     simulation_params["source_field_data"] = source_field_data
     simulation_params["HAS_OBSTACLE"] = bool(np.any(obstacle_data["mask"]))
-    simulation_params["HAS_OBSTACLE_VELOCITY"] = has_nonzero_obstacle_velocity(
-        obstacle_data
+    simulation_params["HAS_OBSTACLE_VELOCITY"] = (
+        requires_obstacle_velocity_allocation(obstacle_data)
     )
     simulation_params["HAS_SOURCE"] = bool(np.any(source_field_data["mask"]))
     simulation_params["HAS_DYNAMIC_BOUNDARIES"] = bool(
@@ -90,7 +107,7 @@ def build_initial_host_state(
         obstacle_prepare(obstacle_data)
 
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
-    obstacle_has_velocity = has_nonzero_obstacle_velocity(obstacle_data)
+    obstacle_has_velocity = requires_obstacle_velocity_allocation(obstacle_data)
     obstacle_velocity_x_host = None
     obstacle_velocity_y_host = None
     obstacle_velocity_z_host = None

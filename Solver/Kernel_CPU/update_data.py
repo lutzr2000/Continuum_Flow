@@ -7,12 +7,13 @@ import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_CPU.kernel_config as kernel_config
 
 
-def _set_cpu_obstacle_velocity_fields(cpu_fields, obstacle_data, precision_dtype):
+def _set_cpu_obstacle_velocity_fields(
+    cpu_fields, obstacle_data, precision_dtype, allocate_velocity
+):
     """
     Point CPU obstacle velocity fields either at the live host arrays or at None.
     """
-    has_velocity = general_update_data.has_nonzero_obstacle_velocity(obstacle_data)
-    if has_velocity:
+    if allocate_velocity:
         cpu_fields["obstacle_velocity_x"] = np.asarray(
             obstacle_data["velocity_x"], dtype=precision_dtype
         )
@@ -26,7 +27,7 @@ def _set_cpu_obstacle_velocity_fields(cpu_fields, obstacle_data, precision_dtype
         cpu_fields["obstacle_velocity_x"] = None
         cpu_fields["obstacle_velocity_y"] = None
         cpu_fields["obstacle_velocity_z"] = None
-    return has_velocity
+    return allocate_velocity
 
 
 def rebuild_cpu_boundary_data(simulation_params):
@@ -228,6 +229,7 @@ def update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_const
             cpu_fields,
             obstacle_data,
             np.dtype(simulation_params["PRECISION"]),
+            bool(cpu_constants.get("HAS_OBSTACLE_VELOCITY", False)),
         )
 
     source_field_data = simulation_params.get("source_field_data")
