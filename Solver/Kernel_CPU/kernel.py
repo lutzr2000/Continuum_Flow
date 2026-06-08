@@ -356,11 +356,14 @@ def _run_time_step(state):
 
     if turbulence_count > 0:
         section_start = perf_counter()
-        cpu_fields["turbulence_mix_factors"][:] = np.sin(
-            turbulence_angular_frequencies * t
+        cpu_fields["turbulence_signed_amplitudes"][:] = (
+            cpu_fields["turbulence_amplitudes"]
+            * np.sin(turbulence_angular_frequencies * t)
         )
         helper_functions._record_timing(
-            timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start
+            timing_stats,
+            "loop_turbulence_signed_amplitudes",
+            perf_counter() - section_start,
         )
 
     section_start = perf_counter()
@@ -368,14 +371,10 @@ def _run_time_step(state):
         cpu_fields["Fx_base"],
         cpu_fields["Fy_base"],
         cpu_fields["Fz_base"],
-        cpu_fields["turbulence_Fx_a"],
-        cpu_fields["turbulence_Fy_a"],
-        cpu_fields["turbulence_Fz_a"],
-        cpu_fields["turbulence_Fx_b"],
-        cpu_fields["turbulence_Fy_b"],
-        cpu_fields["turbulence_Fz_b"],
-        cpu_fields["turbulence_amplitudes"],
-        cpu_fields["turbulence_mix_factors"],
+        cpu_fields["turbulence_Fx"],
+        cpu_fields["turbulence_Fy"],
+        cpu_fields["turbulence_Fz"],
+        cpu_fields["turbulence_signed_amplitudes"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),

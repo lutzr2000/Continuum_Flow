@@ -82,14 +82,13 @@ def upload_simulation_state_to_cpu(simulation_params):
         "Fx_base": np.asarray(force_field_data["Fx_base"], dtype=precision_dtype),
         "Fy_base": np.asarray(force_field_data["Fy_base"], dtype=precision_dtype),
         "Fz_base": np.asarray(force_field_data["Fz_base"], dtype=precision_dtype),
-        "turbulence_Fx_a": np.asarray(turbulence_data["Fx_a"], dtype=precision_dtype),
-        "turbulence_Fy_a": np.asarray(turbulence_data["Fy_a"], dtype=precision_dtype),
-        "turbulence_Fz_a": np.asarray(turbulence_data["Fz_a"], dtype=precision_dtype),
-        "turbulence_Fx_b": np.asarray(turbulence_data["Fx_b"], dtype=precision_dtype),
-        "turbulence_Fy_b": np.asarray(turbulence_data["Fy_b"], dtype=precision_dtype),
-        "turbulence_Fz_b": np.asarray(turbulence_data["Fz_b"], dtype=precision_dtype),
+        "turbulence_Fx": np.asarray(turbulence_data["Fx"], dtype=precision_dtype),
+        "turbulence_Fy": np.asarray(turbulence_data["Fy"], dtype=precision_dtype),
+        "turbulence_Fz": np.asarray(turbulence_data["Fz"], dtype=precision_dtype),
         "turbulence_amplitudes": np.asarray(turbulence_data["amplitudes"], dtype=precision_dtype),
-        "turbulence_mix_factors": np.zeros(len(turbulence_data["angular_frequencies"]), dtype=precision_dtype),
+        "turbulence_signed_amplitudes": np.zeros(
+            len(turbulence_data["angular_frequencies"]), dtype=precision_dtype
+        ),
 
         # Dynamic obstacle mask and obstacle wall velocities.
         "obstacle_mask": host_state["obstacle_mask"],

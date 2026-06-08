@@ -6,14 +6,10 @@ def update_force_fields(
     Fx_base,
     Fy_base,
     Fz_base,
-    turbulence_Fx_a,
-    turbulence_Fy_a,
-    turbulence_Fz_a,
-    turbulence_Fx_b,
-    turbulence_Fy_b,
-    turbulence_Fz_b,
-    turbulence_amplitudes,
-    turbulence_mix_factors,
+    turbulence_Fx,
+    turbulence_Fy,
+    turbulence_Fz,
+    turbulence_signed_amplitudes,
     turbulence_count,
     animated_force_x,
     animated_force_y,
@@ -26,8 +22,8 @@ def update_force_fields(
     Update body-force fields from base fields and precomputed turbulence fields.
 
     The expensive smooth turbulence fields are precomputed on the host. Per
-    timestep this kernel only blends the two stored fields with one
-    host-computed mix factor per turbulence node.
+    timestep this kernel only applies one host-computed signed amplitude per
+    turbulence node.
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = Fx.shape
@@ -40,21 +36,10 @@ def update_force_fields(
     fz = Fz_base[i, j, k] + animated_force_z
 
     for turbulence_index in range(turbulence_count):
-        amplitude = turbulence_amplitudes[turbulence_index]
-        mix_factor = turbulence_mix_factors[turbulence_index]
-        inverse_mix_factor = 1.0 - mix_factor
-        fx += amplitude * (
-            mix_factor * turbulence_Fx_a[turbulence_index, i, j, k]
-            + inverse_mix_factor * turbulence_Fx_b[turbulence_index, i, j, k]
-        )
-        fy += amplitude * (
-            mix_factor * turbulence_Fy_a[turbulence_index, i, j, k]
-            + inverse_mix_factor * turbulence_Fy_b[turbulence_index, i, j, k]
-        )
-        fz += amplitude * (
-            mix_factor * turbulence_Fz_a[turbulence_index, i, j, k]
-            + inverse_mix_factor * turbulence_Fz_b[turbulence_index, i, j, k]
-        )
+        amplitude = turbulence_signed_amplitudes[turbulence_index]
+        fx += amplitude * turbulence_Fx[turbulence_index, i, j, k]
+        fy += amplitude * turbulence_Fy[turbulence_index, i, j, k]
+        fz += amplitude * turbulence_Fz[turbulence_index, i, j, k]
 
     Fx[i, j, k] = fx
     Fy[i, j, k] = fy

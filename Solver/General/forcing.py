@@ -303,11 +303,11 @@ def forcing_swirl(force_state, shape, delta, force_cfg, dtype):
 
 def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     """
-    Build exactly two precomputed turbulence force fields for one force node.
+    Build one precomputed turbulence force field for one force node.
 
-    The GPU kernel later blends the two fields over time with one sinus-based
-    mix factor, so the expensive random smooth field generation happens only
-    once before the first timestep.
+    The expensive smooth random field is generated once before the first
+    timestep. At runtime only the authored amplitude is modulated with a sine
+    wave using the authored frequency.
     """
     amplitude = float(force_cfg.get("amplitude", 0.0))
     spatial_scale = max(float(force_cfg.get("scale", 1.0)), delta, 1.0e-6)
@@ -320,29 +320,17 @@ def forcing_turbulence(force_state, shape, delta, force_cfg, dtype):
     components = ("x", "y", "z")
     turbulence_index = len(force_state["turbulence"]["angular_frequencies"])
 
-    basis_by_suffix = {
-        "a": build_divergence_free_noise_field(
-            shape,
-            delta,
-            spatial_scale,
-            1.0,
-            seed_base,
-            dtype=dtype,
-        ),
-        "b": build_divergence_free_noise_field(
-            shape,
-            delta,
-            spatial_scale,
-            1.0,
-            seed_base + 1,
-            dtype=dtype,
-        ),
-    }
+    basis = build_divergence_free_noise_field(
+        shape,
+        delta,
+        spatial_scale,
+        1.0,
+        seed_base,
+        dtype=dtype,
+    )
 
-    for suffix in ("a", "b"):
-        basis = basis_by_suffix[suffix]
-        for index, component in enumerate(components):
-            force_state["turbulence"][f"F{component}_{suffix}"].append(basis[index])
+    for index, component in enumerate(components):
+        force_state["turbulence"][f"F{component}"].append(basis[index])
     force_state["turbulence"]["angular_frequencies"].append(
         2.0 * np.pi * max(float(force_cfg.get("frequency", 0.0)), 0.0)
     )
@@ -363,7 +351,7 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
     Build all force-field data on the CPU before the simulation starts.
 
     Static components are stored directly, while turbulence is represented as
-    two precomputed force fields plus one angular frequency per node.
+    one precomputed force field plus one angular frequency per node.
     """
     # ------------Grid-------------------
     shape = (
@@ -384,12 +372,9 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "_point_divergence_work": np.zeros(shape, dtype=dtype),
         "point_force_entries": [],
         "turbulence": {
-            "Fx_a": [],
-            "Fy_a": [],
-            "Fz_a": [],
-            "Fx_b": [],
-            "Fy_b": [],
-            "Fz_b": [],
+            "Fx": [],
+            "Fy": [],
+            "Fz": [],
             "angular_frequencies": [],
             "amplitudes": [],
             "max_amplitudes": [],
@@ -431,15 +416,14 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
 
     # ------------Pack turbulence arrays-------------------
     turbulence = {}
-    for suffix in ("a", "b"):
-        for component in components:
-            key = f"F{component}_{suffix}"
-            if force_state["turbulence"][key]:
-                turbulence[key] = np.stack(force_state["turbulence"][key]).astype(
-                    dtype, copy=False
-                )
-            else:
-                turbulence[key] = np.zeros((0,) + shape, dtype=dtype)
+    for component in components:
+        key = f"F{component}"
+        if force_state["turbulence"][key]:
+            turbulence[key] = np.stack(force_state["turbulence"][key]).astype(
+                dtype, copy=False
+            )
+        else:
+            turbulence[key] = np.zeros((0,) + shape, dtype=dtype)
     turbulence["angular_frequencies"] = np.asarray(
         force_state["turbulence"]["angular_frequencies"], dtype=dtype
     )
@@ -459,29 +443,13 @@ def build_force_field_data(domain_cfg, force_entries, dtype=np.float32):
         "y": fy_initial,
         "z": fz_initial,
     }
-    for index in range(len(force_state["turbulence"]["angular_frequencies"])):
-        amplitude = float(turbulence["amplitudes"][index])
-        for component in components:
-            initial_components[component] += (
-                amplitude * turbulence[f"F{component}_b"][index]
-            )
-
     # ------------Force bounds-------------------
     dynamic_max = {component: 0.0 for component in components}
     for index in range(len(force_state["turbulence"]["angular_frequencies"])):
         amplitude = float(turbulence["max_amplitudes"][index])
         for component in components:
             dynamic_max[component] += float(
-                amplitude
-                * max(
-                    np.max(np.abs(turbulence[f"F{component}_a"][index])),
-                    np.max(
-                        np.abs(
-                            2.0 * turbulence[f"F{component}_b"][index]
-                            - turbulence[f"F{component}_a"][index]
-                        )
-                    ),
-                )
+                amplitude * np.max(np.abs(turbulence[f"F{component}"][index]))
             )
     static_max = {
         "x": float(np.max(np.abs(force_state["Fx_base"]))),

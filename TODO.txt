@@ -10,7 +10,6 @@ Improve Output performance
 Make number of substeps adjustable in backtrace?
 
 Reduce VRAM usage
-In the forces there is potential for vram reduction: Turbulence force simplification, only one field that simply has alternating amlitude between minus and plus max amplitude with a sinus
 Force arrays seem redundant at some points in general?
 
 Maybe also compute the obstacle velocity inplace to save the pre allocated arrays for obstalce velocity?

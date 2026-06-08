@@ -438,14 +438,22 @@ def _run_time_step(state, blockspergrid_3d):
     # ------------Update force fields-------------------
     if turbulence_count > 0:
         section_start = perf_counter()
-        gpu_fields["turbulence_mix_factors"].copy_to_device(
-            np.sin(turbulence_angular_frequencies * t).astype(
+        gpu_fields["turbulence_signed_amplitudes"].copy_to_device(
+            (
+                np.asarray(
+                    simulation_params["force_field_data"]["turbulence"]["amplitudes"],
+                    dtype=GPU_FIELD_DTYPE,
+                )
+                * np.sin(turbulence_angular_frequencies * t)
+            ).astype(
                 GPU_FIELD_DTYPE, copy=False
             )
         )
         cuda.synchronize()
         helper_functions._record_timing(
-            timing_stats, "loop_turbulence_mix_factors", perf_counter() - section_start
+            timing_stats,
+            "loop_turbulence_signed_amplitudes",
+            perf_counter() - section_start,
         )
 
     section_start = perf_counter()
@@ -453,14 +461,10 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_fields["Fx_base"],
         gpu_fields["Fy_base"],
         gpu_fields["Fz_base"],
-        gpu_fields["turbulence_Fx_a"],
-        gpu_fields["turbulence_Fy_a"],
-        gpu_fields["turbulence_Fz_a"],
-        gpu_fields["turbulence_Fx_b"],
-        gpu_fields["turbulence_Fy_b"],
-        gpu_fields["turbulence_Fz_b"],
-        gpu_fields["turbulence_amplitudes"],
-        gpu_fields["turbulence_mix_factors"],
+        gpu_fields["turbulence_Fx"],
+        gpu_fields["turbulence_Fy"],
+        gpu_fields["turbulence_Fz"],
+        gpu_fields["turbulence_signed_amplitudes"],
         turbulence_count,
         np.float32(animated_force["x"]),
         np.float32(animated_force["y"]),
