@@ -9,25 +9,9 @@ Improve Output performance
 
 Reduce VRAM usage
 Force arrays seem redundant at some points in general?
-Lazy allocation for turbulence force, also unify turbulence force array for multiple turbulence forces
+unify turbulence force array for multiple turbulence forces
 
 Lazy allocation obstacle velocity?
 if obstalce velocity != 0
 
-
-Lazy scalar allocation:
-
-Temperatur:
-if t_source - t_ref != 0
-if fuel > 0
-compute bouancy in place
-
-Flame:
-if fuel > 0
-
-Fuel:
-if fuel > 0
-
-Smoke:
-if smoke > 0
-if fuel > 0
+Try sparse vram arrays again, maybe possible, look into codex chat

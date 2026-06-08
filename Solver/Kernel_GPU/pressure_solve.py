@@ -8,6 +8,12 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def _is_active_pressure_cell(active_tile_mask, i, j, k):
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
+    return active_tile_mask[i // tile_size, j // tile_size, k // tile_size] != 0
+
+
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
     u,
@@ -24,6 +30,7 @@ def pressure_equation_right_side(
     rho,
     expansion_rate,
     t_reference,
+    active_tile_mask,
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
@@ -36,7 +43,15 @@ def pressure_equation_right_side(
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+    if (
+        i < 1
+        or j < 1
+        or k < 1
+        or i >= nx - 1
+        or j >= ny - 1
+        or k >= nz - 1
+        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+    ):
         b[i, j, k] = 0.0
         return
 
@@ -71,7 +86,7 @@ def pressure_equation_right_side(
 
 
 @cuda.jit(cache=True)
-def _sum_rhs_partial_kernel(b, partial_sums):
+def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
     """
     Reduce the interior RHS into one partial sum per CUDA block. This is needed
     for computing RHS mean.
@@ -103,7 +118,8 @@ def _sum_rhs_partial_kernel(b, partial_sums):
         remainder = flat_idx % plane_size
         j = remainder // interior_nz + 1
         k = remainder % interior_nz + 1
-        local_sum += b[i, j, k]
+        if _is_active_pressure_cell(active_tile_mask, i, j, k):
+            local_sum += b[i, j, k]
         flat_idx += stride
 
     shared_sums[tid] = local_sum
@@ -118,6 +134,56 @@ def _sum_rhs_partial_kernel(b, partial_sums):
 
     if tid == 0:
         partial_sums[cuda.blockIdx.x] = shared_sums[0]
+
+
+@cuda.jit(cache=True)
+def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
+    """
+    Reduce the number of active RHS cells into one partial count per CUDA block.
+    """
+    nx, ny, nz = b.shape
+    interior_nx = nx - 2
+    interior_ny = ny - 2
+    interior_nz = nz - 2
+    interior_cell_count = interior_nx * interior_ny * interior_nz
+
+    if interior_cell_count <= 0:
+        return
+
+    tid = cuda.threadIdx.x
+    block_size = cuda.blockDim.x
+    global_idx = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    shared_counts = cuda.shared.array(
+        shape=REDUCTION_THREADS_PER_BLOCK,
+        dtype=np.float32,
+    )
+
+    local_count = np.float32(0.0)
+    flat_idx = global_idx
+    plane_size = interior_ny * interior_nz
+
+    while flat_idx < interior_cell_count:
+        i = flat_idx // plane_size + 1
+        remainder = flat_idx % plane_size
+        j = remainder // interior_nz + 1
+        k = remainder % interior_nz + 1
+        if _is_active_pressure_cell(active_tile_mask, i, j, k):
+            local_count += np.float32(1.0)
+        flat_idx += stride
+
+    shared_counts[tid] = local_count
+    cuda.syncthreads()
+
+    offset = block_size >> 1
+    while offset > 0:
+        if tid < offset:
+            shared_counts[tid] += shared_counts[tid + offset]
+        cuda.syncthreads()
+        offset >>= 1
+
+    if tid == 0:
+        partial_counts[cuda.blockIdx.x] = shared_counts[0]
 
 
 @cuda.jit(cache=True)
@@ -154,20 +220,54 @@ def _sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
 
 
 @cuda.jit(cache=True)
-def _subtract_rhs_mean_kernel(b, rhs_mean):
+def _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask):
     """
     Subtract the interior RHS mean from interior cells only.
     """
     i, j, k = cuda.grid(3)
     nx, ny, nz = b.shape
 
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+    if (
+        i < 1
+        or j < 1
+        or k < 1
+        or i >= nx - 1
+        or j >= ny - 1
+        or k >= nz - 1
+        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+    ):
         return
 
     b[i, j, k] -= rhs_mean
 
 
-def _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums=None, rhs_sum_buffer=None):
+@cuda.jit(cache=True)
+def _reset_inactive_pressure_kernel(p, active_tile_mask):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1
+        or j < 1
+        or k < 1
+        or i >= nx - 1
+        or j >= ny - 1
+        or k >= nz - 1
+        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+    ):
+        p[i, j, k] = 0.0
+
+
+def _remove_rhs_mean(
+    b,
+    active_tile_mask,
+    threadsperblock_3d,
+    rhs_partial_sums=None,
+    rhs_sum_buffer=None,
+):
     """
     This is a wrapper method for enforcing the Neumann compatibility condition by removing the RHS mean.
 
@@ -182,21 +282,38 @@ def _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums=None, rhs_sum_buffe
     if rhs_sum_buffer is None:
         rhs_sum_buffer = cuda.device_array(1, dtype=np.float32)
 
-    _sum_rhs_partial_kernel[reduction_blocks, reduction_threads](b, rhs_partial_sums)
+    _sum_rhs_partial_kernel[reduction_blocks, reduction_threads](
+        b, active_tile_mask, rhs_partial_sums
+    )
     _sum_partial_sums_kernel[1, reduction_threads](
         rhs_partial_sums, reduction_blocks, rhs_sum_buffer
     )
+    rhs_sum = float(rhs_sum_buffer.copy_to_host()[0])
 
-    rhs_mean = float(rhs_sum_buffer.copy_to_host()[0]) / float(interior_cell_count)
+    _count_rhs_active_partial_kernel[reduction_blocks, reduction_threads](
+        b, active_tile_mask, rhs_partial_sums
+    )
+    _sum_partial_sums_kernel[1, reduction_threads](
+        rhs_partial_sums, reduction_blocks, rhs_sum_buffer
+    )
+    active_cell_count = int(rhs_sum_buffer.copy_to_host()[0])
+    if active_cell_count <= 0:
+        return
+
+    rhs_mean = rhs_sum / float(active_cell_count)
     if abs(rhs_mean) <= 1.0e-12:
         return
 
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, threadsperblock_3d)
-    _subtract_rhs_mean_kernel[blockspergrid_3d, threadsperblock_3d](b, rhs_mean)
+    _subtract_rhs_mean_kernel[blockspergrid_3d, threadsperblock_3d](
+        b, rhs_mean, active_tile_mask
+    )
 
 
 @cuda.jit(cache=True)
-def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
+def _pressure_poisson_red_black_gauss_seidel_step(
+    p, b, delta, parity, active_tile_mask
+):
     """
     Perform one in-place red-black Gauss-Seidel color pass of the 3D pressure Poisson
     equation on the GPU.
@@ -220,6 +337,7 @@ def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
         or j >= ny - 1
         or k >= nz - 1
         or ((i + j + k) & 1) != parity
+        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
     ):
         return
 
@@ -237,7 +355,9 @@ def _pressure_poisson_red_black_gauss_seidel_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
+def project_velocity_kernel(
+    u, v, w, p, obstacle_mask, dt, delta, rho, active_tile_mask
+):
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
 
@@ -250,7 +370,9 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho):
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    if obstacle_mask[i, j, k]:
+    if obstacle_mask[i, j, k] or not _is_active_pressure_cell(
+        active_tile_mask, i, j, k
+    ):
         return
 
     pressure_coeff = dt / (2.0 * rho * delta)
@@ -277,6 +399,7 @@ def pressure_poisson(
     rho,
     expansion_rate,
     t_reference,
+    active_tile_mask,
     max_iter=10,
     threadsperblock_3d=None,
     rhs_partial_sums=None,
@@ -306,17 +429,27 @@ def pressure_poisson(
         rho,
         expansion_rate,
         t_reference,
+        active_tile_mask,
     )
-    _remove_rhs_mean(b, threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer)
+    _remove_rhs_mean(
+        b,
+        active_tile_mask,
+        threadsperblock_3d,
+        rhs_partial_sums,
+        rhs_sum_buffer,
+    )
     p_old = p
+    _reset_inactive_pressure_kernel[blockspergrid_3d, threadsperblock_3d](
+        p_old, active_tile_mask
+    )
 
     for _ in range(max_iter):
         _pressure_poisson_red_black_gauss_seidel_step[
             blockspergrid_3d, threadsperblock_3d
-        ](p_old, b, delta, 0)
+        ](p_old, b, delta, 0, active_tile_mask)
         _pressure_poisson_red_black_gauss_seidel_step[
             blockspergrid_3d, threadsperblock_3d
-        ](p_old, b, delta, 1)
+        ](p_old, b, delta, 1, active_tile_mask)
         BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](
             p_old
         )

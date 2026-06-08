@@ -527,6 +527,7 @@ def _run_time_step(state):
         cpu_constants["RHO"],
         cpu_constants["EXPANSION_RATE"],
         cpu_constants["T_REFERENCE"],
+        cpu_fields["scalar_active_tiles_dilated"],
         simulation_params["MAX_ITER"],
     )
     helper_functions._record_timing(
@@ -543,6 +544,7 @@ def _run_time_step(state):
         dt,
         cpu_constants["DELTA"],
         cpu_constants["RHO"],
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     helper_functions._record_timing(
         timing_stats, "loop_projection", perf_counter() - section_start

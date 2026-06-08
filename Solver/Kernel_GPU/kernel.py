@@ -645,6 +645,7 @@ def _run_time_step(state, blockspergrid_3d):
         gpu_constants["RHO"],
         gpu_constants["EXPANSION_RATE"],
         gpu_constants["T_REFERENCE"],
+        gpu_fields["scalar_active_tiles_dilated"],
         simulation_params["MAX_ITER"],
         rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],
         rhs_sum_buffer=gpu_fields["pressure_rhs_sum"],
@@ -667,6 +668,7 @@ def _run_time_step(state, blockspergrid_3d):
         dt,
         gpu_constants["DELTA"],
         gpu_constants["RHO"],
+        gpu_fields["scalar_active_tiles_dilated"],
     )
     cuda.synchronize()
     helper_functions._record_timing(
