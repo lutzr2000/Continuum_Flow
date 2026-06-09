@@ -56,6 +56,11 @@ ContinuumFlowHostWriterModule = GeneralNodes._load_ui_module(
     "Bake/writer_manager.py",
     (".Bake.writer_manager", "UI.Bake.writer_manager", "Bake.writer_manager"),
 )
+ContinuumFlowEnvironmentModule = GeneralNodes._load_ui_module(
+    "continuum_flow_environment",
+    "Core/environment.py",
+    (".Core.environment", "UI.Core.environment", "Core.environment"),
+)
 
 tree_has_invalid_links = GeneralNodes._sockets_module.tree_has_invalid_links
 set_bake_running = GeneralNodes.set_bake_running
@@ -158,12 +163,15 @@ def _project_root_directory():
 
 
 def _resolve_python_executable():
-    python_executable = (
-        _project_root_directory() / "ContinuumFlow_env" / "Scripts" / "python.exe"
+    python_executable = Path(
+        ContinuumFlowEnvironmentModule.solver_python_executable(__file__)
     )
     if python_executable.exists():
         return str(python_executable)
-    raise FileNotFoundError(f"Python executable not found: {python_executable}")
+    raise FileNotFoundError(
+        "Solver environment not found. Open the Continuum Flow add-on preferences "
+        "and run 'Install Solver Environment' first."
+    )
 
 
 def _run_kernel(config_dict):
@@ -629,6 +637,11 @@ class ContinuumFlow_OT_bake(bpy.types.Operator):
                 {"ERROR"},
                 f"Bake failed: missing Python module '{missing_module}' in {sys.executable}",
             )
+            return {"CANCELLED"}
+        except FileNotFoundError as exc:
+            BakeStorage._cleanup_geometry_cache(live_config_dict)
+            set_bake_running(False, context=context)
+            self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         except Exception as exc:
             BakeStorage._cleanup_geometry_cache(live_config_dict)

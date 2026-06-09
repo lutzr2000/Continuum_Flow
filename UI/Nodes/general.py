@@ -38,9 +38,16 @@ def _solver_python_executable():
     """
     Return the dedicated Continuum Flow solver Python executable.
     """
-    return (
-        _project_root_directory() / "ContinuumFlow_env" / "Scripts" / "python.exe"
+    return Path(
+        ContinuumFlowEnvironmentModule.solver_python_executable(__file__)
     ).resolve()
+
+
+def _solver_environment_ready():
+    """
+    Return whether the external solver environment exists.
+    """
+    return _solver_python_executable().exists()
 
 
 def _register_module_aliases(module, module_name):
@@ -107,6 +114,11 @@ ContinuumFlowViewerModule = _load_ui_module(
     "continuum_flow_viewer",
     "Core/viewer.py",
     (".Core.viewer", "UI.Core.viewer", "Core.viewer"),
+)
+ContinuumFlowEnvironmentModule = _load_ui_module(
+    "continuum_flow_environment",
+    "Core/environment.py",
+    (".Core.environment", "UI.Core.environment", "Core.environment"),
 )
 
 ContinuumFlowForceSocket = _sockets_module.ContinuumFlowForceSocket
@@ -617,6 +629,14 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
+        if not _solver_environment_ready():
+            warning_box = layout.box()
+            warning_box.label(text="Solver environment missing", icon="ERROR")
+            warning_box.label(text="Use the install button to create .venv with uv.")
+            warning_box.operator(
+                "continuum_flow.install_solver_environment",
+                icon="CONSOLE",
+            )
         solver_row = layout.row(align=True)
         cpu_row = solver_row.row(align=True)
         cpu_row.prop_enum(self, "solver_backend", "CPU")
