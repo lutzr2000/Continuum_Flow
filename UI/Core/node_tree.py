@@ -20,7 +20,11 @@ def ensure_fake_user_for_continuum_flow_trees():
     """
     Keep all Continuum Flow node trees protected from accidental data-block purge.
     """
-    for node_tree in bpy.data.node_groups:
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for node_tree in node_groups:
         if getattr(node_tree, "bl_idname", "") != NODE_TREE_ID:
             continue
         if not getattr(node_tree, "use_fake_user", False):
