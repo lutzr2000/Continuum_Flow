@@ -66,9 +66,6 @@ class ContinuumFlowPreferences(bpy.types.AddonPreferences):
 
         box = layout.box()
         box.label(text="Solver Environment")
-        box.label(text=f"Project Root: {status['project_root']}")
-        box.label(text=f"Environment Path: {status['environment_path']}")
-        box.label(text=f"Python Path: {status['python_path']}")
         box.label(
             text="Status: Ready" if status["ready"] else "Status: Missing",
             icon="CHECKMARK" if status["ready"] else "ERROR",
@@ -77,19 +74,6 @@ class ContinuumFlowPreferences(bpy.types.AddonPreferences):
             ContinuumFlow_OT_install_solver_environment.bl_idname,
             icon="CONSOLE",
         )
-
-        info_box = layout.box()
-        info_box.label(text="Install Flow")
-        info_box.label(
-            text="1. Install the add-on from the Git ZIP in Blender Preferences."
-        )
-        info_box.label(
-            text="2. Click 'Install Solver Environment' once to create .venv with uv."
-        )
-        info_box.label(
-            text="3. Start the bake; Blender keeps VDB writing in its own Python."
-        )
-
 
 _ROOT_CLASSES = (
     ContinuumFlow_OT_install_solver_environment,

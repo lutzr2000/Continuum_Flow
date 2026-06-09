@@ -1,2 +1,3 @@
 numpy
 numba
+numba-cuda
