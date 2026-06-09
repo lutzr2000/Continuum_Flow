@@ -10,11 +10,15 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 GPU_FIELD_DTYPE = np.dtype(np.float32)
 
 
-def _create_dummy_obstacle_velocity_fields():
+def _create_dummy_obstacle_velocity_fields(shape):
     """
-    Create tiny placeholder device arrays for the zero-velocity obstacle path.
+    Create placeholder device arrays for the zero-velocity obstacle path.
+
+    These buffers are never read when obstacle wall velocities are disabled, but
+    they still need the same 3D rank as the real fields so Numba can type-check
+    the obstacle kernel successfully.
     """
-    zero = np.zeros(1, dtype=GPU_FIELD_DTYPE)
+    zero = np.zeros(shape, dtype=GPU_FIELD_DTYPE)
     return cuda.to_device(zero), cuda.to_device(zero), cuda.to_device(zero)
 
 
@@ -69,7 +73,7 @@ def upload_simulation_state_to_gpu(simulation_params):
         obstacle_velocity_x,
         obstacle_velocity_y,
         obstacle_velocity_z,
-    ) = _create_dummy_obstacle_velocity_fields()
+    ) = _create_dummy_obstacle_velocity_fields((nx, ny, nz))
     if host_state["obstacle_has_velocity"]:
         obstacle_velocity_x = cuda.to_device(
             np.asarray(host_state["obstacle_velocity_x"], dtype=GPU_FIELD_DTYPE)
