@@ -4,11 +4,14 @@ General:
 Make solver installable
 Rescale Force magnitudes
 the live preview produces a RAM accumulation
-Dissipation still inconsistent with resolution?
+Make most sliders between 0 and 100 %
+be less strict with adaptive, a bit more generous might improve results, since non adpative looks a bit better and more consistent
 
 Performance:
 Improve Output performance
 
-Reduce VRAM usage
-Force arrays seem redundant at some points in general?
-unify turbulence force array for multiple turbulence forces
+Lazy allocation scalar fields?
+
+
+# Ranges
+Temperature Dissipation

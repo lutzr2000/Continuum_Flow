@@ -393,6 +393,7 @@ _PHYSICS_SECTION_FIELDS = {
     ),
     "temperature": (
         ("dissipation", "temperature_dissipation", float, 0.0),
+        ("production_rate", "temperature_production_rate", float, 1.0),
         ("reference_temperature", "reference_temperature", float, 0.0),
         ("buoyancy", "buoyancy", float, 0.0),
         ("expansion_rate", "expansion_rate", float, 0.0),

@@ -30,6 +30,7 @@ PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 SPARSE_MASK_FIELDS = ("smoke", "flame")
 PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
     "temperature_dissipation": "TEMPERATURE_DISSIPATION_RATE",
+    "temperature_production_rate": "TEMPERATURE_PRODUCTION_RATE",
     "reference_temperature": "T_REFERENCE",
     "buoyancy": "BUOANCY_FACTOR",
     "expansion_rate": "EXPANSION_RATE",
@@ -250,6 +251,9 @@ def emit_progress(percent, time_value=None):
 _ANIMATED_CONSTANT_DEFAULTS = {
     "TEMPERATURE_DISSIPATION_RATE": lambda physics_cfg: float(
         physics_cfg["temperature"]["dissipation"]
+    ),
+    "TEMPERATURE_PRODUCTION_RATE": lambda physics_cfg: float(
+        physics_cfg["temperature"].get("production_rate", 1.0)
     ),
     "SMOKE_DISSIPATION_RATE": lambda physics_cfg: float(
         physics_cfg["smoke"]["dissipation"]
@@ -840,7 +844,9 @@ def apply_config(config):
         "TEMPERATURE_DISSIPATION_RATE": physics_constants[
             "TEMPERATURE_DISSIPATION_RATE"
         ],
-        "TEMPERATURE_PRODUCTION_RATE": 1.0,
+        "TEMPERATURE_PRODUCTION_RATE": physics_constants[
+            "TEMPERATURE_PRODUCTION_RATE"
+        ],
         "SMOKE_DISSIPATION_RATE": physics_constants["SMOKE_DISSIPATION_RATE"],
         "SMOKE_PRODUCTION_RATE": physics_constants["SMOKE_PRODUCTION_RATE"],
         "FUEL_DISSIPATION_RATE": physics_constants["FUEL_DISSIPATION_RATE"],

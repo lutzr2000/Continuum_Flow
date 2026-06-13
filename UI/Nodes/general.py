@@ -522,6 +522,7 @@ class ContinuumFlowPhysicsNode(ContinuumFlowBaseNode):
             "Temperature",
             (
                 "temperature_dissipation",
+                "temperature_production_rate",
                 "reference_temperature",
                 "buoyancy",
                 "expansion_rate",
@@ -543,6 +544,7 @@ class ContinuumFlowPhysicsNode(ContinuumFlowBaseNode):
     fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.0001, precision=4, description="Density of the fluid, default is air", options=set())  # type: ignore
     fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, precision=6, description="Viscosity of the fluid, default is air", options=set())  # type: ignore
     temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.01, min=0.0, description="Rate of temperature dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
+    temperature_production_rate: FloatProperty(name="Temperature Production Rate", default=1.0, min=0.0, precision=4, description="Rate of temperature production due to burning, higher means more heat released", options={"ANIMATABLE"})  # type: ignore
     reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up", options={"ANIMATABLE"})  # type: ignore
     buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, precision=4, description="Higher values result in quicker rising of air", options={"ANIMATABLE"})  # type: ignore
     expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, precision=4, description="Higher values result in more expansion of warm air", options={"ANIMATABLE"})  # type: ignore
@@ -602,7 +604,7 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
     iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     maccormack_factor: FloatProperty(name="MacCormack Factor", default=0.25, min=0.0, max=0.5, soft_min=0.0, soft_max=0.5, precision=3, description="Higher values make the flow more swirly, but can produce artefacts", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
-    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.01, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
+    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
