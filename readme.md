@@ -2,9 +2,12 @@
 This is Continuum Flow, a free open source addon for Blender for simulating smoke, fire and gas flows in general. The solver can run on CPU and optionally on Nvidia GPU. On CPU it is roughly 3x faster than Blender's native solver and on GPU it is roughly 20 x faster.
 
 # Requirements
-Blender 5.0.0 or higher
-UV-package manager (can be installed with: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex")
-optional for GPU CUDA-Toolkit (can be downloaded: [CUDA](https://developer.nvidia.com/cuda/toolkit))
+- Blender 5.0.0 or higher
+- `uv` package manager  
+  Install with:
+  `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+- Optional for GPU: CUDA Toolkit  
+  Download: [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
 
 # Installation
 1. Install the required dependencies listed above
