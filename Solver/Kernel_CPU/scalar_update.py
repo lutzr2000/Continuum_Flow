@@ -266,10 +266,10 @@ def update_scalar_fields_maccormack(
 
                 temperature_source = (
                     -temperature_dissipation_rate * (T_corrected - t_reference) +
-                    temperature_production_rate * (-combustion_fuel_source)
+                    temperature_production_rate * fuel_corrected
                 )
                 smoke_source = (
-                    smoke_production_rate * (-combustion_fuel_source) -
+                    smoke_production_rate * fuel_corrected -
                     smoke_dissipation_rate * smoke_corrected
                 )
 

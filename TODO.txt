@@ -15,3 +15,14 @@ Lazy allocation scalar fields?
 
 # Ranges
 Temperature Dissipation
+Temperature Production
+Buonacy
+Expansion Rate
+
+Smoke Dissipation
+Smoke Production
+
+Fuel Dissipation
+Fuel Burn Rate
+
+Vorticity
