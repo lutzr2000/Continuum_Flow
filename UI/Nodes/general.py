@@ -16,7 +16,17 @@ from bpy.app.handlers import persistent
 
 MODULE_NAME_ALIASES = {}
 CONTINUUM_FLOW_BAKE_RUNNING_KEY = "continuum_flow_bake_running"
-
+PERCENTAGE_MAPPED_PROPERTY_RANGES = {
+    "temperature_dissipation": (0.0, 0.1),
+    "temperature_production_rate": (0.0, 0.05),
+    "buoyancy": (0.0, 0.01),
+    "expansion_rate": (0.0, 0.01),
+    "smoke_dissipation": (0.0, 1.0),
+    "smoke_production_rate": (0.0, 0.05),
+    "fuel_dissipation": (0.0, 1.0),
+    "fuel_burn_rate": (0.0, 1.0),
+    "vorticity": (0.0, 1.0),
+}
 
 def _ui_directory():
     """
@@ -543,18 +553,18 @@ class ContinuumFlowPhysicsNode(ContinuumFlowBaseNode):
 
     fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.0001, precision=4, description="Density of the fluid, default is air", options=set())  # type: ignore
     fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, precision=6, description="Viscosity of the fluid, default is air", options=set())  # type: ignore
-    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=0.01, min=0.0, description="Rate of temperature dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
-    temperature_production_rate: FloatProperty(name="Temperature Production Rate", default=1.0, min=0.0, precision=4, description="Rate of temperature production due to burning, higher means more heat released", options={"ANIMATABLE"})  # type: ignore
-    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up", options={"ANIMATABLE"})  # type: ignore
-    buoyancy: FloatProperty(name="Buoyancy", default=0.0033, min=0.0, precision=4, description="Higher values result in quicker rising of air", options={"ANIMATABLE"})  # type: ignore
-    expansion_rate: FloatProperty(name="Expansion Rate", default=0.003, min=0.0, precision=4, description="Higher values result in more expansion of warm air", options={"ANIMATABLE"})  # type: ignore
-    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0.01, min=0.0, precision=4, description="Rate of smoke dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
-    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=1.0, min=0.0, precision=4, description="Rate of smoke production due to burning, higher means more production", options={"ANIMATABLE"})  # type: ignore
-    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0.0, min=0.0, precision=4, description="Rate of fuel dissipation, lower means slower dissipation", options={"ANIMATABLE"})  # type: ignore
-    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=0.1, min=0.0, precision=4, description="How quickly fuel is burned, lower means slower burning", options={"ANIMATABLE"})  # type: ignore
-    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite", options={"ANIMATABLE"})  # type: ignore
+    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=10, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured temperature dissipation range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    temperature_production_rate: FloatProperty(name="Temperature Production Rate", default=20, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured temperature production range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up", options={"ANIMATABLE"})  # type: ignore
+    buoyancy: FloatProperty(name="Buoyancy", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured buoyancy range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    expansion_rate: FloatProperty(name="Expansion Rate", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured expansion range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured smoke dissipation range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=20, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured smoke production range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured fuel dissipation range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=10, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured fuel burn range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, soft_min=0.0, soft_max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite", options={"ANIMATABLE"})  # type: ignore
     minimum_oxygen_concentration: FloatProperty(name="Minimum Oxygen Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Minimum oxygen concentration required for fuel to burn", options={"ANIMATABLE"})  # type: ignore
-    vorticity: FloatProperty(name="Vorticity", default=0.1, min=0.0, precision=4, description="Amount of additional vorticity in the flow, higher values produce more swirl", options={"ANIMATABLE"})  # type: ignore
+    vorticity: FloatProperty(name="Vorticity", default=40, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured vorticity range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
         ensure_named_output(self, ContinuumFlowIntSocket.bl_idname, "Physics")
@@ -674,7 +684,7 @@ class ContinuumFlowSourceNode(ContinuumFlowBaseNode):
 
     fuel: FloatProperty(name="Fuel Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Fuel emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Smoke emission rate in percent per second", options={"ANIMATABLE"})  # type: ignore
-    temperature: FloatProperty(name="Temperature", default=300.0, min=0.0, soft_min=0.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
+    temperature: FloatProperty(name="Temperature", default=300.0, min=0.0, max=2000.0, soft_min=0.0, soft_max=2000.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
     extra_pressure: FloatProperty(name="Extra Pressure", default=0.0, precision=4, description="Additional pressure added in the source", options={"ANIMATABLE"})  # type: ignore
     velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore

@@ -52,6 +52,41 @@ except ImportError:
 NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 
 
+def _mapped_percentage_to_actual(property_name, value):
+    """
+    Convert one UI percentage value back into its solver-facing numeric range.
+    """
+    mapped_ranges = getattr(GeneralNodes, "PERCENTAGE_MAPPED_PROPERTY_RANGES", {})
+    if property_name not in mapped_ranges:
+        return value
+
+    minimum, maximum = mapped_ranges[property_name]
+    return minimum + ((float(value) / 100.0) * (maximum - minimum))
+
+
+def _serialize_node_property_value(node, property_name, default=None):
+    """
+    Serialize one scalar node property, applying UI-to-solver remapping when needed.
+    """
+    value = getattr(node, property_name, default)
+    if property_name in getattr(GeneralNodes, "PERCENTAGE_MAPPED_PROPERTY_RANGES", {}):
+        return float(_mapped_percentage_to_actual(property_name, value))
+    return float(value)
+
+
+def _serialize_animation_value_for_property(property_name, value):
+    """
+    Serialize one sampled animation value, applying UI-to-solver remapping when needed.
+    """
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__len__") and not isinstance(value, (int, float, bool)):
+        return _safe_float_vector(value)
+    if property_name in getattr(GeneralNodes, "PERCENTAGE_MAPPED_PROPERTY_RANGES", {}):
+        return float(_mapped_percentage_to_actual(property_name, value))
+    return float(value)
+
+
 def _safe_float_vector(value):
     """
     Convert Blender float vectors to plain Python float lists.
@@ -208,7 +243,9 @@ def _sample_node_property_series(
             _sync_sampled_custom_node_animations(scene, context=context)
             for property_name in property_names:
                 sampled_values[property_name].append(
-                    _safe_animation_value(getattr(node, property_name))
+                    _serialize_animation_value_for_property(
+                        property_name, getattr(node, property_name)
+                    )
                 )
     finally:
         scene.frame_set(current_frame)
@@ -447,7 +484,11 @@ def _serialize_named_fields(node, field_specs):
     Serialize a flat set of named fields from one node via declarative specs.
     """
     return {
-        export_name: converter(getattr(node, property_name, default))
+        export_name: (
+            _serialize_node_property_value(node, property_name, default)
+            if converter is float
+            else converter(getattr(node, property_name, default))
+        )
         for export_name, property_name, converter, default in field_specs
     }
 

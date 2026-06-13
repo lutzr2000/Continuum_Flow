@@ -1,28 +1,13 @@
 TODO
 
 General:
-Make solver installable
 Rescale Force magnitudes
 the live preview produces a RAM accumulation
-Make most sliders between 0 and 100 %
-be less strict with adaptive, a bit more generous might improve results, since non adpative looks a bit better and more consistent
+Rework explosion setup
 
 Performance:
 Improve Output performance
 
+VRAM:
 Lazy allocation scalar fields?
 
-
-# Ranges
-Temperature Dissipation
-Temperature Production
-Buonacy
-Expansion Rate
-
-Smoke Dissipation
-Smoke Production
-
-Fuel Dissipation
-Fuel Burn Rate
-
-Vorticity
