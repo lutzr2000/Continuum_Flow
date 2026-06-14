@@ -2,20 +2,35 @@ import math
 
 from numba import njit, prange
 
+import Solver.Kernel_CPU.kernel_config as kernel_config
+
 
 @njit(cache=True, parallel=True, fastmath=True)
 def compute_vorticity(
-    u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta
+    u,
+    v,
+    w,
+    obstacle_mask,
+    omega_x,
+    omega_y,
+    omega_z,
+    omega_magnitude,
+    delta,
+    active_tile_mask,
 ):
     """
     Compute vorticity components and scalar magnitude from the velocity field.
     """
     nx, ny, nz = omega_magnitude.shape
     half_inv_delta = 0.5 / delta
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
 
     for i in prange(nx):
+        tile_i = i // tile_size
         for j in range(ny):
+            tile_j = j // tile_size
             for k in range(nz):
+                tile_k = k // tile_size
                 if (
                     i < 1
                     or j < 1
@@ -25,6 +40,13 @@ def compute_vorticity(
                     or k >= nz - 1
                     or obstacle_mask[i, j, k]
                 ):
+                    omega_x[i, j, k] = 0.0
+                    omega_y[i, j, k] = 0.0
+                    omega_z[i, j, k] = 0.0
+                    omega_magnitude[i, j, k] = 0.0
+                    continue
+
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
                     omega_x[i, j, k] = 0.0
                     omega_y[i, j, k] = 0.0
                     omega_z[i, j, k] = 0.0
@@ -60,16 +82,23 @@ def apply_vorticity_confinement(
     Fz,
     delta,
     vorticity_strength,
+    active_tile_mask,
 ):
     """
     Accumulate vorticity confinement forces into the body-force fields on the CPU.
     """
     nx, ny, nz = omega_magnitude.shape
     half_inv_delta = 0.5 / delta
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
 
     for i in prange(2, nx - 2):
+        tile_i = i // tile_size
         for j in range(2, ny - 2):
+            tile_j = j // tile_size
             for k in range(2, nz - 2):
+                tile_k = k // tile_size
+                if not active_tile_mask[tile_i, tile_j, tile_k]:
+                    continue
                 if obstacle_mask[i, j, k]:
                     continue
 

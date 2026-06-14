@@ -1,6 +1,7 @@
 from numba import cuda
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
+from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -156,26 +157,6 @@ def _forward_trace_position(
     return _backtrace_position(
         u, v, w, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz
     )
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _active_tile_cell_indices(field_shape):
-    """
-    Map one active-tile launch to one cell index. Used for itterating through active
-    and inactive blocks.
-    """
-    tile_i = cuda.blockIdx.x
-    tile_j = cuda.blockIdx.y
-    tile_k = cuda.blockIdx.z
-    local_i = cuda.threadIdx.x
-    local_j = cuda.threadIdx.y
-    local_k = cuda.threadIdx.z
-
-    i = tile_i * kernel_config.ACTIVE_TILE_SIZE + local_i
-    j = tile_j * kernel_config.ACTIVE_TILE_SIZE + local_j
-    k = tile_k * kernel_config.ACTIVE_TILE_SIZE + local_k
-    nx, ny, nz = field_shape
-    return tile_i, tile_j, tile_k, i, j, k, nx, ny, nz
 
 
 @cuda.jit(cache=True)

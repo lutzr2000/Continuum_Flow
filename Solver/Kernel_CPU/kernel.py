@@ -356,6 +356,33 @@ def _run_time_step(state):
         timing_stats, "loop_animated_state", perf_counter() - section_start
     )
 
+    section_start = perf_counter()
+    if simulate_sparsely:
+        scalar_update.build_active_scalar_tile_mask(
+            T,
+            smoke,
+            fuel,
+            flame,
+            cpu_fields["scalar_active_tiles"],
+            cpu_constants["T_REFERENCE"],
+            adaptive_domain_threshold,
+        )
+        scalar_update.dilate_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles"],
+            cpu_fields["scalar_active_tiles_dilated"],
+            scalar_tile_padding,
+        )
+    else:
+        scalar_update.fill_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles"], np.bool_(True)
+        )
+        scalar_update.fill_active_scalar_tile_mask(
+            cpu_fields["scalar_active_tiles_dilated"], np.bool_(True)
+        )
+    helper_functions._record_timing(
+        timing_stats, "loop_active_tiles", perf_counter() - section_start
+    )
+
     if turbulence_count > 0:
         section_start = perf_counter()
         cpu_fields["turbulence_signed_amplitudes"][:] = (
@@ -384,6 +411,7 @@ def _run_time_step(state):
         cpu_fields["Fx"],
         cpu_fields["Fy"],
         cpu_fields["Fz"],
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     helper_functions._record_timing(
         timing_stats, "loop_force_fields", perf_counter() - section_start
@@ -395,6 +423,7 @@ def _run_time_step(state):
         cpu_fields["Fz"],
         cpu_constants["BUOANCY_FACTOR"],
         cpu_constants["T_REFERENCE"],
+        cpu_fields["scalar_active_tiles_dilated"],
     )
     helper_functions._record_timing(
         timing_stats, "loop_buoyancy", perf_counter() - section_start
@@ -412,6 +441,7 @@ def _run_time_step(state):
             cpu_fields["vorticity_z"],
             cpu_fields["vorticity_magnitude"],
             cpu_constants["DELTA"],
+            cpu_fields["scalar_active_tiles_dilated"],
         )
         helper_functions._record_timing(
             timing_stats, "loop_vorticity_diagnostics", perf_counter() - section_start
@@ -429,35 +459,13 @@ def _run_time_step(state):
             cpu_fields["Fz"],
             cpu_constants["DELTA"],
             cpu_constants["VORTICITY"],
+            cpu_fields["scalar_active_tiles_dilated"],
         )
         helper_functions._record_timing(
             timing_stats, "loop_vorticity", perf_counter() - section_start
         )
 
     section_start = perf_counter()
-    if simulate_sparsely:
-        scalar_update.build_active_scalar_tile_mask(
-            T,
-            smoke,
-            fuel,
-            flame,
-            cpu_fields["scalar_active_tiles"],
-            cpu_constants["T_REFERENCE"],
-            adaptive_domain_threshold,
-        )
-        scalar_update.dilate_active_scalar_tile_mask(
-            cpu_fields["scalar_active_tiles"],
-            cpu_fields["scalar_active_tiles_dilated"],
-            scalar_tile_padding,
-        )
-    else:
-        scalar_update.fill_active_scalar_tile_mask(
-            cpu_fields["scalar_active_tiles"], np.bool_(True)
-        )
-        scalar_update.fill_active_scalar_tile_mask(
-            cpu_fields["scalar_active_tiles_dilated"], np.bool_(True)
-        )
-
     advection_schemes.preserve_inactive_velocity_tiles(
         u,
         v,

@@ -1,6 +1,5 @@
 from numba import cuda
 
-import Solver.Kernel_GPU.advection_schemes as advection_schemes
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
@@ -123,6 +122,9 @@ def _active_tile_cell_indices(field_shape):
     k = tile_k * kernel_config.ACTIVE_TILE_SIZE + local_k
     nx, ny, nz = field_shape
     return tile_i, tile_j, tile_k, i, j, k, nx, ny, nz
+
+
+import Solver.Kernel_GPU.advection_schemes as advection_schemes
 
 
 @cuda.jit(cache=True)

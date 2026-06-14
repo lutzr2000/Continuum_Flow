@@ -1,5 +1,7 @@
 from numba import cuda
 
+from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
+
 
 @cuda.jit(cache=True)
 def update_force_fields(
@@ -17,6 +19,7 @@ def update_force_fields(
     Fx,
     Fy,
     Fz,
+    active_tile_mask,
 ):
     """
     Update body-force fields from base fields and precomputed turbulence fields.
@@ -25,9 +28,16 @@ def update_force_fields(
     timestep this kernel only applies one host-computed signed amplitude per
     turbulence node.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = Fx.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(Fx.shape)
 
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
+        return
     if i >= nx or j >= ny or k >= nz:
         return
 
@@ -47,7 +57,7 @@ def update_force_fields(
 
 
 @cuda.jit(cache=True)
-def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
+def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference, active_tile_mask):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
 
@@ -56,9 +66,16 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference):
     temperature and scaled by gravity and the configured buoyancy factor.
 
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = T.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(T.shape)
 
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
+        return
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 

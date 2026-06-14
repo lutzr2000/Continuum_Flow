@@ -415,6 +415,10 @@ def _run_time_step(state, blockspergrid_3d):
     dt = state["dt"]
     scalar_tile_blocks = kernel_config.active_tile_shape(u.shape)
     scalar_tile_padding = kernel_config.active_tile_padding_tiles()
+    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
+        gpu_fields["scalar_active_tiles"].shape,
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+    )
 
     # ------------Update dynamic inputs-------------------
     if simulation_params.get("HAS_DYNAMIC_BOUNDARIES", False):
@@ -438,103 +442,8 @@ def _run_time_step(state, blockspergrid_3d):
         timing_stats, "loop_animated_state", perf_counter() - section_start
     )
 
-    # ------------Update force fields-------------------
-    if turbulence_count > 0:
-        section_start = perf_counter()
-        gpu_fields["turbulence_signed_amplitudes"].copy_to_device(
-            (
-                np.asarray(
-                    simulation_params["force_field_data"]["turbulence"]["amplitudes"],
-                    dtype=GPU_FIELD_DTYPE,
-                )
-                * np.sin(turbulence_angular_frequencies * t)
-            ).astype(
-                GPU_FIELD_DTYPE, copy=False
-            )
-        )
-        cuda.synchronize()
-        helper_functions._record_timing(
-            timing_stats,
-            "loop_turbulence_signed_amplitudes",
-            perf_counter() - section_start,
-        )
-
+    # ------------Active tiles-------------------
     section_start = perf_counter()
-    forces.update_force_fields[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-        gpu_fields["Fx_base"],
-        gpu_fields["Fy_base"],
-        gpu_fields["Fz_base"],
-        gpu_fields["turbulence_Fx"],
-        gpu_fields["turbulence_Fy"],
-        gpu_fields["turbulence_Fz"],
-        gpu_fields["turbulence_signed_amplitudes"],
-        turbulence_count,
-        np.float32(animated_force["x"]),
-        np.float32(animated_force["y"]),
-        np.float32(animated_force["z"]),
-        gpu_fields["Fx"],
-        gpu_fields["Fy"],
-        gpu_fields["Fz"],
-    )
-    cuda.synchronize()
-    helper_functions._record_timing(
-        timing_stats, "loop_force_fields", perf_counter() - section_start
-    )
-
-    section_start = perf_counter()
-    forces.buoyancy_approximation[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
-        T,
-        gpu_fields["Fz"],
-        gpu_constants["BUOANCY_FACTOR"],
-        gpu_constants["T_REFERENCE"],
-    )
-    cuda.synchronize()
-    helper_functions._record_timing(
-        timing_stats, "loop_buoyancy", perf_counter() - section_start
-    )
-
-    # ------------Vorticity-------------------
-    if gpu_constants["VORTICITY"] > 0.0:
-        section_start = perf_counter()
-        vorticity.compute_vorticity[
-            blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            u,
-            v,
-            w,
-            gpu_fields["obstacle_mask"],
-            gpu_fields["vorticity_x"],
-            gpu_fields["vorticity_y"],
-            gpu_fields["vorticity_z"],
-            gpu_fields["vorticity_magnitude"],
-            gpu_constants["DELTA"],
-        )
-        vorticity.apply_vorticity_confinement[
-            blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            gpu_fields["obstacle_mask"],
-            gpu_fields["vorticity_x"],
-            gpu_fields["vorticity_y"],
-            gpu_fields["vorticity_z"],
-            gpu_fields["vorticity_magnitude"],
-            gpu_fields["Fx"],
-            gpu_fields["Fy"],
-            gpu_fields["Fz"],
-            gpu_constants["DELTA"],
-            gpu_constants["VORTICITY"],
-        )
-        cuda.synchronize()
-        helper_functions._record_timing(
-            timing_stats, "loop_vorticity", perf_counter() - section_start
-        )
-
-    # ------------Velocity update-------------------
-    section_start = perf_counter()
-    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
-        gpu_fields["scalar_active_tiles"].shape,
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-    )
-    # build active mask
     if simulate_sparsely:
         scalar_update.build_active_scalar_tile_mask[
             active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
@@ -567,6 +476,111 @@ def _run_time_step(state, blockspergrid_3d):
             gpu_fields["scalar_active_tiles_dilated"],
             np.bool_(True),
         )
+    cuda.synchronize()
+    helper_functions._record_timing(
+        timing_stats, "loop_active_tiles", perf_counter() - section_start
+    )
+
+    # ------------Update force fields-------------------
+    if turbulence_count > 0:
+        section_start = perf_counter()
+        gpu_fields["turbulence_signed_amplitudes"].copy_to_device(
+            (
+                np.asarray(
+                    simulation_params["force_field_data"]["turbulence"]["amplitudes"],
+                    dtype=GPU_FIELD_DTYPE,
+                )
+                * np.sin(turbulence_angular_frequencies * t)
+            ).astype(
+                GPU_FIELD_DTYPE, copy=False
+            )
+        )
+        cuda.synchronize()
+        helper_functions._record_timing(
+            timing_stats,
+            "loop_turbulence_signed_amplitudes",
+            perf_counter() - section_start,
+        )
+
+    section_start = perf_counter()
+    forces.update_force_fields[
+        scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
+        gpu_fields["Fx_base"],
+        gpu_fields["Fy_base"],
+        gpu_fields["Fz_base"],
+        gpu_fields["turbulence_Fx"],
+        gpu_fields["turbulence_Fy"],
+        gpu_fields["turbulence_Fz"],
+        gpu_fields["turbulence_signed_amplitudes"],
+        turbulence_count,
+        np.float32(animated_force["x"]),
+        np.float32(animated_force["y"]),
+        np.float32(animated_force["z"]),
+        gpu_fields["Fx"],
+        gpu_fields["Fy"],
+        gpu_fields["Fz"],
+        gpu_fields["scalar_active_tiles_dilated"],
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(
+        timing_stats, "loop_force_fields", perf_counter() - section_start
+    )
+
+    section_start = perf_counter()
+    forces.buoyancy_approximation[
+        scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+    ](
+        T,
+        gpu_fields["Fz"],
+        gpu_constants["BUOANCY_FACTOR"],
+        gpu_constants["T_REFERENCE"],
+        gpu_fields["scalar_active_tiles_dilated"],
+    )
+    cuda.synchronize()
+    helper_functions._record_timing(
+        timing_stats, "loop_buoyancy", perf_counter() - section_start
+    )
+
+    # ------------Vorticity-------------------
+    if gpu_constants["VORTICITY"] > 0.0:
+        section_start = perf_counter()
+        vorticity.compute_vorticity[
+            scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        ](
+            u,
+            v,
+            w,
+            gpu_fields["obstacle_mask"],
+            gpu_fields["vorticity_x"],
+            gpu_fields["vorticity_y"],
+            gpu_fields["vorticity_z"],
+            gpu_fields["vorticity_magnitude"],
+            gpu_constants["DELTA"],
+            gpu_fields["scalar_active_tiles_dilated"],
+        )
+        vorticity.apply_vorticity_confinement[
+            scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        ](
+            gpu_fields["obstacle_mask"],
+            gpu_fields["vorticity_x"],
+            gpu_fields["vorticity_y"],
+            gpu_fields["vorticity_z"],
+            gpu_fields["vorticity_magnitude"],
+            gpu_fields["Fx"],
+            gpu_fields["Fy"],
+            gpu_fields["Fz"],
+            gpu_constants["DELTA"],
+            gpu_constants["VORTICITY"],
+            gpu_fields["scalar_active_tiles_dilated"],
+        )
+        cuda.synchronize()
+        helper_functions._record_timing(
+            timing_stats, "loop_vorticity", perf_counter() - section_start
+        )
+
+    # ------------Velocity update-------------------
+    section_start = perf_counter()
     advection_schemes.preserve_inactive_velocity_tiles[
         scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](

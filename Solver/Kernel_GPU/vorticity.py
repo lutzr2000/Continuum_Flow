@@ -1,21 +1,46 @@
 from numba import cuda
 import math
 
+from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
+
 
 @cuda.jit(cache=True)
 def compute_vorticity(
-    u, v, w, obstacle_mask, omega_x, omega_y, omega_z, omega_magnitude, delta
+    u,
+    v,
+    w,
+    obstacle_mask,
+    omega_x,
+    omega_y,
+    omega_z,
+    omega_magnitude,
+    delta,
+    active_tile_mask,
 ):
     """
     Compute vorticity components and scalar magnitude from the velocity field.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = omega_magnitude.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(
+        omega_magnitude.shape
+    )
 
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
+        return
     if i >= nx or j >= ny or k >= nz:
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        omega_x[i, j, k] = 0.0
+        omega_y[i, j, k] = 0.0
+        omega_z[i, j, k] = 0.0
+        omega_magnitude[i, j, k] = 0.0
+        return
+
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
         omega_x[i, j, k] = 0.0
         omega_y[i, j, k] = 0.0
         omega_z[i, j, k] = 0.0
@@ -60,6 +85,7 @@ def apply_vorticity_confinement(
     Fz,
     delta,
     vorticity_strength,
+    active_tile_mask,
 ):
     """
     adds the vorticity confinement force to the body-force field on the GPU.
@@ -71,9 +97,18 @@ def apply_vorticity_confinement(
     turbulence, buoyancy and any authored force fields.
 
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = omega_magnitude.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(
+        omega_magnitude.shape
+    )
 
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
+        return
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
+        return
     if i >= nx or j >= ny or k >= nz:
         return
 
