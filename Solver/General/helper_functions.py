@@ -216,41 +216,6 @@ def emit_progress(percent, time_value=None):
     sys.stdout.flush()
 
 
-_ANIMATED_CONSTANT_DEFAULTS = {
-    "TEMPERATURE_DISSIPATION_RATE": lambda physics_cfg: float(
-        physics_cfg["temperature"]["dissipation"]
-    ),
-    "TEMPERATURE_PRODUCTION_RATE": lambda physics_cfg: float(
-        physics_cfg["temperature"].get("production_rate", 1.0)
-    ),
-    "SMOKE_DISSIPATION_RATE": lambda physics_cfg: float(
-        physics_cfg["smoke"]["dissipation"]
-    ),
-    "SMOKE_PRODUCTION_RATE": lambda physics_cfg: float(
-        physics_cfg["smoke"].get("production_rate", 1.0)
-    ),
-    "FUEL_DISSIPATION_RATE": lambda physics_cfg: float(
-        physics_cfg["fuel"].get("dissipation", 0.0)
-    ),
-    "FUEL_BURN_RATE": lambda physics_cfg: float(physics_cfg["fuel"]["burn_rate"]),
-    "FUEL_IGNITION_TEMPERATURE": lambda physics_cfg: float(
-        physics_cfg["fuel"]["ignition_temperature"]
-    ),
-    "MINIMUM_OXYGEN_CONCENTRATION": lambda physics_cfg: float(
-        physics_cfg["fuel"].get("minimum_oxygen_concentration", 0.0)
-    ),
-    "T_REFERENCE": lambda physics_cfg: float(
-        physics_cfg["temperature"]["reference_temperature"]
-    ),
-    "BUOANCY_FACTOR": lambda physics_cfg: float(physics_cfg["temperature"]["buoyancy"]),
-    "EXPANSION_RATE": lambda physics_cfg: float(
-        physics_cfg["temperature"]["expansion_rate"]
-    ),
-    "VORTICITY": lambda physics_cfg: float(
-        physics_cfg.get("extras", {}).get("vorticity", 0.0)
-    ),
-}
-
 
 def _build_runtime_data(domain_cfg, obstacle_entries, source_entries, force_entries):
     """
