@@ -867,7 +867,7 @@ def apply_config(config):
         "FRAME_START": int(settings_cfg.get("start_frame", 0)),
         "CFL_MAX": float(settings_cfg["cfl"]),
         "MAX_ITER": int(settings_cfg["iterations"]),
-        "MACCORMACK_FACTOR": float(settings_cfg.get("maccormack_factor", 0.25)),
+        "MACCORMACK_FACTOR": 0.5,
         "SIMULATE_SPARSELY": bool(settings_cfg.get("simulate_sparsely", True)),
         "ADAPTIVE_DOMAIN_THRESHOLD": float(
             settings_cfg.get("adaptive_domain_threshold", 0.001)

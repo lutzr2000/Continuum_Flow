@@ -4,10 +4,14 @@ General:
 Rescale Force magnitudes
 the live preview produces a RAM accumulation
 Rework explosion setup
+Clean up / improve code
+Rising smoke and explosion seem dependent on delta and delta
+Adjust UI tooltips
+Compare to Jflow alpha try to reduce VRAM
+Better output performance
+Test more or less backtracing steps
+Test fixxed dt with substeps again
 
-Performance:
-Improve Output performance
 
-VRAM:
-Lazy allocation scalar fields?
+
 

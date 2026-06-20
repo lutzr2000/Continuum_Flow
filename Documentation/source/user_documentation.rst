@@ -36,9 +36,6 @@ This is the core node of every simulation. It controls the frame range for your 
 **Iterations**
     Number of pressure iterations. Usually the default of ten is fine. Smaller values can be faster but may become unstable. Larger values are more stable but take longer.
 
-**MacCormack Factor**
-    For the purpose of this factor, refer to the theory documentation. In general, larger values make the flow more swirly and detailed, but can introduce artifacts.
-
 **Adaptive Domain**
     Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance. In some cases, however, it is worth turning it off. Refer to the best-practice section.
 

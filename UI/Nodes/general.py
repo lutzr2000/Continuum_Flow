@@ -17,7 +17,7 @@ from bpy.app.handlers import persistent
 MODULE_NAME_ALIASES = {}
 CONTINUUM_FLOW_BAKE_RUNNING_KEY = "continuum_flow_bake_running"
 PERCENTAGE_MAPPED_PROPERTY_RANGES = {
-    "temperature_dissipation": (0.0, 0.1),
+    "temperature_dissipation": (0.0, 0.5),
     "temperature_production_rate": (0.0, 0.05),
     "buoyancy": (0.0, 0.01),
     "expansion_rate": (0.0, 0.01),
@@ -553,7 +553,7 @@ class ContinuumFlowPhysicsNode(ContinuumFlowBaseNode):
 
     fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.0001, precision=4, description="Density of the fluid, default is air", options=set())  # type: ignore
     fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, precision=6, description="Viscosity of the fluid, default is air", options=set())  # type: ignore
-    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=10, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured temperature dissipation range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
+    temperature_dissipation: FloatProperty(name="Temperature Dissipation", default=2, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured temperature dissipation range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
     temperature_production_rate: FloatProperty(name="Temperature Production Rate", default=20, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured temperature production range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
     reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up", options={"ANIMATABLE"})  # type: ignore
     buoyancy: FloatProperty(name="Buoyancy", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="0-100% maps to the configured buoyancy range; higher values can still be typed in", options={"ANIMATABLE"})  # type: ignore
@@ -592,7 +592,6 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
             "Solver",
             (
                 "iterations",
-                "maccormack_factor",
                 "simulate_sparsely",
                 "adaptive_domain_threshold",
             ),
@@ -610,9 +609,8 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
     )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
-    cfl: FloatProperty(name="CFL", default=10, min=0.000001, max=10.0, soft_max=100, description="CFL condition for the solver", options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=10, min=0.000001, soft_max=10.0, description="CFL condition for the solver", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
-    maccormack_factor: FloatProperty(name="MacCormack Factor", default=0.25, min=0.0, max=0.5, soft_min=0.0, soft_max=0.5, precision=3, description="Higher values make the flow more swirly, but can produce artefacts", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
     adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 

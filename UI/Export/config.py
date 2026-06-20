@@ -766,9 +766,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
             ),
             "cfl": float(simulation_node.cfl),
             "iterations": int(simulation_node.iterations),
-            "maccormack_factor": float(
-                getattr(simulation_node, "maccormack_factor", 0.25)
-            ),
             "simulate_sparsely": bool(
                 getattr(simulation_node, "simulate_sparsely", True)
             ),
