@@ -180,11 +180,7 @@ def _run_kernel(config_dict):
     solver_backend = _solver_backend_from_config(config_dict)
     kernel_dir = _kernel_directory(solver_backend)
     project_root = _project_root_directory()
-    kernel_module = (
-        "Solver.Kernel_CPU.kernel"
-        if solver_backend == "CPU"
-        else "Solver.Kernel_GPU.kernel"
-    )
+    kernel_module = "Solver.General.main"
     bootstrap_code = "\n".join(
         (
             "import cProfile, json, os, sys",
