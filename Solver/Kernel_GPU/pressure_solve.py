@@ -1,7 +1,6 @@
 import numpy as np
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.kernel_config as kernel_config
 from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
@@ -24,9 +23,8 @@ def pressure_equation_right_side(
     b,
     dt,
     point_divergence,
-    source_mask,
-    source_entry_masks,
-    source_extra_pressure_values,
+    source_masks,
+    extra_pressure,
     delta,
     rho,
     expansion_rate,
@@ -70,14 +68,13 @@ def pressure_equation_right_side(
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
     authored_divergence = point_divergence[i, j, k]
     extra_pressure_term = 0.0
-    if source_mask[i, j, k]:
-        extra_pressure_term = source_bc.accumulate_source_extra_pressure(
-            i,
-            j,
-            k,
-            source_entry_masks,
-            source_extra_pressure_values,
-        )
+    source_count = source_masks.shape[0]
+    for source_idx in range(source_count):
+        if not source_masks[source_idx, i, j, k]:
+            continue
+        source_extra_pressure = extra_pressure[source_idx]
+        if source_extra_pressure > extra_pressure_term:
+            extra_pressure_term = source_extra_pressure
 
     # ------------Right hand side-------------------
     b[i, j, k] = (
@@ -395,9 +392,8 @@ def pressure_poisson(
     b,
     dt,
     point_divergence,
-    source_mask,
-    source_entry_masks,
-    source_extra_pressure_values,
+    source_masks,
+    extra_pressure,
     delta,
     rho,
     expansion_rate,
@@ -417,6 +413,11 @@ def pressure_poisson(
         threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
+    source_mask_shape = (0,) + tuple(u.shape)
+    source_mask_array = np.zeros(source_mask_shape, dtype=np.bool_)
+    if source_masks:
+        source_mask_array = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
+
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u,
         v,
@@ -425,9 +426,8 @@ def pressure_poisson(
         b,
         dt,
         point_divergence,
-        source_mask,
-        source_entry_masks,
-        source_extra_pressure_values,
+        cuda.to_device(source_mask_array),
+        cuda.to_device(np.ascontiguousarray(np.asarray(extra_pressure, dtype=np.float32))),
         delta,
         rho,
         expansion_rate,

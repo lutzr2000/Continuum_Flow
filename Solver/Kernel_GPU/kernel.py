@@ -21,90 +21,6 @@ import Solver.Kernel_GPU.time_step as time_step
 GPU_FIELD_DTYPE = np.float32
 
 
-def apply_all_BC(
-    u,
-    v,
-    w,
-    p,
-    T,
-    smoke,
-    fuel,
-    flame,
-    dt,
-    bc_config,
-    has_obstacle,
-    has_obstacle_velocity,
-    obstacle_mask,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
-    has_source,
-    source_mask,
-    source_entry_masks,
-    source_temperature_values,
-    source_smoke_values,
-    source_fuel_values,
-    source_velocity_enabled,
-    source_velocity_x_values,
-    source_velocity_y_values,
-    source_velocity_z_values,
-    apply_source_velocity=True,
-    apply_source_scalars=True,
-):
-    """
-    Apply domain, obstacle and source constraints in the fixed overwrite order.
-    Domain BCs are applied always, source and obstalces are optional depending on
-    user config.
-    """
-    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
-
-    if has_obstacle:
-        blockspergrid = kernel_config.volume_blocks_per_grid(
-            obstacle_mask.shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-        obstacle_bc.obstacle_bc_kernel[
-            blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            u,
-            v,
-            w,
-            smoke,
-            fuel,
-            flame,
-            obstacle_mask,
-            has_obstacle_velocity,
-            obstacle_velocity_x,
-            obstacle_velocity_y,
-            obstacle_velocity_z,
-        )
-
-    if has_source:
-        blockspergrid = kernel_config.volume_blocks_per_grid(
-            source_mask.shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-        source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
-            u,
-            v,
-            w,
-            T,
-            smoke,
-            fuel,
-            source_mask,
-            source_entry_masks,
-            source_temperature_values,
-            source_smoke_values,
-            source_fuel_values,
-            source_velocity_enabled,
-            source_velocity_x_values,
-            source_velocity_y_values,
-            source_velocity_z_values,
-            dt,
-            apply_source_velocity,
-            apply_source_scalars,
-        )
-    return u, v, w, p, T, smoke, fuel, flame
 
 
 def _initialise_solver(config):
@@ -931,6 +847,115 @@ def main(config=None):
 
 
 
+def apply_all_BC(
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    flame,
+    dt,
+    bc_config,
+    has_obstacle,
+    has_obstacle_velocity,
+    obstacle_mask,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
+    has_source,
+    source_mask,
+    source_entry_masks,
+    source_temperature_values,
+    source_smoke_values,
+    source_fuel_values,
+    source_velocity_enabled,
+    source_velocity_x_values,
+    source_velocity_y_values,
+    source_velocity_z_values,
+    apply_source_velocity=True,
+    apply_source_scalars=True,
+):
+    """
+    Apply domain, obstacle and source constraints in the fixed overwrite order.
+    Domain BCs are applied always, source and obstalces are optional depending on
+    user config.
+    """
+    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
+
+    if has_obstacle:
+        blockspergrid = kernel_config.volume_blocks_per_grid(
+            obstacle_mask.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+        obstacle_bc.obstacle_bc_kernel[
+            blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
+        ](
+            u,
+            v,
+            w,
+            smoke,
+            fuel,
+            flame,
+            obstacle_mask,
+            has_obstacle_velocity,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
+        )
+
+    if has_source:
+        blockspergrid = kernel_config.volume_blocks_per_grid(
+            source_mask.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+        source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
+            u,
+            v,
+            w,
+            T,
+            smoke,
+            fuel,
+            source_mask,
+            source_entry_masks,
+            source_temperature_values,
+            source_smoke_values,
+            source_fuel_values,
+            source_velocity_enabled,
+            source_velocity_x_values,
+            source_velocity_y_values,
+            source_velocity_z_values,
+            dt,
+            apply_source_velocity,
+            apply_source_scalars,
+        )
+    return u, v, w, p, T, smoke, fuel, flame
+
+
+
+
+
+
+
+def get_source_values(simulations,var_name):
+    source_entries = simulations[0].get("sources") or []
+    values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
+    for source_idx, source_entry in enumerate(source_entries):
+        extra_value = float(source_entry.get(var_name, 0.0))
+        animation_entry = (source_entry.get("animations") or {}).get(var_name) or {}
+        animation_times = animation_entry.get("times") or ()
+        animation_values = animation_entry.get("values") or ()
+        if animation_times and animation_values:
+            nearest_time_idx = min(
+                range(len(animation_times)),
+                key=lambda idx: abs(float(animation_times[idx]) - float(t)),
+            )
+            extra_value = float(animation_values[nearest_time_idx])
+        values[source_idx] = np.asarray(extra_value, dtype=GPU_FIELD_DTYPE)
+
+    return values
+
 
 
 
@@ -968,7 +993,7 @@ def compute_inital_velocity(simulation_cfg):
 
 
 
-def solver(config,obstacle_mask,source_mask):
+def solver(config,obstacle_mask,source_masks):
     simulations = config.get("simulations")
 
     #------------time-------------------
@@ -1054,8 +1079,6 @@ def solver(config,obstacle_mask,source_mask):
 
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
-    source_entry_masks = cuda.to_device(np.zeros((1,) + shape, dtype=np.bool_))
-    source_extra_pressure_values = cuda.to_device(np.zeros(1, dtype=GPU_FIELD_DTYPE))
 
     #------------time loop------------------
     while t < t_max:
@@ -1203,6 +1226,8 @@ def solver(config,obstacle_mask,source_mask):
             w, w_work = w_work, w
 
             # ------------Pressure solve-------------------
+            extra_pressure = get_source_values(simulations,"extra_pressure")
+
             p = pressure_solve.pressure_poisson(
                 u,
                 v,
@@ -1212,9 +1237,8 @@ def solver(config,obstacle_mask,source_mask):
                 scratch_A_x,
                 dt,
                 point_divergence,
-                source_mask,
-                source_entry_masks,
-                source_extra_pressure_values,
+                source_masks,
+                extra_pressure,
                 delta,
                 simulations[0].get("physics").get("fluid").get("density"),
                 simulations[0].get("physics").get("temperature").get("expansion_rate"),
@@ -1241,5 +1265,38 @@ def solver(config,obstacle_mask,source_mask):
                 scalar_active_tiles_dilated,
             )
             cuda.synchronize()
+
+            # # ------------BC-------------------
+            # u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+            #     u,
+            #     v,
+            #     w,
+            #     p,
+            #     T,
+            #     smoke,
+            #     fuel,
+            #     flame,
+            #     dt,
+            #     simulation_params["BC_CONFIG"],
+            #     gpu_constants["HAS_OBSTACLE"],
+            #     gpu_constants["HAS_OBSTACLE_VELOCITY"],
+            #     gpu_fields["obstacle_mask"],
+            #     gpu_fields["obstacle_velocity_x"],
+            #     gpu_fields["obstacle_velocity_y"],
+            #     gpu_fields["obstacle_velocity_z"],
+            #     gpu_constants["HAS_SOURCE"],
+            #     gpu_fields["source_mask"],
+            #     gpu_fields["source_entry_masks"],
+            #     gpu_fields["source_temperature_values"],
+            #     gpu_fields["source_smoke_values"],
+            #     gpu_fields["source_fuel_values"],
+            #     gpu_fields["source_velocity_enabled"],
+            #     gpu_fields["source_velocity_x_values"],
+            #     gpu_fields["source_velocity_y_values"],
+            #     gpu_fields["source_velocity_z_values"],
+            #     apply_source_velocity=True,
+            #     apply_source_scalars=False,
+            # )
+            # cuda.synchronize()
 
         t = t + dt

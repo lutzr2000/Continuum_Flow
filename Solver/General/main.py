@@ -39,15 +39,18 @@ def main(config=None):
         origin_y=origin_y,
         origin_z=origin_z,
     )
-    source_mask = voxelise_mesh_module.voxelise_mesh_all(
-        nx,
-        ny,
-        nz,
-        delta,
-        source_mesh_objects,
-        origin_x=origin_x,
-        origin_y=origin_y,
-        origin_z=origin_z,
-    )
+    source_masks = [
+        voxelise_mesh_module.voxelise_mesh(
+            nx,
+            ny,
+            nz,
+            delta,
+            source_mesh_object,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            origin_z=origin_z,
+        )
+        for source_mesh_object in source_mesh_objects
+    ]
 
-    return gpu_kernel_module.solver(config, obstacle_mask, source_mask)
+    return gpu_kernel_module.solver(config, obstacle_mask, source_masks)
