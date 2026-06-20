@@ -23,6 +23,51 @@ def _bounds_to_indices(
     return int(lo[0]), int(hi[0]), int(lo[1]), int(hi[1]), int(lo[2]), int(hi[2])
 
 
+def _bounds_center_extent(bounds_min, bounds_max):
+    """Convert min/max bounds into center/extent form for cheap affine transforms."""
+    bounds_min = np.asarray(bounds_min, dtype=np.float32)
+    bounds_max = np.asarray(bounds_max, dtype=np.float32)
+    center = (bounds_min + bounds_max) * np.float32(0.5)
+    extent = (bounds_max - bounds_min) * np.float32(0.5)
+    return _as_f32(center), _as_f32(extent)
+
+
+def _transform_bounds(bounds_center, bounds_extent, matrix):
+    """Transform one local AABB into world space using center/extent form."""
+    matrix = np.asarray(matrix, dtype=np.float32)
+    linear = matrix[:3, :3]
+    translation = matrix[:3, 3]
+    center_world = _as_f32(linear @ bounds_center + translation)
+    extent_world = _as_f32(np.abs(linear) @ bounds_extent)
+    return center_world - extent_world, center_world + extent_world
+
+
+def _invert_affine_matrix(matrix):
+    """Invert one affine 4x4 matrix using its linear part and translation."""
+    matrix = np.asarray(matrix, dtype=np.float32)
+    linear = matrix[:3, :3]
+    translation = matrix[:3, 3]
+    inv_linear = _as_f32(np.linalg.inv(linear))
+    inv_translation = _as_f32(-(inv_linear @ translation))
+
+    inv = np.eye(4, dtype=np.float32)
+    inv[:3, :3] = inv_linear
+    inv[:3, 3] = inv_translation
+    return inv
+
+
+def _initial_world_matrix(mesh_object):
+    """Return the first exported world transform for one mesh object."""
+    animation = mesh_object.get("transform_animation") or {}
+    matrices = np.asarray(
+        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
+        dtype=np.float32,
+    ).reshape((-1, 4, 4))
+    if matrices.size == 0:
+        return np.eye(4, dtype=np.float32)
+    return _as_f32(matrices[0])
+
+
 def _load_mesh_triangles(mesh_object):
     """Load one mesh object's triangle payload into contiguous float32 shape (n, 3, 3)."""
     if mesh_object.get("triangles_file"):
@@ -78,15 +123,25 @@ def voxelise_mesh(nx, ny, nz, delta, mesh_object, origin_x=0.0, origin_y=0.0, or
 
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
     delta = np.float32(delta)
-    identity_inv = np.eye(4, dtype=np.float32)
 
     voxels = _voxelize_triangles(_load_mesh_triangles(mesh_object), delta)
     if voxels is None:
         return out
 
+    object_matrix = _initial_world_matrix(mesh_object)
+    bounds_center, bounds_extent = _bounds_center_extent(
+        voxels["bounds_min"], voxels["bounds_max"]
+    )
+    bounds_min, bounds_max = _transform_bounds(
+        bounds_center,
+        bounds_extent,
+        object_matrix,
+    )
+    object_matrix_inv = _invert_affine_matrix(object_matrix)
+
     ix0, ix1, iy0, iy1, iz0, iz1 = _bounds_to_indices(
-        voxels["bounds_min"],
-        voxels["bounds_max"],
+        bounds_min,
+        bounds_max,
         delta,
         origin,
         shape=out.shape,
@@ -108,7 +163,7 @@ def voxelise_mesh(nx, ny, nz, delta, mesh_object, origin_x=0.0, origin_y=0.0, or
         iz0,
         iz1,
         voxels["origin"],
-        identity_inv,
+        object_matrix_inv,
     )
 
     return out
@@ -133,4 +188,3 @@ def voxelise_mesh_all(nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.
         )
 
     return out
-

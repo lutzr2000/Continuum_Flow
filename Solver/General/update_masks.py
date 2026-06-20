@@ -30,3 +30,6 @@ def _sample_mask_backwards(
 
         if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
             out[i, j, k] = True
+
+
+# there might be some stuff in voxelise mesh, that can be reused here
