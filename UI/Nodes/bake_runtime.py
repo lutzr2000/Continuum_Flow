@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -279,12 +280,42 @@ def _snakeviz_profile_path_from_config(config_dict):
     return str(Path(output_dir) / "snakeviz_profile.prof")
 
 
+def _debug_config_export_path_from_config(config_dict):
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return None
+    outputs = simulations[0].get("outputs") or ()
+    if not outputs:
+        return None
+    output_dir = (outputs[0].get("output_path") or "").strip()
+    if not output_dir:
+        return None
+    node_tree_name = ((config_dict.get("meta") or {}).get("node_tree_name") or "").strip()
+    if not node_tree_name:
+        node_tree_name = "continuum_flow"
+    return Path(output_dir) / f"{node_tree_name}_config_export.json"
+
+
 def _snakeviz_debug_enabled_from_config(config_dict):
     simulations = config_dict.get("simulations") or ()
     if not simulations:
         return False
     viewers = simulations[0].get("viewers") or ()
     return any(bool(viewer_cfg.get("debug", False)) for viewer_cfg in viewers)
+
+
+def _write_debug_config_snapshot(config_dict):
+    file_path = _debug_config_export_path_from_config(config_dict)
+    if file_path is None:
+        return None
+    export_config = {
+        key: deepcopy(value)
+        for key, value in config_dict.items()
+        if not str(key).startswith("_")
+    }
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(json.dumps(export_config, indent=2), encoding="utf-8")
+    return file_path
 
 
 def _launch_snakeviz(profile_path, python_executable):
@@ -320,6 +351,8 @@ def _start_bake_session(config_dict):
     config_dict["_host_vdb_writer"] = writer_server.endpoint()
     output_queue = queue.Queue()
     try:
+        if _snakeviz_debug_enabled_from_config(config_dict):
+            _write_debug_config_snapshot(config_dict)
         process, python_executable = _run_kernel(config_dict)
     except Exception:
         writer_server.stop()

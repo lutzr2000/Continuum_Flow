@@ -15,3 +15,10 @@ Test fixxed dt with substeps again
 
 
 
+Code rework:
+The whole mask creation, voxelisation is uncessary complicated, convluted and distributed
+Make a clear entry point in the solver from the UI, maybe a main.py?
+
+Output: 
+Write data from gpu to binary than to vdb?
+Write in bigger blocks?
