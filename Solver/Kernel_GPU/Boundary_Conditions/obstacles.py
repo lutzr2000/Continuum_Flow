@@ -6,7 +6,6 @@ from numba import cuda
 import Solver.General.obstacles as general_obstacles
 from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_3D, volume_blocks_per_grid
 
-mesh = general_obstacles.mesh
 build_dynamic_runtime = general_obstacles.build_dynamic_runtime
 update_dynamic_mask = general_obstacles.update_dynamic_mask
 update_dynamic_obstacle_data = general_obstacles.update_dynamic_obstacle_data
