@@ -926,6 +926,17 @@ def main(config=None):
     print("################################################################")
 
 
+
+
+
+
+
+
+
+
+
+
+
 def compute_inital_velocity(simulation_cfg):
     total_u = 0.0
     total_v = 0.0
@@ -953,6 +964,10 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
+
+
+
+
 def solver(config,obstacle_mask,source_mask):
     simulations = config.get("simulations")
 
@@ -962,6 +977,7 @@ def solver(config,obstacle_mask,source_mask):
     t_max = simulations[0].get("settings").get("simulation_length")
 
     #------------dimensions------------------
+    delta = simulations[0].get("domain").get("resolution")
     nx = simulations[0]["domain"]["grid"]["nx"]
     ny = simulations[0]["domain"]["grid"]["nx"]
     nz = simulations[0]["domain"]["grid"]["nx"]
@@ -1002,9 +1018,17 @@ def solver(config,obstacle_mask,source_mask):
     flame = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     # forces
-
+    fx = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    fy = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    fz = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     # scratch
+    scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    scratch_A_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+
+    # vortictiy
+    vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     #------------intitialise------------------
     u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
@@ -1061,5 +1085,49 @@ def solver(config,obstacle_mask,source_mask):
             )
         cuda.synchronize()
 
+        #------------Forces-------------------
+        forces.buoyancy_approximation[
+            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        ](
+            temperature,
+            fz,
+            simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
+            simulations[0].get("physics").get("temperature").get("reference_temperature"),
+            scalar_active_tiles_dilated,
+        )
+        cuda.synchronize()
+
+        # ------------Vorticity-------------------
+        if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
+            vorticity.compute_vorticity[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                u,
+                v,
+                w,
+                obstacle_mask,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                vorticity_magnitude,
+                delta,
+                scalar_active_tiles_dilated,
+            )
+            vorticity.apply_vorticity_confinement[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                obstacle_mask,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                vorticity_magnitude,
+                fx,
+                fy,
+                fz,
+                delta,
+                simulations[0].get("physics").get("extras").get("vorticity"),
+                scalar_active_tiles_dilated,
+            )
+            cuda.synchronize()
 
         t = t + dt
