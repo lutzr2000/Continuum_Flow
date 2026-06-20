@@ -939,7 +939,7 @@ def apply_all_BC(
         source_velocity_y_values = get_source_values(simulations, "velocity", t, 1)
         source_velocity_z_values = get_source_values(simulations, "velocity", t, 2)
 
-        source_count = source_masks.shape[0]
+        source_count = len(source_masks)
         for source_idx in range(source_count):
             source_mask = source_masks[source_idx]
 
@@ -955,12 +955,12 @@ def apply_all_BC(
                 smoke,
                 fuel,
                 source_mask,
-                source_temperature_values,
-                source_smoke_values,
-                source_fuel_values,
-                source_velocity_x_values,
-                source_velocity_y_values,
-                source_velocity_z_values,
+                source_temperature_values[source_idx],
+                source_smoke_values[source_idx],
+                source_fuel_values[source_idx],
+                source_velocity_x_values[source_idx],
+                source_velocity_y_values[source_idx],
+                source_velocity_z_values[source_idx],
                 dt
             )
     return u, v, w, p, T, smoke, fuel, flame
@@ -1039,7 +1039,6 @@ def solver(config,obstacle_mask,source_masks):
 
     # pressure
     p = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    p_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     pressure_rhs_partial_sums = cuda.device_array(kernel_config.MAX_REDUCTION_BLOCKS,dtype=np.float32)
     pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
 
@@ -1234,7 +1233,7 @@ def solver(config,obstacle_mask,source_masks):
             w, w_work = w_work, w
 
             # ------------Pressure solve-------------------
-            extra_pressure = get_source_values(simulations,"extra_pressure")
+            extra_pressure = get_source_values(simulations,"extra_pressure",t)
 
             p = pressure_solve.pressure_poisson(
                 u,
@@ -1275,14 +1274,14 @@ def solver(config,obstacle_mask,source_masks):
             cuda.synchronize()
 
             # ------------BC-------------------
-            u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+            u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
                 simulations,
                 t,
                 u,
                 v,
                 w,
                 p,
-                T,
+                temperature,
                 smoke,
                 fuel,
                 flame,
@@ -1291,5 +1290,77 @@ def solver(config,obstacle_mask,source_masks):
                 source_masks,
             )
             cuda.synchronize()
+
+            # ------------Scalar update-------------------
+            scalar_update.preserve_inactive_scalar_tiles[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                temperature,
+                smoke,
+                fuel,
+                flame,
+                temperature_work,
+                smoke_work,
+                fuel_work,
+                flame,
+                scalar_active_tiles_dilated,
+            )
+            scalar_update.predict_scalar_fields_semi_lagrangian[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                temperature,
+                smoke,
+                fuel,
+                u,
+                v,
+                w,
+                dt,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                depart_x,
+                depart_y,
+                depart_z,
+                delta,
+                scalar_active_tiles_dilated,
+            )
+            scalar_update.update_scalar_fields_maccormack[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                temperature,
+                smoke,
+                fuel,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                depart_x,
+                depart_y,
+                depart_z,
+                u,
+                v,
+                w,
+                dt,
+                temperature_work,
+                smoke_work,
+                fuel_work,
+                flame,
+                delta,
+                simulations[0].get("physics").get("temperature").get("dissipation"),
+                simulations[0].get("physics").get("temperature").get("production_rate"),
+                simulations[0].get("physics").get("smoke").get("dissipation"),
+                simulations[0].get("physics").get("smoke").get("production_rate"),
+                simulations[0].get("physics").get("fuel").get("dissipation"),
+                simulations[0].get("physics").get("fuel").get("burn_rate"),
+                simulations[0].get("physics").get("fuel").get("ignition_temperature"),
+                simulations[0].get("physics").get("fuel").get("minimum_oxygen_concentration"),
+                simulations[0].get("physics").get("temperature").get("reference_temperature"),
+                scalar_active_tiles_dilated,
+            )
+            cuda.synchronize()
+
+            # ------------Swap-------------------
+            temperature, temperature_work = temperature_work, temperature
+            smoke, smoke_work = smoke_work, smoke
+            fuel, fuel_work = fuel_work, fuel
 
         t = t + dt

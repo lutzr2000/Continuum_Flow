@@ -235,7 +235,6 @@ def update_scalar_fields_maccormack(
     fuel_ignition_temperature,
     minimum_oxygen_concentration,
     t_reference,
-    maccormack_factor,
     active_tile_mask,
 ):
     """
@@ -298,11 +297,11 @@ def update_scalar_fields_maccormack(
         nz,
     )
 
-    T_corrected = T_advected + maccormack_factor * (T[i, j, k] - T_reverse)
-    smoke_corrected = smoke_advected + maccormack_factor * (
+    T_corrected = T_advected + 0.5 * (T[i, j, k] - T_reverse)
+    smoke_corrected = smoke_advected + 0.5 * (
         smoke[i, j, k] - smoke_reverse
     )
-    fuel_corrected = fuel_advected + maccormack_factor * (fuel[i, j, k] - fuel_reverse)
+    fuel_corrected = fuel_advected + 0.5 * (fuel[i, j, k] - fuel_reverse)
 
     x0, y0, z0, x1, y1, z1, _, _, _ = advection_schemes._prepare_trilinear_coords(
         x_depart, y_depart, z_depart, nx, ny, nz
