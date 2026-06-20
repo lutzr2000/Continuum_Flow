@@ -1007,6 +1007,8 @@ def solver(config,obstacle_mask,source_mask):
     # pressure
     p = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     p_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    pressure_rhs_partial_sums = cuda.device_array(kernel_config.MAX_REDUCTION_BLOCKS,dtype=np.float32)
+    pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
 
     # scalars
     temperature = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -1049,6 +1051,11 @@ def solver(config,obstacle_mask,source_mask):
     fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
 
+
+    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
+    point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
+    source_entry_masks = cuda.to_device(np.zeros((1,) + shape, dtype=np.bool_))
+    source_extra_pressure_values = cuda.to_device(np.zeros(1, dtype=GPU_FIELD_DTYPE))
 
     #------------time loop------------------
     while t < t_max:
@@ -1195,29 +1202,29 @@ def solver(config,obstacle_mask,source_mask):
             v, v_work = v_work, v
             w, w_work = w_work, w
 
-            # # ------------Pressure solve-------------------
-            # p = pressure_solve.pressure_poisson(
-            #     u,
-            #     v,
-            #     w,
-            #     p,
-            #     temperature,
-            #     scratch_A_x,
-            #     dt,
-            #     gpu_fields["point_divergence"],
-            #     source_mask,
-            #     gpu_fields["source_entry_masks"],
-            #     gpu_fields["source_extra_pressure_values"],
-            #     delta,
-            #     simulations[0].get("physics").get("fluid").get("density"),
-            #     simulations[0].get("physics").get("temperature").get("expansion_rate"),
-            #     simulations[0].get("physics").get("temperature").get("reference_temperature"),
-            #     scalar_active_tiles_dilated,
-            #     simulations[0].get("settings").get("iterations"),
-            #     rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],
-            #     rhs_sum_buffer=gpu_fields["pressure_rhs_sum"],
-            # )
-            # cuda.synchronize()
+            # ------------Pressure solve-------------------
+            p = pressure_solve.pressure_poisson(
+                u,
+                v,
+                w,
+                p,
+                temperature,
+                scratch_A_x,
+                dt,
+                point_divergence,
+                source_mask,
+                source_entry_masks,
+                source_extra_pressure_values,
+                delta,
+                simulations[0].get("physics").get("fluid").get("density"),
+                simulations[0].get("physics").get("temperature").get("expansion_rate"),
+                simulations[0].get("physics").get("temperature").get("reference_temperature"),
+                scalar_active_tiles_dilated,
+                simulations[0].get("settings").get("iterations"),
+                rhs_partial_sums=pressure_rhs_partial_sums,
+                rhs_sum_buffer=pressure_rhs_sum,
+            )
+            cuda.synchronize()
 
             # ------------Velocity projection-------------------
             pressure_solve.project_velocity_kernel[
