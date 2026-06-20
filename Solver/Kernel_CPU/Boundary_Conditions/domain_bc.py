@@ -1,9 +1,7 @@
 from numba import njit, prange
 
-BC_OUTFLOW = 0
-BC_INFLOW = 1
-BC_NO_SLIP_WALL = 2
-BC_SLIP_WALL = 3
+# Boundary mode encoding:
+# 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
 
 SIDE_TO_AXIS_AND_INDEX = {
     "x_low": (0, 0),
@@ -89,17 +87,17 @@ def _apply_face_state(
             neighbor_smoke = smoke[src_i, j, k]
             neighbor_fuel = fuel[src_i, j, k]
 
-            if bc_mode == BC_OUTFLOW:
+            if bc_mode == 0:
                 u[i, j, k] = (
                     min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
                 )
                 v[i, j, k] = neighbor_v
                 w[i, j, k] = neighbor_w
-            elif bc_mode == BC_INFLOW:
+            elif bc_mode == 1:
                 u[i, j, k] = u_value
                 v[i, j, k] = v_value
                 w[i, j, k] = w_value
-            elif bc_mode == BC_NO_SLIP_WALL:
+            elif bc_mode == 2:
                 u[i, j, k] = 0.0
                 v[i, j, k] = 0.0
                 w[i, j, k] = 0.0
@@ -129,17 +127,17 @@ def _apply_face_state(
             neighbor_smoke = smoke[i, src_j, k]
             neighbor_fuel = fuel[i, src_j, k]
 
-            if bc_mode == BC_OUTFLOW:
+            if bc_mode == 0:
                 u[i, j, k] = neighbor_u
                 v[i, j, k] = (
                     min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
                 )
                 w[i, j, k] = neighbor_w
-            elif bc_mode == BC_INFLOW:
+            elif bc_mode == 1:
                 u[i, j, k] = u_value
                 v[i, j, k] = v_value
                 w[i, j, k] = w_value
-            elif bc_mode == BC_NO_SLIP_WALL:
+            elif bc_mode == 2:
                 u[i, j, k] = 0.0
                 v[i, j, k] = 0.0
                 w[i, j, k] = 0.0
@@ -168,17 +166,17 @@ def _apply_face_state(
         neighbor_smoke = smoke[i, j, src_k]
         neighbor_fuel = fuel[i, j, src_k]
 
-        if bc_mode == BC_OUTFLOW:
+        if bc_mode == 0:
             u[i, j, k] = neighbor_u
             v[i, j, k] = neighbor_v
             w[i, j, k] = (
                 min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
             )
-        elif bc_mode == BC_INFLOW:
+        elif bc_mode == 1:
             u[i, j, k] = u_value
             v[i, j, k] = v_value
             w[i, j, k] = w_value
-        elif bc_mode == BC_NO_SLIP_WALL:
+        elif bc_mode == 2:
             u[i, j, k] = 0.0
             v[i, j, k] = 0.0
             w[i, j, k] = 0.0
@@ -251,7 +249,7 @@ def inflow_bc(
         smoke,
         fuel,
         side,
-        BC_INFLOW,
+        1,
         u_value=u_inflow,
         v_value=v_inflow,
         w_value=w_inflow,
@@ -275,7 +273,7 @@ def outflow_bc(u, v, w, p, T, smoke, fuel, side):
         smoke,
         fuel,
         side,
-        BC_OUTFLOW,
+        0,
     )
 
 
@@ -296,7 +294,7 @@ def slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
         smoke,
         fuel,
         side,
-        BC_SLIP_WALL,
+        3,
         temp_value=t_wall,
     )
 
@@ -318,7 +316,7 @@ def no_slip_wall_bc(u, v, w, p, T, smoke, fuel, side, t_wall=None):
         smoke,
         fuel,
         side,
-        BC_NO_SLIP_WALL,
+        2,
         temp_value=t_wall,
     )
 
@@ -331,22 +329,14 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     boundary mode for INFLOW, OUTFLOW, SLIP_WALL and WALL.
     """
     for side, bc in bc_config.items():
-        bc_type = bc["type"]
-        if bc_type == "OUTFLOW":
-            bc_mode = BC_OUTFLOW
-        elif bc_type == "INFLOW":
-            bc_mode = BC_INFLOW
-        elif bc_type == "WALL":
-            bc_mode = BC_NO_SLIP_WALL
-        elif bc_type == "SLIP_WALL":
-            bc_mode = BC_SLIP_WALL
-        else:
+        bc_mode = int(bc["type"])
+        if bc_mode < 0 or bc_mode > 3:
             raise ValueError(
-                f"Unknown boundary condition '{bc_type}' for side '{side}'"
+                f"Unknown boundary condition '{bc_mode}' for side '{side}'"
             )
 
         temperature = bc.get("T", bc.get("temperature"))
-        if bc_mode == BC_INFLOW:
+        if bc_mode == 1:
             u, v, w, p, T, smoke, fuel = inflow_bc(
                 u,
                 v,
@@ -361,9 +351,9 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
                 bc.get("w", 0.0),
                 temperature,
             )
-        elif bc_mode == BC_OUTFLOW:
+        elif bc_mode == 0:
             u, v, w, p, T, smoke, fuel = outflow_bc(u, v, w, p, T, smoke, fuel, side)
-        elif bc_mode == BC_NO_SLIP_WALL:
+        elif bc_mode == 2:
             u, v, w, p, T, smoke, fuel = no_slip_wall_bc(
                 u, v, w, p, T, smoke, fuel, side, temperature
             )

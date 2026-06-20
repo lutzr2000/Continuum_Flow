@@ -28,6 +28,14 @@ BOUNDARY_FACE_NAMES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 OUTPUT_BUFFER_MULTIPLIER = 2
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 SPARSE_MASK_FIELDS = ("smoke", "flame")
+# Boundary mode encoding:
+# 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
+BOUNDARY_TYPE_TO_MODE = {
+    "OUTFLOW": 0,
+    "INFLOW": 1,
+    "WALL": 2,
+    "SLIP_WALL": 3,
+}
 PHYSICS_ANIMATION_TO_GPU_CONSTANT = {
     "temperature_dissipation": "TEMPERATURE_DISSIPATION_RATE",
     "temperature_production_rate": "TEMPERATURE_PRODUCTION_RATE",
@@ -356,7 +364,20 @@ def build_boundary_config(domain_cfg):
 
     for face_name in BOUNDARY_FACE_NAMES:
         face_cfg = boundary_cfg.get(face_name, {})
-        bc_type = face_cfg.get("type", "OUTFLOW")
+        bc_type = face_cfg.get("type", 0)
+        if isinstance(bc_type, str):
+            try:
+                bc_type = BOUNDARY_TYPE_TO_MODE[bc_type.strip().upper()]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Unknown boundary condition '{face_cfg.get('type')}' for side '{face_name}'"
+                ) from exc
+        else:
+            bc_type = int(bc_type)
+            if bc_type < 0 or bc_type > 3:
+                raise ValueError(
+                    f"Unknown boundary condition '{bc_type}' for side '{face_name}'"
+                )
         face_bc = {
             "type": bc_type,
         }
@@ -392,7 +413,7 @@ def initial_velocity_from_inflows(bc_config):
     initial_w = 0.0
 
     for bc in bc_config.values():
-        if bc.get("type") != "INFLOW":
+        if int(bc.get("type", 0)) != 1:
             continue
         inflow_count += 1
         initial_u += float(bc.get("u", 0.0))

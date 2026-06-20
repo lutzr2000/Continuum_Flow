@@ -2,10 +2,8 @@ from numba import cuda
 
 from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D
 
-BC_OUTFLOW = 0
-BC_INFLOW = 1
-BC_NO_SLIP_WALL = 2
-BC_SLIP_WALL = 3
+# Boundary mode encoding:
+# 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
 
 SIDE_TO_AXIS_AND_INDEX = {
     "x_low": (0, 0),
@@ -90,7 +88,7 @@ def _apply_face_state(
     neighbor_smoke = smoke[src_i, src_j, src_k]
     neighbor_fuel = fuel[src_i, src_j, src_k]
 
-    if bc_mode == BC_OUTFLOW:
+    if bc_mode == 0:
         u[i, j, k] = neighbor_u
         v[i, j, k] = neighbor_v
         w[i, j, k] = neighbor_w
@@ -106,11 +104,11 @@ def _apply_face_state(
             w[i, j, k] = (
                 min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
             )
-    elif bc_mode == BC_INFLOW:
+    elif bc_mode == 1:
         u[i, j, k] = u_value
         v[i, j, k] = v_value
         w[i, j, k] = w_value
-    elif bc_mode == BC_NO_SLIP_WALL:
+    elif bc_mode == 2:
         u[i, j, k] = 0.0
         v[i, j, k] = 0.0
         w[i, j, k] = 0.0
@@ -344,21 +342,8 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     face_args = {}
     for side in SIDE_TO_AXIS_AND_INDEX:
         bc = bc_config[side]
-        bc_type = bc["type"]
+        bc_mode = int(bc["type"])
         temperature = bc.get("T", bc.get("temperature"))
-
-        if bc_type == "OUTFLOW":
-            bc_mode = BC_OUTFLOW
-        elif bc_type == "INFLOW":
-            bc_mode = BC_INFLOW
-        elif bc_type == "WALL":
-            bc_mode = BC_NO_SLIP_WALL
-        elif bc_type == "SLIP_WALL":
-            bc_mode = BC_SLIP_WALL
-        else:
-            raise ValueError(
-                f"Unknown boundary condition '{bc_type}' for side '{side}'"
-            )
 
         face_args[side] = (
             bc_mode,
