@@ -826,9 +826,7 @@ def main(config=None):
         )
 
     # ------------Conclusion-------------------
-    if state["solver_diverged"]:
-        print("Simulation stopped after solver divergence.")
-    elif state["cancel_requested"]:
+    if state["cancel_requested"]:
         print("Simulation cancelled after clean shutdown.")
     else:
         helper_functions.emit_progress(100.0, state["simulation_params"]["T_MAX"])
@@ -1002,7 +1000,11 @@ def compute_inital_velocity(simulation_cfg):
 
 
 def solver(config,obstacle_mask,source_masks):
+    total_start_time = perf_counter()
     simulations = config.get("simulations")
+    cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
+    cancel_requested = False
+    output_frame_count = 0
 
     #------------time-------------------
     t = 0
@@ -1015,6 +1017,10 @@ def solver(config,obstacle_mask,source_masks):
     ny = simulations[0]["domain"]["grid"]["nx"]
     nz = simulations[0]["domain"]["grid"]["nx"]
     shape = (nx,ny,nz)
+
+    print("################################################################")
+    print("Initialise")
+    print("Cell count: ",int(nx * ny * nz))
 
     #------------tiles------------------
     active_tile_shape = kernel_config.active_tile_shape((shape))
@@ -1087,10 +1093,58 @@ def solver(config,obstacle_mask,source_masks):
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
 
-    #------------time loop------------------
-    while t < t_max:
-        
+    # ------------Prepare output-------------------
+    output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
+    output_field_config = helper_functions.build_output_field_config(output_cfg)
+    output_buffer_variables = helper_functions.collect_buffer_variables(output_field_config)
+    output_performance = helper_functions.build_output_performance_config(output_cfg)
+    output_dtype = helper_functions.resolve_output_dtype(output_cfg)
+    output_time_step = 1.0 / int(output_cfg.get("fps", 24))
+    output_sparse_threshold = float(simulations[0].get("settings", {}).get("adaptive_domain_threshold", 0.001))
+    host_vdb_writer = config.get("_host_vdb_writer")
 
+    device_fields = {
+        "u": u,
+        "v": v,
+        "w": w,
+        "p": p,
+        "T": temperature,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
+        "obstacle_mask": obstacle_mask,
+        "source_mask": np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_),
+    }
+
+    (
+        write_queue,
+        buffer_pool,
+        writer_threads,
+        shared_memory_blocks,
+        device_output_staging,
+    ) = output_functions.setup_output(
+        output_cfg.get("output_path", ""),
+        int(simulations[0].get("settings", {}).get("start_frame", 0)),
+        output_buffer_variables,
+        helper_functions.select_fields(device_fields, output_buffer_variables),
+        output_performance["buffer_count"],
+        output_performance["writer_processes"],
+        delta,
+        host_vdb_writer,
+        storage_dtype=output_dtype,
+    )
+
+    #------------time loop------------------
+    print("Start time iteration")
+    helper_functions.emit_progress(0.0, t)
+    next_output_time = 0.0
+    output_index = 0
+    while t < t_max:
+        if cancel_flag_path and Path(cancel_flag_path).exists():
+            cancel_requested = True
+            print("Bake cancellation requested. Stopping the simulation cleanly...")
+            break
+        
 
         #------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
@@ -1363,4 +1417,55 @@ def solver(config,obstacle_mask,source_masks):
             smoke, smoke_work = smoke_work, smoke
             fuel, fuel_work = fuel_work, fuel
 
+            # ------------Output-------------------
+            while t >= next_output_time:
+                device_fields["u"] = u
+                device_fields["v"] = v
+                device_fields["w"] = w
+                device_fields["p"] = p
+                device_fields["T"] = temperature
+                device_fields["smoke"] = smoke
+                device_fields["fuel"] = fuel
+                device_fields["flame"] = flame
+                output_functions.enqueue_device_output(
+                    write_queue,
+                    buffer_pool,
+                    output_buffer_variables,
+                    helper_functions.select_fields(
+                        device_fields,
+                        output_buffer_variables,
+                    ),
+                    device_output_staging,
+                    output_index,
+                    t,
+                    output_field_config,
+                    output_sparse_threshold,
+                )
+
+                output_index += 1
+                output_frame_count += 1
+                next_output_time += output_time_step
+                helper_functions.emit_progress(
+                    t / t_max * 100.0,
+                    t,
+                )
+
         t = t + dt
+
+    if write_queue is not None:
+        output_functions.shutdown_output(
+            write_queue,
+            writer_threads,
+            shared_memory_blocks,
+        )
+
+    # ------------Conclusion-------------------
+    if cancel_requested:
+        print("Simulation cancelled after clean shutdown.")
+    else:
+        helper_functions.emit_progress(100.0, t_max)
+        print("Simulation finished!")
+
+    total_runtime = perf_counter() - total_start_time
+    print(f"Solver runtime: {total_runtime:.3f} s")
+    print("################################################################")
