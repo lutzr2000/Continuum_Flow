@@ -926,6 +926,33 @@ def main(config=None):
     print("################################################################")
 
 
+def compute_inital_velocity(simulation_cfg):
+    total_u = 0.0
+    total_v = 0.0
+    total_w = 0.0
+    inlet_count = 0
+
+    for face_cfg in (simulation_cfg.get("domain") or {}).get("boundary_conditions", {}).values():
+        bc_type = face_cfg.get("type", 0)
+        if isinstance(bc_type, str):
+            if bc_type.strip().upper() != "INFLOW":
+                continue
+        elif int(bc_type) != 1:
+            continue
+
+        velocity = face_cfg.get("velocity") or (0.0, 0.0, 0.0)
+        total_u += float(velocity[0]) if len(velocity) > 0 else 0.0
+        total_v += float(velocity[1]) if len(velocity) > 1 else 0.0
+        total_w += float(velocity[2]) if len(velocity) > 2 else 0.0
+        inlet_count += 1
+
+    if inlet_count == 0:
+        return 0.0, 0.0, 0.0
+
+    inv_count = 1.0 / float(inlet_count)
+    return total_u * inv_count, total_v * inv_count, total_w * inv_count
+
+
 def solver(config,obstacle_mask,source_mask):
     simulations = config.get("simulations")
 
@@ -938,9 +965,10 @@ def solver(config,obstacle_mask,source_mask):
     nx = simulations[0]["domain"]["grid"]["nx"]
     ny = simulations[0]["domain"]["grid"]["nx"]
     nz = simulations[0]["domain"]["grid"]["nx"]
+    shape = (nx,ny,nz)
 
     #------------tiles------------------
-    active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
+    active_tile_shape = kernel_config.active_tile_shape((shape))
 
     scalar_active_tiles = cuda.device_array(active_tile_shape, dtype=np.bool_)
     scalar_active_tiles_dilated = cuda.device_array(active_tile_shape, dtype=np.bool_)
@@ -953,28 +981,47 @@ def solver(config,obstacle_mask,source_mask):
 
     #------------fields------------------
     # velocity
-    u = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    u_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    v = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    v_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    w = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    w_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    u = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    u_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    v = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    v_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    w = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    w_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     # pressure
-    p = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    p_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    p = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    p_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     # scalars
-    temperature = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    temperature_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    smoke = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    smoke_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    fuel = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    fuel_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
-    flame = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    temperature = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    temperature_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    smoke = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    smoke_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    fuel = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    fuel_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    flame = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+
+    # forces
 
 
+    # scratch
 
+    #------------intitialise------------------
+    u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
+
+    u.copy_to_device(np.full((shape), u_initial, dtype=GPU_FIELD_DTYPE))
+    v.copy_to_device(np.full((shape), v_initial, dtype=GPU_FIELD_DTYPE))
+    w.copy_to_device(np.full((shape), w_initial, dtype=GPU_FIELD_DTYPE))
+
+    p.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
+
+    temperature.copy_to_device(np.full((shape), simulations[0].get("physics").get("temperature").get("reference_temperature"), dtype=GPU_FIELD_DTYPE)) 
+    smoke.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
+    fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
+    flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
+
+
+    #------------time loop------------------
     while t < t_max:
         
 
