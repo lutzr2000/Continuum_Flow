@@ -4,7 +4,6 @@ import queue
 import socket
 import threading
 from multiprocessing import shared_memory
-from time import perf_counter
 
 import numpy as np
 
@@ -148,19 +147,10 @@ def enqueue_device_output(
     """
     copies one output frame directly from CUDA device arrays into shared memory.
     """
-    timings = {
-        "wait_for_buffer": 0.0,
-        "device_pack": 0.0,
-        "device_copy": 0.0,
-    }
-
-    section_start = perf_counter()
     fields = buffer_pool.get()
-    timings["wait_for_buffer"] = perf_counter() - section_start
 
     staged_variables = []
     if device_staging_fields:
-        section_start = perf_counter()
         threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
         for variable_name in buffered_variables:
             staging_buffer = device_staging_fields.get(variable_name)
@@ -177,16 +167,13 @@ def enqueue_device_output(
 
         if staged_variables:
             cuda.synchronize()
-            timings["device_pack"] = perf_counter() - section_start
 
-    section_start = perf_counter()
     for variable_name in buffered_variables:
         field_info = fields[variable_name]
         source_field = source_device_fields[variable_name]
         if device_staging_fields and variable_name in device_staging_fields:
             source_field = device_staging_fields[variable_name]
         source_field.copy_to_host(field_info["array"])
-    timings["device_copy"] = perf_counter() - section_start
 
     write_queue.put(
         (
@@ -197,7 +184,6 @@ def enqueue_device_output(
             float(sparse_threshold),
         )
     )
-    return timings
 
 
 def enqueue_host_output(

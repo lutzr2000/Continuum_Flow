@@ -184,11 +184,27 @@ def _run_kernel(config_dict):
         if solver_backend == "CPU"
         else "Solver.Kernel_GPU.kernel"
     )
-    bootstrap_code = (
-        "import json, sys; "
-        "sys.path.insert(0, sys.argv[1]); "
-        f"import {kernel_module} as KernelMain; "
-        "KernelMain.main(json.load(sys.stdin))"
+    bootstrap_code = "\n".join(
+        (
+            "import cProfile, json, os, sys",
+            "sys.path.insert(0, sys.argv[1])",
+            f"import {kernel_module} as KernelMain",
+            "config = json.load(sys.stdin)",
+            "profile = cProfile.Profile()",
+            "simulations = config.get('simulations') or []",
+            "outputs = simulations[0].get('outputs', []) if simulations else []",
+            "output_cfg = outputs[0] if outputs else {}",
+            "output_dir = output_cfg.get('output_path', '')",
+            "profile_path = os.path.join(output_dir, 'snakeviz_profile.prof') if output_dir else ''",
+            "if output_dir:",
+            "    os.makedirs(output_dir, exist_ok=True)",
+            "try:",
+            "    profile.runcall(KernelMain.main, config)",
+            "finally:",
+            "    if profile_path:",
+            "        profile.dump_stats(profile_path)",
+            "        print(f'Snakeviz profile saved to: {profile_path}')",
+        )
     )
     process = subprocess.Popen(
         [python_executable, "-u", "-c", bootstrap_code, str(project_root)],
@@ -248,6 +264,43 @@ def _writer_process_count_from_config(config_dict):
         return 4
     performance_cfg = outputs[0].get("performance", {})
     return max(1, int(performance_cfg.get("writer_processes", 4)))
+
+
+def _snakeviz_profile_path_from_config(config_dict):
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return None
+    outputs = simulations[0].get("outputs") or ()
+    if not outputs:
+        return None
+    output_dir = (outputs[0].get("output_path") or "").strip()
+    if not output_dir:
+        return None
+    return str(Path(output_dir) / "snakeviz_profile.prof")
+
+
+def _snakeviz_debug_enabled_from_config(config_dict):
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return False
+    viewers = simulations[0].get("viewers") or ()
+    return any(bool(viewer_cfg.get("debug", False)) for viewer_cfg in viewers)
+
+
+def _launch_snakeviz(profile_path, python_executable):
+    if not profile_path or not Path(profile_path).exists():
+        return False
+    try:
+        subprocess.Popen(
+            [python_executable, "-m", "snakeviz", profile_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return False
+    return True
 
 
 def _read_kernel_output(process, output_queue):
@@ -489,6 +542,11 @@ class ContinuumFlow_OT_bake(bpy.types.Operator):
         config_dict = self._config_dict
         solver_divergence_message = self._solver_divergence_message
         cancel_requested = self._cancel_requested
+        profile_path = _snakeviz_profile_path_from_config(config_dict or {})
+        snakeviz_debug_enabled = _snakeviz_debug_enabled_from_config(config_dict or {})
+        python_executable = None
+        if self._session is not None:
+            python_executable = self._session.get("python_executable")
         self._cleanup_bake(context)
         if reader_error:
             self.report(
@@ -501,6 +559,11 @@ class ContinuumFlow_OT_bake(bpy.types.Operator):
                 f"Bake failed: Kernel process failed with exit code {return_code}{self._recent_kernel_output_detail()}",
             )
             return {"CANCELLED"}
+        if snakeviz_debug_enabled and python_executable and not _launch_snakeviz(profile_path, python_executable):
+            self.report(
+                {"WARNING"},
+                "Bake finished, but Snakeviz could not be started automatically.",
+            )
         try:
             imported_count, missing_directories = BakeStorage._import_baked_vdbs(
                 config_dict

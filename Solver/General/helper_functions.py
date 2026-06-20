@@ -3,7 +3,6 @@ import json
 import os
 import sys
 from ctypes import wintypes
-from time import perf_counter
 
 import numpy as np
 
@@ -96,44 +95,6 @@ class MemoryUsageTracker:
         print(
             f"Max {self.label} usage: "
             f"{_format_bytes(self._peak_usage)}{_format_percentage(self._peak_usage, self._capacity_bytes)}"
-        )
-
-
-def _record_timing(stats, name, elapsed):
-    """
-    Accumulate wall-clock timings for one named solver section.
-    """
-    entry = stats.get(name)
-    if entry is None:
-        stats[name] = {"total": float(elapsed), "count": 1}
-        return
-    entry["total"] += float(elapsed)
-    entry["count"] += 1
-
-
-def _print_timing_summary(stats, total_runtime, step_count, output_frame_count):
-    """
-    Print a compact timing table for the recorded solver sections.
-    """
-    print("Timing summary:")
-    print(f"  Sim steps: {int(step_count)}")
-    print(f"  Output frames enqueued: {int(output_frame_count)}")
-    print(f"  Solver wall time: {total_runtime:.3f} s")
-
-    if not stats:
-        print("  No timing sections were recorded.")
-        return
-
-    for name, entry in sorted(
-        stats.items(), key=lambda item: item[1]["total"], reverse=True
-    ):
-        total = entry["total"]
-        count = entry["count"]
-        avg_ms = (1000.0 * total / count) if count > 0 else 0.0
-        share = (100.0 * total / total_runtime) if total_runtime > 0.0 else 0.0
-        print(
-            f"  {name:<28} total={total:8.3f} s  "
-            f"calls={count:6d}  avg={avg_ms:8.3f} ms  share={share:6.2f}%"
         )
 
 
@@ -302,14 +263,10 @@ def _build_runtime_data(domain_cfg, obstacle_entries, source_entries, force_entr
         gpu_obstacles,
     )
     source_data = source_bc.build_source_data(domain_cfg, source_entries)
-    force_start = perf_counter()
     force_data = forcing.build_force_field_data(
         domain_cfg, force_entries, dtype=np.float32
     )
-    runtime_timings = {
-        "init_forces": perf_counter() - force_start,
-    }
-    return obstacle_data, source_data, force_data, runtime_timings
+    return obstacle_data, source_data, force_data
 
 
 def _source_temperature_max(source_data):
@@ -834,7 +791,7 @@ def apply_config(config):
     # Build persistent runtime data derived from the exported node config.
     bc_config = build_boundary_config(domain_cfg)
     initial_velocity = initial_velocity_from_inflows(bc_config)
-    obstacle_data, source_data, force_data, runtime_timings = _build_runtime_data(
+    obstacle_data, source_data, force_data = _build_runtime_data(
         domain_cfg,
         obstacle_entries,
         source_entries,
@@ -941,7 +898,6 @@ def apply_config(config):
         "obstacle_mask": obstacle_data["mask"],
         "source_field_data": source_data,
         "force_field_data": force_data,
-        "INIT_FORCE_BUILD_TIME": float(runtime_timings.get("init_forces", 0.0)),
         "HAS_DYNAMIC_BOUNDARIES": bool(
             obstacle_data.get("is_animated", False)
             or source_data.get("is_animated", False)

@@ -755,6 +755,7 @@ class ContinuumFlowViewerNode(ContinuumFlowBaseNode):
     bl_width_max = 260.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
     live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
+    debug: BoolProperty(name="Debug", default=False, description="Open Snakeviz automatically after the bake using the generated .prof file", options=set())  # type: ignore
 
     def _sync_node(self):
         ensure_socket(self.inputs, ContinuumFlowResultSocket.bl_idname, "Result")
@@ -772,6 +773,7 @@ class ContinuumFlowViewerNode(ContinuumFlowBaseNode):
             icon="HIDE_ON" if bool(self.domain_preview_active) else "HIDE_OFF",
         )
         col.prop(self, "live_preview")
+        col.prop(self, "debug")
 
 
 class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
