@@ -269,7 +269,6 @@ def update_velocity_maccormack(
     delta,
     rho,
     nu,
-    maccormack_factor,
     active_tile_mask,
 ):
     """
@@ -347,9 +346,9 @@ def update_velocity_maccormack(
     # u_n   -- original velocity
     # u**   -- reversely advected velocity
     #          (without numerical inaccuracies, this would equal u_n again)
-    corrected_u = advected_u + maccormack_factor * (u_center - reverse_u)
-    corrected_v = advected_v + maccormack_factor * (v_center - reverse_v)
-    corrected_w = advected_w + maccormack_factor * (w_center - reverse_w)
+    corrected_u = advected_u + 0.5 * (u_center - reverse_u)
+    corrected_v = advected_v + 0.5 * (v_center - reverse_v)
+    corrected_w = advected_w + 0.5 * (w_center - reverse_w)
 
     # find backtraced coords
     x0, y0, z0, x1, y1, z1, _, _, _ = _prepare_trilinear_coords(

@@ -585,7 +585,7 @@ def _run_time_step(state, blockspergrid_3d):
 
     # ------------Velocity projection-------------------
     pressure_solve.project_velocity_kernel[
-        blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D
+        scalar_tile_blocks, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
     ](
         u,
         v,
@@ -1017,6 +1017,11 @@ def solver(config,obstacle_mask,source_mask):
     fuel_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     flame = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
+    # depart
+    depart_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    depart_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    depart_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+
     # forces
     fx = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     fy = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -1126,6 +1131,106 @@ def solver(config,obstacle_mask,source_mask):
                 fz,
                 delta,
                 simulations[0].get("physics").get("extras").get("vorticity"),
+                scalar_active_tiles_dilated,
+            )
+            cuda.synchronize()
+
+            # ------------Velocity update-------------------
+            advection_schemes.preserve_inactive_velocity_tiles[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                u,
+                v,
+                w,
+                u_work,
+                v_work,
+                w_work,
+                scalar_active_tiles_dilated,
+            )
+            advection_schemes.advect_velocity_semi_lagrangian[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                u,
+                v,
+                w,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                depart_x,
+                depart_y,
+                depart_z,
+                dt,
+                delta,
+                scalar_active_tiles_dilated,
+            )
+            advection_schemes.update_velocity_maccormack[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                u,
+                v,
+                w,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+                depart_x,
+                depart_y,
+                depart_z,
+                dt,
+                fx,
+                fy,
+                fz,
+                u_work,
+                v_work,
+                w_work,
+                delta,
+                simulations[0].get("physics").get("fluid").get("density"),
+                simulations[0].get("physics").get("fluid").get("viscosity"),
+                scalar_active_tiles_dilated,
+            )
+            cuda.synchronize()
+
+
+            # ------------Velocity swap-------------------
+            u, u_work = u_work, u
+            v, v_work = v_work, v
+            w, w_work = w_work, w
+
+            # # ------------Pressure solve-------------------
+            # p = pressure_solve.pressure_poisson(
+            #     u,
+            #     v,
+            #     w,
+            #     p,
+            #     temperature,
+            #     scratch_A_x,
+            #     dt,
+            #     gpu_fields["point_divergence"],
+            #     source_mask,
+            #     gpu_fields["source_entry_masks"],
+            #     gpu_fields["source_extra_pressure_values"],
+            #     delta,
+            #     simulations[0].get("physics").get("fluid").get("density"),
+            #     simulations[0].get("physics").get("temperature").get("expansion_rate"),
+            #     simulations[0].get("physics").get("temperature").get("reference_temperature"),
+            #     scalar_active_tiles_dilated,
+            #     simulations[0].get("settings").get("iterations"),
+            #     rhs_partial_sums=gpu_fields["pressure_rhs_partial_sums"],
+            #     rhs_sum_buffer=gpu_fields["pressure_rhs_sum"],
+            # )
+            # cuda.synchronize()
+
+            # ------------Velocity projection-------------------
+            pressure_solve.project_velocity_kernel[
+                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            ](
+                u,
+                v,
+                w,
+                p,
+                obstacle_mask,
+                dt,
+                delta,
+                simulations[0].get("physics").get("fluid").get("density"),
                 scalar_active_tiles_dilated,
             )
             cuda.synchronize()

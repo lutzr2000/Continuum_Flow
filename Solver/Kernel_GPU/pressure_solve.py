@@ -4,6 +4,7 @@ from numba import cuda
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.kernel_config as kernel_config
+from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
 
 REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
 
@@ -364,15 +365,18 @@ def project_velocity_kernel(
     Obstacle cells are skipped because their wall velocities are restored by the
     obstacle boundary conditions after the projection pass.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
 
+    if (
+        tile_i >= active_tile_mask.shape[0]
+        or tile_j >= active_tile_mask.shape[1]
+        or tile_k >= active_tile_mask.shape[2]
+    ):
+        return
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    if obstacle_mask[i, j, k] or not _is_active_pressure_cell(
-        active_tile_mask, i, j, k
-    ):
+    if active_tile_mask[tile_i, tile_j, tile_k] == 0 or obstacle_mask[i, j, k]:
         return
 
     pressure_coeff = dt / (2.0 * rho * delta)
@@ -388,7 +392,6 @@ def pressure_poisson(
     w,
     p,
     T,
-    obstacle_mask,
     b,
     dt,
     point_divergence,
