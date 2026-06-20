@@ -10,10 +10,10 @@ def obstacle_bc_kernel(
     fuel,
     flame,
     mask,
-    has_obstacle_velocity,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
+    has_obstacle_velocity=False,
+    obstacle_velocity_x=0,
+    obstacle_velocity_y=0,
+    obstacle_velocity_z=0,
 ):
     """
     applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.

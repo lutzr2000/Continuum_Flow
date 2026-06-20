@@ -302,17 +302,13 @@ def source_bc_kernel(
     smoke,
     fuel,
     source_mask,
-    source_entry_masks,
-    source_temperature_values,
-    source_smoke_values,
-    source_fuel_values,
-    source_velocity_enabled,
-    source_velocity_x_values,
-    source_velocity_y_values,
-    source_velocity_z_values,
+    temperature_value,
+    smoke_value,
+    fuel_value,
+    velocity_x_value,
+    velocity_y_value,
+    velocity_z_value,
     dt,
-    apply_velocity,
-    apply_scalars,
 ):
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
@@ -326,42 +322,20 @@ def source_bc_kernel(
     if not source_mask[i, j, k]:
         return
 
-    (
-        source_temperature_value,
-        source_smoke_value,
-        source_fuel_value,
-        has_velocity_target,
-        velocity_x_value,
-        velocity_y_value,
-        velocity_z_value,
-    ) = resolve_source_cell_targets(
-        i,
-        j,
-        k,
-        source_entry_masks,
-        source_temperature_values,
-        source_smoke_values,
-        source_fuel_values,
-        source_velocity_enabled,
-        source_velocity_x_values,
-        source_velocity_y_values,
-        source_velocity_z_values,
-    )
-
-    if apply_velocity and has_velocity_target:
+    if velocity_x_value != 0 and velocity_y_value != 0 and velocity_z_value != 0:
         u[i, j, k] = velocity_x_value
         v[i, j, k] = velocity_y_value
         w[i, j, k] = velocity_z_value
 
-    if apply_scalars:
-        if T[i, j, k] < source_temperature_value:
-            T[i, j, k] = source_temperature_value
+    T[i, j, k] = temperature_value
 
+    if smoke_value != 0:
         smoke[i, j, k] = min(
-            max(smoke[i, j, k] + dt * 10.0 * source_smoke_value, 0.0),
+            max(smoke[i, j, k] + dt * 10.0 * smoke_value, 0.0),
             100.0,
         )
+    if fuel_value != 0:
         fuel[i, j, k] = min(
-            max(fuel[i, j, k] + dt * 10.0 * source_fuel_value, 0.0),
+            max(fuel[i, j, k] + dt * 10.0 * fuel_value, 0.0),
             100.0,
         )

@@ -847,7 +847,53 @@ def main(config=None):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+def get_source_values(simulations, var_name, t, index=None):
+    source_entries = simulations[0].get("sources") or []
+    values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
+
+    for source_idx, source_entry in enumerate(source_entries):
+        value = source_entry.get(var_name, 0.0)
+
+        animation_entry = (source_entry.get("animations") or {}).get(var_name) or {}
+        animation_times = animation_entry.get("times") or ()
+        animation_values = animation_entry.get("values") or ()
+
+        if animation_times and animation_values:
+            nearest_time_idx = min(
+                range(len(animation_times)),
+                key=lambda idx: abs(float(animation_times[idx]) - float(t)),
+            )
+            value = animation_values[nearest_time_idx]
+
+        if index is not None:
+            if value is None:
+                value = 0.0
+            else:
+                value = value[index]
+
+        values[source_idx] = np.asarray(value, dtype=GPU_FIELD_DTYPE)
+
+    return values
+
+
+
+
+
 def apply_all_BC(
+    simulations,
+    t,
     u,
     v,
     w,
@@ -857,34 +903,18 @@ def apply_all_BC(
     fuel,
     flame,
     dt,
-    bc_config,
-    has_obstacle,
-    has_obstacle_velocity,
     obstacle_mask,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
-    has_source,
-    source_mask,
-    source_entry_masks,
-    source_temperature_values,
-    source_smoke_values,
-    source_fuel_values,
-    source_velocity_enabled,
-    source_velocity_x_values,
-    source_velocity_y_values,
-    source_velocity_z_values,
-    apply_source_velocity=True,
-    apply_source_scalars=True,
+    source_masks
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
     Domain BCs are applied always, source and obstalces are optional depending on
     user config.
     """
+    bc_config = simulations[0].get("domain", {}).get("boundary_conditions", {})
     u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
-    if has_obstacle:
+    if bool(np.any(obstacle_mask)):
         blockspergrid = kernel_config.volume_blocks_per_grid(
             obstacle_mask.shape,
             kernel_config.THREADS_PER_BLOCK_3D,
@@ -899,63 +929,41 @@ def apply_all_BC(
             fuel,
             flame,
             obstacle_mask,
-            has_obstacle_velocity,
-            obstacle_velocity_x,
-            obstacle_velocity_y,
-            obstacle_velocity_z,
         )
 
-    if has_source:
-        blockspergrid = kernel_config.volume_blocks_per_grid(
-            source_mask.shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-        source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
-            u,
-            v,
-            w,
-            T,
-            smoke,
-            fuel,
-            source_mask,
-            source_entry_masks,
-            source_temperature_values,
-            source_smoke_values,
-            source_fuel_values,
-            source_velocity_enabled,
-            source_velocity_x_values,
-            source_velocity_y_values,
-            source_velocity_z_values,
-            dt,
-            apply_source_velocity,
-            apply_source_scalars,
-        )
-    return u, v, w, p, T, smoke, fuel, flame
+    if bool(np.any(source_masks)):
+        source_temperature_values = get_source_values(simulations,"temperature",t)
+        source_smoke_values = get_source_values(simulations,"smoke",t)
+        source_fuel_values = get_source_values(simulations,"fuel",t)
+        source_velocity_x_values = get_source_values(simulations, "velocity", t, 0)
+        source_velocity_y_values = get_source_values(simulations, "velocity", t, 1)
+        source_velocity_z_values = get_source_values(simulations, "velocity", t, 2)
 
+        source_count = source_masks.shape[0]
+        for source_idx in range(source_count):
+            source_mask = source_masks[source_idx]
 
-
-
-
-
-
-def get_source_values(simulations,var_name):
-    source_entries = simulations[0].get("sources") or []
-    values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
-    for source_idx, source_entry in enumerate(source_entries):
-        extra_value = float(source_entry.get(var_name, 0.0))
-        animation_entry = (source_entry.get("animations") or {}).get(var_name) or {}
-        animation_times = animation_entry.get("times") or ()
-        animation_values = animation_entry.get("values") or ()
-        if animation_times and animation_values:
-            nearest_time_idx = min(
-                range(len(animation_times)),
-                key=lambda idx: abs(float(animation_times[idx]) - float(t)),
+            blockspergrid = kernel_config.volume_blocks_per_grid(
+                source_mask.shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
             )
-            extra_value = float(animation_values[nearest_time_idx])
-        values[source_idx] = np.asarray(extra_value, dtype=GPU_FIELD_DTYPE)
-
-    return values
-
+            source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
+                u,
+                v,
+                w,
+                T,
+                smoke,
+                fuel,
+                source_mask,
+                source_temperature_values,
+                source_smoke_values,
+                source_fuel_values,
+                source_velocity_x_values,
+                source_velocity_y_values,
+                source_velocity_z_values,
+                dt
+            )
+    return u, v, w, p, T, smoke, fuel, flame
 
 
 
@@ -1266,37 +1274,22 @@ def solver(config,obstacle_mask,source_masks):
             )
             cuda.synchronize()
 
-            # # ------------BC-------------------
-            # u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
-            #     u,
-            #     v,
-            #     w,
-            #     p,
-            #     T,
-            #     smoke,
-            #     fuel,
-            #     flame,
-            #     dt,
-            #     simulation_params["BC_CONFIG"],
-            #     gpu_constants["HAS_OBSTACLE"],
-            #     gpu_constants["HAS_OBSTACLE_VELOCITY"],
-            #     gpu_fields["obstacle_mask"],
-            #     gpu_fields["obstacle_velocity_x"],
-            #     gpu_fields["obstacle_velocity_y"],
-            #     gpu_fields["obstacle_velocity_z"],
-            #     gpu_constants["HAS_SOURCE"],
-            #     gpu_fields["source_mask"],
-            #     gpu_fields["source_entry_masks"],
-            #     gpu_fields["source_temperature_values"],
-            #     gpu_fields["source_smoke_values"],
-            #     gpu_fields["source_fuel_values"],
-            #     gpu_fields["source_velocity_enabled"],
-            #     gpu_fields["source_velocity_x_values"],
-            #     gpu_fields["source_velocity_y_values"],
-            #     gpu_fields["source_velocity_z_values"],
-            #     apply_source_velocity=True,
-            #     apply_source_scalars=False,
-            # )
-            # cuda.synchronize()
+            # ------------BC-------------------
+            u, v, w, p, T, smoke, fuel, flame = apply_all_BC(
+                simulations,
+                t,
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                flame,
+                dt,
+                obstacle_mask,
+                source_masks,
+            )
+            cuda.synchronize()
 
         t = t + dt

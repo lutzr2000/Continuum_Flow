@@ -14,6 +14,40 @@ SIDE_TO_AXIS_AND_INDEX = {
     "z_high": (2, 1),
 }
 
+def convert_bc_config_format(bc_config):
+    converted = {}
+    type_map = {
+        "OUTFLOW": 0,
+        "INFLOW": 1,
+        "WALL": 2,
+        "SLIP": 3,
+    }
+
+    for side in SIDE_TO_AXIS_AND_INDEX:
+        face_cfg = (bc_config or {}).get(side, {})
+        bc_type = face_cfg.get("type", 0)
+        if isinstance(bc_type, str):
+            bc_type = type_map.get(bc_type.strip().upper(), 0)
+        else:
+            bc_type = int(bc_type)
+
+        velocity = face_cfg.get("velocity") or (0.0, 0.0, 0.0)
+        converted_face = {
+            "type": bc_type,
+            "u": float(velocity[0]) if len(velocity) > 0 else 0.0,
+            "v": float(velocity[1]) if len(velocity) > 1 else 0.0,
+            "w": float(velocity[2]) if len(velocity) > 2 else 0.0,
+        }
+
+        if "temperature" in face_cfg:
+            converted_face["temperature"] = float(face_cfg["temperature"])
+        if "T" in face_cfg:
+            converted_face["T"] = float(face_cfg["T"])
+
+        converted[side] = converted_face
+
+    return converted
+
 
 @cuda.jit(cache=True)
 def _pressure_poisson_apply_neumann_bcs(p):
@@ -339,6 +373,7 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     All six domain faces are packed into scalar launch arguments and applied in
     one GPU kernel to reduce launch overhead.
     """
+    bc_config = convert_bc_config_format(bc_config)
     face_args = {}
     for side in SIDE_TO_AXIS_AND_INDEX:
         bc = bc_config[side]
