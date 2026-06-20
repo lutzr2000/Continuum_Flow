@@ -108,19 +108,15 @@ def build_initial_host_state(
 
     obstacle_mask_host = np.asarray(obstacle_data["mask"])
     obstacle_has_velocity = requires_obstacle_velocity_allocation(obstacle_data)
-    obstacle_velocity_x_host = None
-    obstacle_velocity_y_host = None
-    obstacle_velocity_z_host = None
-    if obstacle_has_velocity:
-        obstacle_velocity_x_host = np.asarray(
-            obstacle_data["velocity_x"], dtype=precision_dtype
-        )
-        obstacle_velocity_y_host = np.asarray(
-            obstacle_data["velocity_y"], dtype=precision_dtype
-        )
-        obstacle_velocity_z_host = np.asarray(
-            obstacle_data["velocity_z"], dtype=precision_dtype
-        )
+    obstacle_velocity_x_host = np.asarray(
+        obstacle_data["velocity_x"], dtype=precision_dtype
+    )
+    obstacle_velocity_y_host = np.asarray(
+        obstacle_data["velocity_y"], dtype=precision_dtype
+    )
+    obstacle_velocity_z_host = np.asarray(
+        obstacle_data["velocity_z"], dtype=precision_dtype
+    )
 
     source_field_data = simulation_params["source_field_data"]
     if source_prepare is not None:

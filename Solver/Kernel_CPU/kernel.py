@@ -64,9 +64,10 @@ def apply_all_BC(
             fuel,
             flame,
             obstacle_mask,
-            obstacle_velocity_x if has_obstacle_velocity else None,
-            obstacle_velocity_y if has_obstacle_velocity else None,
-            obstacle_velocity_z if has_obstacle_velocity else None,
+            has_obstacle_velocity,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
         )
 
     if has_source:

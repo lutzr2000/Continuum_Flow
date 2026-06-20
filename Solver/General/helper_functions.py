@@ -14,7 +14,6 @@ except ImportError:
 import Solver.General.forcing as forcing
 import Solver.General.obstacles as general_obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
-import Solver.Kernel_GPU.Boundary_Conditions.obstacles as gpu_obstacles
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
@@ -260,7 +259,6 @@ def _build_runtime_data(domain_cfg, obstacle_entries, source_entries, force_entr
     obstacle_data = general_obstacles.build_obstacle_data(
         domain_cfg,
         obstacle_entries,
-        gpu_obstacles,
     )
     source_data = source_bc.build_source_data(domain_cfg, source_entries)
     force_data = forcing.build_force_field_data(

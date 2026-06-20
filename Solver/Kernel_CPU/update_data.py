@@ -1,40 +1,35 @@
 import numpy as np
 
+import Solver.General.obstacles as general_obstacles
 import Solver.General.sources as general_sources
 import Solver.General.update_data as general_update_data
-import Solver.Kernel_CPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_CPU.kernel_config as kernel_config
 
 
 def _set_cpu_obstacle_velocity_fields(
-    cpu_fields, obstacle_data, precision_dtype, allocate_velocity
+    cpu_fields, obstacle_data, precision_dtype, has_obstacle_velocity
 ):
     """
-    Point CPU obstacle velocity fields either at the live host arrays or at None.
+    Point CPU obstacle velocity fields at the current host arrays.
     """
-    if allocate_velocity:
-        cpu_fields["obstacle_velocity_x"] = np.asarray(
-            obstacle_data["velocity_x"], dtype=precision_dtype
-        )
-        cpu_fields["obstacle_velocity_y"] = np.asarray(
-            obstacle_data["velocity_y"], dtype=precision_dtype
-        )
-        cpu_fields["obstacle_velocity_z"] = np.asarray(
-            obstacle_data["velocity_z"], dtype=precision_dtype
-        )
-    else:
-        cpu_fields["obstacle_velocity_x"] = None
-        cpu_fields["obstacle_velocity_y"] = None
-        cpu_fields["obstacle_velocity_z"] = None
-    return allocate_velocity
+    cpu_fields["obstacle_velocity_x"] = np.asarray(
+        obstacle_data["velocity_x"], dtype=precision_dtype
+    )
+    cpu_fields["obstacle_velocity_y"] = np.asarray(
+        obstacle_data["velocity_y"], dtype=precision_dtype
+    )
+    cpu_fields["obstacle_velocity_z"] = np.asarray(
+        obstacle_data["velocity_z"], dtype=precision_dtype
+    )
+    return has_obstacle_velocity
 
 
 def rebuild_cpu_boundary_data(simulation_params):
     """Rebuild obstacle/source runtime data so the CPU solver uses CPU-side modules only."""
     return general_update_data.rebuild_boundary_data(
         simulation_params,
-        obstacle_bc.build_obstacle_data,
+        general_obstacles.build_obstacle_data,
         source_bc.build_source_data,
     )
 
@@ -230,7 +225,7 @@ def update_dynamic_boundary_data_on_cpu(simulation_params, cpu_fields, cpu_const
 
     obstacle_data = simulation_params.get("obstacle_data")
     if obstacle_data is not None and obstacle_data.get("runtime") is not None and obstacle_data.get("is_animated", False):
-        obstacle_bc.update_obstacle_mask(obstacle_data, time_value)
+        general_obstacles.update_obstacle_mask(obstacle_data, time_value)
         cpu_fields["obstacle_mask"] = obstacle_data["mask"]
         cpu_constants["HAS_OBSTACLE"] = bool(np.any(obstacle_data["mask"]))
         cpu_constants["HAS_OBSTACLE_VELOCITY"] = _set_cpu_obstacle_velocity_fields(

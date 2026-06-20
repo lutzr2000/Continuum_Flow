@@ -1,33 +1,5 @@
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.obstacles as obstacles
-
-
-def update_obstacle_mask(obstacle_data, time_value):
-    """
-    Update the combined obstacle mask for the current simulation time.
-
-    """
-    runtime = obstacle_data.get("runtime")
-    if runtime is None:
-        return obstacle_data["mask"]
-
-    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = (
-        obstacles.update_dynamic_obstacle_data(
-            runtime,
-            time_value,
-            out_mask=obstacle_data["mask"],
-            out_velocity_x=obstacle_data["velocity_x"],
-            out_velocity_y=obstacle_data["velocity_y"],
-            out_velocity_z=obstacle_data["velocity_z"],
-        )
-    )
-    obstacle_data["mask"] = updated_mask
-    obstacle_data["velocity_x"] = updated_velocity_x
-    obstacle_data["velocity_y"] = updated_velocity_y
-    obstacle_data["velocity_z"] = updated_velocity_z
-    return updated_mask
-
 
 @cuda.jit(cache=True)
 def obstacle_bc_kernel(

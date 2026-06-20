@@ -31,12 +31,12 @@ def combine_exported_obstacles(obstacle_entries):
     }
 
 
-def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
+def build_obstacle_data(domain_cfg, obstacle_entries):
     """
     Build the voxel obstacle mask from exported obstacle nodes.
 
-    The backend module is responsible for the obstacle runtime and dynamic
-    obstacle sampling implementation.
+    Dynamic obstacle runtime setup and host-side obstacle sampling are
+    handled directly by this shared module.
     """
     obstacle_cfg = combine_exported_obstacles(obstacle_entries)
     nx = int(domain_cfg["grid"]["nx"])
@@ -56,7 +56,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
         mesh_objects = mesh_cfg.get(
             "objects", mesh_cfg if isinstance(mesh_cfg, list) else []
         )
-        obstacle_runtime = obstacles_backend.build_dynamic_runtime(
+        obstacle_runtime = build_dynamic_runtime(
             nx,
             ny,
             nz,
@@ -67,7 +67,7 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
             origin_z=origin_z,
         )
         obstacle_mask, obstacle_velocity_x, obstacle_velocity_y, obstacle_velocity_z = (
-            obstacles_backend.update_dynamic_obstacle_data(
+            update_dynamic_obstacle_data(
                 obstacle_runtime,
                 0.0,
             )
@@ -94,6 +94,40 @@ def build_obstacle_data(domain_cfg, obstacle_entries, obstacles_backend):
         }
 
     raise ValueError(f"Unsupported obstacle shape '{obstacle_cfg['shape']}'")
+
+
+def update_obstacle_mask(
+    obstacle_data, time_value, obstacle_updater=None
+):
+    """
+    Update the combined obstacle mask and obstacle wall velocities in-place.
+
+    The optional obstacle_updater hook exists so CPU/GPU boundary modules can
+    pass their backend-specific update function while sharing the same runtime
+    bookkeeping code.
+    """
+    runtime = obstacle_data.get("runtime")
+    if runtime is None:
+        return obstacle_data["mask"]
+
+    if obstacle_updater is None:
+        obstacle_updater = update_dynamic_obstacle_data
+
+    updated_mask, updated_velocity_x, updated_velocity_y, updated_velocity_z = (
+        obstacle_updater(
+            runtime,
+            time_value,
+            out_mask=obstacle_data["mask"],
+            out_velocity_x=obstacle_data["velocity_x"],
+            out_velocity_y=obstacle_data["velocity_y"],
+            out_velocity_z=obstacle_data["velocity_z"],
+        )
+    )
+    obstacle_data["mask"] = updated_mask
+    obstacle_data["velocity_x"] = updated_velocity_x
+    obstacle_data["velocity_y"] = updated_velocity_y
+    obstacle_data["velocity_z"] = updated_velocity_z
+    return updated_mask
 
 
 # -----------------------------------------------------------------------------
