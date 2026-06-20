@@ -1,12 +1,7 @@
 from time import perf_counter
-
 from pathlib import Path
-import warnings
 import numpy as np
 from numba import cuda
-from numba.cuda.core.errors import (
-    NumbaPerformanceWarning as CudaNumbaPerformanceWarning,
-)
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
@@ -22,12 +17,6 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
-
-warnings.filterwarnings(
-    "ignore",
-    message=r"Grid size .* will likely result in GPU under-utilization due to low occupancy\.",
-    category=CudaNumbaPerformanceWarning,
-)
 
 GPU_FIELD_DTYPE = np.float32
 
@@ -939,5 +928,91 @@ def main(config=None):
 
 def solver(config,obstacle_mask,source_mask):
     simulations = config.get("simulations")
-    settings_cfg = simulations[0].get("settings")
-    print(settings_cfg.get("dt"))
+
+    #------------time-------------------
+    t = 0
+    dt = simulations[0].get("settings").get("dt")
+    t_max = simulations[0].get("settings").get("simulation_length")
+
+    #------------dimensions------------------
+    nx = simulations[0]["domain"]["grid"]["nx"]
+    ny = simulations[0]["domain"]["grid"]["nx"]
+    nz = simulations[0]["domain"]["grid"]["nx"]
+
+    #------------tiles------------------
+    active_tile_shape = kernel_config.active_tile_shape((nx, ny, nz))
+
+    scalar_active_tiles = cuda.device_array(active_tile_shape, dtype=np.bool_)
+    scalar_active_tiles_dilated = cuda.device_array(active_tile_shape, dtype=np.bool_)
+    scalar_tile_padding = kernel_config.active_tile_padding_tiles()
+
+    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
+        scalar_active_tiles.shape,
+        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+    )
+
+    #------------fields------------------
+    # velocity
+    u = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    u_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    v = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    v_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    w = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    w_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+
+    # pressure
+    p = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    p_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+
+    # scalars
+    temperature = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    temperature_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    smoke = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    smoke_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    fuel = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    fuel_work = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+    flame = cuda.device_array((nx, ny, nz), dtype=GPU_FIELD_DTYPE)
+
+
+
+    while t < t_max:
+        
+
+
+        #------------Start Active tiles-------------------
+        if simulations[0].get("settings").get("simulate_sparsely"):
+            scalar_update.build_active_scalar_tile_mask[
+                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+            ](
+                temperature,
+                smoke,
+                fuel,
+                flame,
+                scalar_active_tiles,
+                simulations[0].get("physics").get("temperature").get("reference_temperature"),
+                simulations[0].get("settings").get("adaptive_domain_threshold"),
+            )
+            scalar_update.dilate_active_scalar_tile_mask[
+                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+            ](
+                scalar_active_tiles,
+                scalar_active_tiles_dilated,
+                scalar_tile_padding,
+            )
+        else:
+            scalar_update.fill_active_scalar_tile_mask[
+                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+            ](
+                scalar_active_tiles,
+                np.bool_(True),
+            )
+            scalar_update.fill_active_scalar_tile_mask[
+                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
+            ](
+                scalar_active_tiles_dilated,
+                np.bool_(True),
+            )
+        cuda.synchronize()
+
+
+        t = t + dt
