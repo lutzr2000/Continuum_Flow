@@ -1092,6 +1092,8 @@ def solver(config,obstacle_mask,source_masks):
 
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
+    force_zeros_host = np.zeros(shape, dtype=GPU_FIELD_DTYPE)
+    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
 
     # ------------Prepare output-------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
@@ -1145,6 +1147,11 @@ def solver(config,obstacle_mask,source_masks):
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
         
+        ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
+        fx.copy_to_device(force_zeros_host)
+        fy.copy_to_device(force_zeros_host)
+        fz.copy_to_device(force_zeros_host)
+        ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
 
         #------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
