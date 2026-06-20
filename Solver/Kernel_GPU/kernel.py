@@ -935,3 +935,9 @@ def main(config=None):
     total_runtime = perf_counter() - state["total_start_time"]
     print(f"Solver runtime: {total_runtime:.3f} s")
     print("################################################################")
+
+
+def solver(config,obstacle_mask,source_mask):
+    simulations = config.get("simulations")
+    settings_cfg = simulations[0].get("settings")
+    print(settings_cfg.get("dt"))
