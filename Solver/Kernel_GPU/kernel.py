@@ -60,6 +60,9 @@ def apply_all_BC(
     flame,
     dt,
     obstacle_mask,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
     source_masks
 ):
     """
@@ -85,6 +88,9 @@ def apply_all_BC(
             fuel,
             flame,
             obstacle_mask,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
         )
 
     if bool(np.any(source_masks)):
@@ -315,6 +321,26 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_z,
         )
 
+        # ------------BC-------------------
+        u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
+            simulations,
+            t,
+            u,
+            v,
+            w,
+            p,
+            temperature,
+            smoke,
+            fuel,
+            flame,
+            dt,
+            obstacle_mask,
+            scratch_A_x,
+            scratch_A_y,
+            scratch_A_z,
+            source_masks,
+        )
+
         # ------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask[
@@ -461,23 +487,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             delta,
             simulations[0].get("physics").get("fluid").get("density"),
             scalar_active_tiles_dilated,
-        )
-
-        # ------------BC-------------------
-        u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
-            simulations,
-            t,
-            u,
-            v,
-            w,
-            p,
-            temperature,
-            smoke,
-            fuel,
-            flame,
-            dt,
-            obstacle_mask,
-            source_masks,
         )
 
         # ------------Scalar update-------------------
