@@ -359,9 +359,6 @@ def solver(config,obstacle_mask,source_masks):
                 v,
                 w,
                 obstacle_mask,
-                scratch_A_x,
-                scratch_A_y,
-                scratch_A_z,
                 vorticity_magnitude,
                 delta,
                 scalar_active_tiles_dilated,
@@ -369,10 +366,10 @@ def solver(config,obstacle_mask,source_masks):
             vorticity.apply_vorticity_confinement[
                 active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
             ](
+                u,
+                v,
+                w,
                 obstacle_mask,
-                scratch_A_x,
-                scratch_A_y,
-                scratch_A_z,
                 vorticity_magnitude,
                 fx,
                 fy,
@@ -607,8 +604,16 @@ def solver(config,obstacle_mask,source_masks):
                 t,
             )
 
+        # ------------Memory track-------------------
+        if t % 10 == 0:
+            ctx = cuda.current_context()
+            free, total = ctx.get_memory_info()
+            used = total - free
+            print(f"VRAM used: {used / 1024**2:.1f} MB")  
+
         t = t + dt
 
+    # ------------Shutdown-------------------
     if write_queue is not None:
         output_functions.shutdown_output(
             write_queue,
