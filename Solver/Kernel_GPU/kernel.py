@@ -5,7 +5,6 @@ from numba import cuda
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
-import Solver.Kernel_GPU.forces as forces
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
 import Solver.Kernel_GPU.vorticity as vorticity
@@ -14,6 +13,7 @@ import Solver.General.output_functions as output_functions
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.General.update_masks as update_masks
 
 GPU_FIELD_DTYPE = np.float32
 
@@ -156,23 +156,27 @@ def solver(config,obstacle_mask,source_masks):
     cancel_requested = False
     output_frame_count = 0
 
-    #------------time-------------------
+    # ------------time-------------------
     t = 0
     dt = simulations[0].get("settings").get("dt")
     t_max = simulations[0].get("settings").get("simulation_length")
 
-    #------------dimensions------------------
+    # ------------dimensions------------------
     delta = simulations[0].get("domain").get("resolution")
     nx = simulations[0]["domain"]["grid"]["nx"]
     ny = simulations[0]["domain"]["grid"]["ny"]
     nz = simulations[0]["domain"]["grid"]["nz"]
     shape = (nx,ny,nz)
 
+    origin_x = -0.5 * nx * delta
+    origin_y = -0.5 * ny * delta
+    origin_z = 0.0
+
     print("################################################################")
     print("Initialise")
     print("Cell count: ",int(nx * ny * nz))
 
-    #------------tiles------------------
+    # ------------tiles------------------
     active_tile_shape = kernel_config.active_tile_shape((shape))
 
     scalar_active_tiles = cuda.device_array(active_tile_shape, dtype=np.bool_)
@@ -184,7 +188,7 @@ def solver(config,obstacle_mask,source_masks):
         kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
     )
 
-    #------------fields------------------
+    # ------------fields------------------
     # velocity
     u = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     u_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -220,7 +224,7 @@ def solver(config,obstacle_mask,source_masks):
     # vortictiy
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
-    #------------intitialise------------------
+    # ------------intitialise------------------
     u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
 
     u.copy_to_device(np.full((shape), u_initial, dtype=GPU_FIELD_DTYPE))
@@ -233,7 +237,6 @@ def solver(config,obstacle_mask,source_masks):
     smoke.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
-
 
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
@@ -280,7 +283,7 @@ def solver(config,obstacle_mask,source_masks):
         storage_dtype=output_dtype,
     )
 
-    #------------time loop------------------
+    # ------------time loop------------------
     print("Start time iteration")
     helper_functions.emit_progress(0.0, t)
     next_output_time = 0.0
@@ -291,7 +294,25 @@ def solver(config,obstacle_mask,source_masks):
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        #------------Start Active tiles-------------------
+        # # ------------Update masks-------------------
+        # update_masks.sample_mask_backwards(
+        #     obstacle_mask,
+        #     base,
+        #     delta,
+        #     origin_x,
+        #     origin_y,
+        #     origin_z,
+        #     ix0,
+        #     ix1,
+        #     iy0,
+        #     iy1,
+        #     iz0,
+        #     iz1,
+        #     box,
+        #     inv,
+        # )
+
+        # ------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask[
                 active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
@@ -521,7 +542,7 @@ def solver(config,obstacle_mask,source_masks):
             simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
         )
-         
+
         # ------------Swap-------------------
         temperature, temperature_work = temperature_work, temperature
         smoke, smoke_work = smoke_work, smoke
