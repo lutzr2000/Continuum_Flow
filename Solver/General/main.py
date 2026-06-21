@@ -27,7 +27,7 @@ def main(config=None):
     origin_z = 0.0
 
     obstacle_mesh_objects = _collect_mesh_objects(simulation_cfg.get("obstacles"))
-    source_mesh_objects = _collect_mesh_objects(simulation_cfg.get("sources"))
+    source_entries = simulation_cfg.get("sources") or []
 
     obstacle_base_masks, obstacle_mask = voxelise_mesh_module.voxelise_mesh_all(
         nx,
@@ -39,18 +39,28 @@ def main(config=None):
         origin_y=origin_y,
         origin_z=origin_z,
     )
-    source_masks = [
-        voxelise_mesh_module.voxelise_mesh(
+
+    source_base_masks = []
+    source_masks = []
+    for source_entry in source_entries:
+        source_mesh_objects = _collect_mesh_objects([source_entry])
+        source_base_mask, source_mask = voxelise_mesh_module.voxelise_mesh_all(
             nx,
             ny,
             nz,
             delta,
-            source_mesh_object,
+            source_mesh_objects,
             origin_x=origin_x,
             origin_y=origin_y,
             origin_z=origin_z,
         )
-        for source_mesh_object in source_mesh_objects
-    ]
+        source_base_masks.append(source_base_mask)
+        source_masks.append(source_mask)
 
-    return gpu_kernel_module.solver(config, obstacle_base_masks, obstacle_mask, source_masks)
+    return gpu_kernel_module.solver(
+        config,
+        obstacle_base_masks,
+        obstacle_mask,
+        source_base_masks,
+        source_masks,
+    )

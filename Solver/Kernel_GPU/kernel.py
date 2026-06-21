@@ -149,7 +149,7 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def solver(config,obstacle_base_masks,obstacle_mask,source_masks):
+def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks):
     total_start_time = perf_counter()
     simulations = config.get("simulations")
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
@@ -298,6 +298,16 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_masks):
         update_masks.update_masks(
             obstacle_mask,
             obstacle_base_masks,
+            t,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+        )
+
+        update_masks.update_masks(
+            source_masks,
+            source_base_masks,
             t,
             delta,
             origin_x,

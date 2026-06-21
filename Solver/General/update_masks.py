@@ -128,7 +128,7 @@ def _world_matrix_at_time(mesh_object, time_value):
     return _as_f32(matrices[last_segment])
 
 
-def update_masks(
+def _update_one_mask(
     mask,
     base_masks,
     t,
@@ -137,14 +137,13 @@ def update_masks(
     origin_y,
     origin_z,
 ):
-
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
 
     mask.fill(False)
 
-    for obstacle_entry in base_masks:
-        mesh_object = obstacle_entry["mesh_object"]
-        base_voxels = obstacle_entry["voxels"]
+    for mask_entry in base_masks:
+        mesh_object = mask_entry["mesh_object"]
+        base_voxels = mask_entry["voxels"]
         base = base_voxels["mask"]
         box = base_voxels["origin"]
 
@@ -189,3 +188,40 @@ def update_masks(
         )
 
     return mask
+
+
+def update_masks(
+    masks,
+    base_masks,
+    t,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+):
+    if isinstance(masks, np.ndarray):
+        return _update_one_mask(
+            masks,
+            base_masks,
+            t,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+        )
+
+    updated_masks = []
+    mask_count = min(len(masks), len(base_masks))
+    for idx in range(mask_count):
+        updated_masks.append(
+            _update_one_mask(
+                masks[idx],
+                base_masks[idx],
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+            )
+        )
+    return updated_masks
