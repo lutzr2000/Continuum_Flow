@@ -61,47 +61,25 @@ def compute_vorticity(
     omega_magnitude[i, j, k] = math.sqrt(wx * wx + wy * wy + wz * wz)
 
 
-@cuda.jit(cache=True)
+@cuda.jit(device=True, inline=True, cache=True)
 def apply_vorticity_confinement(
     u,
     v,
     w,
     obstacle_mask,
     omega_magnitude,
-    Fx,
-    Fy,
-    Fz,
+    i,
+    j,
+    k,
+    nx,
+    ny,
+    nz,
     delta,
     vorticity_strength,
-    active_tile_mask,
 ):
     """
-    adds the vorticity confinement force to the body-force field on the GPU.
-
-    Each thread computes the gradient of the precomputed vorticity magnitude,
-    normalizes it to the confinement direction N and evaluates the force
-    epsilon * (N x omega) in one interior fluid cell. The resulting force is
-    accumulated into the existing force arrays so confinement combines with
-    turbulence, buoyancy and any authored force fields.
-
+    Compute the local vorticity confinement force in one GPU cell.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(
-        omega_magnitude.shape
-    )
-
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
-        return
-
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
     if (
         i < 2
         or j < 2
@@ -111,7 +89,7 @@ def apply_vorticity_confinement(
         or k >= nz - 2
         or obstacle_mask[i, j, k]
     ):
-        return
+        return 0.0, 0.0, 0.0
 
     half_inv_delta = 0.5 / delta
 
@@ -130,7 +108,7 @@ def apply_vorticity_confinement(
     grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
 
     if grad_length <= 1.0e-12:
-        return
+        return 0.0, 0.0, 0.0
 
     nx_dir = grad_x / grad_length
     ny_dir = grad_y / grad_length
@@ -149,6 +127,8 @@ def apply_vorticity_confinement(
     wy = du_dz - dw_dx
     wz = dv_dx - du_dy
 
-    Fx[i, j, k] += vorticity_strength * (ny_dir * wz - nz_dir * wy)
-    Fy[i, j, k] += vorticity_strength * (nz_dir * wx - nx_dir * wz)
-    Fz[i, j, k] += vorticity_strength * (nx_dir * wy - ny_dir * wx)
+    fx = vorticity_strength * (ny_dir * wz - nz_dir * wy)
+    fy = vorticity_strength * (nz_dir * wx - nx_dir * wz)
+    fz = vorticity_strength * (nx_dir * wy - ny_dir * wx)
+
+    return fx, fy, fz

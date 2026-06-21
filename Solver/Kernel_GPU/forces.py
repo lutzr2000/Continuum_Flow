@@ -56,8 +56,15 @@ def update_force_fields(
     Fz[i, j, k] = fz
 
 
-@cuda.jit(cache=True)
-def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference, active_tile_mask):
+@cuda.jit(device=True, inline=True, cache=True)
+def buoyancy_approximation(
+    T,
+    i,
+    j,
+    k,
+    buoyancy_factor,
+    t_reference,
+):
     """
     computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
 
@@ -66,18 +73,5 @@ def buoyancy_approximation(T, Fz, buoyancy_factor, t_reference, active_tile_mask
     temperature and scaled by gravity and the configured buoyancy factor.
 
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(T.shape)
-
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
-        return
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        return
-
     g = 9.81
-    Fz[i, j, k] += g * buoyancy_factor * (T[i, j, k] - t_reference)
+    return g * buoyancy_factor * (T[i, j, k] - t_reference)

@@ -212,11 +212,6 @@ def solver(config,obstacle_mask,source_masks):
     depart_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     depart_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
-    # forces
-    fx = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    fy = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    fz = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-
     # scratch
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -242,7 +237,6 @@ def solver(config,obstacle_mask,source_masks):
 
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
-    force_zeros_host = np.zeros(shape, dtype=GPU_FIELD_DTYPE)
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
 
     # ------------Prepare output-------------------
@@ -296,12 +290,6 @@ def solver(config,obstacle_mask,source_masks):
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
-        
-        ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
-        fx.copy_to_device(force_zeros_host)
-        fy.copy_to_device(force_zeros_host)
-        fz.copy_to_device(force_zeros_host)
-        ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
 
         #------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
@@ -336,19 +324,6 @@ def solver(config,obstacle_mask,source_masks):
                 scalar_active_tiles_dilated,
                 np.bool_(True),
             )
-        cuda.synchronize()
-
-        #------------Forces-------------------
-        forces.buoyancy_approximation[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            temperature,
-            fz,
-            simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
-            simulations[0].get("physics").get("temperature").get("reference_temperature"),
-            scalar_active_tiles_dilated,
-        )
-        cuda.synchronize()
 
         # ------------Vorticity-------------------
         if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
@@ -362,23 +337,7 @@ def solver(config,obstacle_mask,source_masks):
                 vorticity_magnitude,
                 delta,
                 scalar_active_tiles_dilated,
-            )
-            vorticity.apply_vorticity_confinement[
-                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-            ](
-                u,
-                v,
-                w,
-                obstacle_mask,
-                vorticity_magnitude,
-                fx,
-                fy,
-                fz,
-                delta,
-                simulations[0].get("physics").get("extras").get("vorticity"),
-                scalar_active_tiles_dilated,
-            )
-            cuda.synchronize()
+            )   
 
         # ------------Velocity update-------------------
         advection_schemes.preserve_inactive_velocity_tiles[
@@ -414,6 +373,7 @@ def solver(config,obstacle_mask,source_masks):
             u,
             v,
             w,
+            obstacle_mask,
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
@@ -421,19 +381,19 @@ def solver(config,obstacle_mask,source_masks):
             depart_y,
             depart_z,
             dt,
-            fx,
-            fy,
-            fz,
             u_work,
             v_work,
             w_work,
             delta,
             simulations[0].get("physics").get("fluid").get("density"),
             simulations[0].get("physics").get("fluid").get("viscosity"),
+            vorticity_magnitude,
+            simulations[0].get("physics").get("extras").get("vorticity"),
+            temperature,
+            simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
+            simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
         )
-        cuda.synchronize()
-
 
         # ------------Velocity swap-------------------
         u, u_work = u_work, u
@@ -463,7 +423,6 @@ def solver(config,obstacle_mask,source_masks):
             rhs_partial_sums=pressure_rhs_partial_sums,
             rhs_sum_buffer=pressure_rhs_sum,
         )
-        cuda.synchronize()
 
         # ------------Velocity projection-------------------
         pressure_solve.project_velocity_kernel[
@@ -479,7 +438,6 @@ def solver(config,obstacle_mask,source_masks):
             simulations[0].get("physics").get("fluid").get("density"),
             scalar_active_tiles_dilated,
         )
-        cuda.synchronize()
 
         # ------------BC-------------------
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
@@ -497,7 +455,6 @@ def solver(config,obstacle_mask,source_masks):
             obstacle_mask,
             source_masks,
         )
-        cuda.synchronize()
 
         # ------------Scalar update-------------------
         scalar_update.preserve_inactive_scalar_tiles[
@@ -564,8 +521,7 @@ def solver(config,obstacle_mask,source_masks):
             simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
         )
-        cuda.synchronize()
-
+         
         # ------------Swap-------------------
         temperature, temperature_work = temperature_work, temperature
         smoke, smoke_work = smoke_work, smoke

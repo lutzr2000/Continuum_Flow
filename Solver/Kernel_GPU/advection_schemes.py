@@ -2,6 +2,8 @@ from numba import cuda
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
 from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
+from Solver.Kernel_GPU.forces import buoyancy_approximation
+from Solver.Kernel_GPU.vorticity import apply_vorticity_confinement
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -253,6 +255,7 @@ def update_velocity_maccormack(
     u,
     v,
     w,
+    obstacle_mask,
     predictor_u,
     predictor_v,
     predictor_w,
@@ -260,15 +263,17 @@ def update_velocity_maccormack(
     depart_y,
     depart_z,
     dt,
-    Fx,
-    Fy,
-    Fz,
     un,
     vn,
     wn,
     delta,
     rho,
     nu,
+    vorticity_magnitude,
+    vorticity_strength,
+    temperature,
+    buoyancy_factor,
+    t_reference,
     active_tile_mask,
 ):
     """
@@ -280,6 +285,10 @@ def update_velocity_maccormack(
     compensation term, clamps the result to the departure cell range, and then
     adds pressure, diffusion and external forces explicitly.
     """
+    Fx = 0.0
+    Fy = 0.0
+    Fz = 0.0
+
     tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
 
     if (
@@ -381,10 +390,35 @@ def update_velocity_maccormack(
         + (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
     )
 
+    # Forces
+    if vorticity_strength > 0.0:
+        Fx, Fy, Fz = apply_vorticity_confinement(
+            u,
+            v,
+            w,
+            obstacle_mask,
+            vorticity_magnitude,
+            i,
+            j,
+            k,
+            nx,
+            ny,
+            nz,
+            delta,
+            vorticity_strength,
+        )
+
+    Fz += buoyancy_approximation(
+        temperature,
+        i, j, k,
+        buoyancy_factor,
+        t_reference,
+    )
+
     # u_sword = u_n+1 - D_x + Fx
-    u_raw = corrected_u + diffusion_x + force_coeff * Fx[i, j, k]
-    v_raw = corrected_v + diffusion_y + force_coeff * Fy[i, j, k]
-    w_raw = corrected_w + diffusion_z + force_coeff * Fz[i, j, k]
+    u_raw = corrected_u + diffusion_x + force_coeff * Fx
+    v_raw = corrected_v + diffusion_y + force_coeff * Fy
+    w_raw = corrected_w + diffusion_z + force_coeff * Fz
 
     un[i, j, k] = u_raw
     vn[i, j, k] = v_raw
