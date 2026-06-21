@@ -13,7 +13,7 @@ import Solver.General.output_functions as output_functions
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
-import Solver.General.update_masks as update_masks
+import Solver.Kernel_GPU.update_masks as update_masks
 
 GPU_FIELD_DTYPE = np.float32
 
