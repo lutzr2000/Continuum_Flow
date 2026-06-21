@@ -1,5 +1,6 @@
 import numpy as np
 import trimesh
+from numba import njit, prange
 import Solver.General.update_masks as update_masks
 
 @njit(cache=True, parallel=True)
