@@ -160,30 +160,6 @@ def _forward_trace_position(
         u, v, w, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz
     )
 
-
-@cuda.jit(cache=True)
-def preserve_inactive_velocity_tiles(u, v, w, u_out, v_out, w_out, active_tile_mask):
-    """
-    Copy unchanged velocity values for inactive tiles.
-    """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
-
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
-        return
-    if i >= nx or j >= ny or k >= nz:
-        return
-    if active_tile_mask[tile_i, tile_j, tile_k] != 0:
-        return
-
-    u_out[i, j, k] = u[i, j, k]
-    v_out[i, j, k] = v[i, j, k]
-    w_out[i, j, k] = w[i, j, k]
-
-
 @cuda.jit(cache=True)
 def advect_velocity_semi_lagrangian(
     u,

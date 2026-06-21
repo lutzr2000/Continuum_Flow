@@ -443,17 +443,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             )   
 
         # ------------Velocity update-------------------
-        advection_schemes.preserve_inactive_velocity_tiles[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            u,
-            v,
-            w,
-            u_work,
-            v_work,
-            w_work,
-            scalar_active_tiles_dilated,
-        )
+        u_work.copy_to_device(u)
+        v_work.copy_to_device(v)
+        w_work.copy_to_device(w)
         advection_schemes.advect_velocity_semi_lagrangian[
             active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
         ](
@@ -537,19 +529,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Scalar update-------------------
-        scalar_update.preserve_inactive_scalar_tiles[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            temperature,
-            smoke,
-            fuel,
-            flame,
-            temperature_work,
-            smoke_work,
-            fuel_work,
-            flame,
-            scalar_active_tiles_dilated,
-        )
+        temperature_work.copy_to_device(temperature)
+        smoke_work.copy_to_device(smoke)
+        fuel_work.copy_to_device(fuel)
         scalar_update.predict_scalar_fields_semi_lagrangian[
             active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
         ](
@@ -960,17 +942,18 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
         # ------------Velocity update-------------------
         section_start = perf_counter()
-        advection_schemes.preserve_inactive_velocity_tiles[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            u,
-            v,
-            w,
-            u_work,
-            v_work,
-            w_work,
-            scalar_active_tiles_dilated,
+        velocity_update_start = section_start
+        u_work.copy_to_device(u)
+        v_work.copy_to_device(v)
+        w_work.copy_to_device(w)
+        cuda.synchronize()
+        _record_debug_timing(
+            timing_stats,
+            "loop_velocity_copy_forward",
+            perf_counter() - section_start,
         )
+
+        section_start = perf_counter()
         advection_schemes.advect_velocity_semi_lagrangian[
             active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
         ](
@@ -984,6 +967,14 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             delta,
             scalar_active_tiles_dilated,
         )
+        cuda.synchronize()
+        _record_debug_timing(
+            timing_stats,
+            "loop_velocity_advect_semi_lagrangian",
+            perf_counter() - section_start,
+        )
+
+        section_start = perf_counter()
         advection_schemes.update_velocity_maccormack[
             active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
         ](
@@ -1009,8 +1000,16 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scalar_active_tiles_dilated,
         )
         cuda.synchronize()
-        _record_debug_timing(timing_stats, "loop_velocity_update", perf_counter() - section_start)
-
+        _record_debug_timing(
+            timing_stats,
+            "loop_velocity_update_maccormack",
+            perf_counter() - section_start,
+        )
+        _record_debug_timing(
+            timing_stats,
+            "loop_velocity_update",
+            perf_counter() - velocity_update_start,
+        )
         # ------------Velocity swap-------------------
         section_start = perf_counter()
         u, u_work = u_work, u
@@ -1065,19 +1064,18 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
         # ------------Scalar update-------------------
         section_start = perf_counter()
-        scalar_update.preserve_inactive_scalar_tiles[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            temperature,
-            smoke,
-            fuel,
-            flame,
-            temperature_work,
-            smoke_work,
-            fuel_work,
-            flame,
-            scalar_active_tiles_dilated,
+        scalar_update_start = section_start
+        temperature_work.copy_to_device(temperature)
+        smoke_work.copy_to_device(smoke)
+        fuel_work.copy_to_device(fuel)
+        cuda.synchronize()
+        _record_debug_timing(
+            timing_stats,
+            "loop_scalar_copy_forward",
+            perf_counter() - section_start,
         )
+
+        section_start = perf_counter()
         scalar_update.predict_scalar_fields_semi_lagrangian[
             active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
         ](
@@ -1124,7 +1122,11 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scalar_active_tiles_dilated,
         )
         cuda.synchronize()
-        _record_debug_timing(timing_stats, "loop_scalar_update", perf_counter() - section_start)
+        _record_debug_timing(
+            timing_stats,
+            "loop_scalar_update",
+            perf_counter() - scalar_update_start,
+        )
 
         # ------------Swap-------------------
         section_start = perf_counter()
@@ -1207,10 +1209,5 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     print(f"Average step runtime: {average_step:.6f} s")
     _print_debug_timing_summary(timing_stats, total_runtime)
     print("################################################################")
-
-
-
-
-
 
 

@@ -125,35 +125,6 @@ def _active_tile_cell_indices(field_shape):
     return tile_i, tile_j, tile_k, i, j, k, nx, ny, nz
 
 
-import Solver.Kernel_GPU.advection_schemes as advection_schemes
-
-
-@cuda.jit(cache=True)
-def preserve_inactive_scalar_tiles(
-    T, smoke, fuel, flame, T_out, smoke_out, fuel_out, flame_out, active_tile_mask
-):
-    """
-    Copy current scalar values into output buffers for inactive tiles.
-    """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(T.shape)
-
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
-        return
-    if i >= nx or j >= ny or k >= nz:
-        return
-    if active_tile_mask[tile_i, tile_j, tile_k] != 0:
-        return
-
-    T_out[i, j, k] = T[i, j, k]
-    smoke_out[i, j, k] = smoke[i, j, k]
-    fuel_out[i, j, k] = fuel[i, j, k]
-    flame_out[i, j, k] = flame[i, j, k]
-
-
 @cuda.jit(cache=True)
 def predict_scalar_fields_semi_lagrangian(
     T,
