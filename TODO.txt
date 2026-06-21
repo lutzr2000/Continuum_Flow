@@ -4,8 +4,6 @@ General:
 the live preview produces a RAM accumulation
 
 Code rework:
-Mask updates take way longer than before, why?
-Apply all BC is now way slower, why?
 Artificial forces still missing, also rescale force inputs to be more uniform
 Backtracing steps, 1 is fine
 Maybe scalar values and velocity can share scratch array?

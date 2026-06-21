@@ -32,6 +32,17 @@ def _print_debug_timing_summary(timing_stats, total_runtime):
         print(f"  {name}: {elapsed:.3f} s ({share:.1f}%)")
 
 
+@cuda.jit
+def clear_scratch_kernel(sx, sy, sz):
+    i, j, k = cuda.grid(3)
+
+    nx, ny, nz = sx.shape
+    if i < nx and j < ny and k < nz:
+        sx[i, j, k] = 0.0
+        sy[i, j, k] = 0.0
+        sz[i, j, k] = 0.0
+
+
 def get_source_values(simulations, var_name, t, index=None):
     source_entries = simulations[0].get("sources") or []
     values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
@@ -167,7 +178,7 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks):
+def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
     total_start_time = perf_counter()
     simulations = config.get("simulations")
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
@@ -319,30 +330,40 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        # ------------Update masks-------------------
-        update_masks.update_masks(
-            source_masks,
-            source_base_masks,
-            t,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            aggregate_mask=source_mask,
+        # ------------Clear scratch-------------------
+        blocks = (
+            (shape[0] + kernel_config.THREADS_PER_BLOCK_3D[0] - 1) // kernel_config.THREADS_PER_BLOCK_3D[0],
+            (shape[1] + kernel_config.THREADS_PER_BLOCK_3D[1] - 1) // kernel_config.THREADS_PER_BLOCK_3D[1],
+            (shape[2] + kernel_config.THREADS_PER_BLOCK_3D[2] - 1) // kernel_config.THREADS_PER_BLOCK_3D[2],
         )
+        clear_scratch_kernel[blocks, kernel_config.THREADS_PER_BLOCK_3D](scratch_A_x, scratch_A_y, scratch_A_z)
 
-        update_masks.update_masks(
-            obstacle_mask,
-            obstacle_base_masks,
-            t,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
-        )
+        # ------------Update masks-------------------
+        if animated_obstacles:
+            update_masks.update_masks(
+                source_masks,
+                source_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                aggregate_mask=source_mask,
+            )
+
+        if animated_sources:
+            update_masks.update_masks(
+                obstacle_mask,
+                obstacle_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z,
+            )
 
         # ------------BC-------------------
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
@@ -645,7 +666,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     print("################################################################")
 
 
-def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks):
+def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
     total_start_time = perf_counter()
     timing_stats = {}
 
@@ -811,36 +832,46 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
+        # ------------Clear scratch-------------------
+        blocks = (
+            (shape[0] + kernel_config.THREADS_PER_BLOCK_3D[0] - 1) // kernel_config.THREADS_PER_BLOCK_3D[0],
+            (shape[1] + kernel_config.THREADS_PER_BLOCK_3D[1] - 1) // kernel_config.THREADS_PER_BLOCK_3D[1],
+            (shape[2] + kernel_config.THREADS_PER_BLOCK_3D[2] - 1) // kernel_config.THREADS_PER_BLOCK_3D[2],
+        )
+        clear_scratch_kernel[blocks, kernel_config.THREADS_PER_BLOCK_3D](scratch_A_x, scratch_A_y, scratch_A_z)
+
         # ------------Update masks-------------------
         section_start = perf_counter()
-        update_masks.update_masks(
-            source_masks,
-            source_base_masks,
-            t,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            aggregate_mask=source_mask
-        )
-        cuda.synchronize()
-        _record_debug_timing(timing_stats, "loop_update_source_masks", perf_counter() - section_start)
+        if animated_obstacles:
+            update_masks.update_masks(
+                source_masks,
+                source_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                aggregate_mask=source_mask
+            )
+            cuda.synchronize()
+            _record_debug_timing(timing_stats, "loop_update_source_masks", perf_counter() - section_start)
 
         section_start = perf_counter()
-        update_masks.update_masks(
-            obstacle_mask,
-            obstacle_base_masks,
-            t,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z
-        )
-        cuda.synchronize()
-        _record_debug_timing(timing_stats, "loop_update_obstacle_masks", perf_counter() - section_start)
+        if animated_sources:
+            update_masks.update_masks(
+                obstacle_mask,
+                obstacle_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                scratch_A_x,
+                scratch_A_y,
+                scratch_A_z
+            )
+            cuda.synchronize()
+            _record_debug_timing(timing_stats, "loop_update_obstacle_masks", perf_counter() - section_start)
 
         # ------------BC-------------------
         section_start = perf_counter()

@@ -1,3 +1,5 @@
+import numpy as np
+
 import Solver.General.voxelise_mesh as voxelise_mesh_module
 import Solver.Kernel_GPU.kernel as gpu_kernel_module
 
@@ -8,6 +10,23 @@ def _collect_mesh_objects(entries):
         mesh_cfg = entry.get("mesh", {})
         mesh_objects.extend(mesh_cfg.get("objects", ()))
     return mesh_objects
+
+
+def _has_animated_mesh_objects(mesh_objects):
+    for mesh_object in mesh_objects or ():
+        transform_animation = mesh_object.get("transform_animation") or {}
+        matrices = transform_animation.get("matrices_world") or ()
+        if len(matrices) <= 1:
+            continue
+
+        first_matrix = np.asarray(matrices[0], dtype=np.float32)
+        if any(
+            not np.allclose(np.asarray(matrix, dtype=np.float32), first_matrix)
+            for matrix in matrices[1:]
+        ):
+            return True
+
+    return False
 
 
 def main(config=None):
@@ -28,6 +47,14 @@ def main(config=None):
 
     obstacle_mesh_objects = _collect_mesh_objects(simulation_cfg.get("obstacles"))
     source_entries = simulation_cfg.get("sources") or []
+    source_mesh_objects = _collect_mesh_objects(source_entries)
+
+    animated_obstacles = bool(obstacle_mesh_objects) and _has_animated_mesh_objects(
+        obstacle_mesh_objects
+    )
+    animated_sources = bool(source_mesh_objects) and _has_animated_mesh_objects(
+        source_mesh_objects
+    )
 
     obstacle_base_masks, obstacle_mask = voxelise_mesh_module.voxelise_mesh_all(
         nx,
@@ -67,4 +94,6 @@ def main(config=None):
         obstacle_mask,
         source_base_masks,
         source_masks,
+        animated_obstacles,
+        animated_sources,
     )
