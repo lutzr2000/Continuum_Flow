@@ -50,24 +50,35 @@ def _voxelize_triangles(triangles, delta):
     }
 
 
-def voxelise_mesh(
-    nx, ny, nz, delta, mesh_object, origin_x=0.0, origin_y=0.0, origin_z=0.0
-):
-    """Voxelise one exported triangle mesh into a boolean obstacle mask."""
-    out = np.zeros((nx, ny, nz), dtype=np.bool_)
+def voxelise_base_mesh(mesh_object, delta):
+    """Build one object-local voxel mask that stays fixed in local coordinates."""
     if not mesh_object:
+        return None
+    return _voxelize_triangles(_load_mesh_triangles(mesh_object), np.float32(delta))
+
+
+def sample_base_mask_to_world(
+    nx,
+    ny,
+    nz,
+    delta,
+    mesh_object,
+    base_voxels,
+    origin_x=0.0,
+    origin_y=0.0,
+    origin_z=0.0,
+):
+    """Sample one object-local voxel mask into the simulation world grid."""
+    out = np.zeros((nx, ny, nz), dtype=np.bool_)
+    if not mesh_object or base_voxels is None:
         return out
 
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
     delta = np.float32(delta)
 
-    voxels = _voxelize_triangles(_load_mesh_triangles(mesh_object), delta)
-    if voxels is None:
-        return out
-
     object_matrix = update_masks._initial_world_matrix(mesh_object)
     bounds_center, bounds_extent = update_masks._bounds_center_extent(
-        voxels["bounds_min"], voxels["bounds_max"]
+        base_voxels["bounds_min"], base_voxels["bounds_max"]
     )
     bounds_min, bounds_max = update_masks._transform_bounds(
         bounds_center,
@@ -88,7 +99,7 @@ def voxelise_mesh(
 
     update_masks.sample_mask_backwards(
         out,
-        voxels["mask"],
+        base_voxels["mask"],
         delta,
         origin[0],
         origin[1],
@@ -99,31 +110,59 @@ def voxelise_mesh(
         iy1,
         iz0,
         iz1,
-        voxels["origin"],
+        base_voxels["origin"],
         object_matrix_inv,
     )
 
     return out
 
 
+def voxelise_mesh(
+    nx, ny, nz, delta, mesh_object, origin_x=0.0, origin_y=0.0, origin_z=0.0
+):
+    """Voxelise one exported triangle mesh into a boolean obstacle mask."""
+    base_voxels = voxelise_base_mesh(mesh_object, delta)
+    return sample_base_mask_to_world(
+        nx,
+        ny,
+        nz,
+        delta,
+        mesh_object,
+        base_voxels,
+        origin_x=origin_x,
+        origin_y=origin_y,
+        origin_z=origin_z,
+    )
+
+
 def voxelise_mesh_all(
     nx, ny, nz, delta, mesh_objects, origin_x=0.0, origin_y=0.0, origin_z=0.0
 ):
-    """Voxelise multiple exported triangle meshes into one boolean obstacle mask."""
+    """Build combined local voxel data and the corresponding world obstacle mask."""
     out = np.zeros((nx, ny, nz), dtype=np.bool_)
+    base_voxels = []
     if not mesh_objects:
-        return out
+        return base_voxels, out
 
     for mesh_object in mesh_objects:
-        out |= voxelise_mesh(
+        object_base_voxels = voxelise_base_mesh(mesh_object, delta)
+        if object_base_voxels is not None:
+            base_voxels.append(
+                {
+                    "mesh_object": mesh_object,
+                    "voxels": object_base_voxels,
+                }
+            )
+        out |= sample_base_mask_to_world(
             nx,
             ny,
             nz,
             delta,
             mesh_object,
+            object_base_voxels,
             origin_x=origin_x,
             origin_y=origin_y,
             origin_z=origin_z,
         )
 
-    return out
+    return base_voxels, out

@@ -149,7 +149,7 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def solver(config,obstacle_mask,source_masks):
+def solver(config,obstacle_base_masks,obstacle_mask,source_masks):
     total_start_time = perf_counter()
     simulations = config.get("simulations")
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
@@ -294,23 +294,16 @@ def solver(config,obstacle_mask,source_masks):
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        # # ------------Update masks-------------------
-        # update_masks.sample_mask_backwards(
-        #     obstacle_mask,
-        #     base,
-        #     delta,
-        #     origin_x,
-        #     origin_y,
-        #     origin_z,
-        #     ix0,
-        #     ix1,
-        #     iy0,
-        #     iy1,
-        #     iz0,
-        #     iz1,
-        #     box,
-        #     inv,
-        # )
+        # ------------Update masks-------------------
+        update_masks.update_masks(
+            obstacle_mask,
+            obstacle_base_masks,
+            t,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+        )
 
         # ------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):

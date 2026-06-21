@@ -96,3 +96,96 @@ def _invert_affine_matrix(matrix):
     inv[:3, :3] = inv_linear
     inv[:3, 3] = inv_translation
     return inv
+
+
+def _world_matrix_at_time(mesh_object, time_value):
+    animation = mesh_object.get("transform_animation") or {}
+    times = np.asarray(animation.get("times", (0.0,)), dtype=np.float32)
+    matrices = np.asarray(
+        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
+        dtype=np.float32,
+    ).reshape((-1, 4, 4))
+
+    if matrices.size == 0:
+        return np.eye(4, dtype=np.float32)
+    if times.size <= 1 or matrices.shape[0] <= 1:
+        return _as_f32(matrices[0])
+    if time_value <= float(times[0]):
+        return _as_f32(matrices[0])
+    if time_value >= float(times[-1]):
+        return _as_f32(matrices[min(len(matrices) - 1, len(times) - 1)])
+
+    last_segment = min(len(times), len(matrices)) - 1
+    for idx in range(last_segment):
+        t0 = float(times[idx])
+        t1 = float(times[idx + 1])
+        if time_value <= t1:
+            if t1 <= t0:
+                return _as_f32(matrices[idx])
+            alpha = np.float32((time_value - t0) / (t1 - t0))
+            return _as_f32(matrices[idx] * (1.0 - alpha) + matrices[idx + 1] * alpha)
+
+    return _as_f32(matrices[last_segment])
+
+
+def update_masks(
+    mask,
+    base_masks,
+    t,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+):
+
+    origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
+
+    mask.fill(False)
+
+    for obstacle_entry in base_masks:
+        mesh_object = obstacle_entry["mesh_object"]
+        base_voxels = obstacle_entry["voxels"]
+        base = base_voxels["mask"]
+        box = base_voxels["origin"]
+
+        object_matrix = _world_matrix_at_time(mesh_object, t)
+        bounds_center, bounds_extent = _bounds_center_extent(
+            base_voxels["bounds_min"],
+            base_voxels["bounds_max"],
+        )
+        bounds_min, bounds_max = _transform_bounds(
+            bounds_center,
+            bounds_extent,
+            object_matrix,
+        )
+        inv = _invert_affine_matrix(object_matrix)
+
+        ix0, ix1, iy0, iy1, iz0, iz1 = _bounds_to_indices(
+            bounds_min,
+            bounds_max,
+            delta,
+            origin,
+            shape=mask.shape,
+        )
+
+        if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
+            continue
+
+        sample_mask_backwards(
+            mask,
+            base,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            ix0,
+            ix1,
+            iy0,
+            iy1,
+            iz0,
+            iz1,
+            box,
+            inv,
+        )
+
+    return mask
