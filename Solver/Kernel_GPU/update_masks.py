@@ -8,12 +8,9 @@ _PACKED_MASK_CACHE = {}
 
 
 @cuda.jit(cache=True)
-def rebuild_mask_stack_from_objects(
+def update_source_mask(
     mask_stack,
     aggregate_mask,
-    out_vx,
-    out_vy,
-    out_vz,
     local_masks_flat,
     local_mask_offsets,
     local_mask_shapes,
@@ -21,14 +18,13 @@ def rebuild_mask_stack_from_objects(
     target_indices,
     bounds,
     inv_mats,
-    rates,
     active_flags,
     delta,
     ox,
     oy,
     oz,
-    compute_velocity_flag,
 ):
+    """Rebuild all per-source masks and the aggregate source mask in one pass."""
     i, j, k = cuda.grid(3)
     mask_count, nx, ny, nz = mask_stack.shape
 
@@ -37,11 +33,6 @@ def rebuild_mask_stack_from_objects(
 
     for mask_idx in range(mask_count):
         mask_stack[mask_idx, i, j, k] = False
-
-    if compute_velocity_flag:
-        out_vx[i, j, k] = 0.0
-        out_vy[i, j, k] = 0.0
-        out_vz[i, j, k] = 0.0
 
     aggregate_active = False
     obj_count = target_indices.shape[0]
@@ -98,31 +89,12 @@ def rebuild_mask_stack_from_objects(
                 target_idx = target_indices[obj_idx]
                 mask_stack[target_idx, i, j, k] = True
                 aggregate_active = True
-                if compute_velocity_flag:
-                    out_vx[i, j, k] = (
-                        rates[obj_idx, 0] * bx
-                        + rates[obj_idx, 1] * by
-                        + rates[obj_idx, 2] * bz
-                        + rates[obj_idx, 3]
-                    )
-                    out_vy[i, j, k] = (
-                        rates[obj_idx, 4] * bx
-                        + rates[obj_idx, 5] * by
-                        + rates[obj_idx, 6] * bz
-                        + rates[obj_idx, 7]
-                    )
-                    out_vz[i, j, k] = (
-                        rates[obj_idx, 8] * bx
-                        + rates[obj_idx, 9] * by
-                        + rates[obj_idx, 10] * bz
-                        + rates[obj_idx, 11]
-                    )
 
     aggregate_mask[i, j, k] = aggregate_active
 
 
 @cuda.jit(cache=True)
-def rebuild_single_mask_from_objects(
+def update_obstacle_mask(
     mask,
     out_vx,
     out_vy,
@@ -139,8 +111,8 @@ def rebuild_single_mask_from_objects(
     ox,
     oy,
     oz,
-    compute_velocity_flag,
 ):
+    """Rebuild the obstacle mask and obstacle velocities with last-write-wins overlap."""
     i, j, k = cuda.grid(3)
     nx, ny, nz = mask.shape
 
@@ -148,16 +120,15 @@ def rebuild_single_mask_from_objects(
         return
 
     mask[i, j, k] = False
-    if compute_velocity_flag:
-        out_vx[i, j, k] = 0.0
-        out_vy[i, j, k] = 0.0
-        out_vz[i, j, k] = 0.0
+    out_vx[i, j, k] = 0.0
+    out_vy[i, j, k] = 0.0
+    out_vz[i, j, k] = 0.0
 
     cell_active = False
-    obj_count = active_flags.shape[0]
     x = np.float32(ox + i * delta)
     y = np.float32(oy + j * delta)
     z = np.float32(oz + k * delta)
+    obj_count = active_flags.shape[0]
 
     for obj_idx in range(obj_count):
         if not active_flags[obj_idx]:
@@ -206,97 +177,30 @@ def rebuild_single_mask_from_objects(
             flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
             if local_masks_flat[flat_index]:
                 cell_active = True
-                if compute_velocity_flag:
-                    out_vx[i, j, k] = (
-                        rates[obj_idx, 0] * bx
-                        + rates[obj_idx, 1] * by
-                        + rates[obj_idx, 2] * bz
-                        + rates[obj_idx, 3]
-                    )
-                    out_vy[i, j, k] = (
-                        rates[obj_idx, 4] * bx
-                        + rates[obj_idx, 5] * by
-                        + rates[obj_idx, 6] * bz
-                        + rates[obj_idx, 7]
-                    )
-                    out_vz[i, j, k] = (
-                        rates[obj_idx, 8] * bx
-                        + rates[obj_idx, 9] * by
-                        + rates[obj_idx, 10] * bz
-                        + rates[obj_idx, 11]
-                    )
+                out_vx[i, j, k] = (
+                    rates[obj_idx, 0] * bx
+                    + rates[obj_idx, 1] * by
+                    + rates[obj_idx, 2] * bz
+                    + rates[obj_idx, 3]
+                )
+                out_vy[i, j, k] = (
+                    rates[obj_idx, 4] * bx
+                    + rates[obj_idx, 5] * by
+                    + rates[obj_idx, 6] * bz
+                    + rates[obj_idx, 7]
+                )
+                out_vz[i, j, k] = (
+                    rates[obj_idx, 8] * bx
+                    + rates[obj_idx, 9] * by
+                    + rates[obj_idx, 10] * bz
+                    + rates[obj_idx, 11]
+                )
 
     mask[i, j, k] = cell_active
 
 
-def _iter_mask_entries(base_masks):
-    if not base_masks:
-        return
-
-    first_entry = base_masks[0]
-    if isinstance(first_entry, dict):
-        for mask_entry in base_masks:
-            yield 0, mask_entry
-        return
-
-    for target_idx, mask_entries in enumerate(base_masks):
-        for mask_entry in mask_entries:
-            yield target_idx, mask_entry
-
-
-def _build_mask_pack(base_masks):
-    flat_masks = []
-    offsets = [0]
-    shapes = []
-    origins = []
-    target_indices = []
-    object_entries = []
-
-    for target_idx, mask_entry in _iter_mask_entries(base_masks):
-        base_voxels = mask_entry["voxels"]
-        base_mask = np.ascontiguousarray(base_voxels["mask"], dtype=np.bool_)
-        flat_masks.append(base_mask.reshape(-1))
-        offsets.append(offsets[-1] + base_mask.size)
-        shapes.append(base_mask.shape)
-        origins.append(np.asarray(base_voxels["origin"], dtype=np.float32))
-        target_indices.append(target_idx)
-        object_entries.append(mask_entry)
-
-    object_count = len(object_entries)
-    if flat_masks:
-        local_masks_flat = np.concatenate(flat_masks).astype(np.bool_, copy=False)
-    else:
-        local_masks_flat = np.empty(0, dtype=np.bool_)
-
-    mask_shapes = np.asarray(shapes, dtype=np.int32) if shapes else np.zeros((0, 3), dtype=np.int32)
-    mask_origins = np.asarray(origins, dtype=np.float32) if origins else np.zeros((0, 3), dtype=np.float32)
-    target_indices_array = np.asarray(target_indices, dtype=np.int32)
-
-    return {
-        "object_entries": object_entries,
-        "local_masks_flat": cuda.to_device(local_masks_flat),
-        "local_mask_offsets": cuda.to_device(np.asarray(offsets, dtype=np.int32)),
-        "local_mask_shapes": cuda.to_device(mask_shapes),
-        "local_origins": cuda.to_device(mask_origins),
-        "target_indices": cuda.to_device(target_indices_array),
-        "bounds": cuda.to_device(np.zeros((object_count, 6), dtype=np.int32)),
-        "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
-        "rates": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
-        "active_flags": cuda.to_device(np.zeros(object_count, dtype=np.bool_)),
-        "count": object_count,
-    }
-
-
-def _get_mask_pack(base_masks):
-    cache_key = id(base_masks)
-    pack = _PACKED_MASK_CACHE.get(cache_key)
-    if pack is None:
-        pack = _build_mask_pack(base_masks)
-        _PACKED_MASK_CACHE[cache_key] = pack
-    return pack
-
-
 def _update_frame_state(pack, t, delta, origin_x, origin_y, origin_z, shape):
+    """Refresh per-object transforms, bounds and activity flags for the current frame."""
     object_count = pack["count"]
     if object_count == 0:
         return True
@@ -356,13 +260,75 @@ def update_masks(
     origin_x,
     origin_y,
     origin_z,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
-    compute_velocity_flag=False,
+    obstacle_velocity_x=None,
+    obstacle_velocity_y=None,
+    obstacle_velocity_z=None,
     aggregate_mask=None,
 ):
-    pack = _get_mask_pack(base_masks)
+    """Update either stacked source masks or one obstacle mask using cached packed object data."""
+    cache_key = id(base_masks)
+    pack = _PACKED_MASK_CACHE.get(cache_key)
+    if pack is None:
+        flat_masks = []
+        offsets = [0]
+        shapes = []
+        origins = []
+        target_indices = []
+        object_entries = []
+
+        if base_masks:
+            first_entry = base_masks[0]
+            if isinstance(first_entry, dict):
+                iterable = ((0, mask_entry) for mask_entry in base_masks)
+            else:
+                iterable = (
+                    (target_idx, mask_entry)
+                    for target_idx, mask_entries in enumerate(base_masks)
+                    for mask_entry in mask_entries
+                )
+
+            for target_idx, mask_entry in iterable:
+                base_voxels = mask_entry["voxels"]
+                base_mask = np.ascontiguousarray(base_voxels["mask"], dtype=np.bool_)
+                flat_masks.append(base_mask.reshape(-1))
+                offsets.append(offsets[-1] + base_mask.size)
+                shapes.append(base_mask.shape)
+                origins.append(np.asarray(base_voxels["origin"], dtype=np.float32))
+                target_indices.append(target_idx)
+                object_entries.append(mask_entry)
+
+        object_count = len(object_entries)
+        if flat_masks:
+            local_masks_flat = np.concatenate(flat_masks).astype(np.bool_, copy=False)
+        else:
+            local_masks_flat = np.empty(0, dtype=np.bool_)
+
+        mask_shapes = (
+            np.asarray(shapes, dtype=np.int32)
+            if shapes
+            else np.zeros((0, 3), dtype=np.int32)
+        )
+        mask_origins = (
+            np.asarray(origins, dtype=np.float32)
+            if origins
+            else np.zeros((0, 3), dtype=np.float32)
+        )
+        target_indices_array = np.asarray(target_indices, dtype=np.int32)
+
+        pack = {
+            "object_entries": object_entries,
+            "local_masks_flat": cuda.to_device(local_masks_flat),
+            "local_mask_offsets": cuda.to_device(np.asarray(offsets, dtype=np.int32)),
+            "local_mask_shapes": cuda.to_device(mask_shapes),
+            "local_origins": cuda.to_device(mask_origins),
+            "target_indices": cuda.to_device(target_indices_array),
+            "bounds": cuda.to_device(np.zeros((object_count, 6), dtype=np.int32)),
+            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "active_flags": cuda.to_device(np.zeros(object_count, dtype=np.bool_)),
+            "count": object_count,
+        }
+        _PACKED_MASK_CACHE[cache_key] = pack
     if not _update_frame_state(
         pack,
         t,
@@ -383,12 +349,9 @@ def update_masks(
             (int(launch_shape[1]) + _MASK_THREADS_PER_BLOCK[1] - 1) // _MASK_THREADS_PER_BLOCK[1],
             (int(launch_shape[2]) + _MASK_THREADS_PER_BLOCK[2] - 1) // _MASK_THREADS_PER_BLOCK[2],
         )
-        rebuild_mask_stack_from_objects[launch_blocks, _MASK_THREADS_PER_BLOCK](
+        update_source_mask[launch_blocks, _MASK_THREADS_PER_BLOCK](
             masks,
             aggregate_mask,
-            obstacle_velocity_x,
-            obstacle_velocity_y,
-            obstacle_velocity_z,
             pack["local_masks_flat"],
             pack["local_mask_offsets"],
             pack["local_mask_shapes"],
@@ -396,13 +359,11 @@ def update_masks(
             pack["target_indices"],
             pack["bounds"],
             pack["inv_mats"],
-            pack["rates"],
             pack["active_flags"],
             np.float32(delta),
             np.float32(origin_x),
             np.float32(origin_y),
             np.float32(origin_z),
-            compute_velocity_flag,
         )
         return masks
 
@@ -411,7 +372,7 @@ def update_masks(
         (int(masks.shape[1]) + _MASK_THREADS_PER_BLOCK[1] - 1) // _MASK_THREADS_PER_BLOCK[1],
         (int(masks.shape[2]) + _MASK_THREADS_PER_BLOCK[2] - 1) // _MASK_THREADS_PER_BLOCK[2],
     )
-    rebuild_single_mask_from_objects[launch_blocks, _MASK_THREADS_PER_BLOCK](
+    update_obstacle_mask[launch_blocks, _MASK_THREADS_PER_BLOCK](
         masks,
         obstacle_velocity_x,
         obstacle_velocity_y,
@@ -428,8 +389,8 @@ def update_masks(
         np.float32(origin_x),
         np.float32(origin_y),
         np.float32(origin_z),
-        compute_velocity_flag,
     )
     return masks
+
 
 

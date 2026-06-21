@@ -328,9 +328,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_x,
             origin_y,
             origin_z,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
             aggregate_mask=source_mask,
         )
 
@@ -824,10 +821,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             origin_x,
             origin_y,
             origin_z,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
-            compute_velocity_flag=False,
             aggregate_mask=source_mask
         )
         cuda.synchronize()
@@ -844,8 +837,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             origin_z,
             scratch_A_x,
             scratch_A_y,
-            scratch_A_z,
-            compute_velocity_flag=True
+            scratch_A_z
         )
         cuda.synchronize()
         _record_debug_timing(timing_stats, "loop_update_obstacle_masks", perf_counter() - section_start)
@@ -1188,6 +1180,9 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     print(f"Average step runtime: {average_step:.6f} s")
     _print_debug_timing_summary(timing_stats, total_runtime)
     print("################################################################")
+
+
+
 
 
 
