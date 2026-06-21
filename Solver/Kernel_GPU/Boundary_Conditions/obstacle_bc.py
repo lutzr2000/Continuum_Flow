@@ -1,6 +1,6 @@
 import math
 from numba import cuda
-
+from numba import njit, prange
 
 @cuda.jit(cache=True)
 def obstacle_bc_kernel(

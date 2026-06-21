@@ -4,9 +4,26 @@ import numpy as np
 
 @njit(cache=True, parallel=True)
 def sample_mask_backwards(
-    out, base, delta, ox, oy, oz, ix0, ix1, iy0, iy1, iz0, iz1, box, inv
+    out,
+    out_vx,
+    out_vy,
+    out_vz,
+    base,
+    delta,
+    ox,
+    oy,
+    oz,
+    ix0,
+    ix1,
+    iy0,
+    iy1,
+    iz0,
+    iz1,
+    box,
+    inv,
+    rate,
 ):
-    """Back-sample a local reference mask into the world grid."""
+    """Back-sample a local reference mask into the world grid and evaluate wall velocity."""
     base_ox, base_oy, base_oz = box
     bn_x, bn_y, bn_z = base.shape
     sx, sy, sz = ix1 - ix0 + 1, iy1 - iy0 + 1, iz1 - iz0 + 1
@@ -31,6 +48,15 @@ def sample_mask_backwards(
 
         if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
             out[i, j, k] = True
+            out_vx[i, j, k] = (
+                rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
+            )
+            out_vy[i, j, k] = (
+                rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
+            )
+            out_vz[i, j, k] = (
+                rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
+            )
 
 
 def _as_f32(a):
@@ -128,6 +154,37 @@ def _world_matrix_at_time(mesh_object, time_value):
     return _as_f32(matrices[last_segment])
 
 
+def _world_matrix_rate_at_time(mesh_object, time_value):
+    animation = mesh_object.get("transform_animation") or {}
+    times = np.asarray(animation.get("times", (0.0,)), dtype=np.float32)
+    matrices = np.asarray(
+        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
+        dtype=np.float32,
+    ).reshape((-1, 4, 4))
+
+    if times.size <= 1 or matrices.shape[0] <= 1:
+        return np.zeros((4, 4), dtype=np.float32)
+
+    last_segment = min(len(times), len(matrices)) - 1
+    if time_value <= float(times[0]):
+        idx = 0
+    elif time_value >= float(times[last_segment]):
+        idx = max(0, last_segment - 1)
+    else:
+        idx = 0
+        for candidate in range(last_segment):
+            if time_value <= float(times[candidate + 1]):
+                idx = candidate
+                break
+
+    t0 = float(times[idx])
+    t1 = float(times[idx + 1])
+    if t1 <= t0:
+        return np.zeros((4, 4), dtype=np.float32)
+
+    return _as_f32((matrices[idx + 1] - matrices[idx]) / np.float32(t1 - t0))
+
+
 def _update_one_mask(
     mask,
     base_masks,
@@ -136,10 +193,25 @@ def _update_one_mask(
     origin_x,
     origin_y,
     origin_z,
+    obstacle_velocity_x=None,
+    obstacle_velocity_y=None,
+    obstacle_velocity_z=None,
 ):
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
 
     mask.fill(False)
+    if obstacle_velocity_x is None:
+        obstacle_velocity_x = np.zeros(mask.shape, dtype=np.float32)
+    else:
+        obstacle_velocity_x.fill(0.0)
+    if obstacle_velocity_y is None:
+        obstacle_velocity_y = np.zeros(mask.shape, dtype=np.float32)
+    else:
+        obstacle_velocity_y.fill(0.0)
+    if obstacle_velocity_z is None:
+        obstacle_velocity_z = np.zeros(mask.shape, dtype=np.float32)
+    else:
+        obstacle_velocity_z.fill(0.0)
 
     for mask_entry in base_masks:
         mesh_object = mask_entry["mesh_object"]
@@ -148,6 +220,7 @@ def _update_one_mask(
         box = base_voxels["origin"]
 
         object_matrix = _world_matrix_at_time(mesh_object, t)
+        rate = _world_matrix_rate_at_time(mesh_object, t)
         bounds_center, bounds_extent = _bounds_center_extent(
             base_voxels["bounds_min"],
             base_voxels["bounds_max"],
@@ -172,6 +245,9 @@ def _update_one_mask(
 
         sample_mask_backwards(
             mask,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
             base,
             delta,
             origin_x,
@@ -185,6 +261,7 @@ def _update_one_mask(
             iz1,
             box,
             inv,
+            rate,
         )
 
     return mask
@@ -198,6 +275,9 @@ def update_masks(
     origin_x,
     origin_y,
     origin_z,
+    obstacle_velocity_x=None,
+    obstacle_velocity_y=None,
+    obstacle_velocity_z=None,
 ):
     if isinstance(masks, np.ndarray):
         return _update_one_mask(
@@ -208,6 +288,9 @@ def update_masks(
             origin_x,
             origin_y,
             origin_z,
+            obstacle_velocity_x,
+            obstacle_velocity_y,
+            obstacle_velocity_z,
         )
 
     updated_masks = []

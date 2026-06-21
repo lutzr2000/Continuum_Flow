@@ -302,16 +302,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Update masks-------------------
         update_masks.update_masks(
-            obstacle_mask,
-            obstacle_base_masks,
-            t,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-        )
-
-        update_masks.update_masks(
             source_masks,
             source_base_masks,
             t,
@@ -319,6 +309,22 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_x,
             origin_y,
             origin_z,
+            scratch_A_x,
+            scratch_A_y,
+            scratch_A_z,
+        )
+
+        update_masks.update_masks(
+            obstacle_mask,
+            obstacle_base_masks,
+            t,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            scratch_A_x,
+            scratch_A_y,
+            scratch_A_z,
         )
 
         # ------------BC-------------------
