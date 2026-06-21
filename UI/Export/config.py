@@ -765,7 +765,7 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
             "simulation_length": _simulation_length_from_frames(
                 start_frame, end_frame, simulation_fps
             ),
-            "dt": float(1.0 / simulation_fps / (int(getattr(simulation_node, "substeps", 0)) + 1)),
+            "cfl": float(getattr(simulation_node, "cfl", 10.0)),
             "iterations": int(simulation_node.iterations),
             "simulate_sparsely": bool(
                 getattr(simulation_node, "simulate_sparsely", True)

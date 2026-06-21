@@ -13,6 +13,7 @@ import Solver.General.output_functions as output_functions
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 
 GPU_FIELD_DTYPE = np.float32
@@ -187,7 +188,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
     # ------------time-------------------
     t = 0
-    dt = simulations[0].get("settings").get("dt")
+    cfl = float(simulations[0].get("settings", {}).get("cfl", 10.0))
     t_max = simulations[0].get("settings").get("simulation_length")
 
     # ------------dimensions------------------
@@ -272,6 +273,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
+    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
+    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
     # ------------Prepare output-------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
@@ -324,6 +327,17 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
+
+        time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+        dt = time_step.compute_new_timestep_gpu(
+            u,
+            v,
+            w,
+            velocity_maxima,
+            delta,
+            cfl,
+            output_time_step,
+        )
 
         # ------------Clear scratch-------------------
         blocks = (
@@ -661,7 +675,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
     # ------------time-------------------
     t = 0
-    dt = simulations[0].get("settings").get("dt")
+    cfl = float(simulations[0].get("settings", {}).get("cfl", 10.0))
     t_max = simulations[0].get("settings").get("simulation_length")
 
     # ------------dimensions------------------
@@ -750,6 +764,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
     ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
+    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
+    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
     cuda.synchronize()
     _record_debug_timing(timing_stats, "init_field_upload", perf_counter() - section_start)
 
@@ -809,6 +825,20 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
+
+        section_start = perf_counter()
+        time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
+        dt = time_step.compute_new_timestep_gpu(
+            u,
+            v,
+            w,
+            velocity_maxima,
+            delta,
+            cfl,
+            output_time_step,
+        )
+        cuda.synchronize()
+        _record_debug_timing(timing_stats, "loop_timestep", perf_counter() - section_start)
 
         # ------------Clear scratch-------------------
         blocks = (

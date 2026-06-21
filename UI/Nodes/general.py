@@ -587,7 +587,7 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 420.0
     property_groups = (
-        ("Time", ("start_frame", "end_frame", "substeps")),
+        ("Time", ("start_frame", "end_frame", "cfl")),
         (
             "Solver",
             (
@@ -609,7 +609,7 @@ class ContinuumFlowSimulationNode(ContinuumFlowBaseNode):
     )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
-    substeps: IntProperty(name="Substeps", default=0, min=0, soft_min=0, soft_max=32, description="Additional substeps per output frame", options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=10.0, min=0.0, soft_min=0.0, soft_max=10.0, precision=3, description="Maximum CFL number used for adaptive timesteps", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=10, min=1, max=500, soft_min=1, soft_max=500, description="Number of pressure itterations", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
     adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
