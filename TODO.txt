@@ -5,10 +5,8 @@ the live preview produces a RAM accumulation
 
 Code rework:
 Artificial forces still missing, also rescale force inputs to be more uniform
-Backtracing steps, 1 is fine
 Maybe scalar values and velocity can share scratch array?
 Test different block sizes
-Remove depart_xyz, recompute it every time
 Rebuild output from ground up, main goal is get data from GPU as fast as possible
 Adjust UI tooltips
 Rebuild CPU kernel

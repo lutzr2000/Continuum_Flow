@@ -240,11 +240,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     fuel_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     flame = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
-    # depart
-    depart_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    depart_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    depart_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-
     # scratch
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -454,9 +449,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             dt,
             delta,
             scalar_active_tiles_dilated,
@@ -471,9 +463,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             dt,
             u_work,
             v_work,
@@ -560,9 +549,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             delta,
             scalar_active_tiles_dilated,
         )
@@ -575,9 +561,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             u,
             v,
             w,
@@ -732,11 +715,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     fuel = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     fuel_work = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     flame = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-
-    # depart
-    depart_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    depart_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    depart_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
     # scratch
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -972,9 +950,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             dt,
             delta,
             scalar_active_tiles_dilated,
@@ -989,9 +964,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             dt,
             u_work,
             v_work,
@@ -1089,9 +1061,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             delta,
             scalar_active_tiles_dilated,
         )
@@ -1104,9 +1073,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            depart_x,
-            depart_y,
-            depart_z,
             u,
             v,
             w,

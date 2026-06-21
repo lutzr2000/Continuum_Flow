@@ -131,7 +131,7 @@ def _backtrace_position(u, v, w, x_start, y_start, z_start, dt_over_delta, nx, n
     The helper is used by the semi-Lagrangian and MacCormack advection passes
     to estimate the departure point in grid coordinates.
     """
-    n_substeps = 3
+    n_substeps = 1
     substep_dt = dt_over_delta * 1 / n_substeps
     x_pos = x_start
     y_pos = y_start
@@ -192,9 +192,6 @@ def advect_velocity_semi_lagrangian(
     advected_u,
     advected_v,
     advected_w,
-    depart_x,
-    depart_y,
-    depart_z,
     dt,
     delta,
     active_tile_mask,
@@ -231,9 +228,6 @@ def advect_velocity_semi_lagrangian(
         ny,
         nz,
     )
-    depart_x[i, j, k] = x_depart
-    depart_y[i, j, k] = y_depart
-    depart_z[i, j, k] = z_depart
 
     advected_u[i, j, k], advected_v[i, j, k], advected_w[i, j, k] = (
         _sample_trilinear_vec3(
@@ -259,9 +253,6 @@ def update_velocity_maccormack(
     predictor_u,
     predictor_v,
     predictor_w,
-    depart_x,
-    depart_y,
-    depart_z,
     dt,
     un,
     vn,
@@ -312,9 +303,19 @@ def update_velocity_maccormack(
     v_center = v[i, j, k]
     w_center = w[i, j, k]
 
-    x_depart = depart_x[i, j, k]
-    y_depart = depart_y[i, j, k]
-    z_depart = depart_z[i, j, k]
+    x_depart, y_depart, z_depart = _backtrace_position(
+        u,
+        v,
+        w,
+        float(i),
+        float(j),
+        float(k),
+        dt / delta,
+        nx,
+        ny,
+        nz,
+    )
+
     # Forward trace from the departure point:
     # approximately:
     # x_forward = x_depart + dt * u(x_depart)
