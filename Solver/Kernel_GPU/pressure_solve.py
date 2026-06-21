@@ -414,9 +414,14 @@ def pressure_poisson(
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
     source_mask_shape = (0,) + tuple(u.shape)
-    source_mask_array = np.zeros(source_mask_shape, dtype=np.bool_)
-    if source_masks:
-        source_mask_array = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
+    if hasattr(source_masks, "copy_to_host"):
+        source_mask_array = source_masks
+    else:
+        source_mask_array = cuda.to_device(
+            np.zeros(source_mask_shape, dtype=np.bool_)
+            if len(source_masks) == 0
+            else np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
+        )
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u,
@@ -426,7 +431,7 @@ def pressure_poisson(
         b,
         dt,
         point_divergence,
-        cuda.to_device(source_mask_array),
+        source_mask_array,
         cuda.to_device(np.ascontiguousarray(np.asarray(extra_pressure, dtype=np.float32))),
         delta,
         rho,
@@ -458,3 +463,5 @@ def pressure_poisson(
         )
 
     return p_old
+
+

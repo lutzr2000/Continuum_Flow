@@ -87,7 +87,7 @@ def apply_all_BC(
     bc_config = simulations[0].get("domain", {}).get("boundary_conditions", {})
     u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
-    if bool(np.any(obstacle_mask)):
+    if obstacle_mask is not None:
         blockspergrid = kernel_config.volume_blocks_per_grid(
             obstacle_mask.shape,
             kernel_config.THREADS_PER_BLOCK_3D,
@@ -107,7 +107,8 @@ def apply_all_BC(
             obstacle_velocity_z,
         )
 
-    if bool(np.any(source_masks)):
+    source_count = int(source_masks.shape[0])
+    if source_count > 0:
         source_temperature_values = get_source_values(simulations,"temperature",t)
         source_smoke_values = get_source_values(simulations,"smoke",t)
         source_fuel_values = get_source_values(simulations,"fuel",t)
@@ -115,12 +116,10 @@ def apply_all_BC(
         source_velocity_y_values = get_source_values(simulations, "velocity", t, 1)
         source_velocity_z_values = get_source_values(simulations, "velocity", t, 2)
 
-        source_count = len(source_masks)
         for source_idx in range(source_count):
-            source_mask = source_masks[source_idx]
-
+            source_mask_entry = source_masks[source_idx]
             blockspergrid = kernel_config.volume_blocks_per_grid(
-                source_mask.shape,
+                source_mask_entry.shape,
                 kernel_config.THREADS_PER_BLOCK_3D,
             )
             source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
@@ -130,7 +129,7 @@ def apply_all_BC(
                 T,
                 smoke,
                 fuel,
-                source_mask,
+                source_mask_entry,
                 source_temperature_values[source_idx],
                 source_smoke_values[source_idx],
                 source_fuel_values[source_idx],
@@ -140,7 +139,6 @@ def apply_all_BC(
                 dt
             )
     return u, v, w, p, T, smoke, fuel, flame
-
 
 def compute_inital_velocity(simulation_cfg):
     total_u = 0.0
@@ -244,6 +242,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     # vortictiy
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
 
+    # masks
+    obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
+    source_mask_host = np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_)
+    source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
+    source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
+    source_masks = cuda.to_device(source_mask_stack)
+
     # ------------intitialise------------------
     u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
 
@@ -282,7 +287,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         "fuel": fuel,
         "flame": flame,
         "obstacle_mask": obstacle_mask,
-        "source_mask": np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_),
+        "source_mask": source_mask,
     }
 
     (
@@ -326,6 +331,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
+            aggregate_mask=source_mask,
         )
 
         update_masks.update_masks(
@@ -723,6 +729,13 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     _record_debug_timing(timing_stats, "init_allocations", perf_counter() - section_start)
 
+    # masks
+    obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
+    source_mask_host = np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_)
+    source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
+    source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
+    source_masks = cuda.to_device(source_mask_stack)
+
     section_start = perf_counter()
     # ------------intitialise------------------
     u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
@@ -765,7 +778,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         "fuel": fuel,
         "flame": flame,
         "obstacle_mask": obstacle_mask,
-        "source_mask": np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_),
+        "source_mask": source_mask,
     }
 
     (
@@ -814,7 +827,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
-            compute_velocity_flag=False
+            compute_velocity_flag=False,
+            aggregate_mask=source_mask
         )
         cuda.synchronize()
         _record_debug_timing(timing_stats, "loop_update_source_masks", perf_counter() - section_start)
@@ -1174,3 +1188,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     print(f"Average step runtime: {average_step:.6f} s")
     _print_debug_timing_summary(timing_stats, total_runtime)
     print("################################################################")
+
+
+
+
