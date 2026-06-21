@@ -1,24 +1,16 @@
 TODO
 
 General:
-Rescale Force magnitudes
 the live preview produces a RAM accumulation
-Rework explosion setup
-Clean up / improve code
-Rising smoke and explosion seem dependent on delta and delta
-Adjust UI tooltips
-Compare to Jflow alpha try to reduce VRAM
-Better output performance
-Test more or less backtracing steps
-Test fixxed dt with substeps again
-
-
-
 
 Code rework:
-The whole mask creation, voxelisation is uncessary complicated, convluted and distributed
-Make a clear entry point in the solver from the UI, maybe a main.py?
+Mask updates take way longer than before, why?
+Apply all BC is now way slower, why?
+Artificial forces still missing, also rescale force inputs to be more uniform
+Backtracing steps, 1 is fine
+Remove depart_xyz, recompute it every time
+Rebuild output from ground up, main goal is get data from GPU as fast as possible
+Adjust UI tooltips
+Rebuild CPU kernel
+Rework UI
 
-Output: 
-Write data from gpu to binary than to vdb?
-Write in bigger blocks?
