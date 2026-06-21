@@ -63,6 +63,21 @@ def sample_mask_backwards(
             rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
         )
 
+
+@cuda.jit(cache=True)
+def clear_mask_and_velocity(mask, out_vx, out_vy, out_vz):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = mask.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    mask[i, j, k] = False
+    out_vx[i, j, k] = 0.0
+    out_vy[i, j, k] = 0.0
+    out_vz[i, j, k] = 0.0
+
+
 def _update_one_mask(
     mask,
     base_masks,
@@ -76,6 +91,18 @@ def _update_one_mask(
     obstacle_velocity_z,
 ):
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
+    launch_blocks = (
+        (int(mask.shape[0]) + _MASK_THREADS_PER_BLOCK[0] - 1) // _MASK_THREADS_PER_BLOCK[0],
+        (int(mask.shape[1]) + _MASK_THREADS_PER_BLOCK[1] - 1) // _MASK_THREADS_PER_BLOCK[1],
+        (int(mask.shape[2]) + _MASK_THREADS_PER_BLOCK[2] - 1) // _MASK_THREADS_PER_BLOCK[2],
+    )
+
+    clear_mask_and_velocity[launch_blocks, _MASK_THREADS_PER_BLOCK](
+        mask,
+        obstacle_velocity_x,
+        obstacle_velocity_y,
+        obstacle_velocity_z,
+    )
 
     for mask_entry in base_masks:
         mesh_object = mask_entry["mesh_object"]
@@ -110,14 +137,7 @@ def _update_one_mask(
         if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
             continue
 
-        sample_mask_backwards[
-            (
-                (int(mask.shape[0]) + _MASK_THREADS_PER_BLOCK[0] - 1) // _MASK_THREADS_PER_BLOCK[0],
-                (int(mask.shape[1]) + _MASK_THREADS_PER_BLOCK[1] - 1) // _MASK_THREADS_PER_BLOCK[1],
-                (int(mask.shape[2]) + _MASK_THREADS_PER_BLOCK[2] - 1) // _MASK_THREADS_PER_BLOCK[2],
-            ),
-            _MASK_THREADS_PER_BLOCK,
-        ](
+        sample_mask_backwards[launch_blocks, _MASK_THREADS_PER_BLOCK](
             mask,
             obstacle_velocity_x,
             obstacle_velocity_y,
