@@ -57,7 +57,11 @@ def main(config=None):
         source_base_masks.append(source_base_mask)
         source_masks.append(source_mask)
 
-    return gpu_kernel_module.solver(
+    viewers = simulation_cfg.get("viewers") or []
+    debug_enabled = any(bool(viewer_cfg.get("debug", False)) for viewer_cfg in viewers)
+    solver_fn = gpu_kernel_module.solver_debug if debug_enabled else gpu_kernel_module.solver
+
+    return solver_fn(
         config,
         obstacle_base_masks,
         obstacle_mask,
