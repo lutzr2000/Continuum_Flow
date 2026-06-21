@@ -23,9 +23,34 @@ def sample_mask_backwards(
     iy1,
     iz0,
     iz1,
-    box,
-    inv,
-    rate,
+    base_ox,
+    base_oy,
+    base_oz,
+    inv00,
+    inv01,
+    inv02,
+    inv03,
+    inv10,
+    inv11,
+    inv12,
+    inv13,
+    inv20,
+    inv21,
+    inv22,
+    inv23,
+    rate00,
+    rate01,
+    rate02,
+    rate03,
+    rate10,
+    rate11,
+    rate12,
+    rate13,
+    rate20,
+    rate21,
+    rate22,
+    rate23,
+    compute_velocity_flag=True
 ):
     """Back-sample a local reference mask into the world grid and evaluate wall velocity."""
     i, j, k = cuda.grid(3)
@@ -36,16 +61,15 @@ def sample_mask_backwards(
     if i < ix0 or i > ix1 or j < iy0 or j > iy1 or k < iz0 or k > iz1:
         return
 
-    base_ox, base_oy, base_oz = box
     bn_x, bn_y, bn_z = base.shape
 
     x = np.float32(ox + i * delta)
     y = np.float32(oy + j * delta)
     z = np.float32(oz + k * delta)
 
-    bx = inv[0, 0] * x + inv[0, 1] * y + inv[0, 2] * z + inv[0, 3]
-    by = inv[1, 0] * x + inv[1, 1] * y + inv[1, 2] * z + inv[1, 3]
-    bz = inv[2, 0] * x + inv[2, 1] * y + inv[2, 2] * z + inv[2, 3]
+    bx = inv00 * x + inv01 * y + inv02 * z + inv03
+    by = inv10 * x + inv11 * y + inv12 * z + inv13
+    bz = inv20 * x + inv21 * y + inv22 * z + inv23
 
     bi = int(math.floor((bx - base_ox) / delta + 0.5))
     bj = int(math.floor((by - base_oy) / delta + 0.5))
@@ -53,15 +77,10 @@ def sample_mask_backwards(
 
     if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
         out[i, j, k] = True
-        out_vx[i, j, k] = (
-            rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
-        )
-        out_vy[i, j, k] = (
-            rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
-        )
-        out_vz[i, j, k] = (
-            rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
-        )
+        if compute_velocity_flag:
+            out_vx[i, j, k] = rate00 * bx + rate01 * by + rate02 * bz + rate03
+            out_vy[i, j, k] = rate10 * bx + rate11 * by + rate12 * bz + rate13
+            out_vz[i, j, k] = rate20 * bx + rate21 * by + rate22 * bz + rate23
 
 
 @cuda.jit(cache=True)
@@ -89,6 +108,7 @@ def _update_one_mask(
     obstacle_velocity_x,
     obstacle_velocity_y,
     obstacle_velocity_z,
+    compute_velocity_flag
 ):
     origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
     launch_blocks = (
@@ -153,9 +173,34 @@ def _update_one_mask(
             int(iy1),
             int(iz0),
             int(iz1),
-            box,
-            inv,
-            rate,
+            np.float32(box[0]),
+            np.float32(box[1]),
+            np.float32(box[2]),
+            np.float32(inv[0, 0]),
+            np.float32(inv[0, 1]),
+            np.float32(inv[0, 2]),
+            np.float32(inv[0, 3]),
+            np.float32(inv[1, 0]),
+            np.float32(inv[1, 1]),
+            np.float32(inv[1, 2]),
+            np.float32(inv[1, 3]),
+            np.float32(inv[2, 0]),
+            np.float32(inv[2, 1]),
+            np.float32(inv[2, 2]),
+            np.float32(inv[2, 3]),
+            np.float32(rate[0, 0]),
+            np.float32(rate[0, 1]),
+            np.float32(rate[0, 2]),
+            np.float32(rate[0, 3]),
+            np.float32(rate[1, 0]),
+            np.float32(rate[1, 1]),
+            np.float32(rate[1, 2]),
+            np.float32(rate[1, 3]),
+            np.float32(rate[2, 0]),
+            np.float32(rate[2, 1]),
+            np.float32(rate[2, 2]),
+            np.float32(rate[2, 3]),
+            compute_velocity_flag
         )
 
     return mask
@@ -172,6 +217,7 @@ def update_masks(
     obstacle_velocity_x,
     obstacle_velocity_y,
     obstacle_velocity_z,
+    compute_velocity_flag
 ):
     if isinstance(masks, (list, tuple)):
         updated_masks = []
@@ -189,6 +235,7 @@ def update_masks(
                     obstacle_velocity_x,
                     obstacle_velocity_y,
                     obstacle_velocity_z,
+                    compute_velocity_flag
                 )
             )
         return updated_masks
@@ -204,4 +251,5 @@ def update_masks(
         obstacle_velocity_x,
         obstacle_velocity_y,
         obstacle_velocity_z,
+        compute_velocity_flag
     )

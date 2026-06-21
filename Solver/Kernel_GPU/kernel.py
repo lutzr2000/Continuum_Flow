@@ -814,6 +814,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
+            compute_velocity_flag=False
         )
         cuda.synchronize()
         _record_debug_timing(timing_stats, "loop_update_source_masks", perf_counter() - section_start)
@@ -830,6 +831,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             scratch_A_x,
             scratch_A_y,
             scratch_A_z,
+            compute_velocity_flag=True
         )
         cuda.synchronize()
         _record_debug_timing(timing_stats, "loop_update_obstacle_masks", perf_counter() - section_start)
