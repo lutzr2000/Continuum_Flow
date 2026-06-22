@@ -5,7 +5,6 @@ the live preview produces a RAM accumulation
 
 Code rework:
 Artificial forces still missing, also rescale force inputs to be more uniform
-Remove divergence force completly, unessecary double with extra pressure in source
 Test different block sizes
 Rebuild output from ground up, main goal is get data from GPU as fast as possible
 Behaviour is more inconsistent with resolution again why?

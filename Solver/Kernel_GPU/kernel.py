@@ -1,3 +1,5 @@
+import json
+import sys
 from time import perf_counter
 from pathlib import Path
 import numpy as np
@@ -8,8 +10,6 @@ import Solver.Kernel_GPU.advection_schemes as advection_schemes
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
 import Solver.Kernel_GPU.vorticity as vorticity
-import Solver.General.helper_functions as helper_functions
-import Solver.General.output_functions as output_functions
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
@@ -17,6 +17,20 @@ import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 
 GPU_FIELD_DTYPE = np.float32
+PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
+
+
+def emit_progress(percent, time_value=None):
+    """
+    Emit a machine-readable progress event for Blender's bake progress bar.
+    """
+    payload = {
+        "percent": max(0.0, min(100.0, float(percent))),
+    }
+    if time_value is not None:
+        payload["time"] = float(time_value)
+    sys.stdout.write(PROGRESS_EVENT_PREFIX + json.dumps(payload) + "\n")
+    sys.stdout.flush()
 
 
 def _record_debug_timing(timing_stats, name, elapsed):
@@ -273,50 +287,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
-    # ------------Prepare output-------------------
+    # ------------output------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
-    output_field_config = helper_functions.build_output_field_config(output_cfg)
-    output_buffer_variables = helper_functions.collect_buffer_variables(output_field_config)
-    output_performance = helper_functions.build_output_performance_config(output_cfg)
-    output_dtype = helper_functions.resolve_output_dtype(output_cfg)
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    output_sparse_threshold = float(simulations[0].get("settings", {}).get("adaptive_domain_threshold", 0.001))
-    host_vdb_writer = config.get("_host_vdb_writer")
-
-    device_fields = {
-        "u": u,
-        "v": v,
-        "w": w,
-        "p": p,
-        "T": temperature,
-        "smoke": smoke,
-        "fuel": fuel,
-        "flame": flame,
-        "obstacle_mask": obstacle_mask,
-        "source_mask": source_mask,
-    }
-
-    (
-        write_queue,
-        buffer_pool,
-        writer_threads,
-        shared_memory_blocks,
-        device_output_staging,
-    ) = output_functions.setup_output(
-        output_cfg.get("output_path", ""),
-        int(simulations[0].get("settings", {}).get("start_frame", 0)),
-        output_buffer_variables,
-        helper_functions.select_fields(device_fields, output_buffer_variables),
-        output_performance["buffer_count"],
-        output_performance["writer_processes"],
-        delta,
-        host_vdb_writer,
-        storage_dtype=output_dtype,
-    )
 
     # ------------time loop------------------
     print("Start time iteration")
-    helper_functions.emit_progress(0.0, t)
+    emit_progress(0.0, t)
     next_output_time = 0.0
     output_index = 0
     while t < t_max:
@@ -581,36 +558,15 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
-            device_fields["u"] = u
-            device_fields["v"] = v
-            device_fields["w"] = w
-            device_fields["p"] = p
-            device_fields["T"] = temperature
-            device_fields["smoke"] = smoke
-            device_fields["fuel"] = fuel
-            device_fields["flame"] = flame
-            output_functions.enqueue_device_output(
-                write_queue,
-                buffer_pool,
-                output_buffer_variables,
-                helper_functions.select_fields(
-                    device_fields,
-                    output_buffer_variables,
-                ),
-                device_output_staging,
-                output_index,
-                t,
-                output_field_config,
-                output_sparse_threshold,
-            )
+            print("output due")
 
             output_index += 1
             output_frame_count += 1
             next_output_time += output_time_step
-            helper_functions.emit_progress(
-                t / t_max * 100.0,
-                t,
-            )
+        emit_progress(
+            t / t_max * 100.0,
+            t,
+        )
 
         # ------------Memory track-------------------
         if t % 10 == 0:
@@ -621,19 +577,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         t = t + dt
 
-    # ------------Shutdown-------------------
-    if write_queue is not None:
-        output_functions.shutdown_output(
-            write_queue,
-            writer_threads,
-            shared_memory_blocks,
-        )
 
     # ------------Conclusion-------------------
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")
     else:
-        helper_functions.emit_progress(100.0, t_max)
+        emit_progress(100.0, t_max)
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time
@@ -744,52 +693,13 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     cuda.synchronize()
     _record_debug_timing(timing_stats, "init_field_upload", perf_counter() - section_start)
 
-    section_start = perf_counter()
-    # ------------Prepare output-------------------
+    # ------------output------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
-    output_field_config = helper_functions.build_output_field_config(output_cfg)
-    output_buffer_variables = helper_functions.collect_buffer_variables(output_field_config)
-    output_performance = helper_functions.build_output_performance_config(output_cfg)
-    output_dtype = helper_functions.resolve_output_dtype(output_cfg)
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    output_sparse_threshold = float(simulations[0].get("settings", {}).get("adaptive_domain_threshold", 0.001))
-    host_vdb_writer = config.get("_host_vdb_writer")
-
-    device_fields = {
-        "u": u,
-        "v": v,
-        "w": w,
-        "p": p,
-        "T": temperature,
-        "smoke": smoke,
-        "fuel": fuel,
-        "flame": flame,
-        "obstacle_mask": obstacle_mask,
-        "source_mask": source_mask,
-    }
-
-    (
-        write_queue,
-        buffer_pool,
-        writer_threads,
-        shared_memory_blocks,
-        device_output_staging,
-    ) = output_functions.setup_output(
-        output_cfg.get("output_path", ""),
-        int(simulations[0].get("settings", {}).get("start_frame", 0)),
-        output_buffer_variables,
-        helper_functions.select_fields(device_fields, output_buffer_variables),
-        output_performance["buffer_count"],
-        output_performance["writer_processes"],
-        delta,
-        host_vdb_writer,
-        storage_dtype=output_dtype,
-    )
-    _record_debug_timing(timing_stats, "init_output_setup", perf_counter() - section_start)
 
     # ------------time loop------------------
     print("Start time iteration")
-    helper_functions.emit_progress(0.0, t)
+    emit_progress(0.0, t)
     next_output_time = 0.0
     output_index = 0
     step_count = 0
@@ -1130,37 +1040,15 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
-            device_fields["u"] = u
-            device_fields["v"] = v
-            device_fields["w"] = w
-            device_fields["p"] = p
-            device_fields["T"] = temperature
-            device_fields["smoke"] = smoke
-            device_fields["fuel"] = fuel
-            device_fields["flame"] = flame
-            output_functions.enqueue_device_output(
-                write_queue,
-                buffer_pool,
-                output_buffer_variables,
-                helper_functions.select_fields(
-                    device_fields,
-                    output_buffer_variables,
-                ),
-                device_output_staging,
-                output_index,
-                t,
-                output_field_config,
-                output_sparse_threshold,
-            )
-            cuda.synchronize()
+            print("output due")
 
             output_index += 1
             output_frame_count += 1
             next_output_time += output_time_step
-            helper_functions.emit_progress(
-                t / t_max * 100.0,
-                t,
-            )
+        emit_progress(
+            t / t_max * 100.0,
+            t,
+        )
         _record_debug_timing(timing_stats, "loop_output", perf_counter() - section_start)
 
         # ------------Memory track-------------------
@@ -1176,21 +1064,11 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         step_count += 1
         _record_debug_timing(timing_stats, "loop_total", perf_counter() - step_start)
 
-    # ------------Shutdown-------------------
-    section_start = perf_counter()
-    if write_queue is not None:
-        output_functions.shutdown_output(
-            write_queue,
-            writer_threads,
-            shared_memory_blocks,
-        )
-    _record_debug_timing(timing_stats, "shutdown_output", perf_counter() - section_start)
-
     # ------------Conclusion-------------------
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")
     else:
-        helper_functions.emit_progress(100.0, t_max)
+        emit_progress(100.0, t_max)
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time
