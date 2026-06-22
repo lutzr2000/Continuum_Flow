@@ -4,6 +4,7 @@ General:
 the live preview produces a RAM accumulation
 
 Code rework:
+replace clear scratch kernel with zero upload
 Artificial forces still missing, also rescale force inputs to be more uniform
 Test different block sizes
 Rebuild output from ground up, main goal is get data from GPU as fast as possible

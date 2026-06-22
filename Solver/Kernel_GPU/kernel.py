@@ -291,6 +291,21 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
+    if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
+        u_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+        v_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+        w_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
+        p_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
+        temperature_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
+        smoke_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
+        fuel_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
+        flame_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+
     # ------------time loop------------------
     print("Start time iteration")
     emit_progress(0.0, t)
@@ -558,7 +573,20 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
-            print("output due")
+            if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
+                smoke.copy_to_host(u_host)
+                smoke.copy_to_host(v_host)
+                smoke.copy_to_host(w_host)
+            if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
+                smoke.copy_to_host(p_host)
+            if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
+                smoke.copy_to_host(temperature_host)
+            if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
+                smoke.copy_to_host(smoke_host)
+            if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
+                smoke.copy_to_host(fuel_host)
+            if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
+                smoke.copy_to_host(flame_host)
 
             output_index += 1
             output_frame_count += 1
@@ -696,6 +724,21 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     # ------------output------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
+
+    if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
+        u_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+        v_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+        w_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
+        p_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
+        temperature_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
+        smoke_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
+        fuel_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
+        flame_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1040,7 +1083,20 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
-            print("output due")
+            if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
+                smoke.copy_to_host(u_host)
+                smoke.copy_to_host(v_host)
+                smoke.copy_to_host(w_host)
+            if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
+                smoke.copy_to_host(p_host)
+            if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
+                smoke.copy_to_host(temperature_host)
+            if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
+                smoke.copy_to_host(smoke_host)
+            if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
+                smoke.copy_to_host(fuel_host)
+            if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
+                smoke.copy_to_host(flame_host)
 
             output_index += 1
             output_frame_count += 1
