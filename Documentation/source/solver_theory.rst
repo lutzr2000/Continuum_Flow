@@ -145,7 +145,7 @@ To compute pressure we solve the discretized version of equation :eq:`eq-poisson
    =
    \nabla \cdot \vec{u}'
 
-Here :math:`\vec{u}'` is the previously advected velocity field. Additional divergence terms can optionally be added, like thermal divergence, divergence due to the point force, or an extra pressure term added by sources.
+Here :math:`\vec{u}'` is the previously advected velocity field. Additional divergence terms can optionally be added, like thermal divergence or an extra pressure term added by sources.
 
 Equation :eq:`eq-poisson_pressure` is then solved by a red-black Gauss-Seidel solver for as many iterations as specified by the user. In every iteration the Neumann boundary conditions for pressure are applied. Since the absolute level of pressure is not defined with only Neumann boundary conditions, we subtract :math:`b-\bar{b}`. We remove the mean of :math:`b` to improve stability of the pressure field.
 

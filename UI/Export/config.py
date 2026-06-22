@@ -457,11 +457,6 @@ _FORCE_NODE_FIELDS = {
         ("axis", "axis", _safe_float_vector, None),
         ("radius", "radius", float, 0.0),
     ),
-    "CONTINUUM_FLOW_FORCE_POINT_NODE": (
-        ("strength", "strength", float, 0.0),
-        ("origin", "origin", _safe_float_vector, None),
-        ("radius", "radius", float, 0.0),
-    ),
     "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
         ("scale", "scale", float, 0.0),
         ("frequency", "frequency", float, 0.0),

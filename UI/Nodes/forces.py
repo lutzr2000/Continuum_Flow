@@ -68,24 +68,6 @@ class ContinuumFlowForceSwirlNode(_ContinuumFlowBaseForceNode):
     radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius until which the swirl is applied", options={"ANIMATABLE"})  # type: ignore
 
 
-class ContinuumFlowForcePointNode(_ContinuumFlowBaseForceNode):
-    """
-    Node used to define a smoothed divergence source around one origin.
-    """
-
-    bl_idname = "CONTINUUM_FLOW_FORCE_POINT_NODE"
-    bl_label = "Force Point"
-    bl_icon = "EMPTY_ARROWS"
-    bl_width_default = 220.0
-    bl_width_min = 200.0
-    bl_width_max = 340.0
-    draw_property_names = ("strength", "origin", "radius")
-
-    strength: FloatProperty(name="Strength", default=0.0, description="Strength of force, negative values attract flow, positive push it away", options={"ANIMATABLE"})  # type: ignore
-    origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the point force", options={"ANIMATABLE"})  # type: ignore
-    radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius in which the force is applied", options={"ANIMATABLE"})  # type: ignore
-
-
 class ContinuumFlowForceTurbulenceNode(_ContinuumFlowBaseForceNode):
     """
     Node used to define a procedural turbulence force field.
@@ -108,6 +90,5 @@ class ContinuumFlowForceTurbulenceNode(_ContinuumFlowBaseForceNode):
 classes = (
     ContinuumFlowForceConstantNode,
     ContinuumFlowForceSwirlNode,
-    ContinuumFlowForcePointNode,
     ContinuumFlowForceTurbulenceNode,
 )

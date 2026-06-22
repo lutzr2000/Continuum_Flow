@@ -22,7 +22,6 @@ def pressure_equation_right_side(
     T,
     b,
     dt,
-    point_divergence,
     source_masks,
     extra_pressure,
     delta,
@@ -66,7 +65,6 @@ def pressure_equation_right_side(
 
     # ------------Artifical thermal divergence-------------------
     thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
-    authored_divergence = point_divergence[i, j, k]
     extra_pressure_term = 0.0
     source_count = source_masks.shape[0]
     for source_idx in range(source_count):
@@ -78,7 +76,7 @@ def pressure_equation_right_side(
 
     # ------------Right hand side-------------------
     b[i, j, k] = (
-        rho_over_dt * (divergence - authored_divergence - thermal_divergence)
+        rho_over_dt * (divergence - thermal_divergence)
         - extra_pressure_term
     )
 
@@ -391,7 +389,6 @@ def pressure_poisson(
     T,
     b,
     dt,
-    point_divergence,
     source_masks,
     extra_pressure,
     delta,
@@ -430,7 +427,6 @@ def pressure_poisson(
         T,
         b,
         dt,
-        point_divergence,
         source_mask_array,
         cuda.to_device(np.ascontiguousarray(np.asarray(extra_pressure, dtype=np.float32))),
         delta,

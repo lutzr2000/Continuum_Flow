@@ -276,20 +276,3 @@ Adds swirly forcing to your simulation.
     Radius within which the swirl motion should be applied.
 
 
-Force-Point
-~~~~~~~~~~~
-
-.. figure:: ../images/force_point_node.jpg
-   :class: block-image-left
-   :width: 300px
-
-Adds a point force that can attract flow or push it away.
-
-**Strength**
-    Negative values mean attraction, while positive values push the flow away.
-
-**Origin**
-    Origin of the point force.
-
-**Radius**
-    Radius at which the force is still in effect.

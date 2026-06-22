@@ -11,7 +11,6 @@ _FORCE_COLOR = (0.45, 0.65, 0.95, 1.0)
 _FORCE_NODE_IDS = {
     "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
     "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
-    "CONTINUUM_FLOW_FORCE_POINT_NODE",
     "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
 }
 
@@ -412,15 +411,6 @@ def _force_preview_geometry(force_node):
         lines.extend(
             _arrow_segments(center, _vector_scale(force_vector, preview_scale * 0.2))
         )
-        return lines
-
-    if node_type == "CONTINUUM_FLOW_FORCE_POINT_NODE":
-        center = tuple(float(component) for component in force_node.origin[:3])
-        radius = float(force_node.radius)
-        lines = _crosshair_segments(center, preview_scale * 0.2)
-        lines.extend(_circle_segments(center, (0.0, 0.0, 1.0), radius))
-        lines.extend(_circle_segments(center, (0.0, 1.0, 0.0), radius))
-        lines.extend(_circle_segments(center, (1.0, 0.0, 0.0), radius))
         return lines
 
     if node_type == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":

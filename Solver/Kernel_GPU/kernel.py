@@ -270,9 +270,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
 
-    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
-    point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
-    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
@@ -500,7 +497,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             temperature,
             scratch_A_x,
             dt,
-            point_divergence,
             source_masks,
             extra_pressure,
             delta,
@@ -743,9 +739,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
 
-    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
-    point_divergence = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
-    ############## PLACEHOLDER ##################### !!!!!!!!!!!!!!!!!!!!!!!
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
     cuda.synchronize()
@@ -1029,7 +1022,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             temperature,
             scratch_A_x,
             dt,
-            point_divergence,
             source_masks,
             extra_pressure,
             delta,
