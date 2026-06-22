@@ -574,19 +574,19 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         # ------------Output-------------------
         while t >= next_output_time:
             if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-                smoke.copy_to_host(u_host)
-                smoke.copy_to_host(v_host)
-                smoke.copy_to_host(w_host)
+                u.copy_to_host(u_host)
+                v.copy_to_host(v_host)
+                w.copy_to_host(w_host)
             if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-                smoke.copy_to_host(p_host)
+                p.copy_to_host(p_host)
             if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-                smoke.copy_to_host(temperature_host)
+                temperature.copy_to_host(temperature_host)
             if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
                 smoke.copy_to_host(smoke_host)
             if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-                smoke.copy_to_host(fuel_host)
+                fuel.copy_to_host(fuel_host)
             if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-                smoke.copy_to_host(flame_host)
+                flame.copy_to_host(flame_host)
 
             output_index += 1
             output_frame_count += 1
@@ -1084,19 +1084,19 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         section_start = perf_counter()
         while t >= next_output_time:
             if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-                smoke.copy_to_host(u_host)
-                smoke.copy_to_host(v_host)
-                smoke.copy_to_host(w_host)
+                u.copy_to_host(u_host)
+                v.copy_to_host(v_host)
+                w.copy_to_host(w_host)
             if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-                smoke.copy_to_host(p_host)
+                p.copy_to_host(p_host)
             if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-                smoke.copy_to_host(temperature_host)
+                temperature.copy_to_host(temperature_host)
             if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
                 smoke.copy_to_host(smoke_host)
             if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-                smoke.copy_to_host(fuel_host)
+                fuel.copy_to_host(fuel_host)
             if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-                smoke.copy_to_host(flame_host)
+                flame.copy_to_host(flame_host)
 
             output_index += 1
             output_frame_count += 1
