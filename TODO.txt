@@ -4,6 +4,8 @@ General:
 the live preview produces a RAM accumulation
 
 Code rework:
+turbulence force noise with perlin noise, fast compute every time step?
+Remove animation ability of physics constants, can be a thing for later update, but make sure forces and sources can be animated
 replace clear scratch kernel with zero upload
 Artificial forces still missing, also rescale force inputs to be more uniform
 Test different block sizes

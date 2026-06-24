@@ -303,7 +303,7 @@ def _start_bake_session(config_dict):
         writer_process_count=_writer_process_count_from_config(config_dict)
     )
     writer_server.start()
-    config_dict["_host_vdb_writer"] = writer_server.endpoint()
+    config_dict["host_vdb_writer"] = writer_server.endpoint()
     output_queue = queue.Queue()
     try:
         if _debug_enabled_from_config(config_dict):

@@ -15,10 +15,10 @@ import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
+import Solver.Kernel_GPU.output as output
 
 GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
-
 
 def emit_progress(percent, time_value=None):
     """
@@ -643,6 +643,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
+    origin = (origin_x,origin_y,origin_z)
     _record_debug_timing(timing_stats, "init_config", perf_counter() - section_start)
 
     print("################################################################")
@@ -725,22 +726,25 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-        u_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-        v_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-        w_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-        p_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-        temperature_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
-        smoke_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-        fuel_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-        flame_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    shared_memory_blocks, fields, field_to_output = output.setup_output(
+        simulations[0],
+        simulations[0].get("outputs").get("output_path"),
+        shape
+    )
+
+    device_fields = {
+        "u": u,
+        "v": v,
+        "w": w,
+        "p": p,
+        "T": T,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
+    }
 
     # ------------time loop------------------
+    section_start = perf_counter()
     print("Start time iteration")
     emit_progress(0.0, t)
     next_output_time = 0.0
@@ -1083,20 +1087,16 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
-            if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-                u.copy_to_host(u_host)
-                v.copy_to_host(v_host)
-                w.copy_to_host(w_host)
-            if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-                p.copy_to_host(p_host)
-            if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-                temperature.copy_to_host(temperature_host)
-            if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
-                smoke.copy_to_host(smoke_host)
-            if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-                fuel.copy_to_host(fuel_host)
-            if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-                flame.copy_to_host(flame_host)
+            output.enqueue_device_output(
+                simulations,
+                fields,
+                device_fields,
+                field_to_output,
+                output_index,
+                t,
+                delta,
+                origin
+            )
 
             output_index += 1
             output_frame_count += 1
@@ -1119,6 +1119,10 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         t = t + dt
         step_count += 1
         _record_debug_timing(timing_stats, "loop_total", perf_counter() - step_start)
+
+
+    # ------------Shutdown output-------------------
+    output.shutdown_output(shared_memory_blocks)
 
     # ------------Conclusion-------------------
     if cancel_requested:
