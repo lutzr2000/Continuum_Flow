@@ -728,7 +728,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
     shared_memory_blocks, fields, field_to_output = output.setup_output(
         simulations[0],
-        simulations[0].get("outputs").get("output_path"),
+        simulations[0].get("outputs")[0].get("output_path"),
         shape
     )
 
@@ -736,8 +736,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         "u": u,
         "v": v,
         "w": w,
-        "p": p,
-        "T": T,
+        "pressure": p,
+        "temperature": temperature,
         "smoke": smoke,
         "fuel": fuel,
         "flame": flame,
@@ -1088,7 +1088,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         section_start = perf_counter()
         while t >= next_output_time:
             output.enqueue_device_output(
-                simulations,
+                simulations[0],
                 fields,
                 device_fields,
                 field_to_output,

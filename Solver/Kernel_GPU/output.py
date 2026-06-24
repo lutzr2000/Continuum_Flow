@@ -38,9 +38,14 @@ def setup_output(
     shared_memory_blocks = []
     field_to_output = {}
     field_layouts = {}
-    ouput_list = simulations["outputs"][0]["variables"]
+    output_fields  = simulations["outputs"][0]["fields"]
+    output_list = list(output_fields.keys())
 
-    for variable_name in ouput_list:
+    if "velocity" in output_list:
+        output_list.remove("velocity")
+        output_list.extend(["u", "v", "w"])
+
+    for variable_name in output_list:
 
         if simulations.get("outputs")[0].get("precision") == "float16":
             buffer_dtype = np.float16
@@ -54,14 +59,14 @@ def setup_output(
 
         field_layouts[variable_name] = {
             "shape": shape,
-            "dtype": str(buffer_dtype),
-            "storage_dtype": str(simulations.get("outputs")[0].get("precision")),
+            "dtype": buffer_dtype,
+            "storage_dtype": simulations["outputs"][0].get("precision"),
             "nbytes": int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize,
         }
 
     fields = {}
 
-    for variable_name in ouput_list:
+    for variable_name in output_list:
         layout = field_layouts[variable_name]
         shape = layout["shape"]
         buffer_dtype = np.dtype(layout["dtype"])
@@ -75,7 +80,7 @@ def setup_output(
         fields[variable_name] = {
             "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
             "shape": shape,
-            "dtype": layout["dtype"],
+            "dtype": np.dtype(buffer_dtype).name,
             "storage_dtype": layout["storage_dtype"],
             "shm_name": shm.name,
         }
@@ -97,17 +102,22 @@ def enqueue_device_output(
     Copies one output frame from CUDA device arrays into shared memory
     and sends it directly to the host VDB writer.
     """
-    buffered_variables = simulations["outputs"][0]["variables"]
-    host_writer_endpoint = simulations.get("host_vdb_writer")
+    output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
+    host_writer_endpoint = simulations["outputs"][0]["host_vdb_writer"]
     sparse_threshold = simulations.get("settings").get("adaptive_domain_threshold")
     frame_start = simulations.get("settings").get("start_frame")
-    outpath = simulations.get("outputs").get("output_path")
-    ouput_list = simulations["outputs"][0]["variables"]
+    outpath = output_cfg.get("output_path")
+    output_fields  = output_cfg["fields"]
+    output_list = list(output_fields.keys())
 
-    for variable_name in buffered_variables:
+    if "velocity" in output_list:
+        output_list.remove("velocity")
+        output_list.extend(["u", "v", "w"])
+
+    for variable_name in output_list:
         source_field = sim_fields[variable_name]
 
-        if simulations["outputs"][0].get("precision", "float32") == "float16":
+        if output_cfg.get("precision", "float32") == "float16":
             staging_buffer = field_to_output[variable_name]
             blockspergrid_3d = kernel_config.volume_blocks_per_grid(
                 source_field.shape,
@@ -122,12 +132,12 @@ def enqueue_device_output(
         source_field.copy_to_host(fields[variable_name]["array"])
 
     frame_idx = int(frame_start) + int(output_index)
-    vdb_output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
+    output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
     writer_payload = create_writer_payload(
         fields,
-        ouput_list,
-        vdb_output_path,
+        output_list,
+        output_path,
         t,
         delta,
         origin,
@@ -225,62 +235,15 @@ def enqueue_host_output(
     )
 
 
-def _build_grid_payload(fields, output_field_config):
-    """
-    Describe the VDB grids that should be assembled from buffered fields.
-    """
-    grid_entries = []
-
-    velocity_cfg = output_field_config.get("u", {})
-    if velocity_cfg.get("export") and all(
-        component in fields for component in ("u", "v", "w")
-    ):
-        grid_entries.append(
-            {
-                "name": "velocity",
-                "field_names": ["u", "v", "w"],
-                "grid_type": "vector",
-                "shape": fields["u"]["shape"],
-                "dtype": fields["u"]["dtype"],
-                "storage_dtype": fields["u"]["storage_dtype"],
-                "sparse": bool(velocity_cfg.get("sparse", False)),
-            }
-        )
-
-    scalar_grid_names = {
-        "p": "pressure",
-        "T": "temperature",
-        "smoke": "density",
-        "fuel": "fuel",
-        "flame": "flame",
-    }
-    for field_name, grid_name in scalar_grid_names.items():
-        field_cfg = output_field_config.get(field_name, {})
-        if not field_cfg.get("export") or field_name not in fields:
-            continue
-        grid_entries.append(
-            {
-                "name": grid_name,
-                "field_names": [field_name],
-                "grid_type": "scalar",
-                "shape": fields[field_name]["shape"],
-                "dtype": fields[field_name]["dtype"],
-                "storage_dtype": fields[field_name]["storage_dtype"],
-                "sparse": bool(field_cfg.get("sparse", False)),
-            }
-        )
-
-    return grid_entries
-
-
 def create_writer_payload(
-    fields, output_field_config, output_path, time_value, delta, origin, sparse_threshold
+    fields,
+    output_list,
+    output_path,
+    time_value,
+    delta,
+    origin,
+    sparse_threshold,
 ):
-    """
-    builds the metadata package that is sent to Blender's host VDB writer.
-    """
-    grid_entries = _build_grid_payload(fields, output_field_config)
-
     payload = {
         "output_path": output_path,
         "time": float(time_value),
@@ -290,39 +253,27 @@ def create_writer_payload(
             "origin": origin,
         },
         "sparse_threshold": float(sparse_threshold),
-        "grids": [
-            {
-                "name": grid_entry["name"],
-                "grid_type": grid_entry["grid_type"],
-                "shape": grid_entry["shape"],
-                "dtype": grid_entry["dtype"],
-                "storage_dtype": grid_entry["storage_dtype"],
-                "sparse": grid_entry["sparse"],
-                "fields": {
-                    field_name: {
-                        "shape": fields[field_name]["shape"],
-                        "dtype": fields[field_name]["dtype"],
-                        "storage_dtype": fields[field_name]["storage_dtype"],
-                        "shm_name": fields[field_name]["shm_name"],
-                    }
-                    for field_name in grid_entry["field_names"]
-                },
-            }
-            for grid_entry in grid_entries
-        ],
+        "grids": [],
     }
 
-    if any(grid_entry.get("sparse", False) for grid_entry in payload["grids"]):
-        payload["sparse_mask_fields"] = {
-            variable_name: {
-                "shape": fields[variable_name]["shape"],
-                "dtype": fields[variable_name]["dtype"],
-                "storage_dtype": fields[variable_name]["storage_dtype"],
-                "shm_name": fields[variable_name]["shm_name"],
-            }
-            for variable_name in ("smoke", "flame")
-            if variable_name in fields
-        }
+    for field_name in output_list:
+
+        payload["grids"].append({
+            "name": field_name,
+            "grid_type": "scalar",
+            "shape": fields[field_name]["shape"],
+            "dtype": fields[field_name]["dtype"],
+            "storage_dtype": fields[field_name]["storage_dtype"],
+            "sparse": False,
+            "fields": {
+                field_name: {
+                    "shape": fields[field_name]["shape"],
+                    "dtype": fields[field_name]["dtype"],
+                    "storage_dtype": fields[field_name]["storage_dtype"],
+                    "shm_name": fields[field_name]["shm_name"],
+                }
+            },
+        })
 
     return payload
 
