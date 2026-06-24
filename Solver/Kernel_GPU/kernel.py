@@ -199,6 +199,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
     output_frame_count = 0
+    timing_stats = None
 
     # ------------time-------------------
     t = 0
@@ -215,6 +216,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
+    origin = (origin_x,origin_y,origin_z)
 
     print("################################################################")
     print("Initialise")
@@ -291,20 +293,22 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-        u_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-        v_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-        w_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-        p_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-        temperature_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
-        smoke_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-        fuel_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
-    if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-        flame_host = cuda.pinned_array(shape, dtype=GPU_FIELD_DTYPE)
+    shared_memory_blocks, fields, field_to_output, writer_socket, writer_file = output.setup_output(
+        simulations[0],
+        simulations[0].get("outputs")[0].get("output_path"),
+        shape
+    )
+
+    device_fields = {
+        "u": u,
+        "v": v,
+        "w": w,
+        "pressure": p,
+        "temperature": temperature,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
+    }
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -573,20 +577,18 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
-            if simulations[0].get("outputs")[0].get("fields").get("velocity").get("enabled"):
-                u.copy_to_host(u_host)
-                v.copy_to_host(v_host)
-                w.copy_to_host(w_host)
-            if simulations[0].get("outputs")[0].get("fields").get("pressure").get("enabled"):
-                p.copy_to_host(p_host)
-            if simulations[0].get("outputs")[0].get("fields").get("temperature").get("enabled"):
-                temperature.copy_to_host(temperature_host)
-            if simulations[0].get("outputs")[0].get("fields").get("smoke").get("enabled"):
-                smoke.copy_to_host(smoke_host)
-            if simulations[0].get("outputs")[0].get("fields").get("fuel").get("enabled"):
-                fuel.copy_to_host(fuel_host)
-            if simulations[0].get("outputs")[0].get("fields").get("flame").get("enabled"):
-                flame.copy_to_host(flame_host)
+            output.enqueue_device_output(
+                simulations[0],
+                fields,
+                device_fields,
+                field_to_output,
+                output_index,
+                t,
+                delta,
+                origin,
+                writer_file,
+                timing_stats,
+            )
 
             output_index += 1
             output_frame_count += 1
@@ -605,6 +607,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         t = t + dt
 
+    # ------------Shutdown output-------------------
+    output.shutdown_output(shared_memory_blocks, writer_socket, writer_file)
 
     # ------------Conclusion-------------------
     if cancel_requested:
@@ -726,7 +730,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, fields, field_to_output = output.setup_output(
+    shared_memory_blocks, fields, field_to_output, writer_socket, writer_file = output.setup_output(
         simulations[0],
         simulations[0].get("outputs")[0].get("output_path"),
         shape
@@ -1095,17 +1099,19 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
                 output_index,
                 t,
                 delta,
-                origin
+                origin,
+                writer_file,
+                timing_stats,
             )
 
             output_index += 1
             output_frame_count += 1
             next_output_time += output_time_step
+        _record_debug_timing(timing_stats, "loop_output", perf_counter() - section_start)
         emit_progress(
             t / t_max * 100.0,
             t,
         )
-        _record_debug_timing(timing_stats, "loop_output", perf_counter() - section_start)
 
         # ------------Memory track-------------------
         section_start = perf_counter()
@@ -1122,7 +1128,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
 
     # ------------Shutdown output-------------------
-    output.shutdown_output(shared_memory_blocks)
+    output.shutdown_output(shared_memory_blocks, writer_socket, writer_file)
 
     # ------------Conclusion-------------------
     if cancel_requested:

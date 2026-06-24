@@ -11,6 +11,12 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
+def _record_timing(timing_stats, name, elapsed):
+    if timing_stats is None:
+        return
+    timing_stats[name] = timing_stats.get(name, 0.0) + float(elapsed)
+
+
 def _enabled_output_field_names(output_fields):
     """
     Return only output field names that are explicitly enabled in the config.
@@ -96,7 +102,15 @@ def setup_output(
             "shm_name": shm.name,
         }
 
-    return shared_memory_blocks, fields, field_to_output
+    writer_socket = socket.create_connection(
+        (
+            simulations["outputs"][0]["host_vdb_writer"]["host"],
+            int(simulations["outputs"][0]["host_vdb_writer"]["port"]),
+        )
+    )
+    writer_file = writer_socket.makefile("rwb")
+
+    return shared_memory_blocks, fields, field_to_output, writer_socket, writer_file
 
 
 def enqueue_device_output(
@@ -107,20 +121,22 @@ def enqueue_device_output(
     output_index,
     t,
     delta,
-    origin
+    origin,
+    writer_file,
+    timing_stats=None,
 ):
     """
     Copies one output frame from CUDA device arrays into shared memory
     and sends it directly to the host VDB writer.
     """
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
-    host_writer_endpoint = simulations["outputs"][0]["host_vdb_writer"]
     sparse_threshold = simulations.get("settings").get("adaptive_domain_threshold")
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
     output_fields  = output_cfg["fields"]
     output_list = _enabled_output_field_names(output_fields)
 
+    copy_start = perf_counter()
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
 
@@ -137,10 +153,16 @@ def enqueue_device_output(
             source_field = staging_buffer
 
         source_field.copy_to_host(fields[variable_name]["array"])
+    _record_timing(
+        timing_stats,
+        "output.enqueue_device_output.copy_to_host",
+        perf_counter() - copy_start,
+    )
 
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
+    payload_start = perf_counter()
     writer_payload = create_writer_payload(
         fields,
         output_list,
@@ -150,69 +172,20 @@ def enqueue_device_output(
         origin,
         sparse_threshold,
     )
+    _record_timing(
+        timing_stats,
+        "output.enqueue_device_output.create_payload",
+        perf_counter() - payload_start,
+    )
 
-    with socket.create_connection(
-        (
-            host_writer_endpoint["host"],
-            int(host_writer_endpoint["port"]),
-        )
-    ) as writer_socket:
-        writer_file = writer_socket.makefile("rwb")
-        _send_payload_to_host_writer(writer_file, writer_payload)
-        writer_file.close()
+    socket_start = perf_counter()
+    _send_payload_to_host_writer(writer_file, writer_payload)
 
-
-def writer_thread_func(
-    write_queue,
-    buffer_pool,
-    outpath,
-    frame_start,
-    delta,
-    origin,
-    host_writer_endpoint,
-):
-    """
-    connects to Blender's host writer and forwards queued output jobs to it.
-    """
-    while True:
-        item = write_queue.get()
-
-        (
-            output_idx,
-            time_value,
-            fields,
-            output_field_config,
-            sparse_threshold,
-        ) = item
-        frame_idx = int(frame_start) + int(output_idx)
-        vdb_output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
-        writer_payload = create_writer_payload(
-            fields,
-            output_field_config,
-            vdb_output_path,
-            time_value,
-            delta,
-            origin,
-            sparse_threshold,
-        )
-
-        if writer_file is None or writer_file.closed:
-            writer_socket = socket.create_connection(
-                (
-                    host_writer_endpoint["host"],
-                    int(host_writer_endpoint["port"]),
-                )
-            )
-            writer_file = writer_socket.makefile("rwb")
-
-        _send_payload_to_host_writer(writer_file, writer_payload)
-
-        buffer_pool.put(fields)
-        write_queue.task_done()
-            
-        writer_file.close()
-        writer_socket.close()
-
+    _record_timing(
+        timing_stats,
+        "output.enqueue_device_output.host_writer_roundtrip",
+        perf_counter() - socket_start,
+    )
 
 
 def enqueue_host_output(
@@ -240,8 +213,6 @@ def enqueue_host_output(
             float(sparse_threshold),
         )
     )
-
-
 
 
 def _vdb_grid_name(field_name):
@@ -308,10 +279,10 @@ def _send_payload_to_host_writer(writer_file, writer_payload):
         raise RuntimeError(response.get("message", "unknown host VDB writer error"))
 
 
-def shutdown_output(shared_memory_blocks):
-    """
-    closes and releases all shared-memory output buffers.
-    """
+def shutdown_output(shared_memory_blocks, writer_socket, writer_file):
+    writer_file.close()
+    writer_socket.close()
+
     for shm in shared_memory_blocks:
         shm.close()
         shm.unlink()
