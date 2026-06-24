@@ -11,6 +11,21 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
+def _enabled_output_field_names(output_fields):
+    """
+    Return only output field names that are explicitly enabled in the config.
+    """
+    enabled_fields = []
+    for field_name, field_cfg in (output_fields or {}).items():
+        if bool((field_cfg or {}).get("enabled", False)):
+            enabled_fields.append(field_name)
+
+    if "velocity" in enabled_fields:
+        enabled_fields.remove("velocity")
+        enabled_fields.extend(["u", "v", "w"])
+    return enabled_fields
+
+
 @cuda.jit(cache=True)
 def cast_float16(source_field, output_field):
     """
@@ -39,11 +54,7 @@ def setup_output(
     field_to_output = {}
     field_layouts = {}
     output_fields  = simulations["outputs"][0]["fields"]
-    output_list = list(output_fields.keys())
-
-    if "velocity" in output_list:
-        output_list.remove("velocity")
-        output_list.extend(["u", "v", "w"])
+    output_list = _enabled_output_field_names(output_fields)
 
     for variable_name in output_list:
 
@@ -108,11 +119,7 @@ def enqueue_device_output(
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
     output_fields  = output_cfg["fields"]
-    output_list = list(output_fields.keys())
-
-    if "velocity" in output_list:
-        output_list.remove("velocity")
-        output_list.extend(["u", "v", "w"])
+    output_list = _enabled_output_field_names(output_fields)
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
@@ -235,6 +242,14 @@ def enqueue_host_output(
     )
 
 
+
+
+def _vdb_grid_name(field_name):
+    """
+    Map internal solver field names to their exported VDB grid names.
+    """
+    return "density" if field_name == "smoke" else field_name
+
 def create_writer_payload(
     fields,
     output_list,
@@ -259,7 +274,7 @@ def create_writer_payload(
     for field_name in output_list:
 
         payload["grids"].append({
-            "name": field_name,
+            "name": _vdb_grid_name(field_name),
             "grid_type": "scalar",
             "shape": fields[field_name]["shape"],
             "dtype": fields[field_name]["dtype"],

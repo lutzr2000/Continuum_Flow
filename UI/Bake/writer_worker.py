@@ -157,6 +157,71 @@ def _grid_array_for_export(grid_info, field_arrays, grid_dtype, sparse_mask):
     )
 
 
+def _combine_velocity_component_grids(grid_infos):
+    """
+    Merge scalar u/v/w component grids into one velocity vector grid when possible.
+    """
+    combined_grids = []
+    component_grids = {}
+
+    for grid_info in grid_infos:
+        grid_name = str(grid_info.get("name", "")).lower()
+        if grid_name in {"u", "v", "w"} and grid_info.get("grid_type") == "scalar":
+            component_grids[grid_name] = grid_info
+            continue
+        combined_grids.append(grid_info)
+
+    if len(component_grids) != 3:
+        for component_name in ("u", "v", "w"):
+            grid_info = component_grids.get(component_name)
+            if grid_info is not None:
+                combined_grids.append(grid_info)
+        return combined_grids
+
+    reference_grid = component_grids["u"]
+    reference_shape = tuple(reference_grid.get("shape", ()))
+    reference_dtype = str(reference_grid.get("dtype"))
+    reference_storage_dtype = str(
+        reference_grid.get("storage_dtype", reference_dtype)
+    )
+    reference_sparse = bool(reference_grid.get("sparse", False))
+
+    for component_name in ("v", "w"):
+        grid_info = component_grids[component_name]
+        if tuple(grid_info.get("shape", ())) != reference_shape:
+            for name in ("u", "v", "w"):
+                combined_grids.append(component_grids[name])
+            return combined_grids
+        if str(grid_info.get("dtype")) != reference_dtype:
+            for name in ("u", "v", "w"):
+                combined_grids.append(component_grids[name])
+            return combined_grids
+        if (
+            str(grid_info.get("storage_dtype", grid_info.get("dtype")))
+            != reference_storage_dtype
+        ):
+            for name in ("u", "v", "w"):
+                combined_grids.append(component_grids[name])
+            return combined_grids
+
+    combined_grids.append(
+        {
+            "name": "velocity",
+            "grid_type": "vector",
+            "shape": reference_shape,
+            "dtype": reference_dtype,
+            "storage_dtype": reference_storage_dtype,
+            "sparse": reference_sparse,
+            "fields": {
+                "u": dict(reference_grid["fields"]["u"]),
+                "v": dict(component_grids["v"]["fields"]["v"]),
+                "w": dict(component_grids["w"]["fields"]["w"]),
+            },
+        }
+    )
+    return combined_grids
+
+
 def write_vdb(payload):
     """
     Create one VDB file from field data stored in shared memory.
@@ -170,7 +235,7 @@ def write_vdb(payload):
         sparse_mask, sparse_mask_handles = _sparse_export_mask(payload)
         open_shared_memory.extend(sparse_mask_handles)
 
-        for grid_info in payload.get("grids", ()):
+        for grid_info in _combine_velocity_component_grids(payload.get("grids", ())):
             field_arrays, field_handles = _open_grid_field_arrays(grid_info)
             open_shared_memory.extend(field_handles)
 
