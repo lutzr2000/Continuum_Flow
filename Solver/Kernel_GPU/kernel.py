@@ -437,7 +437,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             )   
 
         # ------------force params-------------------   
-        fx_const, fy_const, fz_const = forces.constant_force(simulations[0])     
+        fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)     
 
         # ------------Velocity update-------------------
         u_work.copy_to_device(u)
@@ -895,7 +895,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             _record_debug_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
         # ------------force params-------------------   
-        fx_const, fy_const, fz_const = forces.constant_force(simulations[0])  
+        fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)  
 
         # ------------Velocity update-------------------
         section_start = perf_counter()

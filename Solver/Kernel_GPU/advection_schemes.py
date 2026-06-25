@@ -2,8 +2,23 @@ from numba import cuda
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
 from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
-from Solver.Kernel_GPU.forces import buoyancy_approximation
 from Solver.Kernel_GPU.vorticity import apply_vorticity_confinement
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def buoyancy_approximation(
+    T,
+    i,
+    j,
+    k,
+    buoyancy_factor,
+    t_reference,
+):
+    """
+    computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
+    """
+    g = 9.81
+    return g * buoyancy_factor * (T[i, j, k] - t_reference)
 
 
 @cuda.jit(device=True, inline=True, cache=True)

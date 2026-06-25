@@ -6,7 +6,8 @@ the live preview produces a RAM accumulation
 Code rework:
 Major:
 turbulence force noise with perlin noise, fast compute every time step?
-Artificial forces still missing, also rescale force inputs to be more uniform
+Swirl force still missing
+rescale force inputs to be more uniform
 Remove animation ability of physics constants, can be a thing for later update, but make sure forces and sources can be animated
 Behaviour is more inconsistent with resolution again why?
 Rebuild CPU kernel
