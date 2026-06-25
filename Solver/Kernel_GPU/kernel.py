@@ -16,6 +16,7 @@ import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 import Solver.Kernel_GPU.output as output
+import Solver.Kernel_GPU.forces as forces
 
 GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
@@ -435,6 +436,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 scalar_active_tiles_dilated,
             )   
 
+        # ------------force params-------------------   
+        fx_const, fy_const, fz_const = forces.constant_force(simulations[0])     
+
         # ------------Velocity update-------------------
         u_work.copy_to_device(u)
         v_work.copy_to_device(v)
@@ -475,6 +479,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
             simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
+            fx_const,
+            fy_const,
+            fz_const
         )
 
         # ------------Velocity swap-------------------
@@ -887,6 +894,9 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             cuda.synchronize()
             _record_debug_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
+        # ------------force params-------------------   
+        fx_const, fy_const, fz_const = forces.constant_force(simulations[0])  
+
         # ------------Velocity update-------------------
         section_start = perf_counter()
         velocity_update_start = section_start
@@ -945,6 +955,9 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
             simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
+            fx_const,
+            fy_const,
+            fz_const
         )
         cuda.synchronize()
         _record_debug_timing(

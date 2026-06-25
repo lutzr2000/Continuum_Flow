@@ -242,6 +242,9 @@ def update_velocity_maccormack(
     buoyancy_factor,
     t_reference,
     active_tile_mask,
+    fx_const,
+    fy_const,
+    fz_const
 ):
     """
     CUDA kernel that updates velocity with a MacCormack-corrected
@@ -368,6 +371,7 @@ def update_velocity_maccormack(
     )
 
     # Forces
+    # Vorticity
     if vorticity_strength > 0.0:
         Fx, Fy, Fz = apply_vorticity_confinement(
             u,
@@ -385,6 +389,12 @@ def update_velocity_maccormack(
             vorticity_strength,
         )
 
+    # Constant force
+    Fx += fx_const
+    Fy += fy_const
+    Fz += fz_const
+
+    # Buoyancy
     Fz += buoyancy_approximation(
         temperature,
         i, j, k,
