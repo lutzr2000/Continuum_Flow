@@ -25,73 +25,34 @@ def _enabled_output_field_names(output_fields):
     return enabled_fields
 
 
-@cuda.jit(cache=True)
-def cast_float16(source_field, output_field):
-    """
-    Cast one CUDA field into a float16 staging buffer.
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = source_field.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    output_field[i, j, k] = np.float16(source_field[i, j, k])
-
-
 def setup_output(
     simulations,
     outpath,
     shape
 ):
-    """
-    Prepares one shared-memory buffer and starts one host-writer thread.
-    """
     os.makedirs(outpath, exist_ok=True)
 
     shared_memory_blocks = []
-    field_to_output = {}
-    field_layouts = {}
-    output_fields  = simulations["outputs"][0]["fields"]
-    output_list = _enabled_output_field_names(output_fields)
-
-    for variable_name in output_list:
-
-        if simulations.get("outputs")[0].get("precision") == "float16":
-            buffer_dtype = np.float16
-        else:
-            buffer_dtype = np.float32
-
-        field_to_output[variable_name] = cuda.device_array(
-            shape,
-            dtype=buffer_dtype,
-        )
-
-        field_layouts[variable_name] = {
-            "shape": shape,
-            "dtype": np.dtype(buffer_dtype).name,
-            "nbytes": int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize,
-        }
-
     fields = {}
 
-    for variable_name in output_list:
-        layout = field_layouts[variable_name]
-        shape = layout["shape"]
-        buffer_dtype = np.dtype(layout["dtype"])
+    output_fields = simulations["outputs"][0]["fields"]
+    output_list = _enabled_output_field_names(output_fields)
 
+    buffer_dtype = np.float32
+    nbytes = int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize
+
+    for variable_name in output_list:
         shm = shared_memory.SharedMemory(
             create=True,
-            size=layout["nbytes"],
+            size=nbytes,
         )
         shared_memory_blocks.append(shm)
 
         fields[variable_name] = {
             "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
-            "shape": shape,
+            "shape": tuple(shape),
             "shm_name": shm.name,
         }
-
 
     writer_socket = socket.create_connection(
         (
@@ -101,43 +62,25 @@ def setup_output(
     )
     writer_file = writer_socket.makefile("rwb")
 
-    return shared_memory_blocks, fields, field_to_output, writer_socket, writer_file
+    return shared_memory_blocks, fields, writer_socket, writer_file
 
 
 def enqueue_device_output(
     simulations,
     fields,
     sim_fields,
-    field_to_output,
     output_index,
     t,
     writer_file
 ):
-    """
-    Copies one output frame from CUDA device arrays into shared memory
-    and sends it directly to the host VDB writer.
-    """
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
-    output_fields  = output_cfg["fields"]
+    output_fields = output_cfg["fields"]
     output_list = _enabled_output_field_names(output_fields)
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
-
-        if output_cfg.get("precision", "float32") == "float16":
-            staging_buffer = field_to_output[variable_name]
-            blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-                source_field.shape,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            )
-            cast_float16[
-                blockspergrid_3d,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            ](source_field, staging_buffer)
-            source_field = staging_buffer
-
         source_field.copy_to_host(fields[variable_name]["array"])
 
     frame_idx = int(frame_start) + int(output_index)
@@ -172,16 +115,14 @@ def create_writer_payload(
     }
 
     for field_name in output_list:
-
         payload["grids"].append({
             "name": _vdb_grid_name(field_name),
             "shape": fields[field_name]["shape"],
             "fields": {
                 field_name: {
                     "shape": fields[field_name]["shape"],
-                    "dtype": str(fields[field_name]["array"].dtype),
                     "shm_name": fields[field_name]["shm_name"],
-                }
+                }   
             },
         })
 

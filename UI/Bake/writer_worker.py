@@ -56,19 +56,14 @@ def write_vdb(payload):
             shape = tuple(field_info["shape"])
             shm_name = field_info["shm_name"]
 
-            # Shared memory dtype aus Payload bevorzugen
-            source_dtype = np.dtype(field_info.get("dtype", "float32"))
-
             shm = shared_memory.SharedMemory(name=shm_name)
             open_shared_memory.append(shm)
 
-            arr = np.ndarray(shape, dtype=source_dtype, buffer=shm.buf)
-
-            # Intern immer FloatGrid / float32
-            if arr.dtype == np.float32 and arr.flags["C_CONTIGUOUS"]:
-                arr_for_vdb = arr
-            else:
-                arr_for_vdb = np.asarray(arr, dtype=np.float32, order="C")
+            arr = np.ndarray(
+                shape,
+                dtype=np.float32,
+                buffer=shm.buf,
+            )
 
             grid = openvdb.FloatGrid(background=0.0)
             grid.name = grid_name
@@ -77,7 +72,7 @@ def write_vdb(payload):
             if hasattr(grid, "saveFloatAsHalf"):
                 grid.saveFloatAsHalf = (precision == "float16")
 
-            grid.copyFromArray(arr_for_vdb)
+            grid.copyFromArray(arr)
 
             try:
                 if sparse_threshold > 0.0:

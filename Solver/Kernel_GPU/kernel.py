@@ -306,7 +306,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, fields, field_to_output, writer_socket, writer_file = output.setup_output(
+    shared_memory_blocks, fields, writer_socket, writer_file = output.setup_output(
         simulations[0],
         simulations[0].get("outputs")[0].get("output_path"),
         shape
@@ -594,7 +594,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 simulations[0],
                 fields,
                 device_fields,
-                field_to_output,
                 output_index,
                 t,
                 writer_file,
@@ -740,7 +739,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, fields, field_to_output, writer_socket, writer_file = output.setup_output(
+    shared_memory_blocks, fields, writer_socket, writer_file = output.setup_output(
         simulations[0],
         simulations[0].get("outputs")[0].get("output_path"),
         shape
@@ -1105,7 +1104,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
                 simulations[0],
                 fields,
                 device_fields,
-                field_to_output,
                 output_index,
                 t,
                 writer_file,
