@@ -1,4 +1,4 @@
-
+import numpy as np
 
 def get_animated_node_value(node, var_name, t, default=0.0):
     value = node.get(var_name, default)
@@ -12,9 +12,9 @@ def get_animated_node_value(node, var_name, t, default=0.0):
             range(len(times)),
             key=lambda i: abs(float(times[i]) - float(t)),
         )
-        return values[nearest_idx]
+        value = values[nearest_idx]
 
-    return value if value is not None else default
+    return default if value is None else value
 
 
 def constant_force(simulation, t):
@@ -31,3 +31,30 @@ def constant_force(simulation, t):
             fz += get_animated_node_value(force_node, "fz", t, force.get("z", 0.0))
 
     return fx, fy, fz
+
+
+def swirl_force(simulation, t):
+    swirl_nodes = []
+
+    for node in simulation.get("forces", []):
+        if node.get("node_type") != "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
+            continue
+
+        strength = get_animated_node_value(node, "strength", t, 0.0)
+        origin = get_animated_node_value(node, "origin", t, [0.0, 0.0, 0.0])
+        axis = get_animated_node_value(node, "axis", t, [0.0, 0.0, 1.0])
+        radius = get_animated_node_value(node, "radius", t, 0.0)
+
+        origin = np.asarray(origin, dtype=np.float32)
+        axis = np.asarray(axis, dtype=np.float32)
+
+        swirl_nodes.append([
+            strength,
+            origin[0], origin[1], origin[2],
+            axis[0], axis[1], axis[2],
+            radius,
+        ])
+
+    swirl_nodes = np.asarray(swirl_nodes, dtype=np.float32).reshape((-1, 8))
+
+    return swirl_nodes, swirl_nodes.shape[0] > 0

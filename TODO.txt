@@ -12,6 +12,8 @@ Remove animation ability of physics constants, can be a thing for later update, 
 Behaviour is more inconsistent with resolution again why?
 Rebuild CPU kernel
 Rework UI
+When a lot of values are animated start up is slow
+Saved vdbs seam slightly stuttery?
 
 Minor:
 Test different block sizes

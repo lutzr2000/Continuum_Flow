@@ -22,6 +22,91 @@ def buoyancy_approximation(
 
 
 @cuda.jit(device=True, inline=True, cache=True)
+def apply_swirl_forces(
+    swirl_config,
+    i,
+    j,
+    k,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+):
+    Fx = 0.0
+    Fy = 0.0
+    Fz = 0.0
+
+    px = origin_x + float(i) * delta
+    py = origin_y + float(j) * delta
+    pz = origin_z + float(k) * delta
+
+    for swirl_idx in range(swirl_config.shape[0]):
+        strength = swirl_config[swirl_idx, 0]
+
+        ox = swirl_config[swirl_idx, 1]
+        oy = swirl_config[swirl_idx, 2]
+        oz = swirl_config[swirl_idx, 3]
+
+        ax = swirl_config[swirl_idx, 4]
+        ay = swirl_config[swirl_idx, 5]
+        az = swirl_config[swirl_idx, 6]
+
+        radius = swirl_config[swirl_idx, 7]
+
+        if radius <= 0.0 or strength == 0.0:
+            continue
+
+        axis_len = (ax * ax + ay * ay + az * az) ** 0.5
+        if axis_len <= 1e-8:
+            continue
+
+        ax /= axis_len
+        ay /= axis_len
+        az /= axis_len
+
+        rx = px - ox
+        ry = py - oy
+        rz = pz - oz
+
+        projection = rx * ax + ry * ay + rz * az
+
+        closest_x = ox + projection * ax
+        closest_y = oy + projection * ay
+        closest_z = oz + projection * az
+
+        radial_x = px - closest_x
+        radial_y = py - closest_y
+        radial_z = pz - closest_z
+
+        dist_sq = radial_x * radial_x + radial_y * radial_y + radial_z * radial_z
+        radius_sq = radius * radius
+
+        if dist_sq > radius_sq or dist_sq <= 1e-12:
+            continue
+
+        tx = ay * radial_z - az * radial_y
+        ty = az * radial_x - ax * radial_z
+        tz = ax * radial_y - ay * radial_x
+
+        t_len = (tx * tx + ty * ty + tz * tz) ** 0.5
+        if t_len <= 1e-8:
+            continue
+
+        tx /= t_len
+        ty /= t_len
+        tz /= t_len
+
+        dist = dist_sq ** 0.5
+        falloff = 1.0 - dist / radius
+
+        Fx += strength * falloff * tx
+        Fy += strength * falloff * ty
+        Fz += strength * falloff * tz
+
+    return Fx, Fy, Fz
+
+
+@cuda.jit(device=True, inline=True, cache=True)
 def _clamp(value, lower, upper):
     """
     Clamp one scalar value to the inclusive `[lower, upper]` interval.
@@ -259,7 +344,12 @@ def update_velocity_maccormack(
     active_tile_mask,
     fx_const,
     fy_const,
-    fz_const
+    fz_const,
+    has_swirl_nodes,
+    swirl_config,
+    origin_x,
+    origin_y,
+    origin_z,
 ):
     """
     CUDA kernel that updates velocity with a MacCormack-corrected
@@ -403,6 +493,23 @@ def update_velocity_maccormack(
             delta,
             vorticity_strength,
         )
+
+    if has_swirl_nodes:
+        # Swirl force
+        swirl_fx, swirl_fy, swirl_fz = apply_swirl_forces(
+            swirl_config,
+            i,
+            j,
+            k,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+        )
+
+        Fx += swirl_fx
+        Fy += swirl_fy
+        Fz += swirl_fz
 
     # Constant force
     Fx += fx_const
