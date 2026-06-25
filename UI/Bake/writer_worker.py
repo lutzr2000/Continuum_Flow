@@ -26,13 +26,36 @@ def get_writer_config():
     return WRITER_CONFIG
 
 
+def open_scalar_array(grid_payload):
+    _field_name, field_info = next(iter(grid_payload["fields"].items()))
+    shape = tuple(field_info["shape"])
+    shm = shared_memory.SharedMemory(name=field_info["shm_name"])
+    arr = np.ndarray(shape, dtype=np.float32, buffer=shm.buf)
+    return arr, shm, shape
+
+
+def prune_scalar_grid(grid,sparse_threshold):
+    try:
+        if sparse_threshold > 0.0:
+            grid.prune(sparse_threshold)
+        else:
+            grid.prune()
+    except TypeError:
+        try:
+            grid.prune()
+        except Exception:
+            pass
+    except AttributeError:
+        pass
+
+
 def write_vdb(payload):
     config = get_writer_config()
     simulations = config.get("simulations", {})
     simulation = simulations[0]
 
     output_cfg = simulation.get("outputs", [{}])[0]
-    precision = output_cfg.get("precision")
+    precision = output_cfg.get("precision", "float32")
     sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
 
     delta = float(simulation.get("domain").get("resolution"))
@@ -49,21 +72,56 @@ def write_vdb(payload):
     transform.postTranslate(origin)
 
     try:
-        for grid_payload in payload["grids"]:
+        grid_payloads = list(payload["grids"])
+        grid_by_name = {
+            grid_payload["name"]: grid_payload
+            for grid_payload in grid_payloads
+        }
+        used = set()
+
+        for grid_payload in grid_payloads:
             grid_name = grid_payload["name"]
-            _field_name, field_info = next(iter(grid_payload["fields"].items()))
 
-            shape = tuple(field_info["shape"])
-            shm_name = field_info["shm_name"]
+            if grid_name in used:
+                continue
 
-            shm = shared_memory.SharedMemory(name=shm_name)
+            # Combine u/v/w into one vector velocity grid.
+            if grid_name == "u" and "v" in grid_by_name and "w" in grid_by_name:
+                u_arr, u_shm, _shape = open_scalar_array(grid_by_name["u"])
+                v_arr, v_shm, _ = open_scalar_array(grid_by_name["v"])
+                w_arr, w_shm, _ = open_scalar_array(grid_by_name["w"])
+
+                open_shared_memory.extend([u_shm, v_shm, w_shm])
+
+                vec_arr = np.stack((u_arr, v_arr, w_arr), axis=-1)
+
+                grid_class = (
+                    getattr(openvdb, "Vec3SGrid", None)
+                    or getattr(openvdb, "VectorGrid", None)
+                    or getattr(openvdb, "Vec3fGrid", None)
+                )
+                if grid_class is None:
+                    raise AttributeError(
+                        "No supported OpenVDB vector grid class available"
+                    )
+
+                grid = grid_class()
+                grid.name = "velocity"
+                grid.transform = transform
+
+                if hasattr(grid, "saveFloatAsHalf"):
+                    grid.saveFloatAsHalf = (precision == "float16")
+
+                grid.copyFromArray(vec_arr)
+
+                # Do not prune Vec3 grids here. This binding expects Vec3s tolerance.
+                grids.append(grid)
+                used.update(("u", "v", "w"))
+                continue
+
+            # Scalar grid path.
+            arr, shm, _shape = open_scalar_array(grid_payload)
             open_shared_memory.append(shm)
-
-            arr = np.ndarray(
-                shape,
-                dtype=np.float32,
-                buffer=shm.buf,
-            )
 
             grid = openvdb.FloatGrid(background=0.0)
             grid.name = grid_name
@@ -73,18 +131,10 @@ def write_vdb(payload):
                 grid.saveFloatAsHalf = (precision == "float16")
 
             grid.copyFromArray(arr)
-
-            try:
-                if sparse_threshold > 0.0:
-                    grid.prune(sparse_threshold)
-                else:
-                    grid.prune()
-            except TypeError:
-                grid.prune()
-            except AttributeError:
-                pass
+            prune_scalar_grid(grid,sparse_threshold)
 
             grids.append(grid)
+            used.add(grid_name)
 
         os.makedirs(os.path.dirname(output_vdb_path), exist_ok=True)
         openvdb.write(output_vdb_path, grids=grids)

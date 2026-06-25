@@ -16,3 +16,4 @@ Rebuild example files
 Adjust UI tooltips
 Rebuild CPU kernel
 Rework UI
+Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
