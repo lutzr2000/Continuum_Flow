@@ -32,7 +32,7 @@ def write_vdb(payload):
     simulation = simulations[0]
 
     output_cfg = simulation.get("outputs", [{}])[0]
-    precision = output_cfg.get("precision", "float32")
+    precision = output_cfg.get("precision")
     sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
 
     delta = float(simulation.get("domain").get("resolution"))
