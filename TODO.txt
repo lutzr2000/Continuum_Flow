@@ -4,9 +4,7 @@ General:
 the live preview produces a RAM accumulation
 
 Code rework:
-Major:
 turbulence force noise with perlin noise, fast compute every time step?
-Swirl force still missing
 rescale force inputs to be more uniform
 Remove animation ability of physics constants, can be a thing for later update, but make sure forces and sources can be animated
 Behaviour is more inconsistent with resolution again why?
@@ -14,8 +12,6 @@ Rebuild CPU kernel
 Rework UI
 When a lot of values are animated start up is slow
 Saved vdbs seam slightly stuttery?
-
-Minor:
 Test different block sizes
 Output of velocity is not very effective because of non zero
 Some cases definetly need cfl smaller than 10

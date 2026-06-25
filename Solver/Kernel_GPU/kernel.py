@@ -48,6 +48,22 @@ def _print_debug_timing_summary(timing_stats, total_runtime):
         print(f"  {name}: {elapsed:.3f} s ({share:.1f}%)")
 
 
+def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
+    """
+    Return the currently active device buffers for output export.
+    """
+    return {
+        "u": u,
+        "v": v,
+        "w": w,
+        "pressure": p,
+        "temperature": temperature,
+        "smoke": smoke,
+        "fuel": fuel,
+        "flame": flame,
+    }
+
+
 @cuda.jit
 def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
     i, j, k = cuda.grid(3)
@@ -588,7 +604,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
 
+        # ------------time updated-------------------
+        t = t + dt
+
         # ------------Output-------------------
+        device_fields = _current_device_fields(
+            u, v, w, p, temperature, smoke, fuel, flame
+        )
         while t >= next_output_time:
             output.enqueue_device_output(
                 simulations[0],
@@ -612,8 +634,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             free, total = ctx.get_memory_info()
             used = total - free
             print(f"VRAM used: {used / 1024**2:.1f} MB")  
-
-        t = t + dt
 
     # ------------Shutdown output-------------------
     output.shutdown_output(shared_memory_blocks, writer_slots)
@@ -1106,8 +1126,14 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         fuel, fuel_work = fuel_work, fuel
         _record_debug_timing(timing_stats, "loop_scalar_swap", perf_counter() - section_start)
 
+        # ------------time updated-------------------
+        t = t + dt
+
         # ------------Output-------------------
         section_start = perf_counter()
+        device_fields = _current_device_fields(
+            u, v, w, p, temperature, smoke, fuel, flame
+        )
         while t >= next_output_time:
             output.enqueue_device_output(
                 simulations[0],
@@ -1135,7 +1161,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             print(f"VRAM used: {used / 1024**2:.1f} MB")
         _record_debug_timing(timing_stats, "loop_memory_track", perf_counter() - section_start)
 
-        t = t + dt
         step_count += 1
         _record_debug_timing(timing_stats, "loop_total", perf_counter() - step_start)
 
@@ -1158,5 +1183,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     print(f"Average step runtime: {average_step:.6f} s")
     _print_debug_timing_summary(timing_stats, total_runtime)
     print("################################################################")
+
+
+
 
 
