@@ -62,17 +62,6 @@ def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
     output_mask[i, j, k] = active_tiles[tile_i, tile_j, tile_k]
 
 
-@cuda.jit
-def clear_scratch_kernel(sx, sy, sz):
-    i, j, k = cuda.grid(3)
-
-    nx, ny, nz = sx.shape
-    if i < nx and j < ny and k < nz:
-        sx[i, j, k] = 0.0
-        sy[i, j, k] = 0.0
-        sz[i, j, k] = 0.0
-
-
 def get_source_values(simulations, var_name, t, index=None):
     source_entries = simulations[0].get("sources") or []
     values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
@@ -274,6 +263,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    scratch_zeros = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
 
     # vortictiy
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -346,12 +336,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Clear scratch-------------------
-        blocks = (
-            (shape[0] + kernel_config.THREADS_PER_BLOCK_3D[0] - 1) // kernel_config.THREADS_PER_BLOCK_3D[0],
-            (shape[1] + kernel_config.THREADS_PER_BLOCK_3D[1] - 1) // kernel_config.THREADS_PER_BLOCK_3D[1],
-            (shape[2] + kernel_config.THREADS_PER_BLOCK_3D[2] - 1) // kernel_config.THREADS_PER_BLOCK_3D[2],
-        )
-        clear_scratch_kernel[blocks, kernel_config.THREADS_PER_BLOCK_3D](scratch_A_x, scratch_A_y, scratch_A_z)
+        scratch_A_x.copy_to_device(scratch_zeros)
+        scratch_A_y.copy_to_device(scratch_zeros)
+        scratch_A_z.copy_to_device(scratch_zeros)
 
         # ------------Update masks-------------------
         if animated_obstacles:
@@ -702,6 +689,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
+    scratch_zeros = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
 
     # vortictiy
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -785,12 +773,9 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         _record_debug_timing(timing_stats, "loop_timestep", perf_counter() - section_start)
 
         # ------------Clear scratch-------------------
-        blocks = (
-            (shape[0] + kernel_config.THREADS_PER_BLOCK_3D[0] - 1) // kernel_config.THREADS_PER_BLOCK_3D[0],
-            (shape[1] + kernel_config.THREADS_PER_BLOCK_3D[1] - 1) // kernel_config.THREADS_PER_BLOCK_3D[1],
-            (shape[2] + kernel_config.THREADS_PER_BLOCK_3D[2] - 1) // kernel_config.THREADS_PER_BLOCK_3D[2],
-        )
-        clear_scratch_kernel[blocks, kernel_config.THREADS_PER_BLOCK_3D](scratch_A_x, scratch_A_y, scratch_A_z)
+        scratch_A_x.copy_to_device(scratch_zeros)
+        scratch_A_y.copy_to_device(scratch_zeros)
+        scratch_A_z.copy_to_device(scratch_zeros)
 
         # ------------Update masks-------------------
         section_start = perf_counter()
