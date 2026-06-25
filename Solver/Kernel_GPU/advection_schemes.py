@@ -107,6 +107,116 @@ def apply_swirl_forces(
 
 
 @cuda.jit(device=True, inline=True, cache=True)
+def _smoothstep(t):
+    return t * t * (3.0 - 2.0 * t)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _lerp(a, b, t):
+    return a + t * (b - a)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _fast_floor(x):
+    i = int(x)
+    if x < float(i):
+        return i - 1
+    return i
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _hash_noise_3d(ix, iy, iz, seed):
+    n = ix * 15731 + iy * 789221 + iz * 1376312589 + seed * 1013
+    n = (n << 13) ^ n
+    nn = n * (n * n * 15731 + 789221) + 1376312589
+    nn = nn & 0x7fffffff
+    return float(nn) / 1073741824.0 - 1.0  # [-1, 1]
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _value_noise_3d(x, y, z, seed):
+    x0 = _fast_floor(x)
+    y0 = _fast_floor(y)
+    z0 = _fast_floor(z)
+
+    x1 = x0 + 1
+    y1 = y0 + 1
+    z1 = z0 + 1
+
+    tx = _smoothstep(x - float(x0))
+    ty = _smoothstep(y - float(y0))
+    tz = _smoothstep(z - float(z0))
+
+    c000 = _hash_noise_3d(x0, y0, z0, seed)
+    c100 = _hash_noise_3d(x1, y0, z0, seed)
+    c010 = _hash_noise_3d(x0, y1, z0, seed)
+    c110 = _hash_noise_3d(x1, y1, z0, seed)
+
+    c001 = _hash_noise_3d(x0, y0, z1, seed)
+    c101 = _hash_noise_3d(x1, y0, z1, seed)
+    c011 = _hash_noise_3d(x0, y1, z1, seed)
+    c111 = _hash_noise_3d(x1, y1, z1, seed)
+
+    x00 = _lerp(c000, c100, tx)
+    x10 = _lerp(c010, c110, tx)
+    x01 = _lerp(c001, c101, tx)
+    x11 = _lerp(c011, c111, tx)
+
+    y0v = _lerp(x00, x10, ty)
+    y1v = _lerp(x01, x11, ty)
+
+    return _lerp(y0v, y1v, tz)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def apply_turbulence_forces(
+    turbulence_config,
+    i,
+    j,
+    k,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+    t,
+):
+    Fx = 0.0
+    Fy = 0.0
+    Fz = 0.0
+
+    px = origin_x + float(i) * delta
+    py = origin_y + float(j) * delta
+    pz = origin_z + float(k) * delta
+
+    for turb_idx in range(turbulence_config.shape[0]):
+        amplitude = turbulence_config[turb_idx, 0]
+        scale = turbulence_config[turb_idx, 1]
+        frequency = turbulence_config[turb_idx, 2]
+        seed = int(turbulence_config[turb_idx, 3])
+
+        if amplitude == 0.0 or scale <= 1e-8:
+            continue
+
+        inv_scale = 1.0 / scale
+        time_offset = t * frequency
+
+        x = px * inv_scale
+        y = py * inv_scale
+        z = pz * inv_scale + time_offset
+
+        # gleiches Noise-Feld, aber räumlich versetzte Samples pro Richtung
+        nx = _value_noise_3d(x, y, z, seed)
+        ny = _value_noise_3d(x + 19.17, y + 7.31, z + 11.73, seed)
+        nz = _value_noise_3d(x + 3.43, y + 23.11, z + 17.89, seed)
+
+        Fx += amplitude * nx
+        Fy += amplitude * ny
+        Fz += amplitude * nz
+
+    return Fx, Fy, Fz
+
+
+@cuda.jit(device=True, inline=True, cache=True)
 def _clamp(value, lower, upper):
     """
     Clamp one scalar value to the inclusive `[lower, upper]` interval.
@@ -350,6 +460,9 @@ def update_velocity_maccormack(
     origin_x,
     origin_y,
     origin_z,
+    has_turbulence_nodes,
+    turbulence_config,
+    t
 ):
     """
     CUDA kernel that updates velocity with a MacCormack-corrected
@@ -510,6 +623,24 @@ def update_velocity_maccormack(
         Fx += swirl_fx
         Fy += swirl_fy
         Fz += swirl_fz
+
+    if has_turbulence_nodes:
+        turb_fx, turb_fy, turb_fz = apply_turbulence_forces(
+            turbulence_config,
+            i,
+            j,
+            k,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            t,
+        )
+
+        Fx += turb_fx
+        Fy += turb_fy
+        Fz += turb_fz
+
 
     # Constant force
     Fx += fx_const

@@ -58,3 +58,27 @@ def swirl_force(simulation, t):
     swirl_nodes = np.asarray(swirl_nodes, dtype=np.float32).reshape((-1, 8))
 
     return swirl_nodes, swirl_nodes.shape[0] > 0
+
+
+def turbulence_force(simulation, t):
+    turbulence_nodes = []
+
+    for node in simulation.get("forces", []):
+        if node.get("node_type") != "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+            continue
+
+        amplitude = get_animated_node_value(node, "amplitude", t, 0.0)
+        scale = node.get("scale", 1.0)
+        frequency = node.get("frequency", 1.0)
+        seed = node.get("seed", 0)
+
+        turbulence_nodes.append([
+            amplitude,
+            scale,
+            frequency,
+            seed,
+        ])
+
+    turbulence_nodes = np.asarray(turbulence_nodes, dtype=np.float32).reshape((-1, 4))
+
+    return turbulence_nodes, turbulence_nodes.shape[0] > 0

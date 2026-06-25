@@ -455,6 +455,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         # ------------force params-------------------   
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)     
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0],t)
+        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0],t)
 
         # ------------Velocity update-------------------
         u_work.copy_to_device(u)
@@ -504,6 +505,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_x,
             origin_y,
             origin_z,
+            has_turbulence_nodes,
+            turbulence_config,
+            t
         )
 
         # ------------Velocity swap-------------------
@@ -923,6 +927,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------force params-------------------   
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)  
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0],t)
+        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0],t)
 
         # ------------Velocity update-------------------
         section_start = perf_counter()
@@ -990,6 +995,9 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             origin_x,
             origin_y,
             origin_z,
+            has_turbulence_nodes,
+            turbulence_config,
+            t
         )
         cuda.synchronize()
         _record_debug_timing(
