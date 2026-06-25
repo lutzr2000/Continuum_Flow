@@ -62,7 +62,9 @@ def setup_output(
     )
     writer_file = writer_socket.makefile("rwb")
 
-    return shared_memory_blocks, fields, writer_socket, writer_file
+    writer_busy = False
+
+    return shared_memory_blocks, fields, writer_socket, writer_file, writer_busy
 
 
 def enqueue_device_output(
@@ -71,8 +73,13 @@ def enqueue_device_output(
     sim_fields,
     output_index,
     t,
-    writer_file
+    writer_file,
+    writer_busy,
 ):
+    if writer_busy:
+        _wait_for_writer_ack(writer_file)
+        writer_busy = False
+
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
@@ -92,7 +99,8 @@ def enqueue_device_output(
         output_path,
         t,
     )
-    _send_payload_to_host_writer(writer_file, writer_payload)
+    _send_payload_without_wait(writer_file, writer_payload)
+    return True
 
 
 def _vdb_grid_name(field_name):
@@ -129,12 +137,12 @@ def create_writer_payload(
     return payload
 
 
-def _send_payload_to_host_writer(writer_file, writer_payload):
-    """
-    Send one VDB write job to Blender's host writer and wait for the ACK.
-    """
+def _send_payload_without_wait(writer_file, writer_payload):
     writer_file.write((json.dumps(writer_payload) + "\n").encode("utf-8"))
     writer_file.flush()
+
+
+def _wait_for_writer_ack(writer_file):
     response_line = writer_file.readline()
     if not response_line:
         raise RuntimeError("host VDB writer closed the connection")
@@ -144,7 +152,10 @@ def _send_payload_to_host_writer(writer_file, writer_payload):
         raise RuntimeError(response.get("message", "unknown host VDB writer error"))
 
 
-def shutdown_output(shared_memory_blocks, writer_socket, writer_file):
+def shutdown_output(shared_memory_blocks, writer_socket, writer_file, writer_busy):
+    if writer_busy:
+        _wait_for_writer_ack(writer_file)
+
     writer_file.close()
     writer_socket.close()
 
