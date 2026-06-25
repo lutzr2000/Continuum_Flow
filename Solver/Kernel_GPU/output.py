@@ -92,6 +92,22 @@ def setup_output(
             "shm_name": shm.name,
         }
 
+    mask_dtype = np.bool_
+    mask_nbytes = int(np.prod(shape)) * np.dtype(mask_dtype).itemsize
+
+    mask_shm = shared_memory.SharedMemory(
+        create=True,
+        size=mask_nbytes,
+    )
+    shared_memory_blocks.append(mask_shm)
+
+    fields["output_mask"] = {
+        "array": np.ndarray(shape, dtype=mask_dtype, buffer=mask_shm.buf),
+        "shape": tuple(shape),
+        "dtype": np.dtype(mask_dtype).name,
+        "shm_name": mask_shm.name,
+    }
+
     writer_socket = socket.create_connection(
         (
             simulations["outputs"][0]["host_vdb_writer"]["host"],
@@ -111,6 +127,7 @@ def enqueue_device_output(
     output_index,
     t,
     writer_file,
+    output_mask
 ):
     """
     Copies one output frame from CUDA device arrays into shared memory
@@ -139,6 +156,7 @@ def enqueue_device_output(
 
         source_field.copy_to_host(fields[variable_name]["array"])
 
+    output_mask.copy_to_host(fields["output_mask"]["array"])
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
@@ -193,6 +211,11 @@ def create_writer_payload(
     payload = {
         "output_path": output_path,
         "time": float(time_value),
+        "active_mask": {
+            "shape": fields["output_mask"]["shape"],
+            "dtype": fields["output_mask"]["dtype"],
+            "shm_name": fields["output_mask"]["shm_name"],
+        },
         "grids": [],
     }
 
@@ -204,6 +227,7 @@ def create_writer_payload(
             "fields": {
                 field_name: {
                     "shape": fields[field_name]["shape"],
+                    "dtype": str(fields[field_name]["array"].dtype),
                     "shm_name": fields[field_name]["shm_name"],
                 }
             },

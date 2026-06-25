@@ -69,14 +69,27 @@ def write_vdb(payload):
 
             accessor = grid.getAccessor()
 
-            active = np.abs(arr) > sparse_threshold
-            xs, ys, zs = np.nonzero(active)
+            mask_info = payload["active_mask"]
+
+            mask_shm = shared_memory.SharedMemory(name=mask_info["shm_name"])
+            open_shared_memory.append(mask_shm)
+
+            mask = np.ndarray(
+                tuple(mask_info["shape"]),
+                dtype=np.dtype(mask_info["dtype"]),
+                buffer=mask_shm.buf,
+            )
+
+            xs, ys, zs = np.nonzero(mask)
 
             for x, y, z in zip(xs, ys, zs):
-                accessor.setValueOn(
-                    (int(x), int(y), int(z)),
-                    float(arr[x, y, z])
-                )
+                value = float(arr[x, y, z])
+
+                if value > sparse_threshold:
+                    accessor.setValueOn(
+                        (int(x), int(y), int(z)),
+                        value,
+                    )
 
             try:
                 grid.prune()

@@ -48,6 +48,21 @@ def _print_debug_timing_summary(timing_stats, total_runtime):
 
 
 @cuda.jit
+def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
+    i, j, k = cuda.grid(3)
+
+    nx, ny, nz = output_mask.shape
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+
+    output_mask[i, j, k] = active_tiles[tile_i, tile_j, tile_k]
+
+
+@cuda.jit
 def clear_scratch_kernel(sx, sy, sz):
     i, j, k = cuda.grid(3)
 
@@ -307,6 +322,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         "fuel": fuel,
         "flame": flame,
     }
+
+    device_output_mask = cuda.device_array(shape, dtype=np.bool_)
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -575,6 +592,20 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
+            blockspergrid_3d = kernel_config.volume_blocks_per_grid(
+                shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            )
+
+            expand_active_tiles_to_mask[
+                blockspergrid_3d,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                scalar_active_tiles,
+                device_output_mask,
+                kernel_config.ACTIVE_TILE_SIZE,
+            )
+
             output.enqueue_device_output(
                 simulations[0],
                 fields,
@@ -582,7 +613,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 field_to_output,
                 output_index,
                 t,
-                writer_file
+                writer_file,
+                device_output_mask,
             )
 
             output_index += 1
@@ -741,6 +773,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         "fuel": fuel,
         "flame": flame,
     }
+
+    device_output_mask = cuda.device_array(shape, dtype=np.bool_)
 
     # ------------time loop------------------
     section_start = perf_counter()
@@ -1086,6 +1120,20 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
+            blockspergrid_3d = kernel_config.volume_blocks_per_grid(
+                shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            )
+
+            expand_active_tiles_to_mask[
+                blockspergrid_3d,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                scalar_active_tiles,
+                device_output_mask,
+                kernel_config.ACTIVE_TILE_SIZE,
+            )
+            
             output.enqueue_device_output(
                 simulations[0],
                 fields,
@@ -1093,7 +1141,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
                 field_to_output,
                 output_index,
                 t,
-                writer_file
+                writer_file,
+                device_output_mask,
             )
 
             output_index += 1
