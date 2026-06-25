@@ -4,17 +4,10 @@ import queue
 import socket
 import threading
 from multiprocessing import shared_memory
-from time import perf_counter
 import numpy as np
 from numba import cuda
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
-
-
-def _record_timing(timing_stats, name, elapsed):
-    if timing_stats is None:
-        return
-    timing_stats[name] = timing_stats.get(name, 0.0) + float(elapsed)
 
 
 def _enabled_output_field_names(output_fields):
@@ -76,8 +69,7 @@ def setup_output(
 
         field_layouts[variable_name] = {
             "shape": shape,
-            "dtype": buffer_dtype,
-            "storage_dtype": simulations["outputs"][0].get("precision"),
+            "dtype": np.dtype(buffer_dtype).name,
             "nbytes": int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize,
         }
 
@@ -97,8 +89,6 @@ def setup_output(
         fields[variable_name] = {
             "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
             "shape": shape,
-            "dtype": np.dtype(buffer_dtype).name,
-            "storage_dtype": layout["storage_dtype"],
             "shm_name": shm.name,
         }
 
@@ -120,23 +110,18 @@ def enqueue_device_output(
     field_to_output,
     output_index,
     t,
-    delta,
-    origin,
     writer_file,
-    timing_stats=None,
 ):
     """
     Copies one output frame from CUDA device arrays into shared memory
     and sends it directly to the host VDB writer.
     """
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
-    sparse_threshold = simulations.get("settings").get("adaptive_domain_threshold")
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
     output_fields  = output_cfg["fields"]
     output_list = _enabled_output_field_names(output_fields)
 
-    copy_start = perf_counter()
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
 
@@ -153,39 +138,17 @@ def enqueue_device_output(
             source_field = staging_buffer
 
         source_field.copy_to_host(fields[variable_name]["array"])
-    _record_timing(
-        timing_stats,
-        "output.enqueue_device_output.copy_to_host",
-        perf_counter() - copy_start,
-    )
 
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
-    payload_start = perf_counter()
     writer_payload = create_writer_payload(
         fields,
         output_list,
         output_path,
         t,
-        delta,
-        origin,
-        sparse_threshold,
     )
-    _record_timing(
-        timing_stats,
-        "output.enqueue_device_output.create_payload",
-        perf_counter() - payload_start,
-    )
-
-    socket_start = perf_counter()
     _send_payload_to_host_writer(writer_file, writer_payload)
-
-    _record_timing(
-        timing_stats,
-        "output.enqueue_device_output.host_writer_roundtrip",
-        perf_counter() - socket_start,
-    )
 
 
 def enqueue_host_output(
@@ -226,19 +189,10 @@ def create_writer_payload(
     output_list,
     output_path,
     time_value,
-    delta,
-    origin,
-    sparse_threshold,
 ):
     payload = {
         "output_path": output_path,
         "time": float(time_value),
-        "delta": float(delta),
-        "transform": {
-            "voxel_size": float(delta),
-            "origin": origin,
-        },
-        "sparse_threshold": float(sparse_threshold),
         "grids": [],
     }
 
@@ -246,16 +200,10 @@ def create_writer_payload(
 
         payload["grids"].append({
             "name": _vdb_grid_name(field_name),
-            "grid_type": "scalar",
             "shape": fields[field_name]["shape"],
-            "dtype": fields[field_name]["dtype"],
-            "storage_dtype": fields[field_name]["storage_dtype"],
-            "sparse": False,
             "fields": {
                 field_name: {
                     "shape": fields[field_name]["shape"],
-                    "dtype": fields[field_name]["dtype"],
-                    "storage_dtype": fields[field_name]["storage_dtype"],
                     "shm_name": fields[field_name]["shm_name"],
                 }
             },

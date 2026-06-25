@@ -289,6 +289,33 @@ def _write_debug_config_snapshot(config_dict):
     return file_path
 
 
+def _writer_config_export_path_from_config(config_dict):
+    simulations = config_dict.get("simulations") or ()
+    if not simulations:
+        return None
+    outputs = simulations[0].get("outputs") or ()
+    if not outputs:
+        return None
+    output_dir = (outputs[0].get("output_path") or "").strip()
+    if not output_dir:
+        return None
+    return Path(output_dir) / "config.json"
+
+
+def _write_writer_config_snapshot(config_dict):
+    file_path = _writer_config_export_path_from_config(config_dict)
+    if file_path is None:
+        return None
+    export_config = {
+        key: deepcopy(value)
+        for key, value in config_dict.items()
+        if not str(key).startswith("_")
+    }
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(json.dumps(export_config, indent=2), encoding="utf-8")
+    return file_path
+
+
 def _read_kernel_output(process, output_queue):
     try:
         if process.stdout is not None:
@@ -299,8 +326,10 @@ def _read_kernel_output(process, output_queue):
 
 
 def _start_bake_session(config_dict):
+    writer_config_path = _write_writer_config_snapshot(config_dict)
     writer_server = ContinuumFlowHostWriterModule.HostVDBWriterServer(
-        writer_process_count=_writer_process_count_from_config(config_dict)
+        writer_process_count=_writer_process_count_from_config(config_dict),
+        config_path=writer_config_path,
     )
     writer_server.start()
     config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()

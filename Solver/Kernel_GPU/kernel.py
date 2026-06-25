@@ -199,7 +199,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
     output_frame_count = 0
-    timing_stats = None
 
     # ------------time-------------------
     t = 0
@@ -216,7 +215,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
-    origin = (origin_x,origin_y,origin_z)
 
     print("################################################################")
     print("Initialise")
@@ -584,10 +582,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 field_to_output,
                 output_index,
                 t,
-                delta,
-                origin,
-                writer_file,
-                timing_stats,
+                writer_file
             )
 
             output_index += 1
@@ -647,7 +642,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
-    origin = (origin_x,origin_y,origin_z)
+
     _record_debug_timing(timing_stats, "init_config", perf_counter() - section_start)
 
     print("################################################################")
@@ -1098,10 +1093,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
                 field_to_output,
                 output_index,
                 t,
-                delta,
-                origin,
-                writer_file,
-                timing_stats,
+                writer_file
             )
 
             output_index += 1
