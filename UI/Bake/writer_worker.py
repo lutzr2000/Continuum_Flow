@@ -32,8 +32,8 @@ def write_vdb(payload):
     simulation = simulations[0]
 
     output_cfg = simulation.get("outputs", [{}])[0]
-    sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
     precision = output_cfg.get("precision", "float32")
+    sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
 
     delta = float(simulation.get("domain").get("resolution"))
     nx = int(simulation["domain"]["grid"]["nx"])
@@ -51,27 +51,31 @@ def write_vdb(payload):
     try:
         for grid_payload in payload["grids"]:
             grid_name = grid_payload["name"]
-            field_name, field_info = next(iter(grid_payload["fields"].items()))
+            _field_name, field_info = next(iter(grid_payload["fields"].items()))
 
             shape = tuple(field_info["shape"])
             shm_name = field_info["shm_name"]
 
-            dtype = np.float16 if precision == "float16" else np.float32
+            # Shared memory dtype aus Payload bevorzugen
+            source_dtype = np.dtype(field_info.get("dtype", "float32"))
 
             shm = shared_memory.SharedMemory(name=shm_name)
             open_shared_memory.append(shm)
 
-            arr = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+            arr = np.ndarray(shape, dtype=source_dtype, buffer=shm.buf)
 
-            # copyFromArray arbeitet je nach Binding meist mit float32 am besten
-            if arr.dtype != np.float32:
-                arr_for_vdb = np.asarray(arr, dtype=np.float32)
-            else:
+            # Intern immer FloatGrid / float32
+            if arr.dtype == np.float32 and arr.flags["C_CONTIGUOUS"]:
                 arr_for_vdb = arr
+            else:
+                arr_for_vdb = np.asarray(arr, dtype=np.float32, order="C")
 
             grid = openvdb.FloatGrid(background=0.0)
             grid.name = grid_name
             grid.transform = transform
+
+            if hasattr(grid, "saveFloatAsHalf"):
+                grid.saveFloatAsHalf = (precision == "float16")
 
             grid.copyFromArray(arr_for_vdb)
 
@@ -94,7 +98,7 @@ def write_vdb(payload):
         for shm in open_shared_memory:
             shm.close()
 
-
+            
 def main():
     """
     Run a persistent JSON-lines VDB writer process.
