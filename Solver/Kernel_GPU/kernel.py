@@ -323,8 +323,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         "flame": flame,
     }
 
-    device_output_mask = cuda.device_array(shape, dtype=np.bool_)
-
     # ------------time loop------------------
     print("Start time iteration")
     emit_progress(0.0, t)
@@ -592,20 +590,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
-            blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-                shape,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            )
-
-            expand_active_tiles_to_mask[
-                blockspergrid_3d,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            ](
-                scalar_active_tiles,
-                device_output_mask,
-                kernel_config.ACTIVE_TILE_SIZE,
-            )
-
             output.enqueue_device_output(
                 simulations[0],
                 fields,
@@ -614,7 +598,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 output_index,
                 t,
                 writer_file,
-                device_output_mask,
             )
 
             output_index += 1
@@ -773,8 +756,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         "fuel": fuel,
         "flame": flame,
     }
-
-    device_output_mask = cuda.device_array(shape, dtype=np.bool_)
 
     # ------------time loop------------------
     section_start = perf_counter()
@@ -1120,20 +1101,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
-            blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-                shape,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            )
-
-            expand_active_tiles_to_mask[
-                blockspergrid_3d,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            ](
-                scalar_active_tiles,
-                device_output_mask,
-                kernel_config.ACTIVE_TILE_SIZE,
-            )
-            
             output.enqueue_device_output(
                 simulations[0],
                 fields,
@@ -1142,7 +1109,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
                 output_index,
                 t,
                 writer_file,
-                device_output_mask,
             )
 
             output_index += 1

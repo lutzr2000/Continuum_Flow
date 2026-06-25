@@ -30,29 +30,32 @@ def write_vdb(payload):
     config = get_writer_config()
     simulations = config.get("simulations", {})
     simulation = simulations[0]
-    sparse_threshold = float(simulation.get("outputs", [{}])[0].get("sparse_threshold", 0.0))
 
-    delta = simulation.get("domain").get("resolution")
-    nx = simulation["domain"]["grid"]["nx"]
-    ny = simulation["domain"]["grid"]["ny"]
+    output_cfg = simulation.get("outputs", [{}])[0]
+    sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
+    precision = output_cfg.get("precision", "float32")
+
+    delta = float(simulation.get("domain").get("resolution"))
+    nx = int(simulation["domain"]["grid"]["nx"])
+    ny = int(simulation["domain"]["grid"]["ny"])
 
     origin = (-0.5 * nx * delta, -0.5 * ny * delta, 0.0)
-
     output_vdb_path = payload["output_path"]
 
     grids = []
     open_shared_memory = []
 
+    transform = openvdb.createLinearTransform(voxelSize=delta)
+    transform.postTranslate(origin)
+
     try:
         for grid_payload in payload["grids"]:
             grid_name = grid_payload["name"]
-
             field_name, field_info = next(iter(grid_payload["fields"].items()))
 
             shape = tuple(field_info["shape"])
             shm_name = field_info["shm_name"]
 
-            precision = simulation.get("outputs", [{}])[0].get("precision", "float32")
             dtype = np.float16 if precision == "float16" else np.float32
 
             shm = shared_memory.SharedMemory(name=shm_name)
@@ -60,41 +63,27 @@ def write_vdb(payload):
 
             arr = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
 
+            # copyFromArray arbeitet je nach Binding meist mit float32 am besten
+            if arr.dtype != np.float32:
+                arr_for_vdb = np.asarray(arr, dtype=np.float32)
+            else:
+                arr_for_vdb = arr
+
             grid = openvdb.FloatGrid(background=0.0)
             grid.name = grid_name
-
-            transform = openvdb.createLinearTransform(voxelSize=float(delta))
-            transform.postTranslate(origin)
             grid.transform = transform
 
-            accessor = grid.getAccessor()
-
-            mask_info = payload["active_mask"]
-
-            mask_shm = shared_memory.SharedMemory(name=mask_info["shm_name"])
-            open_shared_memory.append(mask_shm)
-
-            mask = np.ndarray(
-                tuple(mask_info["shape"]),
-                dtype=np.dtype(mask_info["dtype"]),
-                buffer=mask_shm.buf,
-            )
-
-            xs, ys, zs = np.nonzero(mask)
-
-            for x, y, z in zip(xs, ys, zs):
-                value = float(arr[x, y, z])
-
-                if value > sparse_threshold:
-                    accessor.setValueOn(
-                        (int(x), int(y), int(z)),
-                        value,
-                    )
+            grid.copyFromArray(arr_for_vdb)
 
             try:
+                if sparse_threshold > 0.0:
+                    grid.prune(sparse_threshold)
+                else:
+                    grid.prune()
+            except TypeError:
                 grid.prune()
             except AttributeError:
-                grid.pruneGrid()
+                pass
 
             grids.append(grid)
 

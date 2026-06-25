@@ -92,21 +92,6 @@ def setup_output(
             "shm_name": shm.name,
         }
 
-    mask_dtype = np.bool_
-    mask_nbytes = int(np.prod(shape)) * np.dtype(mask_dtype).itemsize
-
-    mask_shm = shared_memory.SharedMemory(
-        create=True,
-        size=mask_nbytes,
-    )
-    shared_memory_blocks.append(mask_shm)
-
-    fields["output_mask"] = {
-        "array": np.ndarray(shape, dtype=mask_dtype, buffer=mask_shm.buf),
-        "shape": tuple(shape),
-        "dtype": np.dtype(mask_dtype).name,
-        "shm_name": mask_shm.name,
-    }
 
     writer_socket = socket.create_connection(
         (
@@ -126,8 +111,7 @@ def enqueue_device_output(
     field_to_output,
     output_index,
     t,
-    writer_file,
-    output_mask
+    writer_file
 ):
     """
     Copies one output frame from CUDA device arrays into shared memory
@@ -156,7 +140,6 @@ def enqueue_device_output(
 
         source_field.copy_to_host(fields[variable_name]["array"])
 
-    output_mask.copy_to_host(fields["output_mask"]["array"])
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
@@ -169,38 +152,12 @@ def enqueue_device_output(
     _send_payload_to_host_writer(writer_file, writer_payload)
 
 
-def enqueue_host_output(
-    write_queue,
-    buffer_pool,
-    buffered_variables,
-    source_fields,
-    output_index,
-    time_value,
-    output_field_config,
-    sparse_threshold,
-):
-    """
-    Copy one host-resident output frame into shared memory and enqueue it.
-    """
-    fields = buffer_pool.get()
-    for variable_name in buffered_variables:
-        np.copyto(fields[variable_name]["array"], source_fields[variable_name])
-    write_queue.put(
-        (
-            int(output_index),
-            float(time_value),
-            fields,
-            output_field_config,
-            float(sparse_threshold),
-        )
-    )
-
-
 def _vdb_grid_name(field_name):
     """
     Map internal solver field names to their exported VDB grid names.
     """
     return "density" if field_name == "smoke" else field_name
+
 
 def create_writer_payload(
     fields,
@@ -211,11 +168,6 @@ def create_writer_payload(
     payload = {
         "output_path": output_path,
         "time": float(time_value),
-        "active_mask": {
-            "shape": fields["output_mask"]["shape"],
-            "dtype": fields["output_mask"]["dtype"],
-            "shm_name": fields["output_mask"]["shm_name"],
-        },
         "grids": [],
     }
 
