@@ -341,7 +341,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         scratch_A_z.copy_to_device(scratch_zeros)
 
         # ------------Update masks-------------------
-        if animated_obstacles:
+        if animated_sources:
             update_masks.update_masks(
                 source_masks,
                 source_base_masks,
@@ -353,7 +353,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 aggregate_mask=source_mask,
             )
 
-        if animated_sources:
+        if animated_obstacles:
             update_masks.update_masks(
                 obstacle_mask,
                 obstacle_base_masks,
@@ -779,7 +779,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
         # ------------Update masks-------------------
         section_start = perf_counter()
-        if animated_obstacles:
+        if animated_sources:
             update_masks.update_masks(
                 source_masks,
                 source_base_masks,
@@ -794,7 +794,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             _record_debug_timing(timing_stats, "loop_update_source_masks", perf_counter() - section_start)
 
         section_start = perf_counter()
-        if animated_sources:
+        if animated_obstacles:
             update_masks.update_masks(
                 obstacle_mask,
                 obstacle_base_masks,
