@@ -25,66 +25,93 @@ def _enabled_output_field_names(output_fields):
     return enabled_fields
 
 
-def setup_output(
-    simulations,
-    outpath,
-    shape
-):
+def setup_output(simulations, outpath, shape):
     os.makedirs(outpath, exist_ok=True)
 
-    shared_memory_blocks = []
-    fields = {}
-
-    output_fields = simulations["outputs"][0]["fields"]
+    output_cfg = simulations["outputs"][0]
+    output_fields = output_cfg["fields"]
     output_list = _enabled_output_field_names(output_fields)
+
+    writer_count = int(
+        output_cfg.get("host_vdb_writer", {}).get(
+            "process_count",
+            ((output_cfg.get("performance") or {}).get("writer_processes", 1)),
+        )
+    )
+
+    shared_memory_blocks = []
+    writer_slots = []
 
     buffer_dtype = np.float32
     nbytes = int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize
 
-    for variable_name in output_list:
-        shm = shared_memory.SharedMemory(
-            create=True,
-            size=nbytes,
+    for _slot_index in range(writer_count):
+        fields = {}
+
+        for variable_name in output_list:
+            shm = shared_memory.SharedMemory(
+                create=True,
+                size=nbytes,
+            )
+            shared_memory_blocks.append(shm)
+
+            fields[variable_name] = {
+                "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
+                "shape": tuple(shape),
+                "shm_name": shm.name,
+            }
+
+        writer_socket = socket.create_connection(
+            (
+                output_cfg["host_vdb_writer"]["host"],
+                int(output_cfg["host_vdb_writer"]["port"]),
+            )
         )
-        shared_memory_blocks.append(shm)
+        writer_file = writer_socket.makefile("rwb")
 
-        fields[variable_name] = {
-            "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
-            "shape": tuple(shape),
-            "shm_name": shm.name,
-        }
+        writer_slots.append({
+            "fields": fields,
+            "socket": writer_socket,
+            "file": writer_file,
+            "busy": False,
+        })
 
-    writer_socket = socket.create_connection(
-        (
-            simulations["outputs"][0]["host_vdb_writer"]["host"],
-            int(simulations["outputs"][0]["host_vdb_writer"]["port"]),
-        )
-    )
-    writer_file = writer_socket.makefile("rwb")
+    return shared_memory_blocks, writer_slots
 
-    writer_busy = False
 
-    return shared_memory_blocks, fields, writer_socket, writer_file, writer_busy
+def _get_writer_slot(writer_slots, output_index):
+    slot_count = len(writer_slots)
+
+    # Round-robin bevorzugen
+    start = int(output_index) % slot_count
+
+    for offset in range(slot_count):
+        slot = writer_slots[(start + offset) % slot_count]
+        if not slot["busy"]:
+            return slot
+
+    # Alle busy: auf den Round-robin-Slot warten
+    slot = writer_slots[start]
+    _wait_for_writer_ack(slot["file"])
+    slot["busy"] = False
+    return slot
 
 
 def enqueue_device_output(
     simulations,
-    fields,
+    writer_slots,
     sim_fields,
     output_index,
     t,
-    writer_file,
-    writer_busy,
 ):
-    if writer_busy:
-        _wait_for_writer_ack(writer_file)
-        writer_busy = False
-
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
     output_fields = output_cfg["fields"]
     output_list = _enabled_output_field_names(output_fields)
+
+    slot = _get_writer_slot(writer_slots, output_index)
+    fields = slot["fields"]
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
@@ -99,8 +126,9 @@ def enqueue_device_output(
         output_path,
         t,
     )
-    _send_payload_without_wait(writer_file, writer_payload)
-    return True
+
+    _send_payload_without_wait(slot["file"], writer_payload)
+    slot["busy"] = True
 
 
 def _vdb_grid_name(field_name):
@@ -152,12 +180,15 @@ def _wait_for_writer_ack(writer_file):
         raise RuntimeError(response.get("message", "unknown host VDB writer error"))
 
 
-def shutdown_output(shared_memory_blocks, writer_socket, writer_file, writer_busy):
-    if writer_busy:
-        _wait_for_writer_ack(writer_file)
+def shutdown_output(shared_memory_blocks, writer_slots):
+    for slot in writer_slots:
+        if slot["busy"]:
+            _wait_for_writer_ack(slot["file"])
+            slot["busy"] = False
 
-    writer_file.close()
-    writer_socket.close()
+    for slot in writer_slots:
+        slot["file"].close()
+        slot["socket"].close()
 
     for shm in shared_memory_blocks:
         shm.close()

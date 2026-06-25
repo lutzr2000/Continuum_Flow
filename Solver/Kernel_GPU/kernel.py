@@ -306,10 +306,10 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, fields, writer_socket, writer_file, writer_busy = output.setup_output(
+    shared_memory_blocks, writer_slots = output.setup_output(
         simulations[0],
         simulations[0].get("outputs")[0].get("output_path"),
-        shape
+        shape,
     )
 
     device_fields = {
@@ -590,14 +590,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Output-------------------
         while t >= next_output_time:
-            writer_busy = output.enqueue_device_output(
+            output.enqueue_device_output(
                 simulations[0],
-                fields,
+                writer_slots,
                 device_fields,
                 output_index,
                 t,
-                writer_file,
-                writer_busy,
             )
 
             output_index += 1
@@ -618,7 +616,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         t = t + dt
 
     # ------------Shutdown output-------------------
-    output.shutdown_output(shared_memory_blocks, writer_socket, writer_file, writer_busy)
+    output.shutdown_output(shared_memory_blocks, writer_slots)
 
     # ------------Conclusion-------------------
     if cancel_requested:
@@ -740,10 +738,10 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, fields, writer_socket, writer_file, writer_busy = output.setup_output(
+    shared_memory_blocks, writer_slots = output.setup_output(
         simulations[0],
         simulations[0].get("outputs")[0].get("output_path"),
-        shape
+        shape,
     )
 
     device_fields = {
@@ -1101,14 +1099,12 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         # ------------Output-------------------
         section_start = perf_counter()
         while t >= next_output_time:
-            writer_busy = output.enqueue_device_output(
+            output.enqueue_device_output(
                 simulations[0],
-                fields,
+                writer_slots,
                 device_fields,
                 output_index,
                 t,
-                writer_file,
-                writer_busy,
             )
 
             output_index += 1
@@ -1135,7 +1131,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
 
     # ------------Shutdown output-------------------
-    output.shutdown_output(shared_memory_blocks, writer_socket, writer_file, writer_busy)
+    output.shutdown_output(shared_memory_blocks, writer_slots)
 
     # ------------Conclusion-------------------
     if cancel_requested:

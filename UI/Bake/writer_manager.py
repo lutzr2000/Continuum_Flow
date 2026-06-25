@@ -156,8 +156,9 @@ class HostVDBWriterServer:
         config_path=None,
     ):
         self.host = host
+        self._writer_process_count = int(writer_process_count)
         self._writer_pool = _VDBWriterProcessPool(
-            process_count=writer_process_count,
+            process_count=self._writer_process_count,
             config_path=config_path,
         )
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
@@ -169,7 +170,11 @@ class HostVDBWriterServer:
         return int(self._server.server_address[1])
 
     def endpoint(self):
-        return {"host": self.host, "port": self.port}
+        return {
+            "host": self.host,
+            "port": self.port,
+            "process_count": self._writer_process_count,
+        }
 
     def start(self):
         self._thread.start()
