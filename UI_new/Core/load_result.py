@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from pathlib import Path
 
 
@@ -11,10 +11,10 @@ class VDBWatcher:
         self.sequence_files = []
 
     def start(self, watch_dir):
+        self.clear_loaded_sequence()
         self.watch_dir = Path(watch_dir).resolve()
         self.file_sizes.clear()
         self.sequence_files.clear()
-        self.volume_object = None
         self.running = True
 
         bpy.app.timers.register(self.timer, first_interval=0.5)
@@ -24,6 +24,31 @@ class VDBWatcher:
     def stop(self):
         self.running = False
         print("VDB watcher stopping")
+
+    def clear_loaded_sequence(self):
+        volume_object = self.volume_object
+        self.volume_object = None
+        self.sequence_files.clear()
+        self.file_sizes.clear()
+
+        if volume_object is None:
+            return
+
+        volume_data = getattr(volume_object, "data", None)
+
+        try:
+            bpy.data.objects.remove(volume_object, do_unlink=True)
+        except Exception as exc:
+            print("Failed to remove VDB object:", exc)
+            return
+
+        try:
+            if volume_data is not None and getattr(volume_data, "users", 1) == 0:
+                bpy.data.volumes.remove(volume_data)
+        except Exception as exc:
+            print("Failed to remove VDB volume data:", exc)
+
+        print("Removed loaded VDB sequence from Blender")
 
     def _stable_vdbs(self):
         stable = []

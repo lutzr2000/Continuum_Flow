@@ -12,7 +12,7 @@ Bake slow start
 Progress Bar
 Cancel Bake Button
 Cross to cancel besides progress bar
-Free Bake
+Lock nodes during bake
 Bake in subfolder
 Viewer Hide show button is buggy
 Draw Forces, swirl as Cylinder

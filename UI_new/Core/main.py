@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 import json
 import shutil
 import subprocess
@@ -8,6 +8,7 @@ from pathlib import Path
 from . import export_config
 from . import writer_manager
 from . import load_result
+from . import solver_status
 
 
 def _venv_python_path():
@@ -23,16 +24,84 @@ def _read_solver_stdout(process):
 _vdb_watcher = load_result.VDBWatcher()
 
 
+def _tag_ui_redraw():
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
+
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+
+        for area in screen.areas:
+            area.tag_redraw()
+
+
+def _set_bake_available_state(is_available, output_directory=None):
+    solver_status.bake_available = bool(is_available)
+    solver_status.last_output_directory = str(output_directory) if output_directory else None
+    _tag_ui_redraw()
+
+
+def _update_bake_available_from_output(output_directory):
+    if output_directory is None:
+        _set_bake_available_state(False)
+        return False
+
+    output_directory = Path(output_directory).resolve()
+    has_vdbs = output_directory.exists() and any(output_directory.glob("*.vdb"))
+    _set_bake_available_state(has_vdbs, output_directory if has_vdbs else None)
+    return has_vdbs
+
+
+def _clear_baked_vdbs(output_directory):
+    if output_directory is None:
+        return 0
+
+    output_directory = Path(output_directory).resolve()
+    if not output_directory.exists() or not output_directory.is_dir():
+        return 0
+
+    deleted_count = 0
+    for vdb_path in output_directory.glob("*.vdb"):
+        try:
+            vdb_path.unlink()
+            deleted_count += 1
+        except OSError as exc:
+            print("Failed to remove VDB:", vdb_path, exc)
+
+    print("Removed VDB files:", deleted_count)
+    return deleted_count
+
+
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
 
     def execute(self, context):
+        if solver_status.bake_running:
+            self.report({'WARNING'}, "Bake is already running")
+            return {'CANCELLED'}
+
+        if solver_status.bake_available:
+            deleted_count = self.free_bake()
+            if deleted_count:
+                self.report({'INFO'}, f"Removed {deleted_count} VDB files")
+            else:
+                self.report({'INFO'}, "No VDB files found to remove")
+            return {'FINISHED'}
+
         self.process = None
         self.writer_server = None
         self.config_path = None
+        self.output_directory = None
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
+
+        solver_status.bake_running = True
+        solver_status.active_bake_operator = self
+        _tag_ui_redraw()
 
         self.do_bake(context)
         context.window_manager.modal_handler_add(self)
@@ -56,6 +125,9 @@ class main(bpy.types.Operator):
                 return
 
             self._cleanup_done = True
+            solver_status.bake_running = False
+            if solver_status.active_bake_operator is self:
+                solver_status.active_bake_operator = None
 
             _vdb_watcher.stop()
 
@@ -71,11 +143,13 @@ class main(bpy.types.Operator):
                 except OSError:
                     pass
 
+                geometry_dir = self.config_path.parent / "geometry"
                 try:
-                    shutil.rmtree(self.config_path.parent / "geometry", ignore_errors=True)
+                    shutil.rmtree(geometry_dir, ignore_errors=True)
                 except OSError:
                     pass
 
+            _update_bake_available_from_output(self.output_directory)
             print("Bake cleanup finished")
 
     def cancel_bake(self):
@@ -92,10 +166,12 @@ class main(bpy.types.Operator):
 
         self.cleanup()
 
-    def _wait_solver_finished(self):
-        exit_code = self.process.wait()
-        print("Solver Exit Code:", exit_code)
-        self.cleanup()
+    def free_bake(self):
+        output_directory = solver_status.last_output_directory
+        _vdb_watcher.clear_loaded_sequence()
+        deleted_count = _clear_baked_vdbs(output_directory)
+        _update_bake_available_from_output(output_directory)
+        return deleted_count
 
     def launch_writer_manager(self, config_dict):
         output_config = ((config_dict.get("simulations") or [{}])[0].get("outputs") or [{}])[0]
@@ -125,6 +201,7 @@ class main(bpy.types.Operator):
 
         output_config = config_dict["simulations"][0]["outputs"][0]
         vdb_output_dir = Path(output_config["output_path"]).resolve()
+        self.output_directory = vdb_output_dir
 
         _vdb_watcher.start(vdb_output_dir)
 
@@ -147,11 +224,6 @@ class main(bpy.types.Operator):
         threading.Thread(
             target=_read_solver_stdout,
             args=(self.process,),
-            daemon=True,
-        ).start()
-
-        threading.Thread(
-            target=self._wait_solver_finished,
             daemon=True,
         ).start()
 

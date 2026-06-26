@@ -1,7 +1,8 @@
-import bpy
+﻿import bpy
 from . import helper_functions
 from . import sockets
 from . import node_base
+from ..Core import solver_status
 from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
@@ -146,5 +147,16 @@ class ContinuumFlowOutputNode(bpy.types.Node):
         
         layout.separator()
 
-        # Bake-Button
-        layout.operator("continuum_flow.bake", text="Bake", icon='RENDER_STILL')
+        disable_reason = self._bake_disable_reason()
+        is_free_bake = solver_status.bake_available and not solver_status.bake_running
+
+        button_row = layout.row()
+        button_row.enabled = disable_reason is None and not solver_status.bake_running
+        button_text = "Free Bake" if is_free_bake else "Bake"
+        button_icon = 'TRASH' if is_free_bake else 'RENDER_STILL'
+        button_row.operator("continuum_flow.bake", text=button_text, icon=button_icon)
+
+        if disable_reason is not None:
+            layout.label(text=disable_reason, icon='INFO')
+        elif solver_status.bake_running:
+            layout.label(text="Bake is running", icon='INFO')
