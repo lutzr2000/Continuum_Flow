@@ -5,8 +5,16 @@ from datetime import datetime, timezone
 from . import export_geometry
 from ..Interface.node_tree import ContinuumFlowNodeTree
 
+def _safe_float_vector(value):
+    """
+    Convert Blender float vectors to plain Python float lists.
+    """
+    return [float(component) for component in value]
+
 NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
+_DOMAIN_BOUNDARY_AXES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
 _SYNC_DEBUGGED_ACTIONS = set()
+
 PERCENTAGE_MAPPED_PROPERTY_RANGES = {
     "temperature_dissipation": (0.0, 0.5),
     "temperature_production_rate": (0.0, 0.05),
@@ -18,6 +26,59 @@ PERCENTAGE_MAPPED_PROPERTY_RANGES = {
     "fuel_burn_rate": (0.0, 1.0),
     "vorticity": (0.0, 1.0),
 }
+
+_PHYSICS_SECTION_FIELDS = {
+    "fluid": (
+        ("density", "fluid_density", float, 0.0),
+        ("viscosity", "fluid_viscosity", float, 0.0),
+    ),
+    "temperature": (
+        ("dissipation", "temperature_dissipation", float, 0.0),
+        ("production_rate", "temperature_production_rate", float, 1.0),
+        ("reference_temperature", "reference_temperature", float, 0.0),
+        ("buoyancy", "buoyancy", float, 0.0),
+        ("expansion_rate", "expansion_rate", float, 0.0),
+    ),
+    "smoke": (
+        ("dissipation", "smoke_dissipation", float, 0.0),
+        ("production_rate", "smoke_production_rate", float, 1.0),
+    ),
+    "fuel": (
+        ("dissipation", "fuel_dissipation", float, 0.0),
+        ("burn_rate", "fuel_burn_rate", float, 0.0),
+        ("ignition_temperature", "fuel_ignition_temperature", float, 0.0),
+        ("minimum_oxygen_concentration", "minimum_oxygen_concentration", float, 0.0),
+    ),
+    "extras": (("vorticity", "vorticity", float, 0.0),),
+}
+
+_FORCE_NODE_FIELDS = {
+    "CONTINUUM_FLOW_FORCE_CONSTANT_NODE": (
+        ("force", (("x", "fx"), ("y", "fy"), ("z", "fz"))),
+    ),
+    "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
+        ("strength", "strength", float, 0.0),
+        ("origin", "origin", _safe_float_vector, None),
+        ("axis", "axis", _safe_float_vector, None),
+        ("radius", "radius", float, 0.0),
+    ),
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
+        ("scale", "scale", float, 0.0),
+        ("frequency", "frequency", float, 0.0),
+        ("amplitude", "amplitude", float, 0.0),
+        ("seed", "seed", int, 0),
+    ),
+}
+
+_OUTPUT_FIELD_SPECS = (
+    ("velocity", "export_velocity", "sparse_velocity", True),
+    ("pressure", "export_p", "sparse_p", False),
+    ("temperature", "export_t", "sparse_t", False),
+    ("smoke", "export_smoke", "sparse_smoke", False),
+    ("fuel", "export_fuel", "sparse_fuel", False),
+    ("flame", "export_flame", "sparse_flame", False),
+)
+
 
 
 def _serialize_animation_payload(node, start_frame, end_frame, fps):
@@ -67,13 +128,6 @@ def _serialize_animation_value_for_property(property_name, value):
     if property_name in PERCENTAGE_MAPPED_PROPERTY_RANGES:
         return float(_mapped_percentage_to_actual(property_name, value))
     return float(value)
-
-
-def _safe_float_vector(value):
-    """
-    Convert Blender float vectors to plain Python float lists.
-    """
-    return [float(component) for component in value]
 
 
 def _safe_float_matrix(matrix):
@@ -457,58 +511,6 @@ def _sample_geometry_object_transforms(
     return transform_samples
 
 
-_DOMAIN_BOUNDARY_AXES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high")
-_PHYSICS_SECTION_FIELDS = {
-    "fluid": (
-        ("density", "fluid_density", float, 0.0),
-        ("viscosity", "fluid_viscosity", float, 0.0),
-    ),
-    "temperature": (
-        ("dissipation", "temperature_dissipation", float, 0.0),
-        ("production_rate", "temperature_production_rate", float, 1.0),
-        ("reference_temperature", "reference_temperature", float, 0.0),
-        ("buoyancy", "buoyancy", float, 0.0),
-        ("expansion_rate", "expansion_rate", float, 0.0),
-    ),
-    "smoke": (
-        ("dissipation", "smoke_dissipation", float, 0.0),
-        ("production_rate", "smoke_production_rate", float, 1.0),
-    ),
-    "fuel": (
-        ("dissipation", "fuel_dissipation", float, 0.0),
-        ("burn_rate", "fuel_burn_rate", float, 0.0),
-        ("ignition_temperature", "fuel_ignition_temperature", float, 0.0),
-        ("minimum_oxygen_concentration", "minimum_oxygen_concentration", float, 0.0),
-    ),
-    "extras": (("vorticity", "vorticity", float, 0.0),),
-}
-_FORCE_NODE_FIELDS = {
-    "CONTINUUM_FLOW_FORCE_CONSTANT_NODE": (
-        ("force", (("x", "fx"), ("y", "fy"), ("z", "fz"))),
-    ),
-    "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
-        ("strength", "strength", float, 0.0),
-        ("origin", "origin", _safe_float_vector, None),
-        ("axis", "axis", _safe_float_vector, None),
-        ("radius", "radius", float, 0.0),
-    ),
-    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
-        ("scale", "scale", float, 0.0),
-        ("frequency", "frequency", float, 0.0),
-        ("amplitude", "amplitude", float, 0.0),
-        ("seed", "seed", int, 0),
-    ),
-}
-_OUTPUT_FIELD_SPECS = (
-    ("velocity", "export_velocity", "sparse_velocity", True),
-    ("pressure", "export_p", "sparse_p", False),
-    ("temperature", "export_t", "sparse_t", False),
-    ("smoke", "export_smoke", "sparse_smoke", False),
-    ("fuel", "export_fuel", "sparse_fuel", False),
-    ("flame", "export_flame", "sparse_flame", False),
-)
-
-
 def _serialize_named_fields(node, field_specs):
     """
     Serialize a flat set of named fields from one node via declarative specs.
@@ -559,68 +561,19 @@ def _serialize_physics_node(node, start_frame, end_frame, fps):
     """
     Serialize one physics node.
     """
+    animations, animated_values = _serialize_animation_payload(
+        node, start_frame, end_frame, fps
+    )
+
     return {
         "node_name": node.name,
         **{
             section_name: _serialize_named_fields(node, field_specs)
             for section_name, field_specs in _PHYSICS_SECTION_FIELDS.items()
         },
-        "animations": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
-        "animated_values": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
+        "animations": animations,
+        "animated_values": animated_values,
     }
-
-
-def _build_geometry_payload(
-    geometry_nodes, start_frame, end_frame, fps
-):
-    """
-    Build shared geometry export data for source and obstacle nodes.
-    """
-    geometry_exports = export_geometry.export_geometry_nodes(
-        geometry_nodes,
-    )
-    transform_samples = _sample_geometry_object_transforms(
-        geometry_nodes,
-        start_frame,
-        end_frame,
-        fps,
-    )
-    for geometry_export in geometry_exports:
-        object_name = geometry_export.get("object_name")
-        geometry_export["transform_animation"] = transform_samples.get(object_name, {})
-
-    return {
-        "geometry_inputs": _linked_geometry_names_from_nodes(geometry_nodes),
-        "shape": "mesh" if geometry_exports else "empty",
-        "mesh": {
-            "objects": geometry_exports,
-        },
-    }
-
-
-def _linked_geometry_names_from_nodes(geometry_nodes):
-    """
-    Return node/object name pairs for already resolved geometry nodes.
-    """
-    return [
-        {
-            "node_name": geometry_node.name,
-            "object_name": getattr(
-                getattr(geometry_node, "source_object", None), "name", None
-            ),
-        }
-        for geometry_node in geometry_nodes
-    ]
 
 
 def _serialize_source_node(
@@ -630,12 +583,6 @@ def _serialize_source_node(
     Serialize one source node, including linked geometry names.
     """
     geometry_nodes = _linked_geometry_nodes(node)
-    geometry_payload = _build_geometry_payload(
-        geometry_nodes,
-        start_frame,
-        end_frame,
-        fps,
-    )
 
     return {
         "node_name": node.name,
@@ -645,39 +592,53 @@ def _serialize_source_node(
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": _safe_float_vector(node.velocity),
-        "animations": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
-        "animated_values": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
-        **geometry_payload,
+        **_build_geometry_payload(geometry_nodes, start_frame, end_frame, fps),
     }
 
 
-def _serialize_obstacle_node(
-    node, start_frame, end_frame, fps
-):
+def _serialize_obstacle_node(node, start_frame, end_frame, fps):
     """
     Serialize one obstacle node, including linked geometry names.
     """
     geometry_nodes = _linked_geometry_nodes(node)
-    geometry_payload = _build_geometry_payload(
+
+    return {
+        "node_name": node.name,
+        **_build_geometry_payload(geometry_nodes, start_frame, end_frame, fps),
+    }
+
+
+def _build_geometry_payload(geometry_nodes, start_frame, end_frame, fps):
+    transform_samples = _sample_geometry_object_transforms(
         geometry_nodes,
         start_frame,
         end_frame,
         fps,
     )
 
+    geometry_inputs = [
+        {
+            "node_name": geometry_node.name,
+            "object_name": getattr(
+                getattr(geometry_node, "source_object", None),
+                "name",
+                None,
+            ),
+        }
+        for geometry_node in geometry_nodes
+    ]
+
+    for geometry_input in geometry_inputs:
+        object_name = geometry_input.get("object_name")
+        geometry_input["mesh_file"] = (
+            f"geometry/{object_name}.stl" if object_name else None
+        )
+        geometry_input["mesh_format"] = "stl"
+        geometry_input["transform_animation"] = transform_samples.get(object_name, {})
+
     return {
-        "node_name": node.name,
-        **geometry_payload,
+        "geometry_inputs": geometry_inputs,
+        "shape": "mesh" if geometry_inputs else "empty",
     }
 
 
@@ -899,9 +860,29 @@ def build_config_dict():
     return config_dict
 
 
-##################################################
-# Only necessary for debug
-##################################################
+def _iter_geometry_object_names_from_config(config_dict):
+    seen = set()
+
+    for simulation in config_dict.get("simulations", []):
+        for group_name in ("sources", "obstacles"):
+            for entry in simulation.get(group_name, []):
+                for geometry_input in entry.get("geometry_inputs", []):
+                    object_name = geometry_input.get("object_name")
+                    if object_name and object_name not in seen:
+                        seen.add(object_name)
+                        yield object_name
+
+
+def _export_config_geometry_stls(config_dict, export_directory):
+    geometry_dir = Path(export_directory) / "geometry"
+    geometry_dir.mkdir(parents=True, exist_ok=True)
+
+    for object_name in _iter_geometry_object_names_from_config(config_dict):
+        source_object = bpy.data.objects.get(object_name)
+        if source_object is None:
+            continue
+
+        export_geometry.export_object_as_local_stl(source_object, geometry_dir)
 
 
 def _resolve_export_directory(simulation_entries):
@@ -922,10 +903,12 @@ def _resolve_export_directory(simulation_entries):
 
 def export_config_dict(config_dict):
     """
-    Evaluate the node tree, write a JSON file, and return both path and dict.
+    Write STL geometry files and config JSON into the bake folder.
     """
     export_directory = _resolve_export_directory(config_dict["simulations"])
     export_directory.mkdir(parents=True, exist_ok=True)
+
+    _export_config_geometry_stls(config_dict, export_directory)
 
     file_name = f"{config_dict['meta']['node_tree_name']}_config_export.json"
     file_path = export_directory / file_name
