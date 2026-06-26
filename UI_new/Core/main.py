@@ -1,11 +1,5 @@
-
-# is called by the bake button
-# 1. evaluates the node tree
-# 2. launch writer processes
-# 3. build config
-# 4. send config
-
 import bpy
+from . import export_config
 
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
@@ -16,4 +10,4 @@ class main(bpy.types.Operator):
         return {'FINISHED'}
 
     def do_bake(self, context):
-        print("Baking...")
+        export_config.export_config_dict()
