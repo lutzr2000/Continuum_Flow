@@ -68,17 +68,6 @@ def _safe_float_matrix(matrix):
     return [[float(component) for component in row] for row in matrix]
 
 
-def _safe_animation_value(value):
-    """
-    Convert one sampled Blender property value to a JSON-friendly shape.
-    """
-    if isinstance(value, (str, bytes)):
-        return value
-    if hasattr(value, "__len__") and not isinstance(value, (int, float, bool)):
-        return _safe_float_vector(value)
-    return float(value)
-
-
 def _animation_times(start_frame, end_frame, fps):
     """
     Return the shared simulation time axis derived from the Blender frame range.
@@ -276,10 +265,7 @@ def sync_all_continuum_flow_node_animations(scene=None):
     """
     Evaluate all Continuum Flow node-tree animations for the current frame.
     """
-    if scene is None:
-        scene = getattr(bpy.context, "scene", None)
-    if scene is None:
-        return
+    scene = getattr(bpy.context, "scene", None)
 
     frame_value = float(getattr(scene, "frame_current", 0))
     for node_tree in _iter_continuum_flow_node_trees():
@@ -295,15 +281,13 @@ def _iter_continuum_flow_node_trees():
             yield node_tree
 
 
-def _sync_sampled_custom_node_animations(scene, context=None):
+def _sync_sampled_custom_node_animations(scene):
     """
     Force Continuum Flow custom node properties to follow their F-curves before sampling.
     """
     sync_all_continuum_flow_node_animations(scene)
 
-    view_layer = getattr(context, "view_layer", None) if context is not None else None
-    if view_layer is None:
-        view_layer = getattr(bpy.context, "view_layer", None)
+    view_layer = getattr(bpy.context, "view_layer", None)
     if view_layer is not None and hasattr(view_layer, "update"):
         try:
             view_layer.update()
@@ -312,20 +296,14 @@ def _sync_sampled_custom_node_animations(scene, context=None):
 
 
 def _sample_node_property_series(
-    node, property_names, start_frame, end_frame, context=None
-):
+    node, property_names, start_frame, end_frame):
     """
     Sample one set of node properties once per Blender frame.
     """
     if not property_names:
         return {}
 
-    scene = getattr(context, "scene", None) if context is not None else None
-    if scene is None:
-        scene = getattr(bpy.context, "scene", None)
-    if scene is None:
-        return {}
-
+    scene = getattr(bpy.context, "scene", None)
     current_frame = int(getattr(scene, "frame_current", start_frame))
     frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
     sampled_values = {property_name: [] for property_name in property_names}
@@ -333,7 +311,7 @@ def _sample_node_property_series(
     try:
         for frame in frame_numbers:
             scene.frame_set(frame)
-            _sync_sampled_custom_node_animations(scene, context=context)
+            _sync_sampled_custom_node_animations(scene)
             for property_name in property_names:
                 sampled_values[property_name].append(
                     _serialize_animation_value_for_property(
@@ -342,12 +320,12 @@ def _sample_node_property_series(
                 )
     finally:
         scene.frame_set(current_frame)
-        _sync_sampled_custom_node_animations(scene, context=context)
+        _sync_sampled_custom_node_animations(scene)
 
     return sampled_values
 
 
-def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
+def _serialize_node_animations(node, start_frame, end_frame, fps):
     """
     Sample animated node properties once per Blender frame for kernel playback.
     """
@@ -359,7 +337,6 @@ def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
         animated_properties,
         start_frame,
         end_frame,
-        context=context,
     )
 
     return {
@@ -371,7 +348,7 @@ def _serialize_node_animations(node, start_frame, end_frame, fps, context=None):
     }
 
 
-def _serialize_animatable_value_series(node, start_frame, end_frame, context=None):
+def _serialize_animatable_value_series(node, start_frame, end_frame):
     """
     Sample only animatable UI properties that are actually animated.
     """
@@ -383,7 +360,6 @@ def _serialize_animatable_value_series(node, start_frame, end_frame, context=Non
         animated_properties,
         start_frame,
         end_frame,
-        context=context,
     )
 
 
@@ -429,7 +405,7 @@ def _linked_output_nodes(node, socket_name, expected_idname=None):
     )
 
 
-def _resolve_simulation_output_fps(simulation_node, context=None):
+def _resolve_simulation_output_fps(simulation_node):
     """
     Resolve the FPS that defines frame-to-time conversion for one simulation.
     """
@@ -439,13 +415,9 @@ def _resolve_simulation_output_fps(simulation_node, context=None):
     if output_nodes:
         return max(1, int(getattr(output_nodes[0], "fps", 24)))
 
-    scene = getattr(context, "scene", None) if context is not None else None
-    if scene is None:
-        scene = getattr(bpy.context, "scene", None)
+    scene = getattr(bpy.context, "scene", None)
     render = getattr(scene, "render", None)
-    if render is not None:
-        return max(1, int(getattr(render, "fps", 24)))
-    return 24
+    return max(1, int(getattr(render, "fps", 24)))
 
 
 def _simulation_length_from_frames(start_frame, end_frame, fps):
@@ -465,16 +437,12 @@ def _linked_geometry_nodes(node):
 
 
 def _sample_geometry_object_transforms(
-    geometry_nodes, start_frame, end_frame, fps, context=None
+    geometry_nodes, start_frame, end_frame, fps
 ):
     """
     Sample evaluated world transforms for linked geometry objects once per Blender frame.
     """
-    scene = getattr(context, "scene", None) if context is not None else None
-    if scene is None:
-        scene = getattr(bpy.context, "scene", None)
-    if scene is None:
-        return {}
+    scene = getattr(bpy.context, "scene", None)
 
     current_frame = int(getattr(scene, "frame_current", start_frame))
     frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
@@ -483,11 +451,8 @@ def _sample_geometry_object_transforms(
     try:
         for frame in frame_numbers:
             scene.frame_set(frame)
-            depsgraph = (
-                context.evaluated_depsgraph_get()
-                if context is not None
-                else bpy.context.evaluated_depsgraph_get()
-            )
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+
             for geometry_node in geometry_nodes:
                 source_object = getattr(geometry_node, "source_object", None)
                 if source_object is None:
@@ -613,7 +578,7 @@ def _serialize_domain_node(node):
     }
 
 
-def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
+def _serialize_physics_node(node, start_frame, end_frame, fps):
     """
     Serialize one physics node.
     """
@@ -628,35 +593,29 @@ def _serialize_physics_node(node, start_frame, end_frame, fps, context=None):
             start_frame,
             end_frame,
             fps,
-            context=context,
         ),
         "animated_values": _serialize_animatable_value_series(
             node,
             start_frame,
             end_frame,
-            context=context,
         ),
     }
 
 
 def _build_geometry_payload(
-    geometry_nodes, start_frame, end_frame, fps, context=None, geometry_storage_dir=None
+    geometry_nodes, start_frame, end_frame, fps
 ):
     """
     Build shared geometry export data for source and obstacle nodes.
     """
-    depsgraph = context.evaluated_depsgraph_get() if context is not None else None
     geometry_exports = export_geometry.export_geometry_nodes(
         geometry_nodes,
-        depsgraph=depsgraph,
-        storage_dir=geometry_storage_dir,
     )
     transform_samples = _sample_geometry_object_transforms(
         geometry_nodes,
         start_frame,
         end_frame,
         fps,
-        context=context,
     )
     for geometry_export in geometry_exports:
         object_name = geometry_export.get("object_name")
@@ -687,7 +646,7 @@ def _linked_geometry_names_from_nodes(geometry_nodes):
 
 
 def _serialize_source_node(
-    node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None
+    node, start_frame, end_frame, fps
 ):
     """
     Serialize one source node, including linked geometry names.
@@ -698,8 +657,6 @@ def _serialize_source_node(
         start_frame,
         end_frame,
         fps,
-        context=context,
-        geometry_storage_dir=geometry_storage_dir,
     )
 
     return {
@@ -715,20 +672,18 @@ def _serialize_source_node(
             start_frame,
             end_frame,
             fps,
-            context=context,
         ),
         "animated_values": _serialize_animatable_value_series(
             node,
             start_frame,
             end_frame,
-            context=context,
         ),
         **geometry_payload,
     }
 
 
 def _serialize_obstacle_node(
-    node, start_frame, end_frame, fps, context=None, geometry_storage_dir=None
+    node, start_frame, end_frame, fps
 ):
     """
     Serialize one obstacle node, including linked geometry names.
@@ -739,8 +694,6 @@ def _serialize_obstacle_node(
         start_frame,
         end_frame,
         fps,
-        context=context,
-        geometry_storage_dir=geometry_storage_dir,
     )
 
     return {
@@ -749,7 +702,7 @@ def _serialize_obstacle_node(
     }
 
 
-def _serialize_force_node(node, start_frame, end_frame, fps, context=None):
+def _serialize_force_node(node, start_frame, end_frame, fps):
     """
     Serialize one force node by its concrete subtype.
     """
@@ -761,13 +714,11 @@ def _serialize_force_node(node, start_frame, end_frame, fps, context=None):
             start_frame,
             end_frame,
             fps,
-            context=context,
         ),
         "animated_values": _serialize_animatable_value_series(
             node,
             start_frame,
             end_frame,
-            context=context,
         ),
     }
     for field_spec in _FORCE_NODE_FIELDS.get(node.bl_idname, ()):
@@ -816,7 +767,7 @@ def _serialize_viewer_node(node):
     }
 
 
-def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=None):
+def _build_simulation_entry(simulation_node):
     """
     Build a grouped config entry for one simulation node.
     """
@@ -842,7 +793,7 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
     )
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
-    simulation_fps = _resolve_simulation_output_fps(simulation_node, context=context)
+    simulation_fps = _resolve_simulation_output_fps(simulation_node)
 
     return {
         "node_name": simulation_node.name,
@@ -873,7 +824,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
                 start_frame,
                 end_frame,
                 simulation_fps,
-                context=context,
             )
             if physics_nodes
             else None
@@ -884,8 +834,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
                 start_frame,
                 end_frame,
                 simulation_fps,
-                context=context,
-                geometry_storage_dir=geometry_storage_dir,
             )
             for node in source_nodes
         ],
@@ -895,8 +843,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
                 start_frame,
                 end_frame,
                 simulation_fps,
-                context=context,
-                geometry_storage_dir=geometry_storage_dir,
             )
             for node in obstacle_nodes
         ],
@@ -906,7 +852,6 @@ def _build_simulation_entry(simulation_node, context=None, geometry_storage_dir=
                 start_frame,
                 end_frame,
                 simulation_fps,
-                context=context,
             )
             for node in force_nodes
         ],
@@ -935,23 +880,13 @@ def _collect_tree_geometry_nodes(node_tree):
     return geometry_entries
 
 
-def _resolve_node_tree(context=None):
+def _resolve_node_tree():
     """
     Resolve the active Continuum Flow node tree or fall back to the first one.
     """
-    if context is not None:
-        space_data = getattr(context, "space_data", None)
-        edit_tree = getattr(space_data, "edit_tree", None)
-        if (
-            edit_tree is not None
-            and getattr(edit_tree, "bl_idname", "") == NODE_TREE_ID
-        ):
-            return edit_tree
-
     for node_group in bpy.data.node_groups:
         if getattr(node_group, "bl_idname", "") == NODE_TREE_ID:
             return node_group
-    return None
 
 
 def _resolve_export_directory(simulation_entries):
@@ -970,13 +905,11 @@ def _resolve_export_directory(simulation_entries):
     return Path.cwd()
 
 
-def build_config_dict(context=None, geometry_storage_dir=None):
+def build_config_dict():
     """
     Evaluate the Continuum Flow node tree and return a grouped config dict.
     """
-    node_tree = _resolve_node_tree(context)
-    if node_tree is None:
-        raise RuntimeError("No Continuum Flow node tree found.")
+    node_tree = _resolve_node_tree()
 
     simulation_nodes = [
         node
@@ -993,8 +926,6 @@ def build_config_dict(context=None, geometry_storage_dir=None):
         "simulations": [
             _build_simulation_entry(
                 node,
-                context=context,
-                geometry_storage_dir=geometry_storage_dir,
             )
             for node in simulation_nodes
         ],
@@ -1003,11 +934,11 @@ def build_config_dict(context=None, geometry_storage_dir=None):
     return config_dict
 
 
-def export_config_dict(context=None):
+def export_config_dict():
     """
     Evaluate the node tree, write a JSON file, and return both path and dict.
     """
-    config_dict = build_config_dict(context)
+    config_dict = build_config_dict()
     export_directory = _resolve_export_directory(config_dict["simulations"])
     export_directory.mkdir(parents=True, exist_ok=True)
 

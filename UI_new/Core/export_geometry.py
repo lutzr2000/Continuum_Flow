@@ -17,7 +17,7 @@ def _iter_source_objects(geometry_nodes):
         yield source_object
 
 
-def _object_to_localspace_triangles(source_object, depsgraph=None):
+def _object_to_localspace_triangles(source_object):
     """
     Return a triangulated local-space vertex array for one Blender object.
 
@@ -27,8 +27,7 @@ def _object_to_localspace_triangles(source_object, depsgraph=None):
     if source_object is None:
         return np.empty((0, 3, 3), dtype=np.float32)
 
-    if depsgraph is None:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
 
     object_eval = source_object.evaluated_get(depsgraph)
     mesh = object_eval.to_mesh(preserve_all_data_layers=False, depsgraph=depsgraph)
@@ -101,11 +100,11 @@ def _serialize_triangles(triangles, source_object=None, storage_dir=None):
     }
 
 
-def export_object_geometry(source_object, depsgraph=None, storage_dir=None):
+def export_object_geometry(source_object, storage_dir=None):
     """
     Serialize one Blender object as local-space triangle data.
     """
-    triangles = _object_to_localspace_triangles(source_object, depsgraph=depsgraph)
+    triangles = _object_to_localspace_triangles(source_object)
     if triangles.size == 0:
         bounds_min = [0.0, 0.0, 0.0]
         bounds_max = [0.0, 0.0, 0.0]
@@ -127,7 +126,7 @@ def export_object_geometry(source_object, depsgraph=None, storage_dir=None):
     }
 
 
-def export_geometry_nodes(geometry_nodes, depsgraph=None, storage_dir=None):
+def export_geometry_nodes(geometry_nodes, storage_dir=None):
     """
     Serialize all linked geometry nodes into obstacle-ready triangle payloads.
     """
@@ -135,7 +134,7 @@ def export_geometry_nodes(geometry_nodes, depsgraph=None, storage_dir=None):
     for source_object in _iter_source_objects(geometry_nodes):
         exports.append(
             export_object_geometry(
-                source_object, depsgraph=depsgraph, storage_dir=storage_dir
+                source_object, storage_dir=storage_dir
             )
         )
     return exports
