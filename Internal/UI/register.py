@@ -31,6 +31,7 @@ from ..UI.node_viewer import ContinuumFlowViewerNode
 from ..UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake
 from ..Core import viewer
+from ..Core import forces
 from ..Core import main as bake_main
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
@@ -51,6 +52,11 @@ def ensure_fake_user(_scene=None, _depsgraph=None):
 def sync_runtime_state(_scene=None):
     try:
         viewer.disable_domain_preview()
+    except Exception:
+        pass
+
+    try:
+        forces.disable_force_preview()
     except Exception:
         pass
 
@@ -142,6 +148,9 @@ def register():
     if not bpy.app.timers.is_registered(ensure_fake_user):
         bpy.app.timers.register(ensure_fake_user, first_interval=0.1)
 
+    if not bpy.app.timers.is_registered(forces.force_preview_timer):
+        bpy.app.timers.register(forces.force_preview_timer, first_interval=0.1)
+
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
@@ -162,6 +171,9 @@ def unregister():
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
 
+    if bpy.app.timers.is_registered(forces.force_preview_timer):
+        bpy.app.timers.unregister(forces.force_preview_timer)
+
     if sync_runtime_state in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(sync_runtime_state)
 
@@ -172,6 +184,11 @@ def unregister():
 
     try:
         viewer.disable_domain_preview()
+    except Exception:
+        pass
+
+    try:
+        forces.disable_force_preview()
     except Exception:
         pass
 
