@@ -6,9 +6,12 @@ import Solver.Kernel_GPU.kernel as gpu_kernel_module
 
 def _collect_mesh_objects(entries):
     mesh_objects = []
+
     for entry in entries or ():
-        mesh_cfg = entry.get("mesh", {})
-        mesh_objects.extend(mesh_cfg.get("objects", ()))
+        for geometry_input in entry.get("geometry_inputs", ()):
+            if geometry_input.get("mesh_file"):
+                mesh_objects.append(geometry_input)
+
     return mesh_objects
 
 
@@ -102,9 +105,12 @@ if __name__ == "__main__":
     import json
     import sys
     import traceback
+    from pathlib import Path
 
     try:
-        config_path = sys.argv[1]
+        config_path = Path(sys.argv[1]).resolve()
+
+        voxelise_mesh_module.set_config_dir(config_path.parent)
 
         with open(config_path, "r", encoding="utf-8") as file:
             config = json.load(file)

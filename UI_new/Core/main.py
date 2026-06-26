@@ -10,11 +10,6 @@ def _venv_python_path():
     return addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
 
 
-def _solver_main_path():
-    addon_root = Path(__file__).resolve().parents[2]
-    return addon_root / "Solver" / "General" / "main.py"
-
-
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"

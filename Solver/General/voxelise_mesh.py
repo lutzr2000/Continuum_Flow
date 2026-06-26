@@ -1,5 +1,6 @@
 import numpy as np
 import trimesh
+from pathlib import Path
 from numba import njit, prange
 import Solver.General.update_masks as update_masks
 
@@ -46,19 +47,41 @@ def sample_mask_backwards(
         if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z and base[bi, bj, bk]:
             out[i, j, k] = True
 
-def _load_mesh_triangles(mesh_object):
-    """Load one mesh object's triangle payload into contiguous float32 shape (n, 3, 3)."""
-    if mesh_object.get("triangles_file"):
-        triangles = np.load(mesh_object["triangles_file"], allow_pickle=False)
-    else:
-        triangles = mesh_object.get("triangles", ())
 
-    triangles = np.asarray(triangles, dtype=np.float32)
-    if triangles.size == 0:
+_CONFIG_DIR = None
+
+
+def set_config_dir(config_dir):
+    global _CONFIG_DIR
+    _CONFIG_DIR = Path(config_dir)
+
+
+def _resolve_mesh_file(mesh_file):
+    path = Path(mesh_file)
+
+    if path.is_absolute():
+        return path
+
+    if _CONFIG_DIR is not None:
+        return _CONFIG_DIR / path
+
+    return path
+
+
+def _load_mesh_triangles(mesh_object):
+    mesh_file = mesh_object.get("mesh_file")
+    if not mesh_file:
         return np.empty((0, 3, 3), dtype=np.float32)
 
-    shape = mesh_object.get("triangles_shape") or (-1, 3, 3)
-    return update_masks._as_f32(triangles.reshape(tuple(map(int, shape))))
+    path = _resolve_mesh_file(mesh_file)
+
+    mesh = trimesh.load_mesh(str(path), process=False)
+
+    if mesh.is_empty or len(mesh.faces) == 0:
+        return np.empty((0, 3, 3), dtype=np.float32)
+
+    triangles = mesh.vertices[mesh.faces]
+    return update_masks._as_f32(np.asarray(triangles, dtype=np.float32))
 
 
 def _voxelize_triangles(triangles, delta):
