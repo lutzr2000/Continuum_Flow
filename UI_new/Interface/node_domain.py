@@ -1,6 +1,7 @@
 import helper_functions
 import sockets
 import node_base
+import bpy
 
 
 class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
