@@ -81,10 +81,16 @@ class CONTINUUM_FLOW_OT_reload(bpy.types.Operator):
 
     def execute(self, context):
         import addon_utils
+        import bpy
 
         module_name = __package__.split(".")[0]
-        addon_utils.disable(module_name)
-        addon_utils.enable(module_name)
 
-        self.report({"INFO"}, "Continuum Flow reloaded")
+        def do_reload():
+            addon_utils.disable(module_name, default_set=True)
+            addon_utils.enable(module_name, default_set=True)
+            return None
+
+        bpy.app.timers.register(do_reload, first_interval=0.1)
+
+        self.report({"INFO"}, "Reload scheduled")
         return {"FINISHED"}

@@ -27,6 +27,7 @@ from ..Interface.node_simulation import ContinuumFlowSimulationNode
 from ..Interface.node_source import ContinuumFlowSourceNode
 from ..Interface.node_viewer import ContinuumFlowViewerNode
 from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
+from ..Core.main import main
 
 
 @persistent
@@ -63,19 +64,38 @@ classes = (
     ContinuumFlowForceTurbulenceNode,
 
     ContinuumFlow_OT_add_basic_setup,
+    main,
 )
+
+
+def safe_unregister_class(cls):
+    try:
+        bpy.utils.unregister_class(cls)
+    except RuntimeError:
+        pass
+
+
+def safe_register_class(cls):
+    safe_unregister_class(cls)
+    bpy.utils.register_class(cls)
 
 
 def register():
     for cls in classes:
-        bpy.utils.register_class(cls)
+        safe_register_class(cls)
+
+    try:
+        unregister_node_categories(NODE_CATEGORIES_ID)
+    except Exception:
+        pass
 
     register_node_categories(
         NODE_CATEGORIES_ID,
         build_node_categories(),
     )
 
-    bpy.app.timers.register(ensure_fake_user, first_interval=0.1)
+    if not bpy.app.timers.is_registered(ensure_fake_user):
+        bpy.app.timers.register(ensure_fake_user, first_interval=0.1)
 
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
@@ -91,4 +111,4 @@ def unregister():
         pass
 
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        safe_unregister_class(cls)

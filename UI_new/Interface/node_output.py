@@ -143,3 +143,8 @@ class ContinuumFlowOutputNode(bpy.types.Node):
         layout.separator()
 
         layout.prop(self, "output_path")
+        
+        layout.separator()
+
+        # Bake-Button
+        layout.operator("continuum_flow.bake", text="Bake", icon='RENDER_STILL')
