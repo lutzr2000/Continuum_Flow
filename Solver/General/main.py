@@ -97,3 +97,20 @@ def main(config=None):
         animated_obstacles,
         animated_sources,
     )
+
+if __name__ == "__main__":
+    import json
+    import sys
+    import traceback
+
+    try:
+        config_path = sys.argv[1]
+
+        with open(config_path, "r", encoding="utf-8") as file:
+            config = json.load(file)
+
+        main(config)
+
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)

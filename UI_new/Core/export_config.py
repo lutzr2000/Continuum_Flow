@@ -913,4 +913,5 @@ def export_config_dict(config_dict):
     file_name = f"{config_dict['meta']['node_tree_name']}_config_export.json"
     file_path = export_directory / file_name
     file_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
+
     return file_path, config_dict
