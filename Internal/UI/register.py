@@ -23,7 +23,7 @@ from ..UI.node_domain import ContinuumFlowDomainNode
 from ..UI.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
 from ..UI.node_geometry import ContinuumFlowGeometryNode
 from ..UI.node_obstacle import ContinuumFlowObstacleNode
-from ..UI.node_output import ContinuumFlowOutputNode
+from ..UI.node_output import ContinuumFlowOutputNode, CONTINUUM_FLOW_OT_output_bake_button
 from ..UI.node_physics import ContinuumFlowPhysicsNode0
 from ..UI.node_simulation import ContinuumFlowSimulationNode
 from ..UI.node_source import ContinuumFlowSourceNode
@@ -72,6 +72,7 @@ classes = (
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
     ContinuumFlowOutputNode,
+    CONTINUUM_FLOW_OT_output_bake_button,
     ContinuumFlowPhysicsNode0,
     ContinuumFlowSimulationNode,
     ContinuumFlowSourceNode,

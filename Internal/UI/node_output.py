@@ -9,6 +9,22 @@ from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 from bpy.props import StringProperty
 
+class CONTINUUM_FLOW_OT_output_bake_button(bpy.types.Operator):
+    bl_idname = "continuum_flow.output_bake_button"
+    bl_label = "Bake"
+    bl_description = "Start a new bake or remove the last baked result for this output"
+
+    @classmethod
+    def description(cls, context, _properties):
+        output_node = getattr(context, "node", None)
+        if bake_main.output_node_has_baked_data(output_node):
+            return "Delete the last baked VDB result folder for this output"
+        return "Run the solver and write a new baked VDB sequence for this output"
+
+    def execute(self, context):
+        return bpy.ops.continuum_flow.bake()
+
+
 class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     """
     Node used to configure which simulation results should be written to disk.
@@ -46,20 +62,21 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
             ),
         ),
         default="float16",
+        options=set(),
     )
-    export_velocity: BoolProperty(name="velocity", default=False)  # type: ignore
-    sparse_velocity: BoolProperty(name="sparse", default=True)  # type: ignore
-    export_p: BoolProperty(name="pressure", default=False)  # type: ignore
-    sparse_p: BoolProperty(name="sparse", default=True)  # type: ignore
-    export_t: BoolProperty(name="temperature", default=False)  # type: ignore
-    sparse_t: BoolProperty(name="sparse", default=True)  # type: ignore
-    export_smoke: BoolProperty(name="density", default=True)  # type: ignore
-    sparse_smoke: BoolProperty(name="sparse", default=True)  # type: ignore
-    export_fuel: BoolProperty(name="fuel", default=False)  # type: ignore
-    sparse_fuel: BoolProperty(name="sparse", default=True)  # type: ignore
-    export_flame: BoolProperty(name="flame", default=True)  # type: ignore
-    sparse_flame: BoolProperty(name="sparse", default=True)  # type: ignore
-    output_path: StringProperty(name="Path", default="", subtype="DIR_PATH")  # type: ignore
+    export_velocity: BoolProperty(name="velocity", default=False, options=set())  # type: ignore
+    sparse_velocity: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    export_p: BoolProperty(name="pressure", default=False, options=set())  # type: ignore
+    sparse_p: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    export_t: BoolProperty(name="temperature", default=False, options=set())  # type: ignore
+    sparse_t: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    export_smoke: BoolProperty(name="density", default=True, options=set())  # type: ignore
+    sparse_smoke: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    export_fuel: BoolProperty(name="fuel", default=False, options=set())  # type: ignore
+    sparse_fuel: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    export_flame: BoolProperty(name="flame", default=True, options=set())  # type: ignore
+    sparse_flame: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
+    output_path: StringProperty(name="Path", default="", subtype="DIR_PATH", options=set())  # type: ignore
     last_bake_directory: StringProperty(default="", options={"HIDDEN"})  # type: ignore
 
     def _ensure_input_socket(self):
@@ -158,7 +175,7 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         button_row.enabled = disable_reason is None and not solver_status.bake_running
         button_text = "Free Bake" if is_free_bake else "Bake"
         button_icon = 'TRASH' if is_free_bake else 'RENDER_STILL'
-        button_row.operator("continuum_flow.bake", text=button_text, icon=button_icon)
+        button_row.operator("continuum_flow.output_bake_button", text=button_text, icon=button_icon)
 
         if disable_reason is not None:
             layout.label(text=disable_reason, icon='INFO')

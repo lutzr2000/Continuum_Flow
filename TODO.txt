@@ -1,17 +1,13 @@
 TODO
 
 Solver:
-rescale force inputs to be more uniform
 Behaviour is more inconsistent with resolution again why?
 Rebuild CPU kernel
-Test different block sizes
 
 
 UI:
 Bake slow start and end
 Draw Forces, swirl as Cylinder
-Adjust tooltips
-physics node should not be animatable
 When a lot of values are animated start up is slow
 
 
@@ -20,6 +16,7 @@ Build proper console output
 Remove Debug code
 Rebuild example files
 Output of velocity is not very effective because of non zero
+Rescale inputs for percantage range and forces
 
 
 Final:
