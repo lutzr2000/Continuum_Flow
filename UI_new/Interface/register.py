@@ -1,6 +1,8 @@
 import bpy
 from bpy.app.handlers import persistent
 from nodeitems_utils import register_node_categories, unregister_node_categories
+from pathlib import Path
+import subprocess
 
 from ..Interface.node_tree import (
     ContinuumFlowNodeTree,
@@ -28,6 +30,7 @@ from ..Interface.node_source import ContinuumFlowSourceNode
 from ..Interface.node_viewer import ContinuumFlowViewerNode
 from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.main import main
+from ..Core import solver_status
 
 
 @persistent
@@ -68,6 +71,26 @@ classes = (
 )
 
 
+def check_solver_status():
+    addon_root = Path(__file__).resolve().parents[2]
+    py = addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
+
+    solver_status.environment_ready = py.exists()
+    solver_status.gpu_available = False
+
+    if solver_status.environment_ready:
+        result = subprocess.run(
+            [
+                str(py),
+                "-c",
+                "from numba import cuda; cuda.get_current_device()",
+            ],
+            capture_output=True,
+        )
+
+        solver_status.gpu_available = result.returncode == 0
+
+
 def safe_unregister_class(cls):
     try:
         bpy.utils.unregister_class(cls)
@@ -81,6 +104,8 @@ def safe_register_class(cls):
 
 
 def register():
+    check_solver_status()
+
     for cls in classes:
         safe_register_class(cls)
 
@@ -102,6 +127,8 @@ def register():
 
 
 def unregister():
+    solver_status.environment_ready = False
+    solver_status.gpu_available = False
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
 

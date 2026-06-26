@@ -1,4 +1,2 @@
-
-
-environment_ready = True
-gpu_available = True
+environment_ready = False
+gpu_available = False

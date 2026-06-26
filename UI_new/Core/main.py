@@ -1,5 +1,6 @@
 import bpy
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from . import export_config
@@ -62,3 +63,11 @@ class main(bpy.types.Operator):
         finally:
             print("Solver Exit Code:", process.wait())
             writer_server.stop()
+            try:
+                config_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            try:
+                shutil.rmtree(config_path.parent / "geometry", ignore_errors=True)
+            except OSError:
+                pass
