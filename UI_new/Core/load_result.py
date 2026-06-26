@@ -9,12 +9,14 @@ class VDBWatcher:
         self.running = False
         self.volume_object = None
         self.sequence_files = []
+        self.progress_callback = None
 
-    def start(self, watch_dir):
+    def start(self, watch_dir, progress_callback=None):
         self.clear_loaded_sequence()
         self.watch_dir = Path(watch_dir).resolve()
         self.file_sizes.clear()
         self.sequence_files.clear()
+        self.progress_callback = progress_callback
         self.running = True
 
         bpy.app.timers.register(self.timer, first_interval=0.5)
@@ -23,6 +25,7 @@ class VDBWatcher:
 
     def stop(self):
         self.running = False
+        self.progress_callback = None
         print("VDB watcher stopping")
 
     def clear_loaded_sequence(self):
@@ -120,6 +123,8 @@ class VDBWatcher:
         stable_vdbs = self._stable_vdbs()
 
         if not stable_vdbs:
+            if self.progress_callback is not None:
+                self.progress_callback(0)
             return interval
 
         if self.volume_object is None:
@@ -128,5 +133,8 @@ class VDBWatcher:
             self._refresh_sequence(stable_vdbs)
 
         self.sequence_files = stable_vdbs
+
+        if self.progress_callback is not None:
+            self.progress_callback(len(self.sequence_files))
 
         return interval

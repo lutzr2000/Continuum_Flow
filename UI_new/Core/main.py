@@ -24,6 +24,56 @@ def _read_solver_stdout(process):
 _vdb_watcher = load_result.VDBWatcher()
 
 
+def draw_bake_progress(self, context):
+    if not solver_status.bake_running:
+        return
+
+    window_manager = getattr(context, "window_manager", None)
+    if window_manager is None:
+        return
+
+    row = self.layout.row(align=True)
+
+    # Linker flexibler Spacer
+    row.separator_spacer()
+
+    center = row.row(align=True)
+    center.alignment = 'CENTER'
+
+    center.label(text="Bake:")
+
+    progress_row = center.row(align=True)
+    progress_row.ui_units_x = 13
+
+    if hasattr(progress_row, "progress"):
+        progress_row.progress(
+            factor=float(solver_status.progress),
+            type='BAR',
+            text=solver_status.progress_text,
+        )
+    elif hasattr(window_manager, "continuum_flow_bake_progress"):
+        fallback_row = progress_row.row(align=True)
+        fallback_row.enabled = False
+        fallback_row.prop(
+            window_manager,
+            "continuum_flow_bake_progress",
+            text=solver_status.progress_text,
+            slider=True,
+        )
+
+    # Rechter flexibler Spacer
+    row.separator_spacer()
+
+    # Cancel-Button rechts außen
+    cancel_row = row.row(align=True)
+    cancel_row.operator(
+        "continuum_flow.cancel_bake",
+        text="",
+        icon="PANEL_CLOSE",
+        emboss=False,
+    )
+
+
 def _tag_ui_redraw():
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
@@ -36,6 +86,31 @@ def _tag_ui_redraw():
 
         for area in screen.areas:
             area.tag_redraw()
+
+
+def _set_bake_progress(current_frames, total_frames):
+    current_frames = max(0, int(current_frames or 0))
+    total_frames = max(0, int(total_frames or 0))
+
+    solver_status.progress_current_frames = current_frames
+    solver_status.progress_total_frames = total_frames
+
+    if total_frames > 0:
+        progress = min(1.0, float(current_frames) / float(total_frames))
+        percent = int(round(progress * 100.0))
+        solver_status.progress = progress
+        solver_status.progress_text = f"{percent}%"
+    else:
+        solver_status.progress = 0.0
+        solver_status.progress_text = "0%"
+
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
+
+    if hasattr(window_manager, "continuum_flow_bake_progress"):
+        window_manager.continuum_flow_bake_progress = float(solver_status.progress)
+    _tag_ui_redraw()
 
 
 def _set_bake_available_state(is_available, output_directory=None):
@@ -73,6 +148,21 @@ def _clear_baked_vdbs(output_directory):
 
     print("Removed VDB files:", deleted_count)
     return deleted_count
+
+
+class CONTINUUM_FLOW_OT_cancel_bake(bpy.types.Operator):
+    bl_idname = "continuum_flow.cancel_bake"
+    bl_label = "Cancel Bake"
+
+    def execute(self, context):
+        active_operator = solver_status.active_bake_operator
+        if not solver_status.bake_running or active_operator is None:
+            self.report({'WARNING'}, "No bake is currently running")
+            return {'CANCELLED'}
+
+        print("Bake cancelled by user")
+        active_operator.cancel_bake()
+        return {'FINISHED'}
 
 
 class main(bpy.types.Operator):
@@ -150,6 +240,7 @@ class main(bpy.types.Operator):
                     pass
 
             _update_bake_available_from_output(self.output_directory)
+            _set_bake_progress(0, 0)
             print("Bake cleanup finished")
 
     def cancel_bake(self):
@@ -172,6 +263,9 @@ class main(bpy.types.Operator):
         deleted_count = _clear_baked_vdbs(output_directory)
         _update_bake_available_from_output(output_directory)
         return deleted_count
+
+    def _update_progress_from_loaded_frames(self, loaded_frame_count):
+        _set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
 
     def launch_writer_manager(self, config_dict):
         output_config = ((config_dict.get("simulations") or [{}])[0].get("outputs") or [{}])[0]
@@ -200,10 +294,19 @@ class main(bpy.types.Operator):
         self.writer_server = writer_server
 
         output_config = config_dict["simulations"][0]["outputs"][0]
+        simulation_settings = config_dict["simulations"][0].get("settings") or {}
+        start_frame = int(simulation_settings.get("start_frame", 1))
+        end_frame = int(simulation_settings.get("end_frame", start_frame))
+        total_frames = max(0, (end_frame - start_frame) + 1)
+        _set_bake_progress(0, total_frames)
+
         vdb_output_dir = Path(output_config["output_path"]).resolve()
         self.output_directory = vdb_output_dir
 
-        _vdb_watcher.start(vdb_output_dir)
+        _vdb_watcher.start(
+            vdb_output_dir,
+            progress_callback=self._update_progress_from_loaded_frames,
+        )
 
         addon_root = Path(__file__).resolve().parents[2]
 
@@ -228,3 +331,4 @@ class main(bpy.types.Operator):
         ).start()
 
         print("Solver started:", self.process.pid)
+

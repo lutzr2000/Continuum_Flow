@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from bpy.app.handlers import persistent
 from nodeitems_utils import register_node_categories, unregister_node_categories
 from pathlib import Path
@@ -29,7 +29,7 @@ from ..Interface.node_simulation import ContinuumFlowSimulationNode
 from ..Interface.node_source import ContinuumFlowSourceNode
 from ..Interface.node_viewer import ContinuumFlowViewerNode
 from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
-from ..Core.main import main
+from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake, draw_bake_progress
 from ..Core import viewer
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
@@ -70,6 +70,7 @@ classes = (
 
     ContinuumFlow_OT_add_basic_setup,
     ContinuumFlow_OT_viewer_toggle_domain,
+    CONTINUUM_FLOW_OT_cancel_bake,
     main,
 )
 
@@ -106,11 +107,37 @@ def safe_register_class(cls):
     bpy.utils.register_class(cls)
 
 
+def register_statusbar_progress():
+    statusbar_header = getattr(bpy.types, "STATUSBAR_HT_header", None)
+    if statusbar_header is None:
+        return
+
+    try:
+        statusbar_header.remove(draw_bake_progress)
+    except Exception:
+        pass
+
+    statusbar_header.prepend(draw_bake_progress)
+
+
+def unregister_statusbar_progress():
+    statusbar_header = getattr(bpy.types, "STATUSBAR_HT_header", None)
+    if statusbar_header is None:
+        return
+
+    try:
+        statusbar_header.remove(draw_bake_progress)
+    except Exception:
+        pass
+
+
 def register():
     check_solver_status()
 
     for cls in classes:
         safe_register_class(cls)
+
+    register_statusbar_progress()
 
     try:
         unregister_node_categories(NODE_CATEGORIES_ID)
@@ -132,6 +159,12 @@ def register():
 def unregister():
     solver_status.environment_ready = False
     solver_status.gpu_available = False
+
+    unregister_statusbar_progress()
+
+    if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):
+        del bpy.types.WindowManager.continuum_flow_bake_progress
+
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
 
@@ -147,3 +180,4 @@ def unregister():
 
     for cls in reversed(classes):
         safe_unregister_class(cls)
+
