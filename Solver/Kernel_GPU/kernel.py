@@ -633,7 +633,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Memory track-------------------
-        if t % 10 == 0:
+        if output_index == 10:
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()
             used = total - free
@@ -1162,7 +1162,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
 
         # ------------Memory track-------------------
         section_start = perf_counter()
-        if t % 10 == 0:
+        if output_index == 10:
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()
             used = total - free
