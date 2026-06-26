@@ -254,7 +254,6 @@ class main(bpy.types.Operator):
             _set_bake_progress(0, 0)
             if bpy.context is not None:
                 _clear_status_progress(bpy.context)
-            print("Bake cleanup finished")
 
     def cancel_bake(self):
         _vdb_watcher.stop()
@@ -326,6 +325,7 @@ class main(bpy.types.Operator):
         self.process = subprocess.Popen(
             [
                 str(_venv_python_path()),
+                "-u",
                 "-m",
                 "Solver.General.main",
                 str(config_path),
@@ -343,5 +343,4 @@ class main(bpy.types.Operator):
             daemon=True,
         ).start()
 
-        print("Solver started:", self.process.pid)
 

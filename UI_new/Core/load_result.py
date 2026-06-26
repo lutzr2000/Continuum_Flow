@@ -21,12 +21,10 @@ class VDBWatcher:
 
         bpy.app.timers.register(self.timer, first_interval=0.5)
 
-        print("VDB watcher started:", self.watch_dir)
 
     def stop(self):
         self.running = False
         self.progress_callback = None
-        print("VDB watcher stopping")
 
     def clear_loaded_sequence(self):
         volume_object = self.volume_object
@@ -51,7 +49,6 @@ class VDBWatcher:
         except Exception as exc:
             print("Failed to remove VDB volume data:", exc)
 
-        print("Removed loaded VDB sequence from Blender")
 
     def _stable_vdbs(self):
         stable = []
@@ -83,14 +80,8 @@ class VDBWatcher:
         volume.frame_duration = len(stable_vdbs)
         volume.sequence_mode = 'CLIP'
 
-        try:
-            volume.reload()
-        except Exception as exc:
-            print("Initial volume reload failed:", exc)
-
         bpy.context.scene.frame_set(len(stable_vdbs))
 
-        print("Created VDB sequence:", first_vdb)
 
     def _refresh_sequence(self, stable_vdbs):
         volume = self.volume_object.data
@@ -101,14 +92,8 @@ class VDBWatcher:
 
         volume.frame_duration = new_duration
 
-        try:
-            volume.reload()
-        except Exception as exc:
-            print("Volume reload failed:", exc)
-
         bpy.context.scene.frame_set(new_duration)
 
-        print("Updated VDB sequence duration:", new_duration)
 
     def timer(self):
         if not self.running:

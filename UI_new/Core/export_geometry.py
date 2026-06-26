@@ -1,4 +1,6 @@
 from pathlib import Path
+import contextlib
+import io
 import bpy
 
 
@@ -17,12 +19,14 @@ def export_object_as_local_stl(source_object, target_dir):
         source_object.select_set(True)
         bpy.context.view_layer.objects.active = source_object
 
-        bpy.ops.wm.stl_export(
-            filepath=str(file_path),
-            export_selected_objects=True,
-            apply_modifiers=True,
-            ascii_format=False,
-        )
+        # remove console output
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            bpy.ops.wm.stl_export(
+                filepath=str(file_path),
+                export_selected_objects=True,
+                apply_modifiers=True,
+                ascii_format=False,
+            )
 
     finally:
         source_object.matrix_world = old_matrix
