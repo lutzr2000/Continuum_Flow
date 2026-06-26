@@ -2,6 +2,7 @@ import bpy
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from . import export_config
 from . import writer_manager
@@ -10,6 +11,25 @@ def _venv_python_path():
     addon_root = Path(__file__).resolve().parents[2]
     return addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
 
+def _read_solver_stdout(process):
+    for line in process.stdout:
+        print("[Solver]", line, end="")
+
+def _wait_solver_finished(process, writer_server, config_path):
+    exit_code = process.wait()
+    print("Solver Exit Code:", exit_code)
+
+    writer_server.stop()
+
+    try:
+        config_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    try:
+        shutil.rmtree(config_path.parent / "geometry", ignore_errors=True)
+    except OSError:
+        pass
 
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
@@ -55,19 +75,19 @@ class main(bpy.types.Operator):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
 
-        try:
-            for line in process.stdout:
-                print("[Solver]", line, end="")
-        finally:
-            print("Solver Exit Code:", process.wait())
-            writer_server.stop()
-            try:
-                config_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            try:
-                shutil.rmtree(config_path.parent / "geometry", ignore_errors=True)
-            except OSError:
-                pass
+        threading.Thread(
+            target=_read_solver_stdout,
+            args=(process,),
+            daemon=True,
+        ).start()
+
+        threading.Thread(
+            target=_wait_solver_finished,
+            args=(process, writer_server, config_path),
+            daemon=True,
+        ).start()
+
+        print("Solver started:", process.pid)
