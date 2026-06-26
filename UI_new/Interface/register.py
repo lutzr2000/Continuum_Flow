@@ -1,32 +1,35 @@
 import bpy
-import importlib.util
-from pathlib import Path
 from bpy.app.handlers import persistent
 
-
-# Load node_tree.py
-HERE = Path(bpy.data.texts["register.py"].filepath).parent
-NODE_TREE_PATH = HERE / "node_tree.py"
-
-spec = importlib.util.spec_from_file_location("node_tree", NODE_TREE_PATH)
-node_tree = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(node_tree)
+from ..Interface.node_tree import (
+    ContinuumFlowNodeTree,
+    CONTINUUM_FLOW_OT_reload,
+    NODE_TREE_ID,
+)
 
 
 @persistent
 def ensure_fake_user(_scene=None, _depsgraph=None):
-    for tree in bpy.data.node_groups:
-        if (
-            tree.bl_idname == node_tree.NODE_TREE_ID
-            and not tree.use_fake_user
-        ):
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for tree in node_groups:
+        if tree.bl_idname == NODE_TREE_ID and not tree.use_fake_user:
             tree.use_fake_user = True
 
 
-def register():
-    bpy.utils.register_class(node_tree.ContinuumFlowNodeTree)
+classes = (
+    ContinuumFlowNodeTree,
+    CONTINUUM_FLOW_OT_reload,
+)
 
-    ensure_fake_user()
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+    bpy.app.timers.register(ensure_fake_user, first_interval=0.1)
 
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
@@ -36,13 +39,5 @@ def unregister():
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
 
-    bpy.utils.unregister_class(node_tree.ContinuumFlowNodeTree)
-
-
-if __name__ == "__main__":
-    try:
-        unregister()
-    except Exception:
-        pass
-
-    register()
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

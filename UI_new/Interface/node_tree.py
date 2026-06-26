@@ -75,3 +75,16 @@ def build_node_categories():
     ]
 
 
+class CONTINUUM_FLOW_OT_reload(bpy.types.Operator):
+    bl_idname = "continuum_flow.reload"
+    bl_label = "Reload Continuum Flow"
+
+    def execute(self, context):
+        import addon_utils
+
+        module_name = __package__.split(".")[0]
+        addon_utils.disable(module_name)
+        addon_utils.enable(module_name)
+
+        self.report({"INFO"}, "Continuum Flow reloaded")
+        return {"FINISHED"}
