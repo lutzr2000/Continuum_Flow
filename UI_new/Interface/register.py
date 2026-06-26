@@ -30,6 +30,8 @@ from ..Interface.node_source import ContinuumFlowSourceNode
 from ..Interface.node_viewer import ContinuumFlowViewerNode
 from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.main import main
+from ..Core import viewer
+from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
 
 
@@ -67,6 +69,7 @@ classes = (
     ContinuumFlowForceTurbulenceNode,
 
     ContinuumFlow_OT_add_basic_setup,
+    ContinuumFlow_OT_viewer_toggle_domain,
     main,
 )
 
@@ -134,6 +137,11 @@ def unregister():
 
     try:
         unregister_node_categories(NODE_CATEGORIES_ID)
+    except Exception:
+        pass
+
+    try:
+        viewer.disable_domain_preview()
     except Exception:
         pass
 
