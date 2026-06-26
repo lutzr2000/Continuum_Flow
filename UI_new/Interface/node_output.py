@@ -8,7 +8,7 @@ from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 from bpy.props import StringProperty
 
-class ContinuumFlowOutputNode(bpy.types.Node):
+class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     """
     Node used to configure which simulation results should be written to disk.
     """
@@ -69,7 +69,7 @@ class ContinuumFlowOutputNode(bpy.types.Node):
             )
         return socket
 
-    def _sync_input_socket(self):
+    def _sync_node(self):
         self._ensure_input_socket()
 
     def _sync_defaults_from_scene(self, context):
@@ -84,20 +84,20 @@ class ContinuumFlowOutputNode(bpy.types.Node):
             self.fps = fps
 
     def init(self, context):
-        self._sync_input_socket()
+        self._sync_node()
         self._sync_defaults_from_scene(context)
 
     def copy(self, node):
-        self._sync_input_socket()
+        self._sync_node()
 
     def update(self):
-        self._sync_input_socket()
+        self._sync_node()
 
     def _draw_field_row(self, layout, export_attr, sparse_attr, label=None):
         row = layout.row(align=True)
         row.prop(self, export_attr, text=label)
         sparse_row = row.row(align=True)
-        sparse_row.enabled = bool(getattr(self, export_attr))
+        sparse_row.enabled = bool(getattr(self, export_attr)) and not solver_status.bake_running
         sparse_row.prop(self, sparse_attr, text="sparse")
 
     def _linked_simulation_node(self):
@@ -132,6 +132,8 @@ class ContinuumFlowOutputNode(bpy.types.Node):
         return None
 
     def draw_buttons(self, context, layout):
+        self._set_layout_enabled(context, layout)
+
         layout.prop(self, "fps")
         layout.prop(self, "writer_processes")
         layout.prop(self, "output_precision")
@@ -144,7 +146,7 @@ class ContinuumFlowOutputNode(bpy.types.Node):
         layout.separator()
 
         layout.prop(self, "output_path")
-        
+
         layout.separator()
 
         disable_reason = self._bake_disable_reason()

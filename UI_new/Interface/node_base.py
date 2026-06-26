@@ -1,5 +1,6 @@
-import bpy
+﻿import bpy
 from .node_tree import ContinuumFlowNodeTree
+from ..Core import solver_status
 
 class ContinuumFlowBaseNode(bpy.types.Node):
     """
@@ -25,7 +26,7 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         self._sync_node()
 
     def _set_layout_enabled(self, context, layout):
-        layout.enabled = True
+        layout.enabled = not solver_status.bake_running
 
     def _draw_group(self, layout, title, property_names):
         box = layout.box()
