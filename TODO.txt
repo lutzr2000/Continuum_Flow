@@ -8,9 +8,8 @@ Test different block sizes
 
 
 UI:
-Bake slow start
+Bake slow start and end
 Free bake needs to be active if last bake contains files
-Viewer Hide show button is buggy
 Draw Forces, swirl as Cylinder
 Rename new UI to UI
 Adjust tooltips

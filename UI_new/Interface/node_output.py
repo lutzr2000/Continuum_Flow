@@ -3,6 +3,7 @@ from . import helper_functions
 from . import sockets
 from . import node_base
 from ..Core import solver_status
+from ..Core import main as bake_main
 from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
@@ -59,6 +60,7 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     export_flame: BoolProperty(name="flame", default=True)  # type: ignore
     sparse_flame: BoolProperty(name="sparse", default=True)  # type: ignore
     output_path: StringProperty(name="Path", default="", subtype="DIR_PATH")  # type: ignore
+    last_bake_directory: StringProperty(default="", options={"HIDDEN"})  # type: ignore
 
     def _ensure_input_socket(self):
         socket = self.inputs.get("Result")
@@ -150,7 +152,7 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         layout.separator()
 
         disable_reason = self._bake_disable_reason()
-        is_free_bake = solver_status.bake_available and not solver_status.bake_running
+        is_free_bake = bake_main.output_node_has_baked_data(self) and not solver_status.bake_running
 
         button_row = layout.row()
         button_row.enabled = disable_reason is None and not solver_status.bake_running

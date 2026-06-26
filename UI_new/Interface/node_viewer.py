@@ -29,11 +29,12 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
+        is_domain_preview_active = viewer.viewer_domain_preview_enabled(self)
         col = layout.column(align=True)
         col.operator(
             "continuum_flow.viewer_toggle_domain",
-            text="Hide Domain" if bool(self.domain_preview_active) else "Show Domain",
-            icon="HIDE_ON" if bool(self.domain_preview_active) else "HIDE_OFF",
+            text="Hide Domain" if is_domain_preview_active else "Show Domain",
+            icon="HIDE_ON" if is_domain_preview_active else "HIDE_OFF",
         )
         col.prop(self, "live_preview")
         col.prop(self, "debug")

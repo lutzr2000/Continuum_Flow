@@ -31,6 +31,7 @@ from ..Interface.node_viewer import ContinuumFlowViewerNode
 from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake
 from ..Core import viewer
+from ..Core import main as bake_main
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
 
@@ -44,6 +45,19 @@ def ensure_fake_user(_scene=None, _depsgraph=None):
     for tree in node_groups:
         if tree.bl_idname == NODE_TREE_ID and not tree.use_fake_user:
             tree.use_fake_user = True
+
+
+@persistent
+def sync_runtime_state(_scene=None):
+    try:
+        viewer.disable_domain_preview()
+    except Exception:
+        pass
+
+    try:
+        bake_main.refresh_bake_state_from_output_nodes()
+    except Exception:
+        pass
 
 
 classes = (
@@ -130,6 +144,11 @@ def register():
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
+    if sync_runtime_state not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(sync_runtime_state)
+
+    sync_runtime_state()
+
 
 def unregister():
     solver_status.environment_ready = False
@@ -141,6 +160,9 @@ def unregister():
 
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
+
+    if sync_runtime_state in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(sync_runtime_state)
 
     try:
         unregister_node_categories(NODE_CATEGORIES_ID)

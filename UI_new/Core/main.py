@@ -99,6 +99,117 @@ def _clear_status_progress(context):
     _tag_ui_redraw()
 
 
+def _normalize_directory_path(path_value):
+    if not path_value:
+        return None
+    try:
+        return Path(path_value).resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def output_directory_has_vdbs(output_directory):
+    output_directory = _normalize_directory_path(output_directory)
+    return bool(
+        output_directory
+        and output_directory.exists()
+        and output_directory.is_dir()
+        and any(output_directory.glob("*.vdb"))
+    )
+
+
+def _resolve_output_node_from_context(context):
+    node = getattr(context, "node", None)
+    if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
+        return node
+    return None
+
+
+def _output_node_last_bake_directory(output_node):
+    if output_node is None:
+        return None
+    return _normalize_directory_path(getattr(output_node, "last_bake_directory", ""))
+
+
+def _output_node_target_directory(output_node):
+    if output_node is None:
+        return None
+    return _normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
+
+
+def _is_bake_directory_inside_target(output_node, bake_directory):
+    target_directory = _output_node_target_directory(output_node)
+    bake_directory = _normalize_directory_path(bake_directory)
+    if target_directory is None or bake_directory is None:
+        return False
+
+    try:
+        bake_directory.relative_to(target_directory)
+    except ValueError:
+        return False
+    return True
+
+
+def _discover_latest_bake_directory(output_node):
+    target_directory = _output_node_target_directory(output_node)
+    if target_directory is None or not target_directory.exists() or not target_directory.is_dir():
+        return None
+
+    candidates = []
+    for child in target_directory.iterdir():
+        if not child.is_dir():
+            continue
+        if not output_directory_has_vdbs(child):
+            continue
+        candidates.append(child)
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda directory: directory.stat().st_mtime)
+
+
+def _resolved_output_node_bake_directory(output_node, persist=False):
+    bake_directory = _output_node_last_bake_directory(output_node)
+    if _is_bake_directory_inside_target(output_node, bake_directory) and output_directory_has_vdbs(bake_directory):
+        return bake_directory
+
+    discovered_directory = _discover_latest_bake_directory(output_node)
+    if persist and discovered_directory is not None:
+        _store_output_node_last_bake_directory(output_node, discovered_directory)
+    return discovered_directory
+
+
+def _store_output_node_last_bake_directory(output_node, output_directory):
+    if output_node is None:
+        return
+    output_node.last_bake_directory = str(output_directory) if output_directory else ""
+
+
+def output_node_has_baked_data(output_node):
+    return _resolved_output_node_bake_directory(output_node, persist=False) is not None
+
+
+def refresh_bake_state_from_output_nodes():
+    active_output_directory = None
+
+    for node_tree in getattr(bpy.data, "node_groups", ()):
+        for node in getattr(node_tree, "nodes", ()): 
+            if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_OUTPUT_NODE":
+                continue
+
+            candidate_directory = _resolved_output_node_bake_directory(node, persist=False)
+            if candidate_directory is not None:
+                active_output_directory = candidate_directory
+                break
+
+        if active_output_directory is not None:
+            break
+
+    _set_bake_available_state(active_output_directory is not None, active_output_directory)
+    return active_output_directory
+
+
 def _set_bake_progress(current_frames, total_frames):
     current_frames = max(0, int(current_frames or 0))
     total_frames = max(0, int(total_frames or 0))
@@ -131,12 +242,8 @@ def _set_bake_available_state(is_available, output_directory=None):
 
 
 def _update_bake_available_from_output(output_directory):
-    if output_directory is None:
-        _set_bake_available_state(False)
-        return False
-
-    output_directory = Path(output_directory).resolve()
-    has_vdbs = output_directory.exists() and any(output_directory.glob("*.vdb"))
+    has_vdbs = output_directory_has_vdbs(output_directory)
+    output_directory = _normalize_directory_path(output_directory)
     _set_bake_available_state(has_vdbs, output_directory if has_vdbs else None)
     return has_vdbs
 
@@ -181,11 +288,14 @@ class main(bpy.types.Operator):
     bl_label = "Bake"
 
     def execute(self, context):
+        self.output_node = _resolve_output_node_from_context(context)
+        refresh_bake_state_from_output_nodes()
+
         if solver_status.bake_running:
             self.report({'WARNING'}, "Bake is already running")
             return {'CANCELLED'}
 
-        if solver_status.bake_available:
+        if output_node_has_baked_data(self.output_node):
             deleted_count = self.free_bake()
             if deleted_count:
                 self.report({'INFO'}, f"Removed {deleted_count} VDB files")
@@ -250,7 +360,12 @@ class main(bpy.types.Operator):
                 except OSError:
                     pass
 
-            _update_bake_available_from_output(self.output_directory)
+            has_vdbs = _update_bake_available_from_output(self.output_directory)
+            _store_output_node_last_bake_directory(
+                self.output_node,
+                self.output_directory if has_vdbs else None,
+            )
+            refresh_bake_state_from_output_nodes()
             _set_bake_progress(0, 0)
             if bpy.context is not None:
                 _clear_status_progress(bpy.context)
@@ -270,10 +385,14 @@ class main(bpy.types.Operator):
         self.cleanup()
 
     def free_bake(self):
-        output_directory = solver_status.last_output_directory
+        output_directory = _resolved_output_node_bake_directory(self.output_node, persist=False)
+        if output_directory is None:
+            output_directory = solver_status.last_output_directory
+
         _vdb_watcher.clear_loaded_sequence()
         deleted_count = _clear_bake_directory(output_directory)
-        _update_bake_available_from_output(output_directory)
+        _store_output_node_last_bake_directory(self.output_node, None)
+        refresh_bake_state_from_output_nodes()
         return deleted_count
 
     def _update_progress_from_loaded_frames(self, loaded_frame_count):
