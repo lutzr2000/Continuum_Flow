@@ -2,11 +2,12 @@ import bpy
 from . import helper_functions
 from . import sockets
 from . import node_base
+from ..Core import solver_status
 from bpy.props import FloatProperty
 from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
-#import solver_status
+
 
 class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     """
@@ -76,28 +77,28 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         self.cpu_available = cpu_available
         self.gpu_available = gpu_available 
 
-    # def draw_buttons(self, context, layout):
-    #     self._set_layout_enabled(context, layout)
+    def draw_buttons(self, context, layout):
+        self._set_layout_enabled(context, layout)
 
-    #     if not solver_status.environment_ready:
-    #         warning_box = layout.box()
-    #         warning_box.label(text="Solver environment missing", icon="ERROR")
-    #         warning_box.label(text="Use the install button to create .venv with uv.")
-    #         warning_box.operator(
-    #             "continuum_flow.install_solver_environment",
-    #             icon="CONSOLE",
-    #         )
+        if not solver_status.environment_ready:
+            warning_box = layout.box()
+            warning_box.label(text="Solver environment missing", icon="ERROR")
+            warning_box.label(text="Use the install button to create .venv with uv.")
+            warning_box.operator(
+                "continuum_flow.install_solver_environment",
+                icon="CONSOLE",
+            )
 
-    #     solver_row = layout.row(align=True)
+        solver_row = layout.row(align=True)
 
-    #     solver_row.prop_enum(self, "solver_backend", "CPU")
+        solver_row.prop_enum(self, "solver_backend", "CPU")
 
-    #     gpu_row = solver_row.row(align=True)
-    #     gpu_row.enabled = solver_status.gpu_available
-    #     gpu_row.prop_enum(self, "solver_backend", "GPU")
+        gpu_row = solver_row.row(align=True)
+        gpu_row.enabled = solver_status.gpu_available
+        gpu_row.prop_enum(self, "solver_backend", "GPU")
 
-    #     if self.solver_backend == "GPU" and not solver_status.gpu_available:
-    #         self.solver_backend = "CPU"
+        if self.solver_backend == "GPU" and not solver_status.gpu_available:
+            self.solver_backend = "CPU"
 
-    #     for title, property_names in self.property_groups:
-    #         self._draw_group(layout, title, property_names)
+        for title, property_names in self.property_groups:
+            self._draw_group(layout, title, property_names)

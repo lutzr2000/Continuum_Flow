@@ -26,6 +26,7 @@ from ..Interface.node_physics import ContinuumFlowPhysicsNode0
 from ..Interface.node_simulation import ContinuumFlowSimulationNode
 from ..Interface.node_source import ContinuumFlowSourceNode
 from ..Interface.node_viewer import ContinuumFlowViewerNode
+from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 
 
 @persistent
@@ -60,6 +61,8 @@ classes = (
     ContinuumFlowForceConstantNode,
     ContinuumFlowForceSwirlNode,
     ContinuumFlowForceTurbulenceNode,
+
+    ContinuumFlow_OT_add_basic_setup,
 )
 
 

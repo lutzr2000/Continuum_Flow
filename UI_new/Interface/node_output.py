@@ -59,11 +59,13 @@ class ContinuumFlowOutputNode(bpy.types.Node):
     sparse_flame: BoolProperty(name="sparse", default=True)  # type: ignore
     output_path: StringProperty(name="Path", default="", subtype="DIR_PATH")  # type: ignore
 
-    @classmethod
     def _ensure_input_socket(self):
         socket = self.inputs.get("Result")
         if socket is None:
-            socket = self.inputs.new(sockets.ContinuumFlowResultSocket.bl_idname, "Result")
+            socket = self.inputs.new(
+                sockets.ContinuumFlowResultSocket.bl_idname,
+                "Result",
+            )
         return socket
 
     def _sync_input_socket(self):
@@ -128,4 +130,16 @@ class ContinuumFlowOutputNode(bpy.types.Node):
 
         return None
 
+    def draw_buttons(self, context, layout):
+        layout.prop(self, "fps")
+        layout.prop(self, "writer_processes")
+        layout.prop(self, "output_precision")
 
+        layout.separator()
+
+        for export_attr, sparse_attr, label in self.field_rows:
+            self._draw_field_row(layout, export_attr, sparse_attr, label)
+
+        layout.separator()
+
+        layout.prop(self, "output_path")
