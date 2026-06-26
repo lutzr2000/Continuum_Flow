@@ -1,13 +1,8 @@
 import json
 import os
-import queue
 import socket
-import threading
 from multiprocessing import shared_memory
 import numpy as np
-from numba import cuda
-
-import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
 def _enabled_output_field_names(output_fields):
