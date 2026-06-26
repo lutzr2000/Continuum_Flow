@@ -21,18 +21,6 @@ import Solver.Kernel_GPU.forces as forces
 GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
-def emit_progress(percent, time_value=None):
-    """
-    Emit a machine-readable progress event for Blender's bake progress bar.
-    """
-    payload = {
-        "percent": max(0.0, min(100.0, float(percent))),
-    }
-    if time_value is not None:
-        payload["time"] = float(time_value)
-    sys.stdout.write(PROGRESS_EVENT_PREFIX + json.dumps(payload) + "\n")
-    sys.stdout.flush()
-
 
 def _record_debug_timing(timing_stats, name, elapsed):
     timing_stats[name] = timing_stats.get(name, 0.0) + float(elapsed)
@@ -332,7 +320,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
     # ------------time loop------------------
     print("Start time iteration")
-    emit_progress(0.0, t)
     next_output_time = 0.0
     output_index = 0
     while t < t_max:
@@ -627,10 +614,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             output_index += 1
             output_frame_count += 1
             next_output_time += output_time_step
-        emit_progress(
-            t / t_max * 100.0,
-            t,
-        )
 
         # ------------Memory track-------------------
         if output_index == 10:
@@ -646,7 +629,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")
     else:
-        emit_progress(100.0, t_max)
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time
@@ -783,7 +765,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     # ------------time loop------------------
     section_start = perf_counter()
     print("Start time iteration")
-    emit_progress(0.0, t)
     next_output_time = 0.0
     output_index = 0
     step_count = 0
@@ -1155,10 +1136,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             output_frame_count += 1
             next_output_time += output_time_step
         _record_debug_timing(timing_stats, "loop_output", perf_counter() - section_start)
-        emit_progress(
-            t / t_max * 100.0,
-            t,
-        )
 
         # ------------Memory track-------------------
         section_start = perf_counter()
@@ -1180,7 +1157,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")
     else:
-        emit_progress(100.0, t_max)
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time

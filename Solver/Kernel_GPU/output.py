@@ -177,7 +177,7 @@ def _wait_for_writer_ack(writer_file):
 
     response = json.loads(response_line.decode("utf-8"))
     if response.get("status") != "ok":
-        raise RuntimeError(response.get("message", "unknown host VDB writer error"))
+        raise RuntimeError(f"Host VDB writer error: {response!r}")
 
 
 def shutdown_output(shared_memory_blocks, writer_slots):

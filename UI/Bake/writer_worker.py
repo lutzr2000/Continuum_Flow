@@ -51,7 +51,11 @@ def prune_scalar_grid(grid,sparse_threshold):
 
 def write_vdb(payload):
     config = get_writer_config()
-    simulations = config.get("simulations", {})
+    simulations = config.get("simulations") or []
+    if not isinstance(simulations, list) or not simulations:
+        raise ValueError(
+            "Writer config must contain a non-empty 'simulations' list."
+        )
     simulation = simulations[0]
 
     output_cfg = simulation.get("outputs", [{}])[0]
