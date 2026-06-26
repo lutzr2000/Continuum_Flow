@@ -10,4 +10,6 @@ class main(bpy.types.Operator):
         return {'FINISHED'}
 
     def do_bake(self, context):
-        export_config.export_config_dict()
+        config_dict = export_config.build_config_dict()
+        export_config.export_config_dict(config_dict)
+

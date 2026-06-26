@@ -20,6 +20,21 @@ PERCENTAGE_MAPPED_PROPERTY_RANGES = {
 }
 
 
+def _serialize_animation_payload(node, start_frame, end_frame, fps):
+    props = _animated_node_property_names(node)
+    if not props:
+        return {}, {}
+
+    sampled = _sample_node_property_series(node, props, start_frame, end_frame)
+    times = _animation_times(start_frame, end_frame, fps)
+
+    animations = {
+        name: {"times": times, "values": sampled[name]}
+        for name in props
+    }
+    return animations, sampled
+
+
 def _mapped_percentage_to_actual(property_name, value):
     """
     Convert one UI percentage value back into its solver-facing numeric range.
@@ -325,44 +340,6 @@ def _sample_node_property_series(
     return sampled_values
 
 
-def _serialize_node_animations(node, start_frame, end_frame, fps):
-    """
-    Sample animated node properties once per Blender frame for kernel playback.
-    """
-    animated_properties = _animated_node_property_names(node)
-    if not animated_properties:
-        return {}
-    sampled_values = _sample_node_property_series(
-        node,
-        animated_properties,
-        start_frame,
-        end_frame,
-    )
-
-    return {
-        property_name: {
-            "times": _animation_times(start_frame, end_frame, fps),
-            "values": sampled_values[property_name],
-        }
-        for property_name in animated_properties
-    }
-
-
-def _serialize_animatable_value_series(node, start_frame, end_frame):
-    """
-    Sample only animatable UI properties that are actually animated.
-    """
-    animated_properties = _animated_node_property_names(node)
-    if not animated_properties:
-        return {}
-    return _sample_node_property_series(
-        node,
-        animated_properties,
-        start_frame,
-        end_frame,
-    )
-
-
 def _linked_socket_nodes(
     socket_collection, socket_name, linked_node_attr, expected_idname=None
 ):
@@ -588,16 +565,17 @@ def _serialize_physics_node(node, start_frame, end_frame, fps):
             section_name: _serialize_named_fields(node, field_specs)
             for section_name, field_specs in _PHYSICS_SECTION_FIELDS.items()
         },
-        "animations": _serialize_node_animations(
+        "animations": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
             fps,
         ),
-        "animated_values": _serialize_animatable_value_series(
+        "animated_values": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
+            fps,
         ),
     }
 
@@ -667,16 +645,17 @@ def _serialize_source_node(
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": _safe_float_vector(node.velocity),
-        "animations": _serialize_node_animations(
+        "animations": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
             fps,
         ),
-        "animated_values": _serialize_animatable_value_series(
+        "animated_values": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
+            fps,
         ),
         **geometry_payload,
     }
@@ -709,16 +688,17 @@ def _serialize_force_node(node, start_frame, end_frame, fps):
     base_data = {
         "node_name": node.name,
         "node_type": node.bl_idname,
-        "animations": _serialize_node_animations(
+        "animations": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
             fps,
         ),
-        "animated_values": _serialize_animatable_value_series(
+        "animated_values": _serialize_animation_payload(
             node,
             start_frame,
             end_frame,
+            fps,
         ),
     }
     for field_spec in _FORCE_NODE_FIELDS.get(node.bl_idname, ()):
@@ -889,26 +869,11 @@ def _resolve_node_tree():
             return node_group
 
 
-def _resolve_export_directory(simulation_entries):
-    """
-    Choose a directory for the exported JSON.
-    """
-    for simulation_entry in simulation_entries:
-        for output_entry in simulation_entry["outputs"]:
-            output_path = output_entry.get("output_path", "")
-            if output_path:
-                return Path(output_path)
-
-    blend_directory = bpy.path.abspath("//")
-    if blend_directory:
-        return Path(blend_directory)
-    return Path.cwd()
-
-
 def build_config_dict():
     """
     Evaluate the Continuum Flow node tree and return a grouped config dict.
     """
+
     node_tree = _resolve_node_tree()
 
     simulation_nodes = [
@@ -934,11 +899,31 @@ def build_config_dict():
     return config_dict
 
 
-def export_config_dict():
+##################################################
+# Only necessary for debug
+##################################################
+
+
+def _resolve_export_directory(simulation_entries):
+    """
+    Choose a directory for the exported JSON.
+    """
+    for simulation_entry in simulation_entries:
+        for output_entry in simulation_entry["outputs"]:
+            output_path = output_entry.get("output_path", "")
+            if output_path:
+                return Path(output_path)
+
+    blend_directory = bpy.path.abspath("//")
+    if blend_directory:
+        return Path(blend_directory)
+    return Path.cwd()
+
+
+def export_config_dict(config_dict):
     """
     Evaluate the node tree, write a JSON file, and return both path and dict.
     """
-    config_dict = build_config_dict()
     export_directory = _resolve_export_directory(config_dict["simulations"])
     export_directory.mkdir(parents=True, exist_ok=True)
 
