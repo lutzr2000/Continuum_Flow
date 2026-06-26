@@ -23,31 +23,79 @@ def _read_solver_stdout(process):
 _vdb_watcher = load_result.VDBWatcher()
 
 
-def _wait_solver_finished(process, writer_server, config_path, vdb_watcher):
-    exit_code = process.wait()
-    print("Solver Exit Code:", exit_code)
-
-    writer_server.stop()
-    vdb_watcher.stop()
-
-    try:
-        config_path.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    try:
-        shutil.rmtree(config_path.parent / "geometry", ignore_errors=True)
-    except OSError:
-        pass
-
-
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
 
     def execute(self, context):
+        self.process = None
+        self.writer_server = None
+        self.config_path = None
+        self._cleanup_done = False
+        self._cleanup_lock = threading.Lock()
+
         self.do_bake(context)
-        return {'FINISHED'}
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        if event.type == 'ESC':
+            print("Bake cancelled by user")
+            self.cancel_bake()
+            return {'CANCELLED'}
+
+        if self.process and self.process.poll() is not None:
+            self.cleanup()
+            return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+    def cleanup(self):
+        with self._cleanup_lock:
+            if self._cleanup_done:
+                return
+
+            self._cleanup_done = True
+
+            _vdb_watcher.stop()
+
+            if self.writer_server:
+                try:
+                    self.writer_server.stop()
+                except Exception as exc:
+                    print("Failed to stop writer server:", exc)
+
+            if self.config_path:
+                try:
+                    self.config_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+                try:
+                    shutil.rmtree(self.config_path.parent / "geometry", ignore_errors=True)
+                except OSError:
+                    pass
+
+            print("Bake cleanup finished")
+
+    def cancel_bake(self):
+        _vdb_watcher.stop()
+
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            except Exception as exc:
+                print("Failed to terminate solver:", exc)
+
+        self.cleanup()
+
+    def _wait_solver_finished(self):
+        exit_code = self.process.wait()
+        print("Solver Exit Code:", exit_code)
+        self.cleanup()
 
     def launch_writer_manager(self, config_dict):
         output_config = ((config_dict.get("simulations") or [{}])[0].get("outputs") or [{}])[0]
@@ -72,15 +120,17 @@ class main(bpy.types.Operator):
         config_dict["simulations"][0]["outputs"][0].pop("_writer_config_path", None)
         config_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
 
-        output_config = config_dict["simulations"][0]["outputs"][0]
+        self.config_path = config_path
+        self.writer_server = writer_server
 
+        output_config = config_dict["simulations"][0]["outputs"][0]
         vdb_output_dir = Path(output_config["output_path"]).resolve()
 
         _vdb_watcher.start(vdb_output_dir)
 
         addon_root = Path(__file__).resolve().parents[2]
 
-        process = subprocess.Popen(
+        self.process = subprocess.Popen(
             [
                 str(_venv_python_path()),
                 "-m",
@@ -96,14 +146,13 @@ class main(bpy.types.Operator):
 
         threading.Thread(
             target=_read_solver_stdout,
-            args=(process,),
+            args=(self.process,),
             daemon=True,
         ).start()
 
         threading.Thread(
-            target=_wait_solver_finished,
-            args=(process, writer_server, config_path, _vdb_watcher),
+            target=self._wait_solver_finished,
             daemon=True,
         ).start()
 
-        print("Solver started:", process.pid)
+        print("Solver started:", self.process.pid)
