@@ -141,7 +141,7 @@ def _update_bake_available_from_output(output_directory):
     return has_vdbs
 
 
-def _clear_baked_vdbs(output_directory):
+def _clear_bake_directory(output_directory):
     if output_directory is None:
         return 0
 
@@ -149,15 +149,15 @@ def _clear_baked_vdbs(output_directory):
     if not output_directory.exists() or not output_directory.is_dir():
         return 0
 
-    deleted_count = 0
-    for vdb_path in output_directory.glob("*.vdb"):
-        try:
-            vdb_path.unlink()
-            deleted_count += 1
-        except OSError as exc:
-            print("Failed to remove VDB:", vdb_path, exc)
+    deleted_count = sum(1 for _ in output_directory.glob("*.vdb"))
 
-    print("Removed VDB files:", deleted_count)
+    try:
+        shutil.rmtree(output_directory)
+    except OSError as exc:
+        print("Failed to remove bake directory:", output_directory, exc)
+        return 0
+
+    print("Removed bake directory:", output_directory)
     return deleted_count
 
 
@@ -272,7 +272,7 @@ class main(bpy.types.Operator):
     def free_bake(self):
         output_directory = solver_status.last_output_directory
         _vdb_watcher.clear_loaded_sequence()
-        deleted_count = _clear_baked_vdbs(output_directory)
+        deleted_count = _clear_bake_directory(output_directory)
         _update_bake_available_from_output(output_directory)
         return deleted_count
 

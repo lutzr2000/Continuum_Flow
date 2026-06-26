@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import bpy
 import json
 from datetime import datetime, timezone
@@ -860,6 +861,35 @@ def build_config_dict():
     return config_dict
 
 
+def _safe_bake_name(value):
+    """
+    Convert one user-visible name into a filesystem-friendly folder fragment.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "bake").strip())
+    return cleaned.strip("._-") or "bake"
+
+
+def _create_bake_subdirectory(base_directory, config_dict):
+    """
+    Create a fresh subfolder for one bake run inside the configured output root.
+    """
+    node_tree_name = _safe_bake_name((config_dict.get("meta") or {}).get("node_tree_name"))
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    bake_directory = Path(base_directory) / f"{node_tree_name}_bake_{timestamp}"
+    bake_directory.mkdir(parents=True, exist_ok=False)
+    return bake_directory
+
+
+def _rewrite_simulation_output_paths(config_dict, bake_directory):
+    """
+    Point every simulation output at the concrete bake subfolder for this run.
+    """
+    bake_directory = str(Path(bake_directory).resolve())
+    for simulation_entry in config_dict.get("simulations", []):
+        for output_entry in simulation_entry.get("outputs", []):
+            output_entry["output_path"] = bake_directory
+
+
 def _iter_geometry_object_names_from_config(config_dict):
     seen = set()
 
@@ -903,11 +933,13 @@ def _resolve_export_directory(simulation_entries):
 
 def export_config_dict(config_dict):
     """
-    Write STL geometry files and config JSON into the bake folder.
+    Write STL geometry files and config JSON into a fresh bake subfolder.
     """
-    export_directory = _resolve_export_directory(config_dict["simulations"])
-    export_directory.mkdir(parents=True, exist_ok=True)
+    export_root_directory = _resolve_export_directory(config_dict["simulations"])
+    export_root_directory.mkdir(parents=True, exist_ok=True)
 
+    export_directory = _create_bake_subdirectory(export_root_directory, config_dict)
+    _rewrite_simulation_output_paths(config_dict, export_directory)
     _export_config_geometry_stls(config_dict, export_directory)
 
     file_name = f"{config_dict['meta']['node_tree_name']}_config_export.json"

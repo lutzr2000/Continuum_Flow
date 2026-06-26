@@ -10,7 +10,6 @@ Test different block sizes
 UI:
 Bake slow start
 Free bake needs to be active if last bake contains files
-Bake in subfolder
 Viewer Hide show button is buggy
 Draw Forces, swirl as Cylinder
 Rename new UI to UI
