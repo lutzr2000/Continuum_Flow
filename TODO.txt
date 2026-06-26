@@ -7,14 +7,12 @@ Rebuild CPU kernel
 
 UI:
 Bake slow start and end
-Draw turbulence force
 When a lot of values are animated start up is slow
 
 
 General:
 Build proper console output
 Remove Debug code
-Rebuild example files
 Output of velocity is not very effective because of non zero when initialised velocity, or is it (how does vdb handle this, even if non zero compression should be possible)
 Rescale inputs for percantage range and forces
 Even when save sparse is not active, the data is saved sparse?
@@ -23,3 +21,4 @@ Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
 Bug testing
 Test install
+Rebuild example files

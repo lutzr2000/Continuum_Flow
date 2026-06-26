@@ -3,6 +3,7 @@ import math
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
+from mathutils import Vector
 
 _DRAW_HANDLER = None
 _ACTIVE_FORCE_REF = None
@@ -107,8 +108,32 @@ def _is_valid_swirl_force_node(force_node):
     return True
 
 
+def _is_valid_turbulence_force_node(force_node):
+    """
+    Return whether one turbulence force node can still be accessed safely.
+    """
+    if force_node is None:
+        return False
+    try:
+        if getattr(force_node, "bl_idname", "") != "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+            return False
+        if getattr(force_node, "id_data", None) is None:
+            return False
+        float(force_node.scale)
+        float(force_node.frequency)
+        float(force_node.amplitude)
+        int(force_node.seed)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _is_valid_force_preview_node(force_node):
-    return _is_valid_constant_force_node(force_node) or _is_valid_swirl_force_node(force_node)
+    return (
+        _is_valid_constant_force_node(force_node)
+        or _is_valid_swirl_force_node(force_node)
+        or _is_valid_turbulence_force_node(force_node)
+    )
 
 
 def _linked_simulation_from_force(force_node):
@@ -278,26 +303,44 @@ def _draw_force_preview():
     if not _view3d_overlays_visible():
         return
 
-    if getattr(force_node, "bl_idname", "") == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
+    force_type = getattr(force_node, "bl_idname", "")
+    if force_type == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
         segments = _build_constant_force_segments(force_node)
-    elif getattr(force_node, "bl_idname", "") == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
-        segments = _build_swirl_force_segments(force_node)
-    else:
-        segments = []
-
-    if not segments:
+        if not segments:
+            return
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(3.0)
+        shader.bind()
+        shader.uniform_float("color", (0.45, 0.65, 0.95, 1.0))
+        batch_for_shader(shader, "LINES", {"pos": segments}).draw(shader)
+        gpu.state.line_width_set(1.0)
+        gpu.state.blend_set("NONE")
         return
 
-    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-    gpu.state.blend_set("ALPHA")
-    gpu.state.line_width_set(3.0)
+    if force_type == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
+        segments = _build_swirl_force_segments(force_node)
+        if not segments:
+            return
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(3.0)
+        shader.bind()
+        shader.uniform_float("color", (0.45, 0.65, 0.95, 1.0))
+        batch_for_shader(shader, "LINES", {"pos": segments}).draw(shader)
+        gpu.state.line_width_set(1.0)
+        gpu.state.blend_set("NONE")
+        return
 
-    shader.bind()
-    shader.uniform_float("color", (0.45, 0.65, 0.95, 1.0))
-    batch_for_shader(shader, "LINES", {"pos": segments}).draw(shader)
-
-    gpu.state.line_width_set(1.0)
-    gpu.state.blend_set("NONE")
+    if force_type == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+        positions, colors = _build_turbulence_force_triangles(force_node)
+        if not positions:
+            return
+        shader = gpu.shader.from_builtin("SMOOTH_COLOR")
+        gpu.state.blend_set("ALPHA")
+        shader.bind()
+        batch_for_shader(shader, "TRIS", {"pos": positions, "color": colors}).draw(shader)
+        gpu.state.blend_set("NONE")
 
 
 def enable_force_preview(force_node):
@@ -341,7 +384,11 @@ def _selected_force_nodes():
         for node in getattr(node_tree, "nodes", ()):
             if not getattr(node, "select", False):
                 continue
-            if getattr(node, "bl_idname", "") not in {"CONTINUUM_FLOW_FORCE_CONSTANT_NODE", "CONTINUUM_FLOW_FORCE_SWIRL_NODE"}:
+            if getattr(node, "bl_idname", "") not in {
+                "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
+                "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
+                "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
+            }:
                 continue
             yield node
 
@@ -526,3 +573,185 @@ def _build_swirl_force_segments(force_node):
         )
     )
     return segments
+
+###########################
+# turbulence force
+###########################
+
+def _current_view_direction():
+    region_data = getattr(bpy.context, "region_data", None)
+    if region_data is None:
+        return (0.0, 0.0, -1.0)
+    try:
+        direction = region_data.view_rotation @ Vector((0.0, 0.0, -1.0))
+        return (float(direction.x), float(direction.y), float(direction.z))
+    except Exception:
+        return (0.0, 0.0, -1.0)
+
+
+def _solver_time_seconds():
+    scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return 0.0
+    render = getattr(scene, "render", None)
+    fps = max(1, int(getattr(render, "fps", 24)))
+    return float(getattr(scene, "frame_current", 0)) / float(fps)
+
+
+def _smoothstep(t):
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _lerp(a, b, t):
+    return a + t * (b - a)
+
+
+def _fast_floor(x):
+    i = int(x)
+    if x < float(i):
+        return i - 1
+    return i
+
+
+def _hash_noise_3d(ix, iy, iz, seed):
+    n = ix * 15731 + iy * 789221 + iz * 1376312589 + seed * 1013
+    n = (n << 13) ^ n
+    nn = n * (n * n * 15731 + 789221) + 1376312589
+    nn = nn & 0x7fffffff
+    return float(nn) / 1073741824.0 - 1.0
+
+
+def _value_noise_3d(x, y, z, seed):
+    x0 = _fast_floor(x)
+    y0 = _fast_floor(y)
+    z0 = _fast_floor(z)
+    x1 = x0 + 1
+    y1 = y0 + 1
+    z1 = z0 + 1
+    tx = _smoothstep(x - float(x0))
+    ty = _smoothstep(y - float(y0))
+    tz = _smoothstep(z - float(z0))
+    c000 = _hash_noise_3d(x0, y0, z0, seed)
+    c100 = _hash_noise_3d(x1, y0, z0, seed)
+    c010 = _hash_noise_3d(x0, y1, z0, seed)
+    c110 = _hash_noise_3d(x1, y1, z0, seed)
+    c001 = _hash_noise_3d(x0, y0, z1, seed)
+    c101 = _hash_noise_3d(x1, y0, z1, seed)
+    c011 = _hash_noise_3d(x0, y1, z1, seed)
+    c111 = _hash_noise_3d(x1, y1, z1, seed)
+    x00 = _lerp(c000, c100, tx)
+    x10 = _lerp(c010, c110, tx)
+    x01 = _lerp(c001, c101, tx)
+    x11 = _lerp(c011, c111, tx)
+    y0v = _lerp(x00, x10, ty)
+    y1v = _lerp(x01, x11, ty)
+    return _lerp(y0v, y1v, tz)
+
+
+def _choose_turbulence_plane(domain_node):
+    width, depth, height = _domain_dimensions(domain_node)
+    center = _domain_center(domain_node)
+    view_direction = _vector_normalized(_current_view_direction()) or (0.0, 0.0, -1.0)
+    planes = [
+        {"normal": (0.0, 0.0, 1.0), "u": (1.0, 0.0, 0.0), "v": (0.0, 1.0, 0.0), "size_u": width, "size_v": depth, "center": center},
+        {"normal": (0.0, 1.0, 0.0), "u": (1.0, 0.0, 0.0), "v": (0.0, 0.0, 1.0), "size_u": width, "size_v": height, "center": center},
+        {"normal": (1.0, 0.0, 0.0), "u": (0.0, 1.0, 0.0), "v": (0.0, 0.0, 1.0), "size_u": depth, "size_v": height, "center": center},
+    ]
+    return max(planes, key=lambda plane: abs(_vector_dot(plane["normal"], view_direction)))
+
+
+def _turbulence_scalar(force_node, position, time_value):
+    amplitude = float(force_node.amplitude)
+    scale = float(force_node.scale)
+    if abs(amplitude) <= 1.0e-9 or scale <= 1.0e-8:
+        return 0.0
+    inv_scale = 1.0 / scale
+    frequency = float(force_node.frequency)
+    seed = int(force_node.seed)
+    x = position[0] * inv_scale
+    y = position[1] * inv_scale
+    z = position[2] * inv_scale + (time_value * frequency)
+    return amplitude * _value_noise_3d(x, y, z, seed)
+
+
+def _turbulence_color(value, amplitude):
+    max_value = max(abs(float(amplitude)), 1.0e-6)
+    factor = max(0.0, min(1.0, 0.5 + (0.5 * value / max_value)))
+    gray = factor
+    return (gray, gray, gray, 1.0)
+
+
+def _build_turbulence_force_triangles(force_node, sample_count=64):
+    simulation_node = _linked_simulation_from_force(force_node)
+    if simulation_node is None:
+        return [], []
+
+    domain_node = _linked_domain_from_simulation(simulation_node)
+    if domain_node is None:
+        return [], []
+
+    if float(force_node.scale) <= 1.0e-8 or abs(float(force_node.amplitude)) <= 1.0e-9:
+        return [], []
+
+    plane = _choose_turbulence_plane(domain_node)
+    time_value = _solver_time_seconds()
+
+    size_u = max(float(plane["size_u"]), float(domain_node.resolution))
+    size_v = max(float(plane["size_v"]), float(domain_node.resolution))
+
+    half_u = _vector_scale(plane["u"], size_u * 0.5)
+    half_v = _vector_scale(plane["v"], size_v * 0.5)
+    origin = _vector_sub(_vector_sub(plane["center"], half_u), half_v)
+
+    step_u = size_u / float(sample_count)
+    step_v = size_v / float(sample_count)
+
+    # Grid-Punkte einmal berechnen
+    grid_positions = []
+    grid_colors = []
+
+    for iy in range(sample_count + 1):
+        row_positions = []
+        row_colors = []
+
+        v_amount = float(iy) * step_v
+        v_offset = _vector_scale(plane["v"], v_amount)
+
+        for ix in range(sample_count + 1):
+            u_amount = float(ix) * step_u
+            u_offset = _vector_scale(plane["u"], u_amount)
+
+            p = _vector_add(origin, _vector_add(u_offset, v_offset))
+            value = _turbulence_scalar(force_node, p, time_value)
+            color = _turbulence_color(value, force_node.amplitude)
+
+            row_positions.append(p)
+            row_colors.append(color)
+
+        grid_positions.append(row_positions)
+        grid_colors.append(row_colors)
+
+    positions = []
+    colors = []
+
+    for iy in range(sample_count):
+        row0_p = grid_positions[iy]
+        row1_p = grid_positions[iy + 1]
+        row0_c = grid_colors[iy]
+        row1_c = grid_colors[iy + 1]
+
+        for ix in range(sample_count):
+            p00 = row0_p[ix]
+            p10 = row0_p[ix + 1]
+            p01 = row1_p[ix]
+            p11 = row1_p[ix + 1]
+
+            c00 = row0_c[ix]
+            c10 = row0_c[ix + 1]
+            c01 = row1_c[ix]
+            c11 = row1_c[ix + 1]
+
+            positions.extend((p00, p10, p11, p00, p11, p01))
+            colors.extend((c00, c10, c11, c00, c11, c01))
+
+    return positions, colors
