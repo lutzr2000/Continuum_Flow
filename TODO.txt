@@ -9,9 +9,8 @@ Test different block sizes
 
 UI:
 Bake slow start
-Progress Bar
-Cancel Bake Button
-Cross to cancel besides progress bar
+Progress Bar needs to be centered
+Free bake needs to be active if last bake contains files
 Bake in subfolder
 Viewer Hide show button is buggy
 Draw Forces, swirl as Cylinder

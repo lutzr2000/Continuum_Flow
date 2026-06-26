@@ -22,6 +22,7 @@ def _read_solver_stdout(process):
 
 
 _vdb_watcher = load_result.VDBWatcher()
+_status_workspace = None
 
 
 def draw_bake_progress(self, context):
@@ -32,17 +33,11 @@ def draw_bake_progress(self, context):
     if window_manager is None:
         return
 
-    row = self.layout.row(align=True)
+    layout = self.layout
+    layout.separator_spacer()
+    layout.label(text="Bake:")
 
-    # Linker flexibler Spacer
-    row.separator_spacer()
-
-    center = row.row(align=True)
-    center.alignment = 'CENTER'
-
-    center.label(text="Bake:")
-
-    progress_row = center.row(align=True)
+    progress_row = layout.row(align=True)
     progress_row.ui_units_x = 13
 
     if hasattr(progress_row, "progress"):
@@ -61,18 +56,14 @@ def draw_bake_progress(self, context):
             slider=True,
         )
 
-    # Rechter flexibler Spacer
-    row.separator_spacer()
-
-    # Cancel-Button rechts außen
-    cancel_row = row.row(align=True)
+    cancel_row = layout.row(align=True)
     cancel_row.operator(
         "continuum_flow.cancel_bake",
         text="",
         icon="PANEL_CLOSE",
         emboss=False,
     )
-
+    layout.separator_spacer()
 
 def _tag_ui_redraw():
     window_manager = getattr(bpy.context, "window_manager", None)
@@ -85,7 +76,27 @@ def _tag_ui_redraw():
             continue
 
         for area in screen.areas:
-            area.tag_redraw()
+            if area.type == "STATUSBAR":
+                area.tag_redraw()
+
+
+def _set_status_progress(context):
+    global _status_workspace
+    workspace = getattr(context, "workspace", None)
+    if workspace is None:
+        return
+    _status_workspace = workspace
+    workspace.status_text_set(draw_bake_progress)
+    _tag_ui_redraw()
+
+
+def _clear_status_progress(context):
+    global _status_workspace
+    workspace = _status_workspace or getattr(context, "workspace", None)
+    if workspace is not None:
+        workspace.status_text_set(None)
+    _status_workspace = None
+    _tag_ui_redraw()
 
 
 def _set_bake_progress(current_frames, total_frames):
@@ -191,7 +202,7 @@ class main(bpy.types.Operator):
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
-        _tag_ui_redraw()
+        _set_status_progress(context)
 
         self.do_bake(context)
         context.window_manager.modal_handler_add(self)
@@ -241,6 +252,8 @@ class main(bpy.types.Operator):
 
             _update_bake_available_from_output(self.output_directory)
             _set_bake_progress(0, 0)
+            if bpy.context is not None:
+                _clear_status_progress(bpy.context)
             print("Bake cleanup finished")
 
     def cancel_bake(self):
