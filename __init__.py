@@ -6,7 +6,7 @@ bl_info = {
     "category": "Node",
 }
 
-from .UI_new.Interface import register as registry
+from .Internal.UI import register as registry
 
 
 def register():

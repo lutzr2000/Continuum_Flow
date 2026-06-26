@@ -9,9 +9,7 @@ Test different block sizes
 
 UI:
 Bake slow start and end
-Free bake needs to be active if last bake contains files
 Draw Forces, swirl as Cylinder
-Rename new UI to UI
 Adjust tooltips
 physics node should not be animatable
 When a lot of values are animated start up is slow

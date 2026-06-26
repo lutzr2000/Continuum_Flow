@@ -4,7 +4,7 @@ from nodeitems_utils import register_node_categories, unregister_node_categories
 from pathlib import Path
 import subprocess
 
-from ..Interface.node_tree import (
+from ..UI.node_tree import (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
     NODE_TREE_ID,
@@ -12,23 +12,23 @@ from ..Interface.node_tree import (
     build_node_categories,
 )
 
-from ..Interface.sockets import (
+from ..UI.sockets import (
     ContinuumFlowIntSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
 )
 
-from ..Interface.node_domain import ContinuumFlowDomainNode
-from ..Interface.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
-from ..Interface.node_geometry import ContinuumFlowGeometryNode
-from ..Interface.node_obstacle import ContinuumFlowObstacleNode
-from ..Interface.node_output import ContinuumFlowOutputNode
-from ..Interface.node_physics import ContinuumFlowPhysicsNode0
-from ..Interface.node_simulation import ContinuumFlowSimulationNode
-from ..Interface.node_source import ContinuumFlowSourceNode
-from ..Interface.node_viewer import ContinuumFlowViewerNode
-from ..Interface.node_preset_tree import ContinuumFlow_OT_add_basic_setup
+from ..UI.node_domain import ContinuumFlowDomainNode
+from ..UI.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
+from ..UI.node_geometry import ContinuumFlowGeometryNode
+from ..UI.node_obstacle import ContinuumFlowObstacleNode
+from ..UI.node_output import ContinuumFlowOutputNode
+from ..UI.node_physics import ContinuumFlowPhysicsNode0
+from ..UI.node_simulation import ContinuumFlowSimulationNode
+from ..UI.node_source import ContinuumFlowSourceNode
+from ..UI.node_viewer import ContinuumFlowViewerNode
+from ..UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake
 from ..Core import viewer
 from ..Core import main as bake_main
