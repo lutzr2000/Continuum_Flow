@@ -1,21 +1,33 @@
 TODO
 
-General:
-the live preview produces a RAM accumulation
-
-Code rework:
+Solver:
 rescale force inputs to be more uniform
-Remove animation ability of physics constants, can be a thing for later update, but make sure forces and sources can be animated
 Behaviour is more inconsistent with resolution again why?
 Rebuild CPU kernel
-When a lot of values are animated start up is slow
 Test different block sizes
-Output of velocity is not very effective because of non zero
-Some cases definetly need cfl smaller than 10
+
+
+UI:
+Bake slow start
+Progress Bar
+Cancel Bake Button
+Cross to cancel besides progress bar
+Free Bake
+Bake in subfolder
+Viewer Hide show button is buggy
+Draw Forces, swirl as Cylinder
+Rename new UI to UI
+Adjust tooltips
+physics node should not be animatable
+When a lot of values are animated start up is slow
+
+
+General:
+Build proper console output
+Remove Debug code
 Rebuild example files
-Adjust UI tooltips
-Rework UI, rename new_ui to ui
-remove debug
+Output of velocity is not very effective because of non zero
+
 
 Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
