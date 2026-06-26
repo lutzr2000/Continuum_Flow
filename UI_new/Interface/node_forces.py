@@ -1,7 +1,9 @@
-import helper_functions
-import sockets
-import node_base
+from . import helper_functions
+from . import sockets
+from . import node_base
 import bpy
+from bpy.props import FloatProperty
+from bpy.props import FloatVectorProperty
 
 class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
     """

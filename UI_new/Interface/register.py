@@ -10,7 +10,22 @@ from ..Interface.node_tree import (
     build_node_categories,
 )
 
+from ..Interface.sockets import (
+    ContinuumFlowIntSocket,
+    ContinuumFlowForceSocket,
+    ContinuumFlowLinkSocket,
+    ContinuumFlowResultSocket,
+)
+
+from ..Interface.node_domain import ContinuumFlowDomainNode
+from ..Interface.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
 from ..Interface.node_geometry import ContinuumFlowGeometryNode
+from ..Interface.node_obstacle import ContinuumFlowObstacleNode
+from ..Interface.node_output import ContinuumFlowOutputNode
+from ..Interface.node_physics import ContinuumFlowPhysicsNode0
+from ..Interface.node_simulation import ContinuumFlowSimulationNode
+from ..Interface.node_source import ContinuumFlowSourceNode
+from ..Interface.node_viewer import ContinuumFlowViewerNode
 
 
 @persistent
@@ -27,7 +42,24 @@ def ensure_fake_user(_scene=None, _depsgraph=None):
 classes = (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
+
+    ContinuumFlowIntSocket,
+    ContinuumFlowForceSocket,
+    ContinuumFlowLinkSocket,
+    ContinuumFlowResultSocket,
+
+    ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
+    ContinuumFlowOutputNode,
+    ContinuumFlowPhysicsNode0,
+    ContinuumFlowSimulationNode,
+    ContinuumFlowSourceNode,
+    ContinuumFlowObstacleNode,
+    ContinuumFlowViewerNode,
+
+    ContinuumFlowForceConstantNode,
+    ContinuumFlowForceSwirlNode,
+    ContinuumFlowForceTurbulenceNode,
 )
 
 

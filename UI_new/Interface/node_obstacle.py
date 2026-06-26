@@ -1,6 +1,6 @@
-import helper_functions
-import sockets
-import node_base
+from . import helper_functions
+from . import sockets
+from . import node_base
 
 class ContinuumFlowObstacleNode(node_base.ContinuumFlowBaseNode):
     """

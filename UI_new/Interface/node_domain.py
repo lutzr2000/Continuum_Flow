@@ -1,7 +1,11 @@
-import helper_functions
-import sockets
-import node_base
+from . import helper_functions
+from . import sockets
+from . import node_base
 import bpy
+from bpy.props import FloatProperty
+from bpy.props import IntProperty
+from bpy.props import FloatVectorProperty
+from bpy.props import EnumProperty
 
 
 class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
@@ -34,12 +38,12 @@ class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
     nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, description="Grid cells in x", options=set())  # type: ignore
     ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, description="Grid cells in y", options=set())  # type: ignore
     nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, description="Grid cells in z", options=set())  # type: ignore
-    x_low_bc: bpy.props.EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
-    x_high_bc: bpy.props.EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
-    y_low_bc: bpy.props.EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
-    y_high_bc: bpy.props.EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
-    z_low_bc: bpy.props.EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
-    z_high_bc: bpy.props.EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    x_low_bc: EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    x_high_bc: EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    y_low_bc: EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    y_high_bc: EnumProperty(name="Y High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    z_low_bc: EnumProperty(name="Z Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
+    z_high_bc: EnumProperty(name="Z High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
     x_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
     x_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
     y_low_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore

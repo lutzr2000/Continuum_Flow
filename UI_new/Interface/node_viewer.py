@@ -1,7 +1,8 @@
-import helper_functions
-import sockets
-import node_base
-import Core.viewer as viewer
+from . import helper_functions
+from . import sockets
+from . import node_base
+from ..Core import viewer
+from bpy.props import BoolProperty
 
 
 class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
@@ -22,9 +23,9 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     def _sync_node(self):
         helper_functions.ensure_socket(self.inputs, sockets.ContinuumFlowResultSocket.bl_idname, "Result")
 
-    def free(self):
-        self.domain_preview_active = False
-        viewer.disable_domain_preview()
+    # def free(self):
+    #     self.domain_preview_active = False
+    #     viewer.disable_domain_preview()
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
