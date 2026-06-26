@@ -4,22 +4,31 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+
 from . import export_config
 from . import writer_manager
+from . import load_result
+
 
 def _venv_python_path():
     addon_root = Path(__file__).resolve().parents[2]
     return addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
 
+
 def _read_solver_stdout(process):
     for line in process.stdout:
         print("[Solver]", line, end="")
 
-def _wait_solver_finished(process, writer_server, config_path):
+
+_vdb_watcher = load_result.VDBWatcher()
+
+
+def _wait_solver_finished(process, writer_server, config_path, vdb_watcher):
     exit_code = process.wait()
     print("Solver Exit Code:", exit_code)
 
     writer_server.stop()
+    vdb_watcher.stop()
 
     try:
         config_path.unlink(missing_ok=True)
@@ -31,6 +40,7 @@ def _wait_solver_finished(process, writer_server, config_path):
     except OSError:
         pass
 
+
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
@@ -38,7 +48,7 @@ class main(bpy.types.Operator):
     def execute(self, context):
         self.do_bake(context)
         return {'FINISHED'}
-    
+
     def launch_writer_manager(self, config_dict):
         output_config = ((config_dict.get("simulations") or [{}])[0].get("outputs") or [{}])[0]
         performance_config = output_config.get("performance") or {}
@@ -61,6 +71,12 @@ class main(bpy.types.Operator):
         config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
         config_dict["simulations"][0]["outputs"][0].pop("_writer_config_path", None)
         config_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
+
+        output_config = config_dict["simulations"][0]["outputs"][0]
+
+        vdb_output_dir = Path(output_config["output_path"]).resolve()
+
+        _vdb_watcher.start(vdb_output_dir)
 
         addon_root = Path(__file__).resolve().parents[2]
 
@@ -86,7 +102,7 @@ class main(bpy.types.Operator):
 
         threading.Thread(
             target=_wait_solver_finished,
-            args=(process, writer_server, config_path),
+            args=(process, writer_server, config_path, _vdb_watcher),
             daemon=True,
         ).start()
 

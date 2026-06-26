@@ -14,7 +14,8 @@ Output of velocity is not very effective because of non zero
 Some cases definetly need cfl smaller than 10
 Rebuild example files
 Adjust UI tooltips
-Rework UI
+Rework UI, rename new_ui to ui
+remove debug
 
 Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
