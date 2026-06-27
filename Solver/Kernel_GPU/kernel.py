@@ -4,6 +4,8 @@ from time import perf_counter
 from pathlib import Path
 import numpy as np
 from numba import cuda
+import warnings
+warnings.filterwarnings("ignore")
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
@@ -52,7 +54,7 @@ def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
     }
 
 
-@cuda.jit
+@cuda.jit(cache=True)
 def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
     i, j, k = cuda.grid(3)
 

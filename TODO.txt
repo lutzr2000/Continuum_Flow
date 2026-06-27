@@ -12,7 +12,6 @@ UI:
 Bake slow start
 The clean up at the end has some weird reaction behaviour if blender main window is not selected
 Supress numba warning
-Something in the geometry output is broken, visible in drift test scene, obstacles reset shortly to local space? Also everything with the geometry seems buggy, investigate
 
 
 General:
