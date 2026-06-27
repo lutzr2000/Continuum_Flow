@@ -305,7 +305,7 @@ class main(bpy.types.Operator):
 
         self.process = None
         self.writer_server = None
-        self.config_path = None
+        self.bake_directory = None
         self.output_directory = None
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
@@ -348,17 +348,6 @@ class main(bpy.types.Operator):
                 except Exception as exc:
                     print("Failed to stop writer server:", exc)
 
-            if self.config_path:
-                try:
-                    self.config_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-
-                geometry_dir = self.config_path.parent / "geometry"
-                try:
-                    shutil.rmtree(geometry_dir, ignore_errors=True)
-                except OSError:
-                    pass
 
             has_vdbs = _update_bake_available_from_output(self.output_directory)
             _store_output_node_last_bake_directory(
@@ -399,29 +388,34 @@ class main(bpy.types.Operator):
         _set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
 
     def launch_writer_manager(self, config_dict):
-        output_config = ((config_dict.get("simulations") or [{}])[0].get("outputs") or [{}])[0]
+        simulation_config = ((config_dict.get("simulations") or [{}])[0])
+        output_config = (simulation_config.get("outputs") or [{}])[0]
         performance_config = output_config.get("performance") or {}
         writer_process_count = int(performance_config.get("writer_processes", 4))
-        config_path = output_config.get("_writer_config_path")
+        writer_config = {
+            "simulations": [{
+                "domain": simulation_config.get("domain") or {},
+                "outputs": [{
+                    "precision": output_config.get("precision", "float32"),
+                }],
+            }],
+        }
 
         server = writer_manager.HostVDBWriterServer(
             writer_process_count=writer_process_count,
-            config_path=config_path,
+            writer_config=writer_config,
         )
         server.start()
         return server
 
     def do_bake(self, context):
         config_dict = export_config.build_config_dict()
-        config_path, config_dict = export_config.export_config_dict(config_dict)
-        config_dict["simulations"][0]["outputs"][0]["_writer_config_path"] = str(config_path)
+        bake_directory, config_dict = export_config.export_config_dict(config_dict)
 
         writer_server = self.launch_writer_manager(config_dict)
         config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
-        config_dict["simulations"][0]["outputs"][0].pop("_writer_config_path", None)
-        config_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
 
-        self.config_path = config_path
+        self.bake_directory = Path(bake_directory).resolve()
         self.writer_server = writer_server
 
         output_config = config_dict["simulations"][0]["outputs"][0]
@@ -447,14 +441,19 @@ class main(bpy.types.Operator):
                 "-u",
                 "-m",
                 "Solver.General.main",
-                str(config_path),
+                str(self.bake_directory),
             ],
             cwd=str(addon_root),
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
         )
+
+        if self.process.stdin is not None:
+            self.process.stdin.write(json.dumps(config_dict))
+            self.process.stdin.close()
 
         threading.Thread(
             target=_read_solver_stdout,

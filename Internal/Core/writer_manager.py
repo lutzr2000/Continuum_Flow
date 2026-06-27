@@ -1,4 +1,4 @@
-import json
+﻿import json
 import queue
 import socketserver
 import subprocess
@@ -42,10 +42,10 @@ class _VDBWriterProcess:
     One persistent UI-side VDB writer process.
     """
 
-    def __init__(self, python_executable, writer_script, config_path=None):
+    def __init__(self, python_executable, writer_script, writer_config=None):
         command = [python_executable, str(writer_script)]
-        if config_path is not None:
-            command.append(str(config_path))
+        if writer_config is not None:
+            command.append(json.dumps(writer_config))
         self._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -90,14 +90,14 @@ class _VDBWriterProcessPool:
     Round-robin pool of persistent UI-side VDB writer processes.
     """
 
-    def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT, config_path=None):
+    def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT, writer_config=None):
         writer_script = _bake_directory() / "writer_worker.py"
         if not writer_script.exists():
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
 
         python_executable = _resolve_blender_python_executable()
         self._processes = [
-            _VDBWriterProcess(python_executable, writer_script, config_path=config_path)
+            _VDBWriterProcess(python_executable, writer_script, writer_config=writer_config)
             for _ in range(process_count)
         ]
         self._available_processes = queue.Queue(maxsize=process_count)
@@ -153,13 +153,13 @@ class HostVDBWriterServer:
         self,
         host="127.0.0.1",
         writer_process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT,
-        config_path=None,
+        writer_config=None,
     ):
         self.host = host
         self._writer_process_count = int(writer_process_count)
         self._writer_pool = _VDBWriterProcessPool(
             process_count=self._writer_process_count,
-            config_path=config_path,
+            writer_config=writer_config,
         )
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
         self._server.write_vdb = self._writer_pool.write

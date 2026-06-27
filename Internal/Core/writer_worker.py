@@ -1,9 +1,7 @@
-import json
+﻿import json
 import os
 import sys
 from multiprocessing import shared_memory
-from pathlib import Path
-
 import numpy as np
 import openvdb
 
@@ -13,13 +11,7 @@ WRITER_CONFIG = {}
 def _load_writer_config_from_argv(argv):
     if len(argv) < 2:
         return {}
-
-    config_path = Path(argv[1]).resolve()
-    if not config_path.exists():
-        raise FileNotFoundError(f"Writer config file not found: {config_path}")
-
-    with config_path.open("r", encoding="utf-8") as config_file:
-        return json.load(config_file)
+    return json.loads(argv[1])
 
 
 def get_writer_config():

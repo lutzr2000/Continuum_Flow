@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 
 import Solver.General.voxelise_mesh as voxelise_mesh_module
 import Solver.Kernel_GPU.kernel as gpu_kernel_module
@@ -87,11 +87,7 @@ def main(config=None):
         source_base_masks.append(source_base_mask)
         source_masks.append(source_mask)
 
-    viewers = simulation_cfg.get("viewers") or []
-    debug_enabled = any(bool(viewer_cfg.get("debug", False)) for viewer_cfg in viewers)
-    solver_fn = gpu_kernel_module.solver_debug if debug_enabled else gpu_kernel_module.solver
-
-    return solver_fn(
+    return gpu_kernel_module.solver(
         config,
         obstacle_base_masks,
         obstacle_mask,
@@ -108,13 +104,13 @@ if __name__ == "__main__":
     from pathlib import Path
 
     try:
-        config_path = Path(sys.argv[1]).resolve()
+        if len(sys.argv) < 2:
+            raise ValueError("Expected bake directory path as first argument.")
 
-        voxelise_mesh_module.set_config_dir(config_path.parent)
+        bake_directory = Path(sys.argv[1]).resolve()
+        voxelise_mesh_module.set_config_dir(bake_directory)
 
-        with open(config_path, "r", encoding="utf-8") as file:
-            config = json.load(file)
-
+        config = json.load(sys.stdin)
         main(config)
 
     except Exception:

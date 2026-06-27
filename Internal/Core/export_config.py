@@ -708,7 +708,6 @@ def _serialize_viewer_node(node):
     return {
         "node_name": node.name,
         "live_preview": bool(getattr(node, "live_preview", True)),
-        "debug": bool(getattr(node, "debug", False)),
     }
 
 
@@ -941,7 +940,7 @@ def _resolve_export_directory(simulation_entries):
 
 def export_config_dict(config_dict):
     """
-    Write STL geometry files and config JSON into a fresh bake subfolder.
+    Prepare a fresh bake subfolder and export the STL geometry assets into it.
     """
     export_root_directory = _resolve_export_directory(config_dict["simulations"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
@@ -950,8 +949,4 @@ def export_config_dict(config_dict):
     _rewrite_simulation_output_paths(config_dict, export_directory)
     _export_config_geometry_stls(config_dict, export_directory)
 
-    file_name = f"{config_dict['meta']['node_tree_name']}_config_export.json"
-    file_path = export_directory / file_name
-    file_path.write_text(json.dumps(config_dict, indent=2), encoding="utf-8")
-
-    return file_path, config_dict
+    return export_directory, config_dict
