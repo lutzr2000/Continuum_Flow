@@ -1,7 +1,30 @@
 from pathlib import Path
 import contextlib
 import io
+import os
 import bpy
+
+
+@contextlib.contextmanager
+def _suppress_process_output():
+    """
+    Suppress Python- and C-level stdout/stderr during Blender operator calls.
+    """
+    saved_stdout = os.dup(1)
+    saved_stderr = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+
+    try:
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        os.dup2(saved_stdout, 1)
+        os.dup2(saved_stderr, 2)
+        os.close(saved_stdout)
+        os.close(saved_stderr)
+        os.close(devnull_fd)
 
 
 def _evaluated_mesh_to_temporary_object(source_object, depsgraph):
@@ -50,8 +73,7 @@ def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
         temp_object.select_set(True)
         bpy.context.view_layer.objects.active = temp_object
 
-        # remove console output
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with _suppress_process_output():
             bpy.ops.wm.stl_export(
                 filepath=str(file_path),
                 export_selected_objects=True,

@@ -2,20 +2,16 @@ TODO
 
 Solver:
 Behaviour is more inconsistent with resolution again why?
-Are all kernels cached?
 Rebuild CPU kernel
 Outputs 2 frames too much
-Obstcacle and Source Bounding Box update?
 
 
 UI:
 Bake slow start
 The clean up at the end has some weird reaction behaviour if blender main window is not selected
-Supress numba warning
 
 
 General:
-Build proper console output
 Remove Debug code
 Output of velocity is not very effective because of non zero when initialised velocity, or is it (how does vdb handle this, even if non zero compression should be possible)
 Rescale inputs for percantage range and forces
@@ -26,7 +22,69 @@ If a source intersects with a boundary and the source is turned off the boundary
 
 Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
-If Continuum Flow is in no way worked with in Blender, make sure that none of it affets performance
+If Continuum Flow is in no way opened within Blender, make sure that none of it affets performance
 Bug testing
 Test install
 Rebuild example files
+
+
+Shut this off gracefully:
+Exception occurred during processing of request from ('127.0.0.1', 51822)
+Exception occurred during processing of request from ('127.0.0.1', 51823)
+Exception occurred during processing of request from ('127.0.0.1', 51825)
+Exception occurred during processing of request from ('127.0.0.1', 51824)
+Traceback (most recent call last):
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+Traceback (most recent call last):
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 691, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Users\lutz_\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\BlenderCFD\Internal\Core\writer_manager.py", line 129, in handle
+    for raw_line in self.rfile:
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socket.py", line 718, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\lutz_\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\BlenderCFD\Internal\Core\writer_manager.py", line 129, in handle
+    for raw_line in self.rfile:
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+  File "C:\Users\lutz_\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\BlenderCFD\Internal\Core\writer_manager.py", line 129, in handle
+    for raw_line in self.rfile:
+----------------------------------------
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socket.py", line 718, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socket.py", line 718, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+----------------------------------------
+----------------------------------------
+  File "C:\Users\lutz_\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\BlenderCFD\Internal\Core\writer_manager.py", line 129, in handle
+    for raw_line in self.rfile:
+  File "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\Lib\socket.py", line 718, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
