@@ -6,10 +6,6 @@ Rebuild CPU kernel
 Outputs 2 frames too much
 
 
-UI:
-The clean up at the end has some weird reaction behaviour if blender main window is not selected
-
-
 General:
 Rescale inputs for percantage range and forces
 At very high res run, the live preview struggles to load vdbs properly

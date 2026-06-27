@@ -76,7 +76,7 @@ def _tag_ui_redraw():
             continue
 
         for area in screen.areas:
-            if area.type == "STATUSBAR":
+            if area.type in {"STATUSBAR", "NODE_EDITOR", "PROPERTIES"}:
                 area.tag_redraw()
 
 
@@ -309,12 +309,14 @@ class main(bpy.types.Operator):
         self.output_directory = None
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
+        self._event_timer = None
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
         _set_status_progress(context)
 
         self.do_bake(context)
+        self._event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -324,7 +326,7 @@ class main(bpy.types.Operator):
             self.cancel_bake()
             return {'CANCELLED'}
 
-        if self.process and self.process.poll() is not None:
+        if event.type == 'TIMER' and self.process and self.process.poll() is not None:
             self.cleanup()
             return {'FINISHED'}
 
@@ -339,6 +341,13 @@ class main(bpy.types.Operator):
             solver_status.bake_running = False
             if solver_status.active_bake_operator is self:
                 solver_status.active_bake_operator = None
+
+            if self._event_timer is not None and bpy.context is not None:
+                try:
+                    bpy.context.window_manager.event_timer_remove(self._event_timer)
+                except Exception:
+                    pass
+                self._event_timer = None
 
             _vdb_watcher.stop()
 
