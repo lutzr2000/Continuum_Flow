@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from numba import cuda
 import warnings
-#warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
@@ -97,6 +97,12 @@ def get_source_values(simulations, var_name, t, index=None):
 
     return values
 
+
+def _prepare_force_config_device(config_array, row_width):
+    host_array = np.ascontiguousarray(
+        np.asarray(config_array, dtype=GPU_FIELD_DTYPE).reshape((-1, row_width))
+    )
+    return cuda.to_device(host_array)
 
 def apply_all_BC(
     simulations,
@@ -445,6 +451,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)     
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0],t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0],t)
+        swirl_config_device = _prepare_force_config_device(swirl_config, 8)
+        turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
 
         # ------------Velocity update-------------------
         u_work.copy_to_device(u)
@@ -490,12 +498,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             fy_const,
             fz_const,
             has_swirl_nodes,
-            swirl_config,
+            swirl_config_device,
             origin_x,
             origin_y,
             origin_z,
             has_turbulence_nodes,
-            turbulence_config,
+            turbulence_config_device,
             t
         )
 
@@ -912,6 +920,8 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)  
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0],t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0],t)
+        swirl_config_device = _prepare_force_config_device(swirl_config, 8)
+        turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
 
         # ------------Velocity update-------------------
         section_start = perf_counter()
@@ -975,12 +985,12 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             fy_const,
             fz_const,
             has_swirl_nodes,
-            swirl_config,
+            swirl_config_device,
             origin_x,
             origin_y,
             origin_z,
             has_turbulence_nodes,
-            turbulence_config,
+            turbulence_config_device,
             t
         )
         cuda.synchronize()
@@ -1171,6 +1181,7 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
     print(f"Average step runtime: {average_step:.6f} s")
     _print_debug_timing_summary(timing_stats, total_runtime)
     print("################################################################")
+
 
 
 

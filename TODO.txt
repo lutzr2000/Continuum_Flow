@@ -7,16 +7,15 @@ Outputs 2 frames too much
 
 
 UI:
-Bake slow start
+Bake slow start, generally bad startup performance
 The clean up at the end has some weird reaction behaviour if blender main window is not selected
 
 
 General:
 Remove Debug code
-Output of velocity is not very effective because of non zero when initialised velocity, or is it (how does vdb handle this, even if non zero compression should be possible)
 Rescale inputs for percantage range and forces
-Even when save sparse is not active, the data is saved sparse?
-Add very high res run, the live preview struggles to load vdbs properly
+Remove the sparse save option vdb does that anyways
+At very high res run, the live preview struggles to load vdbs properly
 If a source intersects with a boundary and the source is turned off the boundary continues emitting
 
 
