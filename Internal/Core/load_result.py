@@ -71,6 +71,8 @@ class VDBWatcher:
         bpy.ops.object.volume_import(filepath=str(first_vdb))
 
         self.volume_object = bpy.context.object
+        if self.volume_object is not None:
+            self.volume_object.location = (0.0, 0.0, 0.0)
         volume = self.volume_object.data
 
         volume.filepath = str(first_vdb)

@@ -14,7 +14,6 @@ The clean up at the end has some weird reaction behaviour if blender main window
 General:
 Remove Debug code
 Rescale inputs for percantage range and forces
-Remove the sparse save option vdb does that anyways
 At very high res run, the live preview struggles to load vdbs properly
 If a source intersects with a boundary and the source is turned off the boundary continues emitting
 

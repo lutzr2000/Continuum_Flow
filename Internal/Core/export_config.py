@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import re
 import bpy
 import json
@@ -70,16 +70,6 @@ _FORCE_NODE_FIELDS = {
         ("seed", "seed", int, 0),
     ),
 }
-
-_OUTPUT_FIELD_SPECS = (
-    ("velocity", "export_velocity", "sparse_velocity", True),
-    ("pressure", "export_p", "sparse_p", False),
-    ("temperature", "export_t", "sparse_t", False),
-    ("smoke", "export_smoke", "sparse_smoke", False),
-    ("fuel", "export_fuel", "sparse_fuel", False),
-    ("flame", "export_flame", "sparse_flame", False),
-)
-
 
 
 def _serialize_animation_payload(node, start_frame, end_frame, fps):
@@ -697,11 +687,12 @@ def _serialize_output_node(node):
         "fps": int(node.fps),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
-            field_name: {
-                "enabled": bool(getattr(node, enabled_property, enabled_default)),
-                "sparse": bool(getattr(node, sparse_property, False)),
-            }
-            for field_name, enabled_property, sparse_property, enabled_default in _OUTPUT_FIELD_SPECS
+            "velocity": {"enabled": bool(getattr(node, "export_velocity", True))},
+            "pressure": {"enabled": bool(getattr(node, "export_p", False))},
+            "temperature": {"enabled": bool(getattr(node, "export_t", False))},
+            "smoke": {"enabled": bool(getattr(node, "export_smoke", False))},
+            "fuel": {"enabled": bool(getattr(node, "export_fuel", False))},
+            "flame": {"enabled": bool(getattr(node, "export_flame", False))},
         },
         "performance": {
             "writer_processes": int(getattr(node, "writer_processes", 4)),

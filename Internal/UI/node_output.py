@@ -37,12 +37,12 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 420.0
     field_rows = (
-        ("export_velocity", "sparse_velocity", "velocity"),
-        ("export_p", "sparse_p", "pressure"),
-        ("export_t", "sparse_t", "temperature"),
-        ("export_smoke", "sparse_smoke", "density"),
-        ("export_fuel", "sparse_fuel", "fuel"),
-        ("export_flame", "sparse_flame", "flame"),
+        ("export_velocity", "velocity"),
+        ("export_p", "pressure"),
+        ("export_t", "temperature"),
+        ("export_smoke", "density"),
+        ("export_fuel", "fuel"),
+        ("export_flame", "flame"),
     )
 
     fps: IntProperty(name="FPS", default=24, min=1, soft_min=1, description="Output frame rate", options=set())  # type: ignore
@@ -65,17 +65,11 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         options=set(),
     )
     export_velocity: BoolProperty(name="velocity", default=False, options=set())  # type: ignore
-    sparse_velocity: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     export_p: BoolProperty(name="pressure", default=False, options=set())  # type: ignore
-    sparse_p: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     export_t: BoolProperty(name="temperature", default=False, options=set())  # type: ignore
-    sparse_t: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     export_smoke: BoolProperty(name="density", default=True, options=set())  # type: ignore
-    sparse_smoke: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     export_fuel: BoolProperty(name="fuel", default=False, options=set())  # type: ignore
-    sparse_fuel: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     export_flame: BoolProperty(name="flame", default=True, options=set())  # type: ignore
-    sparse_flame: BoolProperty(name="sparse", default=True, options=set())  # type: ignore
     output_path: StringProperty(name="Path", default="", subtype="DIR_PATH", options=set())  # type: ignore
     last_bake_directory: StringProperty(default="", options={"HIDDEN"})  # type: ignore
 
@@ -112,12 +106,9 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     def update(self):
         self._sync_node()
 
-    def _draw_field_row(self, layout, export_attr, sparse_attr, label=None):
+    def _draw_field_row(self, layout, export_attr, label=None):
         row = layout.row(align=True)
         row.prop(self, export_attr, text=label)
-        sparse_row = row.row(align=True)
-        sparse_row.enabled = bool(getattr(self, export_attr)) and not solver_status.bake_running
-        sparse_row.prop(self, sparse_attr, text="sparse")
 
     def _linked_simulation_node(self):
         socket = self.inputs.get("Result")
@@ -159,8 +150,8 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
 
         layout.separator()
 
-        for export_attr, sparse_attr, label in self.field_rows:
-            self._draw_field_row(layout, export_attr, sparse_attr, label)
+        for export_attr, label in self.field_rows:
+            self._draw_field_row(layout, export_attr, label)
 
         layout.separator()
 

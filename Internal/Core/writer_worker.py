@@ -34,12 +34,9 @@ def open_scalar_array(grid_payload):
     return arr, shm, shape
 
 
-def prune_scalar_grid(grid,sparse_threshold):
+def prune_scalar_grid(grid):
     try:
-        if sparse_threshold > 0.0:
-            grid.prune(sparse_threshold)
-        else:
-            grid.prune()
+        grid.prune()
     except TypeError:
         try:
             grid.prune()
@@ -60,7 +57,6 @@ def write_vdb(payload):
 
     output_cfg = simulation.get("outputs", [{}])[0]
     precision = output_cfg.get("precision", "float32")
-    sparse_threshold = float(output_cfg.get("sparse_threshold", 0.0))
 
     delta = float(simulation.get("domain").get("resolution"))
     nx = int(simulation["domain"]["grid"]["nx"])
@@ -135,7 +131,7 @@ def write_vdb(payload):
                 grid.saveFloatAsHalf = (precision == "float16")
 
             grid.copyFromArray(arr)
-            prune_scalar_grid(grid,sparse_threshold)
+            prune_scalar_grid(grid)
 
             grids.append(grid)
             used.add(grid_name)
