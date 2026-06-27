@@ -335,7 +335,10 @@ def sync_all_continuum_flow_node_animations(scene=None):
     """
     Evaluate all Continuum Flow node-tree animations for the current frame.
     """
-    scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return
 
     frame_value = float(getattr(scene, "frame_current", 0))
     for node_tree in _iter_continuum_flow_node_trees():
@@ -346,7 +349,11 @@ def _iter_continuum_flow_node_trees():
     """
     Yield all Continuum Flow node trees in the current file.
     """
-    for node_tree in bpy.data.node_groups:
+    node_groups = getattr(getattr(bpy, "data", None), "node_groups", None)
+    if node_groups is None:
+        return
+
+    for node_tree in node_groups:
         if getattr(node_tree, "bl_idname", "") == ContinuumFlowNodeTree.bl_idname:
             yield node_tree
 
@@ -583,6 +590,12 @@ def _serialize_source_node(
     """
     Serialize one source node, including linked geometry names.
     """
+    animations, animated_values = _serialize_animation_payload(
+        node,
+        start_frame,
+        end_frame,
+        fps,
+    )
     geometry_nodes = _linked_geometry_nodes(node)
 
     return {
@@ -593,6 +606,8 @@ def _serialize_source_node(
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": _safe_float_vector(node.velocity),
+        "animations": animations,
+        "animated_values": animated_values,
         **_build_geometry_payload(geometry_nodes, start_frame, end_frame, fps),
     }
 
@@ -647,21 +662,18 @@ def _serialize_force_node(node, start_frame, end_frame, fps):
     """
     Serialize one force node by its concrete subtype.
     """
+    animations, animated_values = _serialize_animation_payload(
+        node,
+        start_frame,
+        end_frame,
+        fps,
+    )
+
     base_data = {
         "node_name": node.name,
         "node_type": node.bl_idname,
-        "animations": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
-        "animated_values": _serialize_animation_payload(
-            node,
-            start_frame,
-            end_frame,
-            fps,
-        ),
+        "animations": animations,
+        "animated_values": animated_values,
     }
     for field_spec in _FORCE_NODE_FIELDS.get(node.bl_idname, ()):
         if len(field_spec) == 2:

@@ -7,7 +7,10 @@ Rebuild CPU kernel
 
 UI:
 Bake slow start and end
+The clean up at the end has some weird reaction behaviour if blender main window is not selected
 When a lot of values are animated start up is slow
+Supress numba warning
+Something in the geometry output is broken, visible in drift test scene, obstacles reset shortly to local space? Also everything with the geometry seems buggy, investigate
 
 
 General:
@@ -16,9 +19,13 @@ Remove Debug code
 Output of velocity is not very effective because of non zero when initialised velocity, or is it (how does vdb handle this, even if non zero compression should be possible)
 Rescale inputs for percantage range and forces
 Even when save sparse is not active, the data is saved sparse?
+Add very high res run, the live preview struggles to load vdbs properly
+If a source intersects with a boundary and the source is turned off the boundary continues emitting
+
 
 Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
+If Continuum Flow is in no way worked with in Blender, make sure that none of it affets performance
 Bug testing
 Test install
 Rebuild example files

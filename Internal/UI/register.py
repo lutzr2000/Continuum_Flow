@@ -1,5 +1,4 @@
-﻿import bpy
-from bpy.app.handlers import persistent
+import bpy
 from nodeitems_utils import register_node_categories, unregister_node_categories
 from pathlib import Path
 import subprocess
@@ -7,7 +6,6 @@ import subprocess
 from ..UI.node_tree import (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
-    NODE_TREE_ID,
     NODE_CATEGORIES_ID,
     build_node_categories,
 )
@@ -29,41 +27,16 @@ from ..UI.node_simulation import ContinuumFlowSimulationNode
 from ..UI.node_source import ContinuumFlowSourceNode
 from ..UI.node_viewer import ContinuumFlowViewerNode
 from ..UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
+from ..Core.runtime_handlers import (
+    continuum_flow_frame_change_post,
+    ensure_fake_user,
+    sync_runtime_state,
+    sync_ui_animation_state,
+)
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake
-from ..Core import viewer
 from ..Core import forces
-from ..Core import main as bake_main
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
-
-
-@persistent
-def ensure_fake_user(_scene=None, _depsgraph=None):
-    node_groups = getattr(bpy.data, "node_groups", None)
-    if node_groups is None:
-        return
-
-    for tree in node_groups:
-        if tree.bl_idname == NODE_TREE_ID and not tree.use_fake_user:
-            tree.use_fake_user = True
-
-
-@persistent
-def sync_runtime_state(_scene=None):
-    try:
-        viewer.disable_domain_preview()
-    except Exception:
-        pass
-
-    try:
-        forces.disable_force_preview()
-    except Exception:
-        pass
-
-    try:
-        bake_main.refresh_bake_state_from_output_nodes()
-    except Exception:
-        pass
 
 
 classes = (
@@ -134,7 +107,6 @@ def register():
     for cls in classes:
         safe_register_class(cls)
 
-
     try:
         unregister_node_categories(NODE_CATEGORIES_ID)
     except Exception:
@@ -157,19 +129,25 @@ def register():
     if sync_runtime_state not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(sync_runtime_state)
 
+    if continuum_flow_frame_change_post not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(continuum_flow_frame_change_post)
+
     sync_runtime_state()
+    sync_ui_animation_state(getattr(bpy.context, "scene", None))
 
 
 def unregister():
     solver_status.environment_ready = False
     solver_status.gpu_available = False
 
-
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):
         del bpy.types.WindowManager.continuum_flow_bake_progress
 
     if ensure_fake_user in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(ensure_fake_user)
+
+    if continuum_flow_frame_change_post in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(continuum_flow_frame_change_post)
 
     if bpy.app.timers.is_registered(forces.force_preview_timer):
         bpy.app.timers.unregister(forces.force_preview_timer)
@@ -183,15 +161,9 @@ def unregister():
         pass
 
     try:
-        viewer.disable_domain_preview()
-    except Exception:
-        pass
-
-    try:
-        forces.disable_force_preview()
+        sync_runtime_state()
     except Exception:
         pass
 
     for cls in reversed(classes):
         safe_unregister_class(cls)
-
