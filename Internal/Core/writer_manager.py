@@ -126,22 +126,25 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
         """
         Handle one persistent kernel writer connection.
         """
-        for raw_line in self.rfile:
-            line = raw_line.decode("utf-8").strip()
-            if not line:
-                continue
-            if line == "__QUIT__":
-                break
+        try:
+            for raw_line in self.rfile:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                if line == "__QUIT__":
+                    break
 
-            try:
-                payload = json.loads(line)
-                self.server.write_vdb(payload)
-                response = {"status": "ok"}
-            except Exception as exc:
-                response = {"status": "error", "message": str(exc)}
+                try:
+                    payload = json.loads(line)
+                    self.server.write_vdb(payload)
+                    response = {"status": "ok"}
+                except Exception as exc:
+                    response = {"status": "error", "message": str(exc)}
 
-            self.wfile.write((json.dumps(response) + "\n").encode("utf-8"))
-            self.wfile.flush()
+                self.wfile.write((json.dumps(response) + "\n").encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
 
 
 class HostVDBWriterServer:
