@@ -1,7 +1,6 @@
-﻿import numpy as np
-
-import Solver.General.voxelise_mesh as voxelise_mesh_module
-import Solver.Kernel_GPU.kernel as gpu_kernel_module
+﻿voxelise_mesh_module = None
+gpu_kernel_module = None
+np = None
 
 
 def _collect_mesh_objects(entries):
@@ -33,6 +32,18 @@ def _has_animated_mesh_objects(mesh_objects):
 
 
 def main(config=None):
+    global np, voxelise_mesh_module, gpu_kernel_module
+
+    if np is None:
+        import numpy as _np
+        np = _np
+    if voxelise_mesh_module is None:
+        import Solver.General.voxelise_mesh as _voxelise_mesh_module
+        voxelise_mesh_module = _voxelise_mesh_module
+    voxelise_mesh_module.set_config_dir(config.get("bake_directory", ""))
+    if gpu_kernel_module is None:
+        import Solver.Kernel_GPU.kernel as _gpu_kernel_module
+        gpu_kernel_module = _gpu_kernel_module
 
     simulations = config.get("simulations") or []
 
@@ -108,9 +119,8 @@ if __name__ == "__main__":
             raise ValueError("Expected bake directory path as first argument.")
 
         bake_directory = Path(sys.argv[1]).resolve()
-        voxelise_mesh_module.set_config_dir(bake_directory)
-
         config = json.load(sys.stdin)
+        config["bake_directory"] = str(bake_directory)
         main(config)
 
     except Exception:

@@ -7,7 +7,6 @@ Outputs 2 frames too much
 
 
 UI:
-Bake slow start, generally bad startup performance
 The clean up at the end has some weird reaction behaviour if blender main window is not selected
 
 
