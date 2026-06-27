@@ -2,13 +2,15 @@ TODO
 
 Solver:
 Behaviour is more inconsistent with resolution again why?
+Are all kernels cached?
 Rebuild CPU kernel
+Outputs 2 frames too much
+Obstcacle and Source Bounding Box update?
 
 
 UI:
-Bake slow start and end
+Bake slow start
 The clean up at the end has some weird reaction behaviour if blender main window is not selected
-When a lot of values are animated start up is slow
 Supress numba warning
 Something in the geometry output is broken, visible in drift test scene, obstacles reset shortly to local space? Also everything with the geometry seems buggy, investigate
 

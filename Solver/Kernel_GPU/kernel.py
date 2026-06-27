@@ -595,6 +595,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
 
+        # ------------time updated-------------------
+        t = t + dt
+
         # ------------Output-------------------
         device_fields = _current_device_fields(
             u, v, w, p, temperature, smoke, fuel, flame
@@ -612,8 +615,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             output_frame_count += 1
             next_output_time += output_time_step
 
-        # ------------time updated-------------------
-        t = t + dt
 
         # ------------Memory track-------------------
         if output_index == 10:
@@ -1120,6 +1121,10 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
         device_fields = _current_device_fields(
             u, v, w, p, temperature, smoke, fuel, flame
         )
+
+        # ------------time updated-------------------
+        t = t + dt
+
         while t >= next_output_time:
             output.enqueue_device_output(
                 simulations[0],
@@ -1133,9 +1138,6 @@ def solver_debug(config,obstacle_base_masks,obstacle_mask,source_base_masks,sour
             output_frame_count += 1
             next_output_time += output_time_step
         _record_debug_timing(timing_stats, "loop_output", perf_counter() - section_start)
-
-        # ------------time updated-------------------
-        t = t + dt
 
         # ------------Memory track-------------------
         section_start = perf_counter()

@@ -4,31 +4,88 @@ import io
 import bpy
 
 
-def export_object_as_local_stl(source_object, target_dir):
+def _evaluated_mesh_to_temporary_object(source_object, depsgraph):
+    """
+    Build one temporary mesh object from the evaluated object state.
+    """
+    object_eval = source_object.evaluated_get(depsgraph)
+    temp_mesh = bpy.data.meshes.new_from_object(
+        object_eval,
+        depsgraph=depsgraph,
+        preserve_all_data_layers=False,
+    )
+    temp_object = bpy.data.objects.new(
+        f"__continuum_flow_export__{source_object.name}",
+        temp_mesh,
+    )
+    temp_object.matrix_world.identity()
+    return temp_object, temp_mesh
+
+
+def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = target_dir / f"{source_object.name}.stl"
+    if depsgraph is None:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
 
-    old_matrix = source_object.matrix_world.copy()
+    temp_object = None
+    temp_mesh = None
+    active_object = getattr(bpy.context.view_layer.objects, "active", None)
+    selected_objects = list(getattr(bpy.context, "selected_objects", ()))
+    scene_collection = getattr(getattr(bpy.context, "scene", None), "collection", None)
 
     try:
-        source_object.matrix_world.identity()
+        if scene_collection is None:
+            raise RuntimeError("No active scene collection available for STL export.")
+
+        temp_object, temp_mesh = _evaluated_mesh_to_temporary_object(
+            source_object,
+            depsgraph,
+        )
+        scene_collection.objects.link(temp_object)
 
         bpy.ops.object.select_all(action="DESELECT")
-        source_object.select_set(True)
-        bpy.context.view_layer.objects.active = source_object
+        temp_object.select_set(True)
+        bpy.context.view_layer.objects.active = temp_object
 
         # remove console output
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             bpy.ops.wm.stl_export(
                 filepath=str(file_path),
                 export_selected_objects=True,
-                apply_modifiers=True,
+                apply_modifiers=False,
                 ascii_format=False,
             )
 
     finally:
-        source_object.matrix_world = old_matrix
+        bpy.ops.object.select_all(action="DESELECT")
+
+        if temp_object is not None:
+            try:
+                if temp_object.name in bpy.data.objects:
+                    bpy.data.objects.remove(temp_object, do_unlink=True)
+            except Exception:
+                pass
+
+        if temp_mesh is not None:
+            try:
+                if temp_mesh.name in bpy.data.meshes:
+                    bpy.data.meshes.remove(temp_mesh, do_unlink=True)
+            except Exception:
+                pass
+
+        for selected_object in selected_objects:
+            try:
+                if selected_object.name in bpy.data.objects:
+                    selected_object.select_set(True)
+            except Exception:
+                pass
+
+        try:
+            bpy.context.view_layer.objects.active = active_object
+        except Exception:
+            pass
 
     return file_path

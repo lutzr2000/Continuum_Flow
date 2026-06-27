@@ -918,13 +918,18 @@ def _iter_geometry_object_names_from_config(config_dict):
 def _export_config_geometry_stls(config_dict, export_directory):
     geometry_dir = Path(export_directory) / "geometry"
     geometry_dir.mkdir(parents=True, exist_ok=True)
+    depsgraph = bpy.context.evaluated_depsgraph_get()
 
     for object_name in _iter_geometry_object_names_from_config(config_dict):
         source_object = bpy.data.objects.get(object_name)
         if source_object is None:
             continue
 
-        export_geometry.export_object_as_local_stl(source_object, geometry_dir)
+        export_geometry.export_object_as_local_stl(
+            source_object,
+            geometry_dir,
+            depsgraph=depsgraph,
+        )
 
 
 def _resolve_export_directory(simulation_entries):
