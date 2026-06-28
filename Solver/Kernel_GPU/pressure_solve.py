@@ -283,50 +283,6 @@ def _remove_rhs_mean(
 
 
 @cuda.jit(cache=True)
-def _pressure_poisson_red_black_gauss_seidel_step(
-    p, b, delta, parity, active_tile_mask
-):
-    """
-    Perform one in-place red-black Gauss-Seidel color pass of the 3D pressure Poisson
-    equation on the GPU.
-
-    Only interior cells whose `(i + j + k) % 2` matches `parity` are updated in
-    this launch. Each update computes the red-black Gauss-Seidel value and
-    stores it in place.
-
-    """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = p.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if (
-        i < 1
-        or j < 1
-        or k < 1
-        or i >= nx - 1
-        or j >= ny - 1
-        or k >= nz - 1
-        or ((i + j + k) & 1) != parity
-        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-    ):
-        return
-
-    delta2 = delta * delta
-    # nabla^2p = b
-    p[i, j, k] = (
-        p[i + 1, j, k]
-        + p[i - 1, j, k]
-        + p[i, j + 1, k]
-        + p[i, j - 1, k]
-        + p[i, j, k + 1]
-        + p[i, j, k - 1]
-        - delta2 * b[i, j, k]
-    ) / 6.0
-
-
-@cuda.jit(cache=True)
 def project_velocity_kernel(
     u, v, w, p, obstacle_mask, dt, delta, rho, active_tile_mask
 ):
@@ -476,7 +432,7 @@ def mg_prolongate_add_nearest(coarse_e, fine_p):
     if I >= cnx or J >= cny or K >= cnz:
         return
 
-    e = coarse_e[I, J, K]
+    e = 0.25 * coarse_e[I, J, K]
 
     i0 = 2 * I
     j0 = 2 * J
@@ -491,26 +447,6 @@ def mg_prolongate_add_nearest(coarse_e, fine_p):
 
                 if i < fnx and j < fny and k < fnz:
                     fine_p[i, j, k] += e
-
-
-def smooth_rbgs(p, b, delta, iterations):
-    blocks = kernel_config.volume_blocks_per_grid(
-        p.shape,
-        kernel_config.THREADS_PER_BLOCK_3D,
-    )
-
-    for _ in range(iterations):
-        _pressure_poisson_red_black_gauss_seidel_step[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p, b, delta, 0)
-
-        _pressure_poisson_red_black_gauss_seidel_step[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p, b, delta, 1)
-
-        BC._pressure_poisson_apply_neumann_bcs[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p)
 
 
 @cuda.jit(cache=True)
@@ -535,75 +471,6 @@ def mg_rbgs_step(p, b, delta, parity):
         p[i, j, k + 1] + p[i, j, k - 1] -
         delta2 * b[i, j, k]
     ) / 6.0
-
-
-def mg_vcycle(level, p_levels, b_levels, r_levels, delta_levels):
-    p = p_levels[level]
-    b = b_levels[level]
-    r = r_levels[level]
-    delta = delta_levels[level]
-
-    blocks = kernel_config.volume_blocks_per_grid(
-        p.shape,
-        kernel_config.THREADS_PER_BLOCK_3D,
-    )
-
-    # pre smooth
-    for _ in range(3):
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
-        BC._pressure_poisson_apply_neumann_bcs[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p)
-
-    last_level = len(p_levels) - 1
-
-    if level == last_level:
-        for _ in range(30):
-            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
-            BC._pressure_poisson_apply_neumann_bcs[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p)
-        return
-
-    # residual
-    mg_compute_residual[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, r, delta)
-
-    # coarse clear
-    coarse_p = p_levels[level + 1]
-    coarse_b = b_levels[level + 1]
-
-    coarse_blocks = kernel_config.volume_blocks_per_grid(
-        coarse_p.shape,
-        kernel_config.THREADS_PER_BLOCK_3D,
-    )
-
-    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_p)
-    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_b)
-
-    # restrict residual
-    mg_restrict_8cell[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
-        r,
-        coarse_b,
-    )
-
-    # recursive coarse solve
-    mg_vcycle(level + 1, p_levels, b_levels, r_levels, delta_levels)
-
-    # prolongate correction
-    mg_prolongate_add_nearest[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
-        coarse_p,
-        p,
-    )
-
-    # post smooth
-    for _ in range(3):
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
-        BC._pressure_poisson_apply_neumann_bcs[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p)
 
 
 def _mg_smooth(p, b, delta, iterations):
@@ -691,8 +558,6 @@ def _mg_vcycle(
     _mg_smooth(p, b, delta, post_smooth)
 
 
-
-
 def pressure_poisson_multigrid(
     u,
     v,
@@ -712,9 +577,9 @@ def pressure_poisson_multigrid(
     b_levels,
     r_levels,
     delta_levels,
-    rhs_partial_sums=None,
-    rhs_sum_buffer=None,
-    num_vcycles=10,
+    num_vcycles,
+    rhs_partial_sums,
+    rhs_sum_buffer,
 ):
     threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(
@@ -722,7 +587,6 @@ def pressure_poisson_multigrid(
         threadsperblock_3d,
     )
 
-    # Level 0 uses your existing p and b
     p_levels[0] = p
     b_levels[0] = b
 
@@ -769,9 +633,9 @@ def pressure_poisson_multigrid(
             b_levels,
             r_levels,
             delta_levels,
-            pre_smooth=3,
-            post_smooth=3,
-            coarse_smooth=40,
+            pre_smooth=2,
+            post_smooth=4,
+            coarse_smooth=20,
         )
 
     return p_levels[0]

@@ -550,9 +550,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             b_levels,
             r_levels,
             delta_levels,
-            rhs_partial_sums=pressure_rhs_partial_sums,
-            rhs_sum_buffer=pressure_rhs_sum,
-            num_vcycles=2,
+            simulations[0].get("settings").get("iterations"),
+            pressure_rhs_partial_sums,
+            pressure_rhs_sum,
         )   
 
         # ------------Velocity projection-------------------
