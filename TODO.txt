@@ -1,7 +1,10 @@
 TODO
 
 Solver:
-Implement Multigrid, better pressure solve performance necessary at high res
+make multigrid adaptive again
+Optimize multigrid code, make sure it is resolution consistent
+time multigrid code
+Understand multigrid math
 Maybe look at output performance again, mainly the to host copies
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
 Random noise emission from source 

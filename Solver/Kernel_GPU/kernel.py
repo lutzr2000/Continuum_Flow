@@ -199,8 +199,8 @@ def compute_inital_velocity(simulation_cfg):
 def create_multigrid_levels(shape, delta, min_size=8):
     p_levels = []
     b_levels = []
-    r_levels = []
     delta_levels = []
+    zero_levels = []
 
     nx, ny, nz = shape
     level = 0
@@ -210,7 +210,7 @@ def create_multigrid_levels(shape, delta, min_size=8):
 
         p_levels.append(cuda.device_array(level_shape, dtype=np.float32))
         b_levels.append(cuda.device_array(level_shape, dtype=np.float32))
-        r_levels.append(cuda.device_array(level_shape, dtype=np.float32))
+        zero_levels.append(cuda.to_device(np.zeros(level_shape, dtype=np.float32)))
         delta_levels.append(delta * (2 ** level))
 
         nx = (nx + 1) // 2
@@ -218,7 +218,7 @@ def create_multigrid_levels(shape, delta, min_size=8):
         nz = (nz + 1) // 2
         level += 1
 
-    return p_levels, b_levels, r_levels, delta_levels
+    return p_levels, b_levels, delta_levels, zero_levels
 
 
 def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
@@ -287,7 +287,6 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     scratch_A_x = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
     scratch_A_z = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
-    scratch_zeros = cuda.to_device(np.zeros(shape, dtype=GPU_FIELD_DTYPE))
 
     # vortictiy
     vorticity_magnitude = cuda.device_array((shape), dtype=GPU_FIELD_DTYPE)
@@ -300,7 +299,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     source_masks = cuda.to_device(source_mask_stack)
 
     # multigrid levels
-    p_levels, b_levels, r_levels, delta_levels = create_multigrid_levels(
+    p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
         shape,
         delta,
         min_size=8,
@@ -366,9 +365,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Clear scratch-------------------
-        scratch_A_x.copy_to_device(scratch_zeros)
-        scratch_A_y.copy_to_device(scratch_zeros)
-        scratch_A_z.copy_to_device(scratch_zeros)
+        scratch_A_x.copy_to_device(zero_levels[0])
+        scratch_A_y.copy_to_device(zero_levels[0])
+        scratch_A_z.copy_to_device(zero_levels[0])
 
         # ------------Update masks-------------------
         if animated_sources:
@@ -548,11 +547,11 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scalar_active_tiles_dilated,
             p_levels,
             b_levels,
-            r_levels,
             delta_levels,
             simulations[0].get("settings").get("iterations"),
             pressure_rhs_partial_sums,
             pressure_rhs_sum,
+            zero_levels,
         )   
 
         # ------------Velocity projection-------------------
