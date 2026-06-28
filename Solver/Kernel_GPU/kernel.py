@@ -24,20 +24,6 @@ GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-def _record_debug_timing(timing_stats, name, elapsed):
-    timing_stats[name] = timing_stats.get(name, 0.0) + float(elapsed)
-
-
-def _print_debug_timing_summary(timing_stats, total_runtime):
-    if not timing_stats:
-        return
-
-    print("Debug timing summary:")
-    for name, elapsed in sorted(timing_stats.items(), key=lambda item: item[1], reverse=True):
-        share = (elapsed / total_runtime * 100.0) if total_runtime > 0.0 else 0.0
-        print(f"  {name}: {elapsed:.3f} s ({share:.1f}%)")
-
-
 def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
     """
     Return the currently active device buffers for output export.
@@ -210,6 +196,31 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
+def create_multigrid_levels(shape, delta, min_size=8):
+    p_levels = []
+    b_levels = []
+    r_levels = []
+    delta_levels = []
+
+    nx, ny, nz = shape
+    level = 0
+
+    while nx >= min_size and ny >= min_size and nz >= min_size:
+        level_shape = (nx, ny, nz)
+
+        p_levels.append(cuda.device_array(level_shape, dtype=np.float32))
+        b_levels.append(cuda.device_array(level_shape, dtype=np.float32))
+        r_levels.append(cuda.device_array(level_shape, dtype=np.float32))
+        delta_levels.append(delta * (2 ** level))
+
+        nx = (nx + 1) // 2
+        ny = (ny + 1) // 2
+        nz = (nz + 1) // 2
+        level += 1
+
+    return p_levels, b_levels, r_levels, delta_levels
+
+
 def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
     total_start_time = perf_counter()
     simulations = config.get("simulations")
@@ -287,6 +298,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
     source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
     source_masks = cuda.to_device(source_mask_stack)
+
+    # multigrid levels
+    p_levels, b_levels, r_levels, delta_levels = create_multigrid_levels(
+        shape,
+        delta,
+        min_size=8,
+    )
 
     # ------------intitialise------------------
     u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
@@ -515,10 +533,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         # ------------Pressure solve-------------------
         extra_pressure = get_source_values(simulations,"extra_pressure",t)
 
-        p = pressure_solve.pressure_poisson(
-            u,
-            v,
-            w,
+        p = pressure_solve.pressure_poisson_multigrid(
+            u, v, w,
             p,
             temperature,
             scratch_A_x,
@@ -530,10 +546,14 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             simulations[0].get("physics").get("temperature").get("expansion_rate"),
             simulations[0].get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
-            simulations[0].get("settings").get("iterations"),
+            p_levels,
+            b_levels,
+            r_levels,
+            delta_levels,
             rhs_partial_sums=pressure_rhs_partial_sums,
             rhs_sum_buffer=pressure_rhs_sum,
-        )
+            num_vcycles=2,
+        )   
 
         # ------------Velocity projection-------------------
         pressure_solve.project_velocity_kernel[

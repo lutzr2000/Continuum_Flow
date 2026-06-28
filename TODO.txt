@@ -1,12 +1,12 @@
 TODO
 
 Solver:
-Outputs 2 frames too much
+Implement Multigrid, better pressure solve performance necessary at high res
+Maybe look at output performance again, mainly the to host copies
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
 Random noise emission from source 
-Get more randomness in fire
-High res rising smoke seems streaky, not swirly?
 If a source intersects with a boundary and the source is turned off the boundary continues emitting
+Outputs 2 frames too much
 Rebuild CPU kernel
 
 UI:

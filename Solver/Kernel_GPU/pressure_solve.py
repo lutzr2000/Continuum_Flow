@@ -402,8 +402,298 @@ def add_artifical_divergence(
     b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
 
 
+@cuda.jit(cache=True)
+def mg_clear(field):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = field.shape
+    if i < nx and j < ny and k < nz:
+        field[i, j, k] = 0.0
 
-def pressure_poisson(
+
+@cuda.jit(cache=True)
+def mg_compute_residual(p, b, r, delta):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        r[i, j, k] = 0.0
+        return
+
+    inv_delta2 = 1.0 / (delta * delta)
+
+    lap = (
+        p[i + 1, j, k] + p[i - 1, j, k] +
+        p[i, j + 1, k] + p[i, j - 1, k] +
+        p[i, j, k + 1] + p[i, j, k - 1] -
+        6.0 * p[i, j, k]
+    ) * inv_delta2
+
+    r[i, j, k] = b[i, j, k] - lap
+
+
+@cuda.jit(cache=True)
+def mg_restrict_8cell(fine_r, coarse_b):
+    I, J, K = cuda.grid(3)
+    cnx, cny, cnz = coarse_b.shape
+    fnx, fny, fnz = fine_r.shape
+
+    if I >= cnx or J >= cny or K >= cnz:
+        return
+
+    i0 = 2 * I
+    j0 = 2 * J
+    k0 = 2 * K
+
+    s = 0.0
+    count = 0.0
+
+    for di in range(2):
+        for dj in range(2):
+            for dk in range(2):
+                i = i0 + di
+                j = j0 + dj
+                k = k0 + dk
+
+                if i < fnx and j < fny and k < fnz:
+                    s += fine_r[i, j, k]
+                    count += 1.0
+
+    if count > 0.0:
+        coarse_b[I, J, K] = s / count
+    else:
+        coarse_b[I, J, K] = 0.0
+
+
+@cuda.jit(cache=True)
+def mg_prolongate_add_nearest(coarse_e, fine_p):
+    I, J, K = cuda.grid(3)
+    cnx, cny, cnz = coarse_e.shape
+    fnx, fny, fnz = fine_p.shape
+
+    if I >= cnx or J >= cny or K >= cnz:
+        return
+
+    e = coarse_e[I, J, K]
+
+    i0 = 2 * I
+    j0 = 2 * J
+    k0 = 2 * K
+
+    for di in range(2):
+        for dj in range(2):
+            for dk in range(2):
+                i = i0 + di
+                j = j0 + dj
+                k = k0 + dk
+
+                if i < fnx and j < fny and k < fnz:
+                    fine_p[i, j, k] += e
+
+
+def smooth_rbgs(p, b, delta, iterations):
+    blocks = kernel_config.volume_blocks_per_grid(
+        p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    for _ in range(iterations):
+        _pressure_poisson_red_black_gauss_seidel_step[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p, b, delta, 0)
+
+        _pressure_poisson_red_black_gauss_seidel_step[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p, b, delta, 1)
+
+        BC._pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
+
+
+@cuda.jit(cache=True)
+def mg_rbgs_step(p, b, delta, parity):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
+    if ((i + j + k) & 1) != parity:
+        return
+
+    delta2 = delta * delta
+
+    p[i, j, k] = (
+        p[i + 1, j, k] + p[i - 1, j, k] +
+        p[i, j + 1, k] + p[i, j - 1, k] +
+        p[i, j, k + 1] + p[i, j, k - 1] -
+        delta2 * b[i, j, k]
+    ) / 6.0
+
+
+def mg_vcycle(level, p_levels, b_levels, r_levels, delta_levels):
+    p = p_levels[level]
+    b = b_levels[level]
+    r = r_levels[level]
+    delta = delta_levels[level]
+
+    blocks = kernel_config.volume_blocks_per_grid(
+        p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    # pre smooth
+    for _ in range(3):
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
+        BC._pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
+
+    last_level = len(p_levels) - 1
+
+    if level == last_level:
+        for _ in range(30):
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
+            BC._pressure_poisson_apply_neumann_bcs[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p)
+        return
+
+    # residual
+    mg_compute_residual[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, r, delta)
+
+    # coarse clear
+    coarse_p = p_levels[level + 1]
+    coarse_b = b_levels[level + 1]
+
+    coarse_blocks = kernel_config.volume_blocks_per_grid(
+        coarse_p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_p)
+    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_b)
+
+    # restrict residual
+    mg_restrict_8cell[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
+        r,
+        coarse_b,
+    )
+
+    # recursive coarse solve
+    mg_vcycle(level + 1, p_levels, b_levels, r_levels, delta_levels)
+
+    # prolongate correction
+    mg_prolongate_add_nearest[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
+        coarse_p,
+        p,
+    )
+
+    # post smooth
+    for _ in range(3):
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
+        BC._pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
+
+
+def _mg_smooth(p, b, delta, iterations):
+    blocks = kernel_config.volume_blocks_per_grid(
+        p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    for _ in range(iterations):
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+            p, b, delta, 0
+        )
+        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+            p, b, delta, 1
+        )
+        BC._pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
+
+
+def _mg_vcycle(
+    level,
+    p_levels,
+    b_levels,
+    r_levels,
+    delta_levels,
+    pre_smooth=3,
+    post_smooth=3,
+    coarse_smooth=10,
+):
+    p = p_levels[level]
+    b = b_levels[level]
+    r = r_levels[level]
+    delta = delta_levels[level]
+
+    blocks = kernel_config.volume_blocks_per_grid(
+        p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    _mg_smooth(p, b, delta, pre_smooth)
+
+    last_level = len(p_levels) - 1
+
+    if level == last_level:
+        _mg_smooth(p, b, delta, coarse_smooth)
+        return
+
+    coarse_p = p_levels[level + 1]
+    coarse_b = b_levels[level + 1]
+
+    coarse_blocks = kernel_config.volume_blocks_per_grid(
+        coarse_p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    mg_compute_residual[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+        p, b, r, delta
+    )
+
+    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_p)
+    mg_clear[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](coarse_b)
+
+    mg_restrict_8cell[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
+        r,
+        coarse_b,
+    )
+
+    _mg_vcycle(
+        level + 1,
+        p_levels,
+        b_levels,
+        r_levels,
+        delta_levels,
+        pre_smooth,
+        post_smooth,
+        coarse_smooth,
+    )
+
+    mg_prolongate_add_nearest[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
+        coarse_p,
+        p,
+    )
+
+    _mg_smooth(p, b, delta, post_smooth)
+
+
+
+
+def pressure_poisson_multigrid(
     u,
     v,
     w,
@@ -418,39 +708,46 @@ def pressure_poisson(
     expansion_rate,
     t_reference,
     active_tile_mask,
-    max_iter=10,
+    p_levels,
+    b_levels,
+    r_levels,
+    delta_levels,
     rhs_partial_sums=None,
     rhs_sum_buffer=None,
+    num_vcycles=10,
 ):
-    """
-    Host-side pressure Poisson solve that launches CUDA kernels for the RHS,
-    red-black Gauss-Seidel iterations and Neumann boundary conditions.
-
-    """
-    
     threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(
+        u.shape,
+        threadsperblock_3d,
+    )
+
+    # Level 0 uses your existing p and b
+    p_levels[0] = p
+    b_levels[0] = b
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u,
         v,
         w,
-        b,
+        b_levels[0],
         dt,
         delta,
         rho,
         active_tile_mask,
     )
+
     _remove_rhs_mean(
-        b,
+        b_levels[0],
         active_tile_mask,
         threadsperblock_3d,
         rhs_partial_sums,
         rhs_sum_buffer,
     )
-    p_old = p
+
     _reset_inactive_pressure_kernel[blockspergrid_3d, threadsperblock_3d](
-        p_old, active_tile_mask
+        p_levels[0],
+        active_tile_mask,
     )
 
     add_artifical_divergence[blockspergrid_3d, threadsperblock_3d](
@@ -459,24 +756,22 @@ def pressure_poisson(
         extra_pressure,
         expansion_rate,
         t_reference,
-        b,
+        b_levels[0],
         active_tile_mask,
         rho,
-        dt
+        dt,
     )
 
-    for _ in range(max_iter):
-        _pressure_poisson_red_black_gauss_seidel_step[
-            blockspergrid_3d, threadsperblock_3d
-        ](p_old, b, delta, 0, active_tile_mask)
-        _pressure_poisson_red_black_gauss_seidel_step[
-            blockspergrid_3d, threadsperblock_3d
-        ](p_old, b, delta, 1, active_tile_mask)
-        BC._pressure_poisson_apply_neumann_bcs[blockspergrid_3d, threadsperblock_3d](
-            p_old
+    for _ in range(num_vcycles):
+        _mg_vcycle(
+            0,
+            p_levels,
+            b_levels,
+            r_levels,
+            delta_levels,
+            pre_smooth=3,
+            post_smooth=3,
+            coarse_smooth=40,
         )
 
-    return p_old
-
-
-
+    return p_levels[0]
