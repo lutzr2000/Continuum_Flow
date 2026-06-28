@@ -21,7 +21,7 @@ PERCENTAGE_MAPPED_PROPERTY_RANGES = {
     "temperature_production_rate": (0.0, 0.05),
     "buoyancy": (0.0, 0.01),
     "expansion_rate": (0.0, 0.01),
-    "smoke_dissipation": (0.0, 1.0),
+    "smoke_dissipation": (0.0, 5),
     "smoke_production_rate": (0.0, 0.05),
     "fuel_dissipation": (0.0, 1.0),
     "fuel_burn_rate": (0.0, 1.0),
