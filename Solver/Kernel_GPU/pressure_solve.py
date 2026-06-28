@@ -19,15 +19,10 @@ def pressure_equation_right_side(
     u,
     v,
     w,
-    T,
     b,
     dt,
-    source_masks,
-    extra_pressure,
     delta,
     rho,
-    expansion_rate,
-    t_reference,
     active_tile_mask,
 ):
     """
@@ -63,22 +58,8 @@ def pressure_equation_right_side(
 
     divergence = du_dx + dv_dy + dw_dz
 
-    # ------------Artifical thermal divergence-------------------
-    thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
-    extra_pressure_term = 0.0
-    source_count = source_masks.shape[0]
-    for source_idx in range(source_count):
-        if not source_masks[source_idx, i, j, k]:
-            continue
-        source_extra_pressure = extra_pressure[source_idx]
-        if source_extra_pressure > extra_pressure_term:
-            extra_pressure_term = source_extra_pressure
-
     # ------------Right hand side-------------------
-    b[i, j, k] = (
-        rho_over_dt * (divergence - thermal_divergence)
-        - extra_pressure_term
-    )
+    b[i, j, k] = rho_over_dt * divergence
 
 
 @cuda.jit(cache=True)
@@ -381,6 +362,52 @@ def project_velocity_kernel(
     w[i, j, k] -= pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
 
+@cuda.jit(cache=True)
+def add_artifical_divergence(
+    T,
+    source_masks,
+    extra_pressure,
+    expansion_rate,
+    t_reference,
+    b,
+    active_tile_mask,
+    rho,
+    dt
+):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = b.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1
+        or j < 1
+        or k < 1
+        or i >= nx - 1
+        or j >= ny - 1
+        or k >= nz - 1
+        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+    ):
+        return
+    
+    rho_over_dt = rho / dt
+
+    thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
+    extra_pressure_term = 0.0
+    source_count = source_masks.shape[0]
+    for source_idx in range(source_count):
+        if not source_masks[source_idx, i, j, k]:
+            continue
+        source_extra_pressure = extra_pressure[source_idx]
+        if source_extra_pressure > extra_pressure_term:
+            extra_pressure_term = source_extra_pressure
+
+
+    b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
+
+
+
 def pressure_poisson(
     u,
     v,
@@ -410,29 +437,14 @@ def pressure_poisson(
         threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
-    source_mask_shape = (0,) + tuple(u.shape)
-    if hasattr(source_masks, "copy_to_host"):
-        source_mask_array = source_masks
-    else:
-        source_mask_array = cuda.to_device(
-            np.zeros(source_mask_shape, dtype=np.bool_)
-            if len(source_masks) == 0
-            else np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
-        )
-
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
         u,
         v,
         w,
-        T,
         b,
         dt,
-        source_mask_array,
-        cuda.to_device(np.ascontiguousarray(np.asarray(extra_pressure, dtype=np.float32))),
         delta,
         rho,
-        expansion_rate,
-        t_reference,
         active_tile_mask,
     )
     _remove_rhs_mean(
@@ -447,6 +459,18 @@ def pressure_poisson(
         p_old, active_tile_mask
     )
 
+    add_artifical_divergence[blockspergrid_3d, threadsperblock_3d](
+        T,
+        source_masks,
+        extra_pressure,
+        expansion_rate,
+        t_reference,
+        b,
+        active_tile_mask,
+        rho,
+        dt
+    )
+
     for _ in range(max_iter):
         _pressure_poisson_red_black_gauss_seidel_step[
             blockspergrid_3d, threadsperblock_3d
@@ -459,5 +483,6 @@ def pressure_poisson(
         )
 
     return p_old
+
 
 

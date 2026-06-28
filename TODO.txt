@@ -1,7 +1,7 @@
 TODO
 
 Solver:
-Behaviour is more inconsistent with resolution again why? Check normilzation with delta, dt anc CFL
+Pressure solve has way to many kernel launches
 Rebuild CPU kernel
 Outputs 2 frames too much
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
@@ -9,7 +9,9 @@ Random noise emission from source
 Get more randomness in fire
 
 UI:
-free bake does not always delete object in .blend
+Rescale inputs for percantage range and forces
+free bake does not always delete object in .blend, but sometimes it deletes all
+if i manually delete the vdb from  .blend free bake produces an error
 make sure Continuum Flow dows not affect performance if node tree editor is not opened
 Bake button sometimes deletes vdbs?
 Remove writer process count, find some general solution
@@ -18,7 +20,6 @@ Output:
 Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w), probably because one field might be non zero sometimes
 
 General:
-Rescale inputs for percantage range and forces
 At very high res run, the live preview struggles to load vdbs properly
 If a source intersects with a boundary and the source is turned off the boundary continues emitting
 
