@@ -242,8 +242,8 @@ def _remove_rhs_mean(
     b,
     active_tile_mask,
     threadsperblock_3d,
-    rhs_partial_sums=None,
-    rhs_sum_buffer=None,
+    rhs_partial_sums,
+    rhs_sum_buffer,
 ):
     """
     This is a wrapper method for enforcing the Neumann compatibility condition by removing the RHS mean.
@@ -253,11 +253,6 @@ def _remove_rhs_mean(
     interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
     reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
     reduction_threads = REDUCTION_THREADS_PER_BLOCK
-
-    if rhs_partial_sums is None:
-        rhs_partial_sums = cuda.device_array(reduction_blocks, dtype=np.float32)
-    if rhs_sum_buffer is None:
-        rhs_sum_buffer = cuda.device_array(1, dtype=np.float32)
 
     _sum_rhs_partial_kernel[reduction_blocks, reduction_threads](
         b, active_tile_mask, rhs_partial_sums
@@ -424,7 +419,6 @@ def pressure_poisson(
     t_reference,
     active_tile_mask,
     max_iter=10,
-    threadsperblock_3d=None,
     rhs_partial_sums=None,
     rhs_sum_buffer=None,
 ):
@@ -433,8 +427,8 @@ def pressure_poisson(
     red-black Gauss-Seidel iterations and Neumann boundary conditions.
 
     """
-    if threadsperblock_3d is None:
-        threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
+    
+    threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
 
     pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](

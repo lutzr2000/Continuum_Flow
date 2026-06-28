@@ -1,12 +1,13 @@
 TODO
 
 Solver:
-Pressure solve has way to many kernel launches
-Rebuild CPU kernel
 Outputs 2 frames too much
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
 Random noise emission from source 
 Get more randomness in fire
+High res rising smoke seems streaky, not swirly?
+If a source intersects with a boundary and the source is turned off the boundary continues emitting
+Rebuild CPU kernel
 
 UI:
 Rescale inputs for percantage range and forces
@@ -15,13 +16,13 @@ if i manually delete the vdb from  .blend free bake produces an error
 make sure Continuum Flow dows not affect performance if node tree editor is not opened
 Bake button sometimes deletes vdbs?
 Remove writer process count, find some general solution
+Cancelling the solve should still give a timing
 
 Output:
 Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w), probably because one field might be non zero sometimes
 
 General:
 At very high res run, the live preview struggles to load vdbs properly
-If a source intersects with a boundary and the source is turned off the boundary continues emitting
 
 
 Final:
