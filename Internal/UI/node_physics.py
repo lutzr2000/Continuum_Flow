@@ -33,7 +33,6 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
                 "fuel_dissipation",
                 "fuel_burn_rate",
                 "fuel_ignition_temperature",
-                "minimum_oxygen_concentration",
             ),
         ),
         ("Extras", ("vorticity",)),
@@ -51,7 +50,6 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how quickly fuel dissipates")  # type: ignore
     fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="How quickly fuel burns away")  # type: ignore
     fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, soft_min=0.0, soft_max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite")  # type: ignore
-    minimum_oxygen_concentration: FloatProperty(name="Minimum Oxygen Concentration", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="Minimum oxygen concentration required for fuel to burn")  # type: ignore
     vorticity: FloatProperty(name="Vorticity", default=40, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="How much extra vorticity is added")  # type: ignore
 
     def _sync_node(self):

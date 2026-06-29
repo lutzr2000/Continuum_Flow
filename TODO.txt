@@ -5,7 +5,7 @@ Random noise emission from source
 Rebuild CPU kernel
 
 UI:
-Rescale inputs for percantage range and forces
+Rescale forces
 free bake does not always delete object in .blend, but sometimes it deletes all
 if i manually delete the vdb from  .blend free bake produces an error
 Bake button sometimes deletes vdbs?

@@ -208,7 +208,6 @@ def update_scalar_fields_maccormack(
     fuel_dissipation_rate,
     fuel_burn_rate,
     fuel_ignition_temperature,
-    minimum_oxygen_concentration,
     t_reference,
     active_tile_mask,
 ):

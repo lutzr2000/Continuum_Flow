@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import re
 import bpy
 import json
@@ -48,7 +48,6 @@ _PHYSICS_SECTION_FIELDS = {
         ("dissipation", "fuel_dissipation", float, 0.0),
         ("burn_rate", "fuel_burn_rate", float, 0.0),
         ("ignition_temperature", "fuel_ignition_temperature", float, 0.0),
-        ("minimum_oxygen_concentration", "minimum_oxygen_concentration", float, 0.0),
     ),
     "extras": (("vorticity", "vorticity", float, 0.0),),
 }
