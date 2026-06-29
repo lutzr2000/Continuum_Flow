@@ -677,9 +677,10 @@ def update_velocity_maccormack(
                     Fy += turb_fy
                     Fz += turb_fz
 
-                Fx += fx_const * 10.0
-                Fy += fy_const * 10.0
-                Fz += fz_const * 10.0
+                Fx += fx_const * 0.1
+                Fy += fy_const * 0.1
+                Fz += fz_const * 0.1
+
                 Fz += buoyancy_approximation(
                     temperature,
                     i,

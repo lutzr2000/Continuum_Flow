@@ -4,8 +4,6 @@ General:
 At very high res run, the live preview struggles to load vdbs properly
 
 Final:
-Remove all the stupid exception handles
-Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
 Bug testing
 Init should build venv with UV
 Test install
