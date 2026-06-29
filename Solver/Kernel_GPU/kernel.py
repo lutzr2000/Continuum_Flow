@@ -18,7 +18,7 @@ import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 import Solver.Kernel_GPU.output as output
-import Solver.Kernel_GPU.forces as forces
+import Solver.General.forces as forces
 
 GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "

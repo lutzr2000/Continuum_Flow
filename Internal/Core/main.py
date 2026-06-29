@@ -431,7 +431,7 @@ class main(bpy.types.Operator):
         simulation_settings = config_dict["simulations"][0].get("settings") or {}
         start_frame = int(simulation_settings.get("start_frame", 1))
         end_frame = int(simulation_settings.get("end_frame", start_frame))
-        total_frames = max(0, (end_frame - start_frame) + 1)
+        total_frames = max(0, end_frame - start_frame)
         _set_bake_progress(0, total_frames)
 
         vdb_output_dir = Path(output_config["output_path"]).resolve()

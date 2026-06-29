@@ -134,7 +134,7 @@ def _animation_times(start_frame, end_frame, fps):
     """
     return [
         float(frame - int(start_frame)) / float(fps)
-        for frame in range(int(start_frame), int(end_frame) + 1)
+        for frame in range(int(start_frame), int(end_frame))
     ]
 
 
@@ -372,7 +372,7 @@ def _sample_node_property_series(
 
     scene = getattr(bpy.context, "scene", None)
     current_frame = int(getattr(scene, "frame_current", start_frame))
-    frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
+    frame_numbers = list(range(int(start_frame), int(end_frame)))
     sampled_values = {property_name: [] for property_name in property_names}
 
     try:
@@ -455,7 +455,7 @@ def _simulation_length_from_frames(start_frame, end_frame, fps):
     """
     if end_frame <= start_frame:
         raise ValueError("Simulation end frame must be greater than the start frame.")
-    return float((end_frame - start_frame) + 1) / float(fps)
+    return float(end_frame - start_frame) / float(fps)
 
 
 def _linked_geometry_nodes(node):
@@ -474,7 +474,7 @@ def _sample_geometry_object_transforms(
     scene = getattr(bpy.context, "scene", None)
 
     current_frame = int(getattr(scene, "frame_current", start_frame))
-    frame_numbers = list(range(int(start_frame), int(end_frame) + 1))
+    frame_numbers = list(range(int(start_frame), int(end_frame)))
     transform_samples = {}
 
     try:
