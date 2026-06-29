@@ -1,4 +1,6 @@
-﻿voxelise_mesh_module = None
+﻿from time import perf_counter
+
+voxelise_mesh_module = None
 gpu_kernel_module = None
 np = None
 
@@ -31,82 +33,100 @@ def _has_animated_mesh_objects(mesh_objects):
     return False
 
 
+def _cancel_requested(config):
+    cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
+    return bool(cancel_flag_path) and Path(cancel_flag_path).exists()
+
+
 def main(config=None):
     global np, voxelise_mesh_module, gpu_kernel_module
 
-    if np is None:
-        import numpy as _np
-        np = _np
-    if voxelise_mesh_module is None:
-        import Solver.General.voxelise_mesh as _voxelise_mesh_module
-        voxelise_mesh_module = _voxelise_mesh_module
-    voxelise_mesh_module.set_config_dir(config.get("bake_directory", ""))
-    if gpu_kernel_module is None:
-        import Solver.Kernel_GPU.kernel as _gpu_kernel_module
-        gpu_kernel_module = _gpu_kernel_module
+    total_start_time = perf_counter()
+    try:
+        if np is None:
+            import numpy as _np
+            np = _np
+        if voxelise_mesh_module is None:
+            import Solver.General.voxelise_mesh as _voxelise_mesh_module
+            voxelise_mesh_module = _voxelise_mesh_module
+        voxelise_mesh_module.set_config_dir(config.get("bake_directory", ""))
+        if gpu_kernel_module is None:
+            import Solver.Kernel_GPU.kernel as _gpu_kernel_module
+            gpu_kernel_module = _gpu_kernel_module
 
-    simulations = config.get("simulations") or []
+        simulations = config.get("simulations") or []
 
-    simulation_cfg = simulations[0]
-    domain_cfg = simulation_cfg.get("domain") or {}
-    grid_cfg = domain_cfg.get("grid") or {}
+        simulation_cfg = simulations[0]
+        domain_cfg = simulation_cfg.get("domain") or {}
+        grid_cfg = domain_cfg.get("grid") or {}
 
-    nx = int(grid_cfg.get("nx", 0))
-    ny = int(grid_cfg.get("ny", 0))
-    nz = int(grid_cfg.get("nz", 0))
-    delta = float(domain_cfg.get("resolution", 0.0))
-    origin_x = -0.5 * nx * delta
-    origin_y = -0.5 * ny * delta
-    origin_z = 0.0
+        nx = int(grid_cfg.get("nx", 0))
+        ny = int(grid_cfg.get("ny", 0))
+        nz = int(grid_cfg.get("nz", 0))
+        delta = float(domain_cfg.get("resolution", 0.0))
+        origin_x = -0.5 * nx * delta
+        origin_y = -0.5 * ny * delta
+        origin_z = 0.0
 
-    obstacle_mesh_objects = _collect_mesh_objects(simulation_cfg.get("obstacles"))
-    source_entries = simulation_cfg.get("sources") or []
-    source_mesh_objects = _collect_mesh_objects(source_entries)
+        obstacle_mesh_objects = _collect_mesh_objects(simulation_cfg.get("obstacles"))
+        source_entries = simulation_cfg.get("sources") or []
+        source_mesh_objects = _collect_mesh_objects(source_entries)
 
-    animated_obstacles = bool(obstacle_mesh_objects) and _has_animated_mesh_objects(
-        obstacle_mesh_objects
-    )
-    animated_sources = bool(source_mesh_objects) and _has_animated_mesh_objects(
-        source_mesh_objects
-    )
+        animated_obstacles = bool(obstacle_mesh_objects) and _has_animated_mesh_objects(
+            obstacle_mesh_objects
+        )
+        animated_sources = bool(source_mesh_objects) and _has_animated_mesh_objects(
+            source_mesh_objects
+        )
 
-    obstacle_base_masks, obstacle_mask = voxelise_mesh_module.voxelise_mesh_all(
-        nx,
-        ny,
-        nz,
-        delta,
-        obstacle_mesh_objects,
-        origin_x=origin_x,
-        origin_y=origin_y,
-        origin_z=origin_z,
-    )
-
-    source_base_masks = []
-    source_masks = []
-    for source_entry in source_entries:
-        source_mesh_objects = _collect_mesh_objects([source_entry])
-        source_base_mask, source_mask = voxelise_mesh_module.voxelise_mesh_all(
+        obstacle_base_masks, obstacle_mask = voxelise_mesh_module.voxelise_mesh_all(
             nx,
             ny,
             nz,
             delta,
-            source_mesh_objects,
+            obstacle_mesh_objects,
             origin_x=origin_x,
             origin_y=origin_y,
             origin_z=origin_z,
         )
-        source_base_masks.append(source_base_mask)
-        source_masks.append(source_mask)
+        if _cancel_requested(config):
+            print("Bake cancelled during preprocessing.")
+            return
 
-    return gpu_kernel_module.solver(
-        config,
-        obstacle_base_masks,
-        obstacle_mask,
-        source_base_masks,
-        source_masks,
-        animated_obstacles,
-        animated_sources,
-    )
+        source_base_masks = []
+        source_masks = []
+        for source_entry in source_entries:
+            source_mesh_objects = _collect_mesh_objects([source_entry])
+            source_base_mask, source_mask = voxelise_mesh_module.voxelise_mesh_all(
+                nx,
+                ny,
+                nz,
+                delta,
+                source_mesh_objects,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                origin_z=origin_z,
+            )
+            source_base_masks.append(source_base_mask)
+            source_masks.append(source_mask)
+
+            if _cancel_requested(config):
+                print("Bake cancelled during preprocessing.")
+                return
+
+        return gpu_kernel_module.solver(
+            config,
+            obstacle_base_masks,
+            obstacle_mask,
+            source_base_masks,
+            source_masks,
+            animated_obstacles,
+            animated_sources,
+        )
+    finally:
+        total_runtime = perf_counter() - total_start_time
+        print(f"Bake runtime: {total_runtime:.3f} s")
+        print("################################################################")
 
 if __name__ == "__main__":
     import json

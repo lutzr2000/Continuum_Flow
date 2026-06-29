@@ -307,6 +307,7 @@ class main(bpy.types.Operator):
         self.writer_server = None
         self.bake_directory = None
         self.output_directory = None
+        self.cancel_flag_path = None
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
         self._event_timer = None
@@ -357,6 +358,11 @@ class main(bpy.types.Operator):
                 except Exception as exc:
                     print("Failed to stop writer server:", exc)
 
+            if self.cancel_flag_path is not None:
+                try:
+                    self.cancel_flag_path.unlink(missing_ok=True)
+                except Exception as exc:
+                    print("Failed to remove cancel flag:", exc)
 
             has_vdbs = _update_bake_available_from_output(self.output_directory)
             _store_output_node_last_bake_directory(
@@ -372,11 +378,20 @@ class main(bpy.types.Operator):
         _vdb_watcher.stop()
 
         if self.process and self.process.poll() is None:
+            if self.cancel_flag_path is not None:
+                try:
+                    self.cancel_flag_path.touch()
+                except Exception as exc:
+                    print("Failed to create cancel flag:", exc)
+
             try:
-                self.process.terminate()
-                self.process.wait(timeout=3)
+                self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                self.process.kill()
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
             except Exception as exc:
                 print("Failed to terminate solver:", exc)
 
@@ -425,6 +440,8 @@ class main(bpy.types.Operator):
         config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
 
         self.bake_directory = Path(bake_directory).resolve()
+        self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
+        config_dict.setdefault("meta", {})["cancel_flag_path"] = str(self.cancel_flag_path)
         self.writer_server = writer_server
 
         output_config = config_dict["simulations"][0]["outputs"][0]

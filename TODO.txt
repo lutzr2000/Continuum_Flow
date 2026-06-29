@@ -10,7 +10,6 @@ free bake does not always delete object in .blend, but sometimes it deletes all
 if i manually delete the vdb from  .blend free bake produces an error
 Bake button sometimes deletes vdbs?
 Remove writer process count, find some general solution
-Cancelling the solve should still give a timing
 
 Output:
 Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w)

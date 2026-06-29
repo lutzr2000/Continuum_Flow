@@ -663,4 +663,3 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
     total_runtime = perf_counter() - total_start_time
     print(f"Solver runtime: {total_runtime:.3f} s")
-    print("################################################################")
