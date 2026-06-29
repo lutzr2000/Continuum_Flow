@@ -24,7 +24,7 @@ CPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-class _ProcessMemoryCounters(ctypes.Structure):
+class _ProcessMemoryCountersEx(ctypes.Structure):
     _fields_ = [
         ("cb", ctypes.c_ulong),
         ("PageFaultCount", ctypes.c_ulong),
@@ -36,21 +36,50 @@ class _ProcessMemoryCounters(ctypes.Structure):
         ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
         ("PagefileUsage", ctypes.c_size_t),
         ("PeakPagefileUsage", ctypes.c_size_t),
+        ("PrivateUsage", ctypes.c_size_t),
     ]
 
 
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_psapi = ctypes.WinDLL("psapi", use_last_error=True)
+_kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+_psapi.GetProcessMemoryInfo.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_ulong,
+]
+_psapi.GetProcessMemoryInfo.restype = ctypes.c_long
+
+
 def _process_ram_usage_bytes():
-    counters = _ProcessMemoryCounters()
-    counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
-    process_handle = ctypes.windll.kernel32.GetCurrentProcess()
-    ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+    counters = _ProcessMemoryCountersEx()
+    counters.cb = ctypes.sizeof(_ProcessMemoryCountersEx)
+    process_handle = _kernel32.GetCurrentProcess()
+    ok = _psapi.GetProcessMemoryInfo(
         process_handle,
         ctypes.byref(counters),
         counters.cb,
     )
     if not ok:
-        return None
+        raise OSError(ctypes.get_last_error(), "GetProcessMemoryInfo failed")
     return int(counters.WorkingSetSize)
+
+
+def _record_timing(timings, name, duration):
+    timings[name] = timings.get(name, 0.0) + float(duration)
+
+
+def _print_timing_summary(timings, step_count):
+    if not timings:
+        return
+
+    print("Solver timing summary:")
+    for name, total_duration in sorted(timings.items(), key=lambda item: item[1], reverse=True):
+        if step_count > 0 and name.startswith("loop_"):
+            avg_duration = total_duration / float(step_count)
+            print(f"  {name}: total {total_duration:.3f} s, avg {avg_duration * 1000.0:.3f} ms/step")
+        else:
+            print(f"  {name}: {total_duration:.3f} s")
 
 
 def _current_output_fields(u, v, w, p, temperature, smoke, fuel, flame):
@@ -297,7 +326,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
     output_frame_count = 0
-    ram_reported = False
+    step_count = 0
+    timing_stats = {}
 
     # ------------time-------------------
     t = 0.0
@@ -410,6 +440,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         shape,
     )
 
+    _record_timing(timing_stats, "init_setup", perf_counter() - total_start_time)
+
     # ------------time loop------------------
     print("Start time iteration")
     next_output_time = 0.0
@@ -432,11 +464,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         )
 
         # ------------Clear scratch-------------------
+        section_start = perf_counter()
         scratch_A_x[...] = zero_levels[0]
         scratch_A_y[...] = zero_levels[0]
         scratch_A_z[...] = zero_levels[0]
+        _record_timing(timing_stats, "loop_clear_scratch", perf_counter() - section_start)
 
         # ------------Update masks-------------------
+        section_start = perf_counter()
         if animated_sources:
             update_masks.update_masks(
                 source_masks,
@@ -472,8 +507,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scratch_A_y,
                 scratch_A_z,
             )
+        _record_timing(timing_stats, "loop_update_masks", perf_counter() - section_start)
 
         # ------------BC-------------------
+        section_start = perf_counter()
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
             simulations,
             t,
@@ -493,8 +530,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             source_masks,
             source_noise,
         )
+        _record_timing(timing_stats, "loop_boundary_conditions", perf_counter() - section_start)
 
         # ------------Start Active tiles-------------------
+        section_start = perf_counter()
         if simulations[0].get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask(
                 temperature,
@@ -519,8 +558,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scalar_active_tiles_dilated,
                 np.bool_(True),
             )
+        _record_timing(timing_stats, "loop_active_tiles", perf_counter() - section_start)
 
         # ------------Vorticity-------------------
+        section_start = perf_counter()
         if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
             vorticity.compute_vorticity(
                 u,
@@ -531,15 +572,19 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 delta,
                 scalar_active_tiles_dilated,
             )
+        _record_timing(timing_stats, "loop_vorticity", perf_counter() - section_start)
 
         # ------------force params-------------------
+        section_start = perf_counter()
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0], t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0], t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0], t)
         swirl_config_buffer = _prepare_force_config(swirl_config, 8)
         turbulence_config_buffer = _prepare_force_config(turbulence_config, 4)
+        _record_timing(timing_stats, "loop_force_params", perf_counter() - section_start)
 
         # ------------Velocity update-------------------
+        section_start = perf_counter()
         u_work[...] = u
         v_work[...] = v
         w_work[...] = w
@@ -587,6 +632,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             turbulence_config_buffer,
             t,
         )
+        _record_timing(timing_stats, "loop_velocity_update", perf_counter() - section_start)
 
         # ------------Velocity swap-------------------
         u, u_work = u_work, u
@@ -594,6 +640,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         w, w_work = w_work, w
 
         # ------------Pressure solve-------------------
+        section_start = perf_counter()
         extra_pressure = get_source_values(simulations, "extra_pressure", t)
         noise_amplitudes = get_source_values(simulations, "noise_amplitude", t) / np.float32(100.0)
 
@@ -618,8 +665,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             simulations[0].get("settings").get("iterations"),
             zero_levels,
         )
+        _record_timing(timing_stats, "loop_pressure_solve", perf_counter() - section_start)
 
         # ------------Velocity projection-------------------
+        section_start = perf_counter()
         pressure_solve.project_velocity_kernel(
             u,
             v,
@@ -631,8 +680,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             simulations[0].get("physics").get("fluid").get("density"),
             scalar_active_tiles_dilated,
         )
+        _record_timing(timing_stats, "loop_velocity_projection", perf_counter() - section_start)
 
         # ------------Scalar update-------------------
+        section_start = perf_counter()
         temperature_work[...] = temperature
         smoke_work[...] = smoke
         fuel_work[...] = fuel
@@ -676,6 +727,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             ref_temp,
             scalar_active_tiles_dilated,
         )
+        _record_timing(timing_stats, "loop_scalar_update", perf_counter() - section_start)
 
         # ------------Swap-------------------
         temperature, temperature_work = temperature_work, temperature
@@ -686,6 +738,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         t = t + dt
 
         # ------------Output-------------------
+        section_start = perf_counter()
         output_fields = _current_output_fields(
             u, v, w, p, temperature, smoke, fuel, flame
         )
@@ -701,16 +754,21 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             output_index += 1
             output_frame_count += 1
             next_output_time += output_time_step
+        _record_timing(timing_stats, "loop_output", perf_counter() - section_start)
 
         # ------------Memory track-------------------
-        if output_index == 10 and not ram_reported:
+        section_start = perf_counter()
+        if output_index == 10:
             ram_usage = _process_ram_usage_bytes()
-            if ram_usage is not None:
-                print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
-            ram_reported = True
+            print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
+        _record_timing(timing_stats, "loop_memory_track", perf_counter() - section_start)
+
+        step_count = step_count + 1
 
     # ------------Shutdown output-------------------
+    section_start = perf_counter()
     output.shutdown_output(shared_memory_blocks, writer_slots)
+    _record_timing(timing_stats, "shutdown_output", perf_counter() - section_start)
 
     # ------------Conclusion-------------------
     if cancel_requested:
@@ -719,4 +777,6 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time
+    _record_timing(timing_stats, "total_runtime", total_runtime)
     print(f"Solver runtime: {total_runtime:.3f} s")
+    _print_timing_summary(timing_stats, step_count)
