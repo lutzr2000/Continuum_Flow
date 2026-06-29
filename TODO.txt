@@ -7,6 +7,5 @@ Final:
 Bug testing
 Init should build venv with UV
 Test install
-Rebuild example files
 Documentation (also for multigrid)
 
