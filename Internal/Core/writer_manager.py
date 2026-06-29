@@ -1,4 +1,4 @@
-﻿import json
+import json
 import queue
 import socketserver
 import subprocess
@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 
 DEFAULT_VDB_WRITER_PROCESS_COUNT = 4
+WRITER_CLOSE_TIMEOUT_SECONDS = 10
+WRITER_TERMINATE_TIMEOUT_SECONDS = 3
 
 
 def _bake_directory():
@@ -82,7 +84,16 @@ class _VDBWriterProcess:
                 self._process.stdin.close()
             except OSError:
                 pass
-        self._process.wait()
+
+        try:
+            self._process.wait(timeout=WRITER_CLOSE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=WRITER_TERMINATE_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
 
 
 class _VDBWriterProcessPool:
@@ -96,10 +107,24 @@ class _VDBWriterProcessPool:
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
 
         python_executable = _resolve_blender_python_executable()
-        self._processes = [
-            _VDBWriterProcess(python_executable, writer_script, writer_config=writer_config)
-            for _ in range(process_count)
-        ]
+        self._processes = []
+        try:
+            for _ in range(process_count):
+                self._processes.append(
+                    _VDBWriterProcess(
+                        python_executable,
+                        writer_script,
+                        writer_config=writer_config,
+                    )
+                )
+        except Exception:
+            for writer_process in self._processes:
+                try:
+                    writer_process.close()
+                except Exception:
+                    pass
+            raise
+
         self._available_processes = queue.Queue(maxsize=process_count)
         for writer_process in self._processes:
             self._available_processes.put(writer_process)

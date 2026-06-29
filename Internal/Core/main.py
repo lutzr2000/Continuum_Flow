@@ -522,12 +522,12 @@ class main(bpy.types.Operator):
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 
         writer_server = self.launch_writer_manager(config_dict)
+        self.writer_server = writer_server
         config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
 
         self.bake_directory = Path(bake_directory).resolve()
         self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
         config_dict.setdefault("meta", {})["cancel_flag_path"] = str(self.cancel_flag_path)
-        self.writer_server = writer_server
 
         output_config = config_dict["simulations"][0]["outputs"][0]
         simulation_settings = config_dict["simulations"][0].get("settings") or {}
