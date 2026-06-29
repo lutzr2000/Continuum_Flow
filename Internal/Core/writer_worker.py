@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import sys
 from multiprocessing import shared_memory
@@ -65,53 +65,11 @@ def write_vdb(payload):
 
     try:
         grid_payloads = list(payload["grids"])
-        grid_by_name = {
-            grid_payload["name"]: grid_payload
-            for grid_payload in grid_payloads
-        }
-        used = set()
 
         for grid_payload in grid_payloads:
             grid_name = grid_payload["name"]
 
-            if grid_name in used:
-                continue
-
-            # Combine u/v/w into one vector velocity grid.
-            if grid_name == "u" and "v" in grid_by_name and "w" in grid_by_name:
-                u_arr, u_shm, _shape = open_scalar_array(grid_by_name["u"])
-                v_arr, v_shm, _ = open_scalar_array(grid_by_name["v"])
-                w_arr, w_shm, _ = open_scalar_array(grid_by_name["w"])
-
-                open_shared_memory.extend([u_shm, v_shm, w_shm])
-
-                vec_arr = np.stack((u_arr, v_arr, w_arr), axis=-1)
-
-                grid_class = (
-                    getattr(openvdb, "Vec3SGrid", None)
-                    or getattr(openvdb, "VectorGrid", None)
-                    or getattr(openvdb, "Vec3fGrid", None)
-                )
-                if grid_class is None:
-                    raise AttributeError(
-                        "No supported OpenVDB vector grid class available"
-                    )
-
-                grid = grid_class()
-                grid.name = "velocity"
-                grid.transform = transform
-
-                if hasattr(grid, "saveFloatAsHalf"):
-                    grid.saveFloatAsHalf = (precision == "float16")
-
-                grid.copyFromArray(vec_arr)
-
-                # Do not prune Vec3 grids here. This binding expects Vec3s tolerance.
-                grids.append(grid)
-                used.update(("u", "v", "w"))
-                continue
-
-            # Scalar grid path.
+            # Always write each field as its own scalar grid, including u/v/w.
             arr, shm, _shape = open_scalar_array(grid_payload)
             open_shared_memory.append(shm)
 
@@ -126,7 +84,6 @@ def write_vdb(payload):
             prune_scalar_grid(grid)
 
             grids.append(grid)
-            used.add(grid_name)
 
         os.makedirs(os.path.dirname(output_vdb_path), exist_ok=True)
         openvdb.write(output_vdb_path, grids=grids)
@@ -135,7 +92,7 @@ def write_vdb(payload):
         for shm in open_shared_memory:
             shm.close()
 
-            
+
 def main():
     """
     Run a persistent JSON-lines VDB writer process.

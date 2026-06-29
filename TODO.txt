@@ -10,9 +10,6 @@ if i manually delete the vdb from  .blend free bake produces an error
 Bake button sometimes deletes vdbs?
 Remove writer process count, find some general solution
 
-Output:
-Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w)
-
 General:
 At very high res run, the live preview struggles to load vdbs properly
 
