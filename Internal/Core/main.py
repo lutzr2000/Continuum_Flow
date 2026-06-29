@@ -402,9 +402,19 @@ class main(bpy.types.Operator):
         solver_status.active_bake_operator = self
         _set_status_progress(context)
 
-        self.do_bake(context)
-        self._event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
-        context.window_manager.modal_handler_add(self)
+        try:
+            self.do_bake(context)
+            self._event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
+            context.window_manager.modal_handler_add(self)
+        except Exception as exc:
+            print("Failed to start bake:", exc)
+            if self.process and self.process.poll() is None:
+                self.cancel_bake()
+            else:
+                self.cleanup()
+            self.report({'ERROR'}, f"Failed to start bake: {exc}")
+            return {'CANCELLED'}
+
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
