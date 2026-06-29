@@ -1,8 +1,5 @@
 TODO
 
-Solver:
-Time CPU Kernel
-
 UI:
 free bake does not always delete object in .blend, but sometimes it deletes all
 if i manually delete the vdb from  .blend free bake produces an error

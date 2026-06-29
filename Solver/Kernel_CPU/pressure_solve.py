@@ -1,31 +1,14 @@
 import numpy as np
-from time import perf_counter
 from numba import njit, prange
 
 import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_CPU.kernel_config as kernel_config
 
 
-def _record_pressure_timing(timing_stats, name, duration):
-    if timing_stats is None:
-        return
-    timing_stats[name] = timing_stats.get(name, 0.0) + float(duration)
-
-
 @njit(cache=True, inline="always")
 def _is_active_pressure_cell(active_tile_mask, i, j, k):
     tile_size = kernel_config.ACTIVE_TILE_SIZE
     return active_tile_mask[i // tile_size, j // tile_size, k // tile_size] != 0
-
-
-def _expand_active_pressure_mask(active_tile_mask, shape):
-    tile_size = kernel_config.ACTIVE_TILE_SIZE
-    expanded = np.repeat(
-        np.repeat(np.repeat(active_tile_mask, tile_size, axis=0), tile_size, axis=1),
-        tile_size,
-        axis=2,
-    )
-    return expanded[: shape[0], : shape[1], : shape[2]] != 0
 
 
 @njit(cache=True, parallel=True)
@@ -499,7 +482,6 @@ def pressure_poisson_multigrid(
     delta_levels,
     num_vcycles,
     zero_levels,
-    timing_stats=None,
 ):
     threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     _ = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
@@ -507,7 +489,6 @@ def pressure_poisson_multigrid(
     p_levels[0] = p
     b_levels[0] = b
 
-    section_start = perf_counter()
     pressure_equation_right_side(
         u,
         v,
@@ -518,23 +499,14 @@ def pressure_poisson_multigrid(
         rho,
         active_tile_mask,
     )
-    _record_pressure_timing(timing_stats, "loop_pressure_rhs", perf_counter() - section_start)
-
-    section_start = perf_counter()
     _remove_rhs_mean(
         b_levels[0],
         active_tile_mask,
     )
-    _record_pressure_timing(timing_stats, "loop_pressure_rhs_mean", perf_counter() - section_start)
-
-    section_start = perf_counter()
     _reset_inactive_pressure_kernel(
         p_levels[0],
         active_tile_mask,
     )
-    _record_pressure_timing(timing_stats, "loop_pressure_reset", perf_counter() - section_start)
-
-    section_start = perf_counter()
     add_artifical_divergence(
         T,
         source_masks,
@@ -548,9 +520,6 @@ def pressure_poisson_multigrid(
         rho,
         dt,
     )
-    _record_pressure_timing(timing_stats, "loop_pressure_artificial_divergence", perf_counter() - section_start)
-
-    section_start = perf_counter()
     for _ in range(num_vcycles):
         _mg_vcycle(
             0,
@@ -563,6 +532,4 @@ def pressure_poisson_multigrid(
             coarse_smooth=20,
             active_tile_mask=active_tile_mask,
         )
-    _record_pressure_timing(timing_stats, "loop_pressure_vcycles", perf_counter() - section_start)
-
     return p_levels[0]
