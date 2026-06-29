@@ -460,44 +460,40 @@ def advect_velocity_semi_lagrangian(
     Backtrace the velocity field once and store the purely advected values.
     """
     nx, ny, nz = u.shape
-    total = nx * ny * nz
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if not _is_active_tile(active_tile_mask, i, j, k):
+                    continue
 
-        if not _is_active_tile(active_tile_mask, i, j, k):
-            continue
+                x_depart, y_depart, z_depart = _backtrace_position(
+                    u,
+                    v,
+                    w,
+                    float(i),
+                    float(j),
+                    float(k),
+                    dt / delta,
+                    nx,
+                    ny,
+                    nz,
+                )
 
-        x_depart, y_depart, z_depart = _backtrace_position(
-            u,
-            v,
-            w,
-            float(i),
-            float(j),
-            float(k),
-            dt / delta,
-            nx,
-            ny,
-            nz,
-        )
-
-        adv_u, adv_v, adv_w = _sample_trilinear_vec3(
-            u,
-            v,
-            w,
-            x_depart,
-            y_depart,
-            z_depart,
-            nx,
-            ny,
-            nz,
-        )
-        advected_u[i, j, k] = adv_u
-        advected_v[i, j, k] = adv_v
-        advected_w[i, j, k] = adv_w
+                adv_u, adv_v, adv_w = _sample_trilinear_vec3(
+                    u,
+                    v,
+                    w,
+                    x_depart,
+                    y_depart,
+                    z_depart,
+                    nx,
+                    ny,
+                    nz,
+                )
+                advected_u[i, j, k] = adv_u
+                advected_v[i, j, k] = adv_v
+                advected_w[i, j, k] = adv_w
 
 
 @njit(cache=True, parallel=True)
@@ -538,172 +534,161 @@ def update_velocity_maccormack(
     Update velocity with a MacCormack-corrected semi-Lagrangian step.
     """
     nx, ny, nz = u.shape
-    total = nx * ny * nz
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if not _is_active_tile(active_tile_mask, i, j, k):
+                    continue
+                if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+                    continue
 
-        if not _is_active_tile(active_tile_mask, i, j, k):
-            continue
-        if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-            continue
+                Fx = 0.0
+                Fy = 0.0
+                Fz = 0.0
 
-        Fx = 0.0
-        Fy = 0.0
-        Fz = 0.0
+                dt_over_delta = dt / delta
+                diffusion_coeff = nu * dt / (delta * delta)
+                force_coeff = dt / rho
 
-        dt_over_delta = dt / delta
-        diffusion_coeff = nu * dt / (delta * delta)
-        force_coeff = dt / rho
+                u_center = u[i, j, k]
+                v_center = v[i, j, k]
+                w_center = w[i, j, k]
 
-        u_center = u[i, j, k]
-        v_center = v[i, j, k]
-        w_center = w[i, j, k]
+                x_depart, y_depart, z_depart = _backtrace_position(
+                    u,
+                    v,
+                    w,
+                    float(i),
+                    float(j),
+                    float(k),
+                    dt_over_delta,
+                    nx,
+                    ny,
+                    nz,
+                )
 
-        x_depart, y_depart, z_depart = _backtrace_position(
-            u,
-            v,
-            w,
-            float(i),
-            float(j),
-            float(k),
-            dt_over_delta,
-            nx,
-            ny,
-            nz,
-        )
+                x_forward, y_forward, z_forward = _forward_trace_position(
+                    u,
+                    v,
+                    w,
+                    x_depart,
+                    y_depart,
+                    z_depart,
+                    dt_over_delta,
+                    nx,
+                    ny,
+                    nz,
+                )
 
-        x_forward, y_forward, z_forward = _forward_trace_position(
-            u,
-            v,
-            w,
-            x_depart,
-            y_depart,
-            z_depart,
-            dt_over_delta,
-            nx,
-            ny,
-            nz,
-        )
+                advected_u = predictor_u[i, j, k]
+                advected_v = predictor_v[i, j, k]
+                advected_w = predictor_w[i, j, k]
 
-        advected_u = predictor_u[i, j, k]
-        advected_v = predictor_v[i, j, k]
-        advected_w = predictor_w[i, j, k]
+                reverse_u, reverse_v, reverse_w = _sample_trilinear_vec3(
+                    predictor_u,
+                    predictor_v,
+                    predictor_w,
+                    x_forward,
+                    y_forward,
+                    z_forward,
+                    nx,
+                    ny,
+                    nz,
+                )
 
-        reverse_u, reverse_v, reverse_w = _sample_trilinear_vec3(
-            predictor_u,
-            predictor_v,
-            predictor_w,
-            x_forward,
-            y_forward,
-            z_forward,
-            nx,
-            ny,
-            nz,
-        )
+                corrected_u = advected_u + 0.5 * (u_center - reverse_u)
+                corrected_v = advected_v + 0.5 * (v_center - reverse_v)
+                corrected_w = advected_w + 0.5 * (w_center - reverse_w)
 
-        corrected_u = advected_u + 0.5 * (u_center - reverse_u)
-        corrected_v = advected_v + 0.5 * (v_center - reverse_v)
-        corrected_w = advected_w + 0.5 * (w_center - reverse_w)
+                x0, y0, z0, x1, y1, z1, _, _, _ = _prepare_trilinear_coords(
+                    x_depart, y_depart, z_depart, nx, ny, nz
+                )
 
-        x0, y0, z0, x1, y1, z1, _, _, _ = _prepare_trilinear_coords(
-            x_depart, y_depart, z_depart, nx, ny, nz
-        )
+                u_lower, u_upper = _sample_cell_extrema_inner(u, x0, y0, z0, x1, y1, z1)
+                v_lower, v_upper = _sample_cell_extrema_inner(v, x0, y0, z0, x1, y1, z1)
+                w_lower, w_upper = _sample_cell_extrema_inner(w, x0, y0, z0, x1, y1, z1)
 
-        u_lower, u_upper = _sample_cell_extrema_inner(u, x0, y0, z0, x1, y1, z1)
-        v_lower, v_upper = _sample_cell_extrema_inner(v, x0, y0, z0, x1, y1, z1)
-        w_lower, w_upper = _sample_cell_extrema_inner(w, x0, y0, z0, x1, y1, z1)
+                corrected_u = _clamp(corrected_u, u_lower, u_upper)
+                corrected_v = _clamp(corrected_v, v_lower, v_upper)
+                corrected_w = _clamp(corrected_w, w_lower, w_upper)
 
-        corrected_u = _clamp(corrected_u, u_lower, u_upper)
-        corrected_v = _clamp(corrected_v, v_lower, v_upper)
-        corrected_w = _clamp(corrected_w, w_lower, w_upper)
+                diffusion_x = diffusion_coeff * (
+                    (u[i + 1, j, k] - 2.0 * u_center + u[i - 1, j, k])
+                    + (u[i, j + 1, k] - 2.0 * u_center + u[i, j - 1, k])
+                    + (u[i, j, k + 1] - 2.0 * u_center + u[i, j, k - 1])
+                )
+                diffusion_y = diffusion_coeff * (
+                    (v[i + 1, j, k] - 2.0 * v_center + v[i - 1, j, k])
+                    + (v[i, j + 1, k] - 2.0 * v_center + v[i, j - 1, k])
+                    + (v[i, j, k + 1] - 2.0 * v_center + v[i, j, k - 1])
+                )
+                diffusion_z = diffusion_coeff * (
+                    (w[i + 1, j, k] - 2.0 * w_center + w[i - 1, j, k])
+                    + (w[i, j + 1, k] - 2.0 * w_center + w[i, j - 1, k])
+                    + (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
+                )
 
-        diffusion_x = diffusion_coeff * (
-            (u[i + 1, j, k] - 2.0 * u_center + u[i - 1, j, k])
-            + (u[i, j + 1, k] - 2.0 * u_center + u[i, j - 1, k])
-            + (u[i, j, k + 1] - 2.0 * u_center + u[i, j, k - 1])
-        )
-        diffusion_y = diffusion_coeff * (
-            (v[i + 1, j, k] - 2.0 * v_center + v[i - 1, j, k])
-            + (v[i, j + 1, k] - 2.0 * v_center + v[i, j - 1, k])
-            + (v[i, j, k + 1] - 2.0 * v_center + v[i, j, k - 1])
-        )
-        diffusion_z = diffusion_coeff * (
-            (w[i + 1, j, k] - 2.0 * w_center + w[i - 1, j, k])
-            + (w[i, j + 1, k] - 2.0 * w_center + w[i, j - 1, k])
-            + (w[i, j, k + 1] - 2.0 * w_center + w[i, j, k - 1])
-        )
+                if vorticity_strength > 0.0:
+                    Fx, Fy, Fz = apply_vorticity_confinement(
+                        u,
+                        v,
+                        w,
+                        obstacle_mask,
+                        vorticity_magnitude,
+                        i,
+                        j,
+                        k,
+                        nx,
+                        ny,
+                        nz,
+                        delta,
+                        vorticity_strength,
+                    )
 
-        if vorticity_strength > 0.0:
-            Fx, Fy, Fz = apply_vorticity_confinement(
-                u,
-                v,
-                w,
-                obstacle_mask,
-                vorticity_magnitude,
-                i,
-                j,
-                k,
-                nx,
-                ny,
-                nz,
-                delta,
-                vorticity_strength,
-            )
+                if has_swirl_nodes:
+                    swirl_fx, swirl_fy, swirl_fz = apply_swirl_forces(
+                        swirl_config,
+                        i,
+                        j,
+                        k,
+                        delta,
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                    )
+                    Fx += swirl_fx
+                    Fy += swirl_fy
+                    Fz += swirl_fz
 
-        if has_swirl_nodes:
-            swirl_fx, swirl_fy, swirl_fz = apply_swirl_forces(
-                swirl_config,
-                i,
-                j,
-                k,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-            )
+                if has_turbulence_nodes:
+                    turb_fx, turb_fy, turb_fz = apply_turbulence_forces(
+                        turbulence_config,
+                        i,
+                        j,
+                        k,
+                        delta,
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                        t,
+                    )
+                    Fx += turb_fx
+                    Fy += turb_fy
+                    Fz += turb_fz
 
-            Fx += swirl_fx
-            Fy += swirl_fy
-            Fz += swirl_fz
+                Fx += fx_const * 10.0
+                Fy += fy_const * 10.0
+                Fz += fz_const * 10.0
+                Fz += buoyancy_approximation(
+                    temperature,
+                    i,
+                    j,
+                    k,
+                    buoyancy_factor,
+                    t_reference,
+                )
 
-        if has_turbulence_nodes:
-            turb_fx, turb_fy, turb_fz = apply_turbulence_forces(
-                turbulence_config,
-                i,
-                j,
-                k,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-                t,
-            )
-
-            Fx += turb_fx
-            Fy += turb_fy
-            Fz += turb_fz
-
-        Fx += fx_const * 10.0
-        Fy += fy_const * 10.0
-        Fz += fz_const * 10.0
-
-        Fz += buoyancy_approximation(
-            temperature,
-            i,
-            j,
-            k,
-            buoyancy_factor,
-            t_reference,
-        )
-
-        u_raw = corrected_u + diffusion_x + force_coeff * Fx
-        v_raw = corrected_v + diffusion_y + force_coeff * Fy
-        w_raw = corrected_w + diffusion_z + force_coeff * Fz
-
-        un[i, j, k] = u_raw
-        vn[i, j, k] = v_raw
-        wn[i, j, k] = w_raw
+                un[i, j, k] = corrected_u + diffusion_x + force_coeff * Fx
+                vn[i, j, k] = corrected_v + diffusion_y + force_coeff * Fy
+                wn[i, j, k] = corrected_w + diffusion_z + force_coeff * Fz

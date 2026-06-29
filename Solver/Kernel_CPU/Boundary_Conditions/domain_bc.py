@@ -56,29 +56,24 @@ def _pressure_poisson_apply_neumann_bcs(p):
     Apply zero-gradient pressure boundary conditions on all domain faces.
     """
     nx, ny, nz = p.shape
-    total = nx * ny * nz
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if i == 0:
+                    p[i, j, k] = p[1, j, k]
+                elif i == nx - 1:
+                    p[i, j, k] = p[nx - 2, j, k]
 
-        if i == 0:
-            p[i, j, k] = p[1, j, k]
-        elif i == nx - 1:
-            p[i, j, k] = p[nx - 2, j, k]
+                if j == 0:
+                    p[i, j, k] = p[i, 1, k]
+                elif j == ny - 1:
+                    p[i, j, k] = p[i, ny - 2, k]
 
-        if j == 0:
-            p[i, j, k] = p[i, 1, k]
-        elif j == ny - 1:
-            p[i, j, k] = p[i, ny - 2, k]
-
-        if k == 0:
-            p[i, j, k] = p[i, j, 1]
-        elif k == nz - 1:
-            p[i, j, k] = p[i, j, nz - 2]
-
+                if k == 0:
+                    p[i, j, k] = p[i, j, 1]
+                elif k == nz - 1:
+                    p[i, j, k] = p[i, j, nz - 2]
 
 @njit(cache=True, inline="always")
 def _apply_face_state(
@@ -192,67 +187,63 @@ def _domain_bc_kernel(
     Apply all configured domain face boundary conditions in one 3D pass.
     """
     nx, ny, nz = u.shape
-    total = nx * ny * nz
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
+                    continue
 
-        if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
-            continue
+                if i == 0:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        1, j, k,
+                        0, 0,
+                        x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,
+                    )
+                elif i == nx - 1:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        nx - 2, j, k,
+                        0, 1,
+                        x_high_mode, x_high_u, x_high_v, x_high_w, x_high_temp, x_high_use_temp,
+                    )
 
-        if i == 0:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                1, j, k,
-                0, 0,
-                x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,
-            )
-        elif i == nx - 1:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                nx - 2, j, k,
-                0, 1,
-                x_high_mode, x_high_u, x_high_v, x_high_w, x_high_temp, x_high_use_temp,
-            )
+                if j == 0:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        i, 1, k,
+                        1, 0,
+                        y_low_mode, y_low_u, y_low_v, y_low_w, y_low_temp, y_low_use_temp,
+                    )
+                elif j == ny - 1:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        i, ny - 2, k,
+                        1, 1,
+                        y_high_mode, y_high_u, y_high_v, y_high_w, y_high_temp, y_high_use_temp,
+                    )
 
-        if j == 0:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                i, 1, k,
-                1, 0,
-                y_low_mode, y_low_u, y_low_v, y_low_w, y_low_temp, y_low_use_temp,
-            )
-        elif j == ny - 1:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                i, ny - 2, k,
-                1, 1,
-                y_high_mode, y_high_u, y_high_v, y_high_w, y_high_temp, y_high_use_temp,
-            )
-
-        if k == 0:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                i, j, 1,
-                2, 0,
-                z_low_mode, z_low_u, z_low_v, z_low_w, z_low_temp, z_low_use_temp,
-            )
-        elif k == nz - 1:
-            _apply_face_state(
-                u, v, w, p, T, smoke, fuel,
-                i, j, k,
-                i, j, nz - 2,
-                2, 1,
-                z_high_mode, z_high_u, z_high_v, z_high_w, z_high_temp, z_high_use_temp,
-            )
+                if k == 0:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        i, j, 1,
+                        2, 0,
+                        z_low_mode, z_low_u, z_low_v, z_low_w, z_low_temp, z_low_use_temp,
+                    )
+                elif k == nz - 1:
+                    _apply_face_state(
+                        u, v, w, p, T, smoke, fuel,
+                        i, j, k,
+                        i, j, nz - 2,
+                        2, 1,
+                        z_high_mode, z_high_u, z_high_v, z_high_w, z_high_temp, z_high_use_temp,
+                    )
 
 
 def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):

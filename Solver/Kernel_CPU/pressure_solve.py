@@ -1,8 +1,15 @@
 import numpy as np
+from time import perf_counter
 from numba import njit, prange
 
 import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_CPU.kernel_config as kernel_config
+
+
+def _record_pressure_timing(timing_stats, name, duration):
+    if timing_stats is None:
+        return
+    timing_stats[name] = timing_stats.get(name, 0.0) + float(duration)
 
 
 @njit(cache=True, inline="always")
@@ -36,56 +43,48 @@ def pressure_equation_right_side(
     Compute the right-hand side of the pressure Poisson equation.
     """
     nx, ny, nz = u.shape
-    total = nx * ny * nz
     half_inv_delta = 0.5 / delta
     rho_over_dt = rho / dt
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if (
+                    i < 1
+                    or j < 1
+                    or k < 1
+                    or i >= nx - 1
+                    or j >= ny - 1
+                    or k >= nz - 1
+                    or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+                ):
+                    b[i, j, k] = 0.0
+                    continue
 
-        if (
-            i < 1
-            or j < 1
-            or k < 1
-            or i >= nx - 1
-            or j >= ny - 1
-            or k >= nz - 1
-            or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-        ):
-            b[i, j, k] = 0.0
-            continue
+                du_dx = (u[i + 1, j, k] - u[i - 1, j, k]) * half_inv_delta
+                dv_dy = (v[i, j + 1, k] - v[i, j - 1, k]) * half_inv_delta
+                dw_dz = (w[i, j, k + 1] - w[i, j, k - 1]) * half_inv_delta
 
-        du_dx = (u[i + 1, j, k] - u[i - 1, j, k]) * half_inv_delta
-        dv_dy = (v[i, j + 1, k] - v[i, j - 1, k]) * half_inv_delta
-        dw_dz = (w[i, j, k + 1] - w[i, j, k - 1]) * half_inv_delta
-
-        b[i, j, k] = rho_over_dt * (du_dx + dv_dy + dw_dz)
+                b[i, j, k] = rho_over_dt * (du_dx + dv_dy + dw_dz)
 
 
 @njit(cache=True, parallel=True)
 def _reset_inactive_pressure_kernel(p, active_tile_mask):
     nx, ny, nz = p.shape
-    total = nx * ny * nz
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
-
-        if (
-            i < 1
-            or j < 1
-            or k < 1
-            or i >= nx - 1
-            or j >= ny - 1
-            or k >= nz - 1
-            or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-        ):
-            p[i, j, k] = 0.0
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if (
+                    i < 1
+                    or j < 1
+                    or k < 1
+                    or i >= nx - 1
+                    or j >= ny - 1
+                    or k >= nz - 1
+                    or not _is_active_pressure_cell(active_tile_mask, i, j, k)
+                ):
+                    p[i, j, k] = 0.0
 
 
 def _remove_rhs_mean(
@@ -125,24 +124,17 @@ def project_velocity_kernel(
     obstacle boundary conditions after the projection pass.
     """
     nx, ny, nz = u.shape
-    total = nx * ny * nz
     pressure_coeff = dt / (2.0 * rho * delta)
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                if not _is_active_pressure_cell(active_tile_mask, i, j, k) or obstacle_mask[i, j, k]:
+                    continue
 
-        if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-            continue
-
-        if not _is_active_pressure_cell(active_tile_mask, i, j, k) or obstacle_mask[i, j, k]:
-            continue
-
-        u[i, j, k] -= pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-        v[i, j, k] -= pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-        w[i, j, k] -= pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+                u[i, j, k] -= pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
+                v[i, j, k] -= pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
+                w[i, j, k] -= pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
 
 
 @njit(cache=True, parallel=True)
@@ -160,271 +152,222 @@ def add_artifical_divergence(
     dt,
 ):
     nx, ny, nz = b.shape
-    total = nx * ny * nz
     rho_over_dt = rho / dt
     source_count = source_masks.shape[0]
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                if not _is_active_pressure_cell(active_tile_mask, i, j, k):
+                    continue
 
-        if (
-            i < 1
-            or j < 1
-            or k < 1
-            or i >= nx - 1
-            or j >= ny - 1
-            or k >= nz - 1
-            or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-        ):
-            continue
+                thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
+                extra_pressure_term = 0.0
 
-        thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
-        extra_pressure_term = 0.0
+                for source_idx in range(source_count):
+                    if not source_masks[source_idx, i, j, k]:
+                        continue
+                    source_extra_pressure = extra_pressure[source_idx]
+                    source_extra_pressure *= min(
+                        max(1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k], 0.0),
+                        2.0,
+                    )
+                    if source_extra_pressure > extra_pressure_term:
+                        extra_pressure_term = source_extra_pressure
 
-        for source_idx in range(source_count):
-            if not source_masks[source_idx, i, j, k]:
-                continue
-            source_extra_pressure = extra_pressure[source_idx]
-            source_extra_pressure *= min(
-                max(1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k], 0.0),
-                2.0,
-            )
-            if source_extra_pressure > extra_pressure_term:
-                extra_pressure_term = source_extra_pressure
-
-        b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
+                b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
 
 
 @njit(cache=True, parallel=True)
 def mg_restrict_residual_8cell(p, b, coarse_b, delta):
     cnx, cny, cnz = coarse_b.shape
     nx, ny, nz = p.shape
-    total = cnx * cny * cnz
     inv_delta2 = 1.0 / (delta * delta)
 
-    for n in prange(total):
-        I = n // (cny * cnz)
-        rem = n - I * cny * cnz
-        J = rem // cnz
-        K = rem - J * cnz
+    for I in prange(cnx):
+        for J in range(cny):
+            for K in range(cnz):
+                i0 = 2 * I
+                j0 = 2 * J
+                k0 = 2 * K
 
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
+                s = 0.0
+                count = 0.0
 
-        s = 0.0
-        count = 0.0
+                for di in range(2):
+                    for dj in range(2):
+                        for dk in range(2):
+                            i = i0 + di
+                            j = j0 + dj
+                            k = k0 + dk
 
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
+                            if i >= 1 and j >= 1 and k >= 1 and i < nx - 1 and j < ny - 1 and k < nz - 1:
+                                lap = (
+                                    p[i + 1, j, k] + p[i - 1, j, k]
+                                    + p[i, j + 1, k] + p[i, j - 1, k]
+                                    + p[i, j, k + 1] + p[i, j, k - 1]
+                                    - 6.0 * p[i, j, k]
+                                ) * inv_delta2
 
-                    if i >= 1 and j >= 1 and k >= 1 and i < nx - 1 and j < ny - 1 and k < nz - 1:
-                        lap = (
-                            p[i + 1, j, k] + p[i - 1, j, k]
-                            + p[i, j + 1, k] + p[i, j - 1, k]
-                            + p[i, j, k + 1] + p[i, j, k - 1]
-                            - 6.0 * p[i, j, k]
-                        ) * inv_delta2
+                                s += b[i, j, k] - lap
+                                count += 1.0
 
-                        s += b[i, j, k] - lap
-                        count += 1.0
-
-        coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
+                coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @njit(cache=True, parallel=True)
 def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, active_tile_mask):
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = fine_p.shape
-    total = cnx * cny * cnz
 
-    for n in prange(total):
-        I = n // (cny * cnz)
-        rem = n - I * cny * cnz
-        J = rem // cnz
-        K = rem - J * cnz
+    for I in prange(cnx):
+        for J in range(cny):
+            for K in range(cnz):
+                e = 0.25 * coarse_e[I, J, K]
+                i0 = 2 * I
+                j0 = 2 * J
+                k0 = 2 * K
 
-        e = 0.25 * coarse_e[I, J, K]
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
+                for di in range(2):
+                    for dj in range(2):
+                        for dk in range(2):
+                            i = i0 + di
+                            j = j0 + dj
+                            k = k0 + dk
 
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if i < fnx and j < fny and k < fnz and _is_active_pressure_cell(active_tile_mask, i, j, k):
-                        fine_p[i, j, k] += e
+                            if i < fnx and j < fny and k < fnz and _is_active_pressure_cell(active_tile_mask, i, j, k):
+                                fine_p[i, j, k] += e
 
 
 @njit(cache=True, parallel=True)
 def mg_restrict_8cell(fine_r, coarse_b):
     cnx, cny, cnz = coarse_b.shape
     fnx, fny, fnz = fine_r.shape
-    total = cnx * cny * cnz
 
-    for n in prange(total):
-        I = n // (cny * cnz)
-        rem = n - I * cny * cnz
-        J = rem // cnz
-        K = rem - J * cnz
+    for I in prange(cnx):
+        for J in range(cny):
+            for K in range(cnz):
+                i0 = 2 * I
+                j0 = 2 * J
+                k0 = 2 * K
 
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
+                s = 0.0
+                count = 0.0
 
-        s = 0.0
-        count = 0.0
+                for di in range(2):
+                    for dj in range(2):
+                        for dk in range(2):
+                            i = i0 + di
+                            j = j0 + dj
+                            k = k0 + dk
 
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
+                            if i < fnx and j < fny and k < fnz:
+                                s += fine_r[i, j, k]
+                                count += 1.0
 
-                    if i < fnx and j < fny and k < fnz:
-                        s += fine_r[i, j, k]
-                        count += 1.0
-
-        coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
+                coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @njit(cache=True, parallel=True)
 def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, active_tile_mask):
     cnx, cny, cnz = coarse_b.shape
     nx, ny, nz = p.shape
-    total = cnx * cny * cnz
     inv_delta2 = 1.0 / (delta * delta)
 
-    for n in prange(total):
-        I = n // (cny * cnz)
-        rem = n - I * cny * cnz
-        J = rem // cnz
-        K = rem - J * cnz
+    for I in prange(cnx):
+        for J in range(cny):
+            for K in range(cnz):
+                i0 = 2 * I
+                j0 = 2 * J
+                k0 = 2 * K
 
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
+                s = 0.0
+                count = 0.0
 
-        s = 0.0
-        count = 0.0
+                for di in range(2):
+                    for dj in range(2):
+                        for dk in range(2):
+                            i = i0 + di
+                            j = j0 + dj
+                            k = k0 + dk
 
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
+                            if (
+                                i >= 1 and j >= 1 and k >= 1
+                                and i < nx - 1 and j < ny - 1 and k < nz - 1
+                                and _is_active_pressure_cell(active_tile_mask, i, j, k)
+                            ):
+                                lap = (
+                                    p[i + 1, j, k] + p[i - 1, j, k]
+                                    + p[i, j + 1, k] + p[i, j - 1, k]
+                                    + p[i, j, k + 1] + p[i, j, k - 1]
+                                    - 6.0 * p[i, j, k]
+                                ) * inv_delta2
 
-                    if (
-                        i >= 1 and j >= 1 and k >= 1
-                        and i < nx - 1 and j < ny - 1 and k < nz - 1
-                        and _is_active_pressure_cell(active_tile_mask, i, j, k)
-                    ):
-                        lap = (
-                            p[i + 1, j, k] + p[i - 1, j, k]
-                            + p[i, j + 1, k] + p[i, j - 1, k]
-                            + p[i, j, k + 1] + p[i, j, k - 1]
-                            - 6.0 * p[i, j, k]
-                        ) * inv_delta2
+                                s += b[i, j, k] - lap
+                                count += 1.0
 
-                        s += b[i, j, k] - lap
-                        count += 1.0
-
-        coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
+                coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @njit(cache=True, parallel=True)
 def mg_prolongate_add_nearest(coarse_e, fine_p):
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = fine_p.shape
-    total = cnx * cny * cnz
 
-    for n in prange(total):
-        I = n // (cny * cnz)
-        rem = n - I * cny * cnz
-        J = rem // cnz
-        K = rem - J * cnz
+    for I in prange(cnx):
+        for J in range(cny):
+            for K in range(cnz):
+                e = 0.25 * coarse_e[I, J, K]
+                i0 = 2 * I
+                j0 = 2 * J
+                k0 = 2 * K
 
-        e = 0.25 * coarse_e[I, J, K]
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
+                for di in range(2):
+                    for dj in range(2):
+                        for dk in range(2):
+                            i = i0 + di
+                            j = j0 + dj
+                            k = k0 + dk
 
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if i < fnx and j < fny and k < fnz:
-                        fine_p[i, j, k] += e
+                            if i < fnx and j < fny and k < fnz:
+                                fine_p[i, j, k] += e
 
 
 @njit(cache=True, parallel=True)
 def mg_rbgs_step(p, b, delta, parity):
     nx, ny, nz = p.shape
-    total = nx * ny * nz
     delta2 = delta * delta
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
-
-        if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-            continue
-
-        if ((i + j + k) & 1) != parity:
-            continue
-
-        p[i, j, k] = (
-            p[i + 1, j, k] + p[i - 1, j, k]
-            + p[i, j + 1, k] + p[i, j - 1, k]
-            + p[i, j, k + 1] + p[i, j, k - 1]
-            - delta2 * b[i, j, k]
-        ) / 6.0
+    for i in prange(1, nx - 1):
+        for j in range(1, ny - 1):
+            k_start = 1 + ((parity - ((i + j) & 1)) & 1)
+            for k in range(k_start, nz - 1, 2):
+                p[i, j, k] = (
+                    p[i + 1, j, k] + p[i - 1, j, k]
+                    + p[i, j + 1, k] + p[i, j - 1, k]
+                    + p[i, j, k + 1] + p[i, j, k - 1]
+                    - delta2 * b[i, j, k]
+                ) / 6.0
 
 
 @njit(cache=True, parallel=True)
 def mg_rbgs_step_sparse_level0(p, b, delta, parity, active_tile_mask):
     nx, ny, nz = p.shape
-    total = nx * ny * nz
     delta2 = delta * delta
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(1, nx - 1):
+        for j in range(1, ny - 1):
+            k_start = 1 + ((parity - ((i + j) & 1)) & 1)
+            for k in range(k_start, nz - 1, 2):
+                if not _is_active_pressure_cell(active_tile_mask, i, j, k):
+                    continue
 
-        if (
-            i < 1 or j < 1 or k < 1
-            or i >= nx - 1 or j >= ny - 1 or k >= nz - 1
-            or ((i + j + k) & 1) != parity
-            or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-        ):
-            continue
-
-        p[i, j, k] = (
-            p[i + 1, j, k] + p[i - 1, j, k]
-            + p[i, j + 1, k] + p[i, j - 1, k]
-            + p[i, j, k + 1] + p[i, j, k - 1]
-            - delta2 * b[i, j, k]
-        ) / 6.0
+                p[i, j, k] = (
+                    p[i + 1, j, k] + p[i - 1, j, k]
+                    + p[i, j + 1, k] + p[i, j - 1, k]
+                    + p[i, j, k + 1] + p[i, j, k - 1]
+                    - delta2 * b[i, j, k]
+                ) / 6.0
 
 
 def _mg_smooth(p, b, delta, iterations, level=0, active_tile_mask=None):
@@ -555,6 +498,7 @@ def pressure_poisson_multigrid(
     delta_levels,
     num_vcycles,
     zero_levels,
+    timing_stats=None,
 ):
     threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
     _ = kernel_config.volume_blocks_per_grid(u.shape, threadsperblock_3d)
@@ -562,6 +506,7 @@ def pressure_poisson_multigrid(
     p_levels[0] = p
     b_levels[0] = b
 
+    section_start = perf_counter()
     pressure_equation_right_side(
         u,
         v,
@@ -572,17 +517,23 @@ def pressure_poisson_multigrid(
         rho,
         active_tile_mask,
     )
+    _record_pressure_timing(timing_stats, "loop_pressure_rhs", perf_counter() - section_start)
 
+    section_start = perf_counter()
     _remove_rhs_mean(
         b_levels[0],
         active_tile_mask,
     )
+    _record_pressure_timing(timing_stats, "loop_pressure_rhs_mean", perf_counter() - section_start)
 
+    section_start = perf_counter()
     _reset_inactive_pressure_kernel(
         p_levels[0],
         active_tile_mask,
     )
+    _record_pressure_timing(timing_stats, "loop_pressure_reset", perf_counter() - section_start)
 
+    section_start = perf_counter()
     add_artifical_divergence(
         T,
         source_masks,
@@ -596,7 +547,9 @@ def pressure_poisson_multigrid(
         rho,
         dt,
     )
+    _record_pressure_timing(timing_stats, "loop_pressure_artificial_divergence", perf_counter() - section_start)
 
+    section_start = perf_counter()
     for _ in range(num_vcycles):
         _mg_vcycle(
             0,
@@ -609,5 +562,6 @@ def pressure_poisson_multigrid(
             coarse_smooth=20,
             active_tile_mask=active_tile_mask,
         )
+    _record_pressure_timing(timing_stats, "loop_pressure_vcycles", perf_counter() - section_start)
 
     return p_levels[0]

@@ -664,6 +664,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             delta_levels,
             simulations[0].get("settings").get("iterations"),
             zero_levels,
+            timing_stats,
         )
         _record_timing(timing_stats, "loop_pressure_solve", perf_counter() - section_start)
 

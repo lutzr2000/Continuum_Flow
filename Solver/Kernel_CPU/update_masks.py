@@ -28,75 +28,69 @@ def update_source_mask(
 ):
     """Rebuild all per-source masks and the aggregate source mask in one pass."""
     mask_count, nx, ny, nz = mask_stack.shape
-    total = nx * ny * nz
     obj_count = target_indices.shape[0]
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                for mask_idx in range(mask_count):
+                    mask_stack[mask_idx, i, j, k] = False
 
-        for mask_idx in range(mask_count):
-            mask_stack[mask_idx, i, j, k] = False
+                aggregate_active = False
+                x = np.float32(ox + i * delta)
+                y = np.float32(oy + j * delta)
+                z = np.float32(oz + k * delta)
 
-        aggregate_active = False
-        x = np.float32(ox + i * delta)
-        y = np.float32(oy + j * delta)
-        z = np.float32(oz + k * delta)
+                for obj_idx in range(obj_count):
+                    if not active_flags[obj_idx]:
+                        continue
+                    if (
+                        i < bounds[obj_idx, 0]
+                        or i > bounds[obj_idx, 1]
+                        or j < bounds[obj_idx, 2]
+                        or j > bounds[obj_idx, 3]
+                        or k < bounds[obj_idx, 4]
+                        or k > bounds[obj_idx, 5]
+                    ):
+                        continue
 
-        for obj_idx in range(obj_count):
-            if not active_flags[obj_idx]:
-                continue
+                    bx = (
+                        inv_mats[obj_idx, 0] * x
+                        + inv_mats[obj_idx, 1] * y
+                        + inv_mats[obj_idx, 2] * z
+                        + inv_mats[obj_idx, 3]
+                    )
+                    by = (
+                        inv_mats[obj_idx, 4] * x
+                        + inv_mats[obj_idx, 5] * y
+                        + inv_mats[obj_idx, 6] * z
+                        + inv_mats[obj_idx, 7]
+                    )
+                    bz = (
+                        inv_mats[obj_idx, 8] * x
+                        + inv_mats[obj_idx, 9] * y
+                        + inv_mats[obj_idx, 10] * z
+                        + inv_mats[obj_idx, 11]
+                    )
 
-            if (
-                i < bounds[obj_idx, 0]
-                or i > bounds[obj_idx, 1]
-                or j < bounds[obj_idx, 2]
-                or j > bounds[obj_idx, 3]
-                or k < bounds[obj_idx, 4]
-                or k > bounds[obj_idx, 5]
-            ):
-                continue
+                    base_ox = local_origins[obj_idx, 0]
+                    base_oy = local_origins[obj_idx, 1]
+                    base_oz = local_origins[obj_idx, 2]
+                    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+                    bj = int(math.floor((by - base_oy) / delta + 0.5))
+                    bk = int(math.floor((bz - base_oz) / delta + 0.5))
 
-            bx = (
-                inv_mats[obj_idx, 0] * x
-                + inv_mats[obj_idx, 1] * y
-                + inv_mats[obj_idx, 2] * z
-                + inv_mats[obj_idx, 3]
-            )
-            by = (
-                inv_mats[obj_idx, 4] * x
-                + inv_mats[obj_idx, 5] * y
-                + inv_mats[obj_idx, 6] * z
-                + inv_mats[obj_idx, 7]
-            )
-            bz = (
-                inv_mats[obj_idx, 8] * x
-                + inv_mats[obj_idx, 9] * y
-                + inv_mats[obj_idx, 10] * z
-                + inv_mats[obj_idx, 11]
-            )
+                    bn_x = local_mask_shapes[obj_idx, 0]
+                    bn_y = local_mask_shapes[obj_idx, 1]
+                    bn_z = local_mask_shapes[obj_idx, 2]
+                    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+                        flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
+                        if local_masks_flat[flat_index]:
+                            target_idx = target_indices[obj_idx]
+                            mask_stack[target_idx, i, j, k] = True
+                            aggregate_active = True
 
-            base_ox = local_origins[obj_idx, 0]
-            base_oy = local_origins[obj_idx, 1]
-            base_oz = local_origins[obj_idx, 2]
-            bi = int(math.floor((bx - base_ox) / delta + 0.5))
-            bj = int(math.floor((by - base_oy) / delta + 0.5))
-            bk = int(math.floor((bz - base_oz) / delta + 0.5))
-
-            bn_x = local_mask_shapes[obj_idx, 0]
-            bn_y = local_mask_shapes[obj_idx, 1]
-            bn_z = local_mask_shapes[obj_idx, 2]
-            if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
-                flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
-                if local_masks_flat[flat_index]:
-                    target_idx = target_indices[obj_idx]
-                    mask_stack[target_idx, i, j, k] = True
-                    aggregate_active = True
-
-        aggregate_mask[i, j, k] = aggregate_active
-
+                aggregate_mask[i, j, k] = aggregate_active
 
 @njit(cache=True, parallel=True)
 def update_source_value_stack(
@@ -117,71 +111,65 @@ def update_source_value_stack(
 ):
     """Rebuild stacked per-source scalar fields from local source values."""
     source_count, nx, ny, nz = value_stack.shape
-    total = nx * ny * nz
     obj_count = target_indices.shape[0]
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                for source_idx in range(source_count):
+                    value_stack[source_idx, i, j, k] = 0.0
 
-        for source_idx in range(source_count):
-            value_stack[source_idx, i, j, k] = 0.0
+                x = np.float32(ox + i * delta)
+                y = np.float32(oy + j * delta)
+                z = np.float32(oz + k * delta)
 
-        x = np.float32(ox + i * delta)
-        y = np.float32(oy + j * delta)
-        z = np.float32(oz + k * delta)
+                for obj_idx in range(obj_count):
+                    if not active_flags[obj_idx]:
+                        continue
+                    if (
+                        i < bounds[obj_idx, 0]
+                        or i > bounds[obj_idx, 1]
+                        or j < bounds[obj_idx, 2]
+                        or j > bounds[obj_idx, 3]
+                        or k < bounds[obj_idx, 4]
+                        or k > bounds[obj_idx, 5]
+                    ):
+                        continue
 
-        for obj_idx in range(obj_count):
-            if not active_flags[obj_idx]:
-                continue
+                    bx = (
+                        inv_mats[obj_idx, 0] * x
+                        + inv_mats[obj_idx, 1] * y
+                        + inv_mats[obj_idx, 2] * z
+                        + inv_mats[obj_idx, 3]
+                    )
+                    by = (
+                        inv_mats[obj_idx, 4] * x
+                        + inv_mats[obj_idx, 5] * y
+                        + inv_mats[obj_idx, 6] * z
+                        + inv_mats[obj_idx, 7]
+                    )
+                    bz = (
+                        inv_mats[obj_idx, 8] * x
+                        + inv_mats[obj_idx, 9] * y
+                        + inv_mats[obj_idx, 10] * z
+                        + inv_mats[obj_idx, 11]
+                    )
 
-            if (
-                i < bounds[obj_idx, 0]
-                or i > bounds[obj_idx, 1]
-                or j < bounds[obj_idx, 2]
-                or j > bounds[obj_idx, 3]
-                or k < bounds[obj_idx, 4]
-                or k > bounds[obj_idx, 5]
-            ):
-                continue
+                    base_ox = local_origins[obj_idx, 0]
+                    base_oy = local_origins[obj_idx, 1]
+                    base_oz = local_origins[obj_idx, 2]
+                    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+                    bj = int(math.floor((by - base_oy) / delta + 0.5))
+                    bk = int(math.floor((bz - base_oz) / delta + 0.5))
 
-            bx = (
-                inv_mats[obj_idx, 0] * x
-                + inv_mats[obj_idx, 1] * y
-                + inv_mats[obj_idx, 2] * z
-                + inv_mats[obj_idx, 3]
-            )
-            by = (
-                inv_mats[obj_idx, 4] * x
-                + inv_mats[obj_idx, 5] * y
-                + inv_mats[obj_idx, 6] * z
-                + inv_mats[obj_idx, 7]
-            )
-            bz = (
-                inv_mats[obj_idx, 8] * x
-                + inv_mats[obj_idx, 9] * y
-                + inv_mats[obj_idx, 10] * z
-                + inv_mats[obj_idx, 11]
-            )
-
-            base_ox = local_origins[obj_idx, 0]
-            base_oy = local_origins[obj_idx, 1]
-            base_oz = local_origins[obj_idx, 2]
-            bi = int(math.floor((bx - base_ox) / delta + 0.5))
-            bj = int(math.floor((by - base_oy) / delta + 0.5))
-            bk = int(math.floor((bz - base_oz) / delta + 0.5))
-
-            bn_x = local_mask_shapes[obj_idx, 0]
-            bn_y = local_mask_shapes[obj_idx, 1]
-            bn_z = local_mask_shapes[obj_idx, 2]
-            if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
-                flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
-                if local_masks_flat[flat_index]:
-                    target_idx = target_indices[obj_idx]
-                    value_stack[target_idx, i, j, k] = local_values_flat[flat_index]
-
+                    bn_x = local_mask_shapes[obj_idx, 0]
+                    bn_y = local_mask_shapes[obj_idx, 1]
+                    bn_z = local_mask_shapes[obj_idx, 2]
+                    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+                        flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
+                        if local_masks_flat[flat_index]:
+                            target_idx = target_indices[obj_idx]
+                            value_stack[target_idx, i, j, k] = local_values_flat[flat_index]
 
 @njit(cache=True, parallel=True)
 def update_obstacle_mask(
@@ -204,92 +192,87 @@ def update_obstacle_mask(
 ):
     """Rebuild the obstacle mask and obstacle velocities with last-write-wins overlap."""
     nx, ny, nz = mask.shape
-    total = nx * ny * nz
     obj_count = active_flags.shape[0]
 
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
+    for i in prange(nx):
+        for j in range(ny):
+            for k in range(nz):
+                mask[i, j, k] = False
+                out_vx[i, j, k] = 0.0
+                out_vy[i, j, k] = 0.0
+                out_vz[i, j, k] = 0.0
 
-        mask[i, j, k] = False
-        out_vx[i, j, k] = 0.0
-        out_vy[i, j, k] = 0.0
-        out_vz[i, j, k] = 0.0
+                cell_active = False
+                x = np.float32(ox + i * delta)
+                y = np.float32(oy + j * delta)
+                z = np.float32(oz + k * delta)
 
-        cell_active = False
-        x = np.float32(ox + i * delta)
-        y = np.float32(oy + j * delta)
-        z = np.float32(oz + k * delta)
+                for obj_idx in range(obj_count):
+                    if not active_flags[obj_idx]:
+                        continue
+                    if (
+                        i < bounds[obj_idx, 0]
+                        or i > bounds[obj_idx, 1]
+                        or j < bounds[obj_idx, 2]
+                        or j > bounds[obj_idx, 3]
+                        or k < bounds[obj_idx, 4]
+                        or k > bounds[obj_idx, 5]
+                    ):
+                        continue
 
-        for obj_idx in range(obj_count):
-            if not active_flags[obj_idx]:
-                continue
-
-            if (
-                i < bounds[obj_idx, 0]
-                or i > bounds[obj_idx, 1]
-                or j < bounds[obj_idx, 2]
-                or j > bounds[obj_idx, 3]
-                or k < bounds[obj_idx, 4]
-                or k > bounds[obj_idx, 5]
-            ):
-                continue
-
-            bx = (
-                inv_mats[obj_idx, 0] * x
-                + inv_mats[obj_idx, 1] * y
-                + inv_mats[obj_idx, 2] * z
-                + inv_mats[obj_idx, 3]
-            )
-            by = (
-                inv_mats[obj_idx, 4] * x
-                + inv_mats[obj_idx, 5] * y
-                + inv_mats[obj_idx, 6] * z
-                + inv_mats[obj_idx, 7]
-            )
-            bz = (
-                inv_mats[obj_idx, 8] * x
-                + inv_mats[obj_idx, 9] * y
-                + inv_mats[obj_idx, 10] * z
-                + inv_mats[obj_idx, 11]
-            )
-
-            base_ox = local_origins[obj_idx, 0]
-            base_oy = local_origins[obj_idx, 1]
-            base_oz = local_origins[obj_idx, 2]
-            bi = int(math.floor((bx - base_ox) / delta + 0.5))
-            bj = int(math.floor((by - base_oy) / delta + 0.5))
-            bk = int(math.floor((bz - base_oz) / delta + 0.5))
-
-            bn_x = local_mask_shapes[obj_idx, 0]
-            bn_y = local_mask_shapes[obj_idx, 1]
-            bn_z = local_mask_shapes[obj_idx, 2]
-            if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
-                flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
-                if local_masks_flat[flat_index]:
-                    cell_active = True
-                    out_vx[i, j, k] = (
-                        rates[obj_idx, 0] * bx
-                        + rates[obj_idx, 1] * by
-                        + rates[obj_idx, 2] * bz
-                        + rates[obj_idx, 3]
+                    bx = (
+                        inv_mats[obj_idx, 0] * x
+                        + inv_mats[obj_idx, 1] * y
+                        + inv_mats[obj_idx, 2] * z
+                        + inv_mats[obj_idx, 3]
                     )
-                    out_vy[i, j, k] = (
-                        rates[obj_idx, 4] * bx
-                        + rates[obj_idx, 5] * by
-                        + rates[obj_idx, 6] * bz
-                        + rates[obj_idx, 7]
+                    by = (
+                        inv_mats[obj_idx, 4] * x
+                        + inv_mats[obj_idx, 5] * y
+                        + inv_mats[obj_idx, 6] * z
+                        + inv_mats[obj_idx, 7]
                     )
-                    out_vz[i, j, k] = (
-                        rates[obj_idx, 8] * bx
-                        + rates[obj_idx, 9] * by
-                        + rates[obj_idx, 10] * bz
-                        + rates[obj_idx, 11]
+                    bz = (
+                        inv_mats[obj_idx, 8] * x
+                        + inv_mats[obj_idx, 9] * y
+                        + inv_mats[obj_idx, 10] * z
+                        + inv_mats[obj_idx, 11]
                     )
 
-        mask[i, j, k] = cell_active
+                    base_ox = local_origins[obj_idx, 0]
+                    base_oy = local_origins[obj_idx, 1]
+                    base_oz = local_origins[obj_idx, 2]
+                    bi = int(math.floor((bx - base_ox) / delta + 0.5))
+                    bj = int(math.floor((by - base_oy) / delta + 0.5))
+                    bk = int(math.floor((bz - base_oz) / delta + 0.5))
+
+                    bn_x = local_mask_shapes[obj_idx, 0]
+                    bn_y = local_mask_shapes[obj_idx, 1]
+                    bn_z = local_mask_shapes[obj_idx, 2]
+                    if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+                        flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
+                        if local_masks_flat[flat_index]:
+                            cell_active = True
+                            out_vx[i, j, k] = (
+                                rates[obj_idx, 0] * bx
+                                + rates[obj_idx, 1] * by
+                                + rates[obj_idx, 2] * bz
+                                + rates[obj_idx, 3]
+                            )
+                            out_vy[i, j, k] = (
+                                rates[obj_idx, 4] * bx
+                                + rates[obj_idx, 5] * by
+                                + rates[obj_idx, 6] * bz
+                                + rates[obj_idx, 7]
+                            )
+                            out_vz[i, j, k] = (
+                                rates[obj_idx, 8] * bx
+                                + rates[obj_idx, 9] * by
+                                + rates[obj_idx, 10] * bz
+                                + rates[obj_idx, 11]
+                            )
+
+                mask[i, j, k] = cell_active
 
 
 def _update_frame_state(pack, t, delta, origin_x, origin_y, origin_z, shape):
