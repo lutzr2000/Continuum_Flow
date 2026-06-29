@@ -1,3 +1,4 @@
+import ctypes
 import math
 from pathlib import Path
 from time import perf_counter
@@ -21,6 +22,35 @@ import Solver.General.forces as forces
 
 CPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("PageFaultCount", ctypes.c_ulong),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+def _process_ram_usage_bytes():
+    counters = _ProcessMemoryCounters()
+    counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+    process_handle = ctypes.windll.kernel32.GetCurrentProcess()
+    ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+        process_handle,
+        ctypes.byref(counters),
+        counters.cb,
+    )
+    if not ok:
+        return None
+    return int(counters.WorkingSetSize)
 
 
 def _current_output_fields(u, v, w, p, temperature, smoke, fuel, flame):
@@ -267,11 +297,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
     output_frame_count = 0
+    ram_reported = False
 
+    # ------------time-------------------
     t = 0.0
     cfl = float(simulations[0].get("settings", {}).get("cfl", 10.0))
     t_max = simulations[0].get("settings").get("simulation_length")
 
+    # ------------dimensions------------------
     delta = simulations[0].get("domain").get("resolution")
     nx = simulations[0]["domain"]["grid"]["nx"]
     ny = simulations[0]["domain"]["grid"]["ny"]
@@ -286,12 +319,15 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     print("Initialise")
     print("Cell count: ", int(nx * ny * nz))
 
+    # ------------tiles------------------
     active_tile_shape = kernel_config.active_tile_shape(shape)
 
     scalar_active_tiles = np.zeros(active_tile_shape, dtype=np.bool_)
     scalar_active_tiles_dilated = np.zeros(active_tile_shape, dtype=np.bool_)
     scalar_tile_padding = kernel_config.active_tile_padding_tiles()
 
+    # ------------fields------------------
+    # velocity
     u = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     u_work = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     v = np.empty(shape, dtype=CPU_FIELD_DTYPE)
@@ -299,10 +335,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     w = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     w_work = np.empty(shape, dtype=CPU_FIELD_DTYPE)
 
+    # pressure
     p = np.empty(shape, dtype=CPU_FIELD_DTYPE)
-    pressure_rhs_partial_sums = np.zeros(kernel_config.MAX_REDUCTION_BLOCKS, dtype=np.float32)
-    pressure_rhs_sum = np.zeros(1, dtype=np.float32)
 
+    # scalars
     temperature = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     temperature_work = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     smoke = np.empty(shape, dtype=CPU_FIELD_DTYPE)
@@ -311,12 +347,15 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     fuel_work = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     flame = np.empty(shape, dtype=CPU_FIELD_DTYPE)
 
+    # scratch
     scratch_A_x = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     scratch_A_y = np.empty(shape, dtype=CPU_FIELD_DTYPE)
     scratch_A_z = np.empty(shape, dtype=CPU_FIELD_DTYPE)
 
+    # vortictiy
     vorticity_magnitude = np.empty(shape, dtype=CPU_FIELD_DTYPE)
 
+    # masks
     obstacle_mask = np.ascontiguousarray(obstacle_mask, dtype=np.bool_)
     source_mask_host = np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_)
     source_mask = np.ascontiguousarray(source_mask_host, dtype=np.bool_)
@@ -325,12 +364,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     source_noise_base_fields = build_source_noise_fields(simulations[0].get("sources") or [], source_base_masks)
     source_noise = np.zeros((len(source_noise_base_fields),) + shape, dtype=np.float32)
 
+    # multigrid levels
     p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
         shape,
         delta,
         min_size=8,
     )
 
+    # ------------intitialise------------------
     u_initial, v_initial, w_initial = compute_inital_velocity(simulations[0])
 
     u[...] = np.full(shape, u_initial, dtype=CPU_FIELD_DTYPE)
@@ -359,6 +400,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             origin_z,
         )
 
+    # ------------output------------------
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
@@ -368,6 +410,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         shape,
     )
 
+    # ------------time loop------------------
     print("Start time iteration")
     next_output_time = 0.0
     output_index = 0
@@ -388,10 +431,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             output_time_step,
         )
 
+        # ------------Clear scratch-------------------
         scratch_A_x[...] = zero_levels[0]
         scratch_A_y[...] = zero_levels[0]
         scratch_A_z[...] = zero_levels[0]
 
+        # ------------Update masks-------------------
         if animated_sources:
             update_masks.update_masks(
                 source_masks,
@@ -428,6 +473,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scratch_A_z,
             )
 
+        # ------------BC-------------------
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
             simulations,
             t,
@@ -448,6 +494,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             source_noise,
         )
 
+        # ------------Start Active tiles-------------------
         if simulations[0].get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask(
                 temperature,
@@ -473,6 +520,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 np.bool_(True),
             )
 
+        # ------------Vorticity-------------------
         if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
             vorticity.compute_vorticity(
                 u,
@@ -484,12 +532,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scalar_active_tiles_dilated,
             )
 
+        # ------------force params-------------------
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0], t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0], t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0], t)
         swirl_config_buffer = _prepare_force_config(swirl_config, 8)
         turbulence_config_buffer = _prepare_force_config(turbulence_config, 4)
 
+        # ------------Velocity update-------------------
         u_work[...] = u
         v_work[...] = v
         w_work[...] = w
@@ -538,10 +588,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             t,
         )
 
+        # ------------Velocity swap-------------------
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
 
+        # ------------Pressure solve-------------------
         extra_pressure = get_source_values(simulations, "extra_pressure", t)
         noise_amplitudes = get_source_values(simulations, "noise_amplitude", t) / np.float32(100.0)
 
@@ -564,11 +616,10 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             b_levels,
             delta_levels,
             simulations[0].get("settings").get("iterations"),
-            pressure_rhs_partial_sums,
-            pressure_rhs_sum,
             zero_levels,
         )
 
+        # ------------Velocity projection-------------------
         pressure_solve.project_velocity_kernel(
             u,
             v,
@@ -581,6 +632,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             scalar_active_tiles_dilated,
         )
 
+        # ------------Scalar update-------------------
         temperature_work[...] = temperature
         smoke_work[...] = smoke
         fuel_work[...] = fuel
@@ -625,12 +677,15 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             scalar_active_tiles_dilated,
         )
 
+        # ------------Swap-------------------
         temperature, temperature_work = temperature_work, temperature
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
 
+        # ------------time updated-------------------
         t = t + dt
 
+        # ------------Output-------------------
         output_fields = _current_output_fields(
             u, v, w, p, temperature, smoke, fuel, flame
         )
@@ -647,8 +702,17 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             output_frame_count += 1
             next_output_time += output_time_step
 
+        # ------------Memory track-------------------
+        if output_index == 10 and not ram_reported:
+            ram_usage = _process_ram_usage_bytes()
+            if ram_usage is not None:
+                print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
+            ram_reported = True
+
+    # ------------Shutdown output-------------------
     output.shutdown_output(shared_memory_blocks, writer_slots)
 
+    # ------------Conclusion-------------------
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")
     else:

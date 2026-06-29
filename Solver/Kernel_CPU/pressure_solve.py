@@ -4,8 +4,6 @@ from numba import njit, prange
 import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_CPU.kernel_config as kernel_config
 
-REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
-
 
 @njit(cache=True, inline="always")
 def _is_active_pressure_cell(active_tile_mask, i, j, k):
@@ -93,15 +91,10 @@ def _reset_inactive_pressure_kernel(p, active_tile_mask):
 def _remove_rhs_mean(
     b,
     active_tile_mask,
-    threadsperblock_3d,
-    rhs_partial_sums,
-    rhs_sum_buffer,
 ):
     """
     Remove the mean value from the active interior right-hand side.
     """
-    del threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer
-
     nx, ny, nz = b.shape
     if nx <= 2 or ny <= 2 or nz <= 2:
         return
@@ -561,8 +554,6 @@ def pressure_poisson_multigrid(
     b_levels,
     delta_levels,
     num_vcycles,
-    rhs_partial_sums,
-    rhs_sum_buffer,
     zero_levels,
 ):
     threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
@@ -585,9 +576,6 @@ def pressure_poisson_multigrid(
     _remove_rhs_mean(
         b_levels[0],
         active_tile_mask,
-        threadsperblock_3d,
-        rhs_partial_sums,
-        rhs_sum_buffer,
     )
 
     _reset_inactive_pressure_kernel(

@@ -1,7 +1,7 @@
 TODO
 
 Solver:
-Rebuild CPU kernel
+Time CPU Kernel
 
 UI:
 free bake does not always delete object in .blend, but sometimes it deletes all
@@ -14,7 +14,6 @@ At very high res run, the live preview struggles to load vdbs properly
 
 Final:
 Ask Codex for potential bugs, espically regarding sync and connection of solver-writer
-If Continuum Flow is in no way opened within Blender, make sure that none of it affects performance
 Bug testing
 Init should build venv with UV
 Test install
