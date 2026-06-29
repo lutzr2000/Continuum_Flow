@@ -827,27 +827,51 @@ def _collect_tree_geometry_nodes(node_tree):
     return geometry_entries
 
 
-def _resolve_node_tree():
+def _resolve_node_tree(context=None):
     """
-    Resolve the active Continuum Flow node tree or fall back to the first one.
+    Resolve the current Continuum Flow node tree or fall back to the first one.
     """
+    if context is not None:
+        space_data = getattr(context, "space_data", None)
+        edit_tree = getattr(space_data, "edit_tree", None)
+        if getattr(edit_tree, "bl_idname", "") == NODE_TREE_ID:
+            return edit_tree
+
+        context_node = getattr(context, "node", None)
+        node_tree = getattr(context_node, "id_data", None)
+        if getattr(node_tree, "bl_idname", "") == NODE_TREE_ID:
+            return node_tree
+
     for node_group in bpy.data.node_groups:
         if getattr(node_group, "bl_idname", "") == NODE_TREE_ID:
             return node_group
 
 
-def build_config_dict():
+def build_config_dict(context=None, simulation_node=None):
     """
     Evaluate the Continuum Flow node tree and return a grouped config dict.
     """
+    if simulation_node is not None:
+        node_tree = getattr(simulation_node, "id_data", None)
+    else:
+        node_tree = _resolve_node_tree(context)
 
-    node_tree = _resolve_node_tree()
+    if node_tree is None:
+        raise ValueError("No Continuum Flow node tree found.")
 
-    simulation_nodes = [
-        node
-        for node in node_tree.nodes
-        if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE"
-    ]
+    if simulation_node is not None:
+        if getattr(simulation_node, "bl_idname", "") != "CONTINUUM_FLOW_SIMULATION_NODE":
+            raise ValueError("Selected node is not a Continuum Flow simulation node.")
+        simulation_nodes = [simulation_node]
+    else:
+        simulation_nodes = [
+            node
+            for node in node_tree.nodes
+            if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE"
+        ]
+
+    if not simulation_nodes:
+        raise ValueError("No Continuum Flow simulation node found.")
 
     config_dict = {
         "meta": {

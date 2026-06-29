@@ -125,6 +125,70 @@ def _resolve_output_node_from_context(context):
     return None
 
 
+def _linked_simulation_nodes_from_output_node(output_node):
+    if output_node is None:
+        return []
+
+    result_socket = output_node.inputs.get("Result")
+    if result_socket is None or not result_socket.is_linked:
+        return []
+
+    simulation_nodes = []
+    for link in result_socket.links:
+        simulation_node = getattr(link, "from_node", None)
+        if getattr(simulation_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+            simulation_nodes.append(simulation_node)
+    return simulation_nodes
+
+
+def _resolve_output_node_from_simulation_node(simulation_node):
+    if simulation_node is None:
+        return None
+
+    result_socket = simulation_node.outputs.get("Result")
+    if result_socket is None or not result_socket.is_linked:
+        return None
+
+    for link in result_socket.links:
+        output_node = getattr(link, "to_node", None)
+        if getattr(output_node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
+            return output_node
+    return None
+
+
+def _resolve_selected_simulation_node(context):
+    output_node = _resolve_output_node_from_context(context)
+    linked_simulation_nodes = _linked_simulation_nodes_from_output_node(output_node)
+    if linked_simulation_nodes:
+        return linked_simulation_nodes[0]
+
+    active_node = getattr(context, "active_node", None)
+    if getattr(active_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+        return active_node
+
+    space_data = getattr(context, "space_data", None)
+    edit_tree = getattr(space_data, "edit_tree", None)
+    if getattr(edit_tree, "bl_idname", "") == "CONTINUUM_FLOW_NODE_TREE":
+        active_tree_node = getattr(getattr(edit_tree, "nodes", None), "active", None)
+        if getattr(active_tree_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+            return active_tree_node
+
+        selected_simulation_nodes = [
+            node
+            for node in getattr(edit_tree, "nodes", ())
+            if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE"
+            and bool(getattr(node, "select", False))
+        ]
+        if selected_simulation_nodes:
+            return selected_simulation_nodes[0]
+
+    context_node = getattr(context, "node", None)
+    if getattr(context_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+        return context_node
+
+    return None
+
+
 def _output_node_last_bake_directory(output_node):
     if output_node is None:
         return None
@@ -311,11 +375,18 @@ class main(bpy.types.Operator):
     bl_label = "Bake"
 
     def execute(self, context):
-        self.output_node = _resolve_output_node_from_context(context)
+        self.simulation_node = _resolve_selected_simulation_node(context)
+        self.output_node = _resolve_output_node_from_simulation_node(self.simulation_node)
+        if self.output_node is None:
+            self.output_node = _resolve_output_node_from_context(context)
         refresh_bake_state_from_output_nodes()
 
         if solver_status.bake_running:
             self.report({'WARNING'}, "Bake is already running")
+            return {'CANCELLED'}
+
+        if self.simulation_node is None:
+            self.report({'ERROR'}, "No active Continuum Flow simulation found")
             return {'CANCELLED'}
 
         self.process = None
@@ -437,7 +508,7 @@ class main(bpy.types.Operator):
         return server
 
     def do_bake(self, context):
-        config_dict = export_config.build_config_dict()
+        config_dict = export_config.build_config_dict(context=context, simulation_node=self.simulation_node)
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 
         writer_server = self.launch_writer_manager(config_dict)
