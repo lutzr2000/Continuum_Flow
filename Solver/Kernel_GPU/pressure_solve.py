@@ -318,6 +318,8 @@ def add_artifical_divergence(
     T,
     source_masks,
     extra_pressure,
+    source_noise,
+    noise_amplitudes,
     expansion_rate,
     t_reference,
     b,
@@ -351,6 +353,10 @@ def add_artifical_divergence(
         if not source_masks[source_idx, i, j, k]:
             continue
         source_extra_pressure = extra_pressure[source_idx]
+        source_extra_pressure *= min(
+            max(1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k], 0.0),
+            2.0,
+        )
         if source_extra_pressure > extra_pressure_term:
             extra_pressure_term = source_extra_pressure
 
@@ -739,6 +745,8 @@ def pressure_poisson_multigrid(
     dt,
     source_masks,
     extra_pressure,
+    source_noise,
+    noise_amplitudes,
     delta,
     rho,
     expansion_rate,
@@ -789,6 +797,8 @@ def pressure_poisson_multigrid(
         T,
         source_masks,
         extra_pressure,
+        source_noise,
+        noise_amplitudes,
         expansion_rate,
         t_reference,
         b_levels[0],
@@ -811,3 +821,7 @@ def pressure_poisson_multigrid(
         )
 
     return p_levels[0]
+
+
+
+

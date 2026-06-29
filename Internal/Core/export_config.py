@@ -593,6 +593,10 @@ def _serialize_source_node(
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
+        "source_noise": bool(getattr(node, "source_noise", False)),
+        "noise_scale": float(getattr(node, "noise_scale", 1.0)),
+        "noise_seed": int(getattr(node, "noise_seed", 0)),
+        "noise_amplitude": float(getattr(node, "noise_amplitude", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": _safe_float_vector(node.velocity),
         "animations": animations,
@@ -949,3 +953,6 @@ def export_config_dict(config_dict):
     _export_config_geometry_stls(config_dict, export_directory)
 
     return export_directory, config_dict
+
+
+

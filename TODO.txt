@@ -1,7 +1,6 @@
 TODO
 
 Solver:
-Random noise emission from source 
 Rebuild CPU kernel
 
 UI:

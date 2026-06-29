@@ -2,6 +2,17 @@ import math
 import numpy as np
 from numba import cuda
 
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _clamp(value, lower, upper):
+    return min(max(value, lower), upper)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _noise_multiplier(noise_value, noise_amplitude):
+    return _clamp(1.0 + noise_amplitude * noise_value, 0.0, 2.0)
+
+
 @cuda.jit(cache=True)
 def source_bc_kernel(
     u,
@@ -11,12 +22,14 @@ def source_bc_kernel(
     smoke,
     fuel,
     source_mask,
+    source_noise,
     temperature_value,
     smoke_value,
     fuel_value,
     velocity_x_value,
     velocity_y_value,
     velocity_z_value,
+    noise_amplitude,
     dt,
 ):
     """
@@ -34,20 +47,22 @@ def source_bc_kernel(
     if not source_mask[i, j, k]:
         return
 
+    scalar_multiplier = _noise_multiplier(source_noise[i, j, k], noise_amplitude)
+
     if velocity_x_value != 0 and velocity_y_value != 0 and velocity_z_value != 0:
         u[i, j, k] = velocity_x_value
         v[i, j, k] = velocity_y_value
         w[i, j, k] = velocity_z_value
 
-    T[i, j, k] = temperature_value
+    T[i, j, k] = max(temperature_value * scalar_multiplier, 0.0)
 
     if smoke_value != 0:
         smoke[i, j, k] = min(
-            max(smoke[i, j, k] + dt * 10.0 * smoke_value, 0.0),
+            max(smoke[i, j, k] + dt * 10.0 * smoke_value * scalar_multiplier, 0.0),
             100.0,
         )
     if fuel_value != 0:
         fuel[i, j, k] = min(
-            max(fuel[i, j, k] + dt * 10.0 * fuel_value, 0.0),
+            max(fuel[i, j, k] + dt * 10.0 * fuel_value * scalar_multiplier, 0.0),
             100.0,
         )

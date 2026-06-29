@@ -5,6 +5,7 @@ import Solver.General.update_masks as helper_update_masks
 
 _MASK_THREADS_PER_BLOCK = (8, 8, 8)
 _PACKED_MASK_CACHE = {}
+_PACKED_VALUE_CACHE = {}
 
 
 @cuda.jit(cache=True)
@@ -91,6 +92,88 @@ def update_source_mask(
                 aggregate_active = True
 
     aggregate_mask[i, j, k] = aggregate_active
+
+
+@cuda.jit(cache=True)
+def update_source_value_stack(
+    value_stack,
+    local_masks_flat,
+    local_values_flat,
+    local_mask_offsets,
+    local_mask_shapes,
+    local_origins,
+    target_indices,
+    bounds,
+    inv_mats,
+    active_flags,
+    delta,
+    ox,
+    oy,
+    oz,
+):
+    """Rebuild stacked per-source scalar fields from local source values."""
+    i, j, k = cuda.grid(3)
+    source_count, nx, ny, nz = value_stack.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    for source_idx in range(source_count):
+        value_stack[source_idx, i, j, k] = 0.0
+
+    obj_count = target_indices.shape[0]
+    x = np.float32(ox + i * delta)
+    y = np.float32(oy + j * delta)
+    z = np.float32(oz + k * delta)
+
+    for obj_idx in range(obj_count):
+        if not active_flags[obj_idx]:
+            continue
+
+        if (
+            i < bounds[obj_idx, 0]
+            or i > bounds[obj_idx, 1]
+            or j < bounds[obj_idx, 2]
+            or j > bounds[obj_idx, 3]
+            or k < bounds[obj_idx, 4]
+            or k > bounds[obj_idx, 5]
+        ):
+            continue
+
+        bx = (
+            inv_mats[obj_idx, 0] * x
+            + inv_mats[obj_idx, 1] * y
+            + inv_mats[obj_idx, 2] * z
+            + inv_mats[obj_idx, 3]
+        )
+        by = (
+            inv_mats[obj_idx, 4] * x
+            + inv_mats[obj_idx, 5] * y
+            + inv_mats[obj_idx, 6] * z
+            + inv_mats[obj_idx, 7]
+        )
+        bz = (
+            inv_mats[obj_idx, 8] * x
+            + inv_mats[obj_idx, 9] * y
+            + inv_mats[obj_idx, 10] * z
+            + inv_mats[obj_idx, 11]
+        )
+
+        base_ox = local_origins[obj_idx, 0]
+        base_oy = local_origins[obj_idx, 1]
+        base_oz = local_origins[obj_idx, 2]
+        bi = int(math.floor((bx - base_ox) / delta + 0.5))
+        bj = int(math.floor((by - base_oy) / delta + 0.5))
+        bk = int(math.floor((bz - base_oz) / delta + 0.5))
+
+        bn_x = local_mask_shapes[obj_idx, 0]
+        bn_y = local_mask_shapes[obj_idx, 1]
+        bn_z = local_mask_shapes[obj_idx, 2]
+        if 0 <= bi < bn_x and 0 <= bj < bn_y and 0 <= bk < bn_z:
+            flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
+            if local_masks_flat[flat_index]:
+                target_idx = target_indices[obj_idx]
+                value_stack[target_idx, i, j, k] = local_values_flat[flat_index]
 
 
 @cuda.jit(cache=True)
@@ -392,5 +475,115 @@ def update_masks(
     )
     return masks
 
+
+def update_source_values(
+    value_stack,
+    base_values,
+    t,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+):
+    """Update stacked per-source scalar fields using cached packed local values."""
+    cache_key = id(base_values)
+    pack = _PACKED_VALUE_CACHE.get(cache_key)
+    if pack is None:
+        flat_masks = []
+        flat_values = []
+        offsets = [0]
+        shapes = []
+        origins = []
+        target_indices = []
+        object_entries = []
+
+        for target_idx, value_entries in enumerate(base_values):
+            for value_entry in value_entries:
+                base_voxels = value_entry["voxels"]
+                base_mask = np.ascontiguousarray(base_voxels["mask"], dtype=np.bool_)
+                base_values_local = np.ascontiguousarray(value_entry["values"], dtype=np.float32)
+                flat_masks.append(base_mask.reshape(-1))
+                flat_values.append(base_values_local.reshape(-1))
+                offsets.append(offsets[-1] + base_mask.size)
+                shapes.append(base_mask.shape)
+                origins.append(np.asarray(base_voxels["origin"], dtype=np.float32))
+                target_indices.append(target_idx)
+                object_entries.append(
+                    {
+                        "mesh_object": value_entry["mesh_object"],
+                        "voxels": base_voxels,
+                    }
+                )
+
+        object_count = len(object_entries)
+        if flat_masks:
+            local_masks_flat = np.concatenate(flat_masks).astype(np.bool_, copy=False)
+            local_values_flat = np.concatenate(flat_values).astype(np.float32, copy=False)
+        else:
+            local_masks_flat = np.empty(0, dtype=np.bool_)
+            local_values_flat = np.empty(0, dtype=np.float32)
+
+        mask_shapes = (
+            np.asarray(shapes, dtype=np.int32)
+            if shapes
+            else np.zeros((0, 3), dtype=np.int32)
+        )
+        mask_origins = (
+            np.asarray(origins, dtype=np.float32)
+            if origins
+            else np.zeros((0, 3), dtype=np.float32)
+        )
+        target_indices_array = np.asarray(target_indices, dtype=np.int32)
+
+        pack = {
+            "object_entries": object_entries,
+            "local_masks_flat": cuda.to_device(local_masks_flat),
+            "local_values_flat": cuda.to_device(local_values_flat),
+            "local_mask_offsets": cuda.to_device(np.asarray(offsets, dtype=np.int32)),
+            "local_mask_shapes": cuda.to_device(mask_shapes),
+            "local_origins": cuda.to_device(mask_origins),
+            "target_indices": cuda.to_device(target_indices_array),
+            "bounds": cuda.to_device(np.zeros((object_count, 6), dtype=np.int32)),
+            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "active_flags": cuda.to_device(np.zeros(object_count, dtype=np.bool_)),
+            "count": object_count,
+        }
+        _PACKED_VALUE_CACHE[cache_key] = pack
+
+    if not _update_frame_state(
+        pack,
+        t,
+        delta,
+        origin_x,
+        origin_y,
+        origin_z,
+        value_stack.shape[-3:],
+    ):
+        return value_stack
+
+    launch_shape = value_stack.shape[-3:]
+    launch_blocks = (
+        (int(launch_shape[0]) + _MASK_THREADS_PER_BLOCK[0] - 1) // _MASK_THREADS_PER_BLOCK[0],
+        (int(launch_shape[1]) + _MASK_THREADS_PER_BLOCK[1] - 1) // _MASK_THREADS_PER_BLOCK[1],
+        (int(launch_shape[2]) + _MASK_THREADS_PER_BLOCK[2] - 1) // _MASK_THREADS_PER_BLOCK[2],
+    )
+    update_source_value_stack[launch_blocks, _MASK_THREADS_PER_BLOCK](
+        value_stack,
+        pack["local_masks_flat"],
+        pack["local_values_flat"],
+        pack["local_mask_offsets"],
+        pack["local_mask_shapes"],
+        pack["local_origins"],
+        pack["target_indices"],
+        pack["bounds"],
+        pack["inv_mats"],
+        pack["active_flags"],
+        np.float32(delta),
+        np.float32(origin_x),
+        np.float32(origin_y),
+        np.float32(origin_z),
+    )
+    return value_stack
 
 
