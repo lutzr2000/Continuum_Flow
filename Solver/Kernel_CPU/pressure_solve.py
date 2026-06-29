@@ -87,30 +87,31 @@ def _reset_inactive_pressure_kernel(p, active_tile_mask):
                     p[i, j, k] = 0.0
 
 
-def _remove_rhs_mean(
-    b,
-    active_tile_mask,
-):
-    """
-    Remove the mean value from the active interior right-hand side.
-    """
+@njit(cache=True)
+def _remove_rhs_mean(b, active_tile_mask):
     nx, ny, nz = b.shape
-    if nx <= 2 or ny <= 2 or nz <= 2:
+    s = 0.0
+    count = 0
+
+    for i in range(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                if _is_active_pressure_cell(active_tile_mask, i, j, k):
+                    s += b[i, j, k]
+                    count += 1
+
+    if count == 0:
         return
 
-    active_mask = _expand_active_pressure_mask(active_tile_mask, b.shape)
-    interior_active = active_mask[1:-1, 1:-1, 1:-1]
-
-    active_cell_count = int(np.count_nonzero(interior_active))
-    if active_cell_count <= 0:
+    mean = s / count
+    if abs(mean) <= 1e-12:
         return
 
-    interior_b = b[1:-1, 1:-1, 1:-1]
-    rhs_mean = float(interior_b[interior_active].mean())
-    if abs(rhs_mean) <= 1.0e-12:
-        return
-
-    interior_b[interior_active] -= rhs_mean
+    for i in range(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                if _is_active_pressure_cell(active_tile_mask, i, j, k):
+                    b[i, j, k] -= mean
 
 
 @njit(cache=True, parallel=True)
