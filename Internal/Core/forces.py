@@ -7,6 +7,7 @@ from mathutils import Vector
 
 _DRAW_HANDLER = None
 _ACTIVE_FORCE_REF = None
+_NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 
 ###########################
 # constant force
@@ -41,6 +42,28 @@ def _view3d_overlays_visible():
         return True
     return bool(getattr(overlay, "show_overlays", True))
 
+
+def _continuum_flow_editor_visible():
+    """
+    Return whether any visible node editor is currently showing the Continuum Flow tree.
+    """
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return False
+
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type != "NODE_EDITOR":
+                continue
+            for space in area.spaces:
+                if getattr(space, "type", "") != "NODE_EDITOR":
+                    continue
+                if getattr(space, "tree_type", "") == _NODE_TREE_ID:
+                    return True
+    return False
 
 def _force_node_reference(force_node):
     """
@@ -407,6 +430,10 @@ def force_preview_timer():
     """
     Keep the force preview in sync with node selection.
     """
+    if not _continuum_flow_editor_visible():
+        disable_force_preview()
+        return 0.5
+
     sync_force_preview_from_selection()
     return 0.2
 
