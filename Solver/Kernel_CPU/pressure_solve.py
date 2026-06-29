@@ -76,15 +76,13 @@ def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
 
     for part_idx in prange(partial_count):
         local_sum = np.float32(0.0)
-        flat_idx = part_idx
-        while flat_idx < interior_cell_count:
+        for flat_idx in range(part_idx, interior_cell_count, partial_count):
             i = flat_idx // plane_size + 1
             remainder = flat_idx % plane_size
             j = remainder // interior_nz + 1
             k = remainder % interior_nz + 1
             if _is_active_pressure_cell(active_tile_mask, i, j, k):
                 local_sum += b[i, j, k]
-            flat_idx += partial_count
         partial_sums[part_idx] = local_sum
 
 
@@ -106,15 +104,13 @@ def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
 
     for part_idx in prange(partial_count):
         local_count = np.float32(0.0)
-        flat_idx = part_idx
-        while flat_idx < interior_cell_count:
+        for flat_idx in range(part_idx, interior_cell_count, partial_count):
             i = flat_idx // plane_size + 1
             remainder = flat_idx % plane_size
             j = remainder // interior_nz + 1
             k = remainder % interior_nz + 1
             if _is_active_pressure_cell(active_tile_mask, i, j, k):
                 local_count += np.float32(1.0)
-            flat_idx += partial_count
         partial_counts[part_idx] = local_count
 
 

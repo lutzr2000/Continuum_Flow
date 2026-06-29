@@ -1,7 +1,9 @@
-﻿from time import perf_counter
+from pathlib import Path
+from time import perf_counter
 
 voxelise_mesh_module = None
 gpu_kernel_module = None
+cpu_kernel_module = None
 np = None
 
 
@@ -39,7 +41,7 @@ def _cancel_requested(config):
 
 
 def main(config=None):
-    global np, voxelise_mesh_module, gpu_kernel_module
+    global np, voxelise_mesh_module, gpu_kernel_module, cpu_kernel_module
 
     total_start_time = perf_counter()
     try:
@@ -50,13 +52,22 @@ def main(config=None):
             import Solver.General.voxelise_mesh as _voxelise_mesh_module
             voxelise_mesh_module = _voxelise_mesh_module
         voxelise_mesh_module.set_config_dir(config.get("bake_directory", ""))
-        if gpu_kernel_module is None:
-            import Solver.Kernel_GPU.kernel as _gpu_kernel_module
-            gpu_kernel_module = _gpu_kernel_module
 
         simulations = config.get("simulations") or []
-
         simulation_cfg = simulations[0]
+        solver_backend = str((simulation_cfg.get("settings") or {}).get("solver_backend", "GPU")).strip().upper()
+
+        if solver_backend == "CPU":
+            if cpu_kernel_module is None:
+                import Solver.Kernel_CPU.kernel as _cpu_kernel_module
+                cpu_kernel_module = _cpu_kernel_module
+            solver_kernel_module = cpu_kernel_module
+        else:
+            if gpu_kernel_module is None:
+                import Solver.Kernel_GPU.kernel as _gpu_kernel_module
+                gpu_kernel_module = _gpu_kernel_module
+            solver_kernel_module = gpu_kernel_module
+
         domain_cfg = simulation_cfg.get("domain") or {}
         grid_cfg = domain_cfg.get("grid") or {}
 
@@ -114,7 +125,7 @@ def main(config=None):
                 print("Bake cancelled during preprocessing.")
                 return
 
-        return gpu_kernel_module.solver(
+        return solver_kernel_module.solver(
             config,
             obstacle_base_masks,
             obstacle_mask,
@@ -128,11 +139,11 @@ def main(config=None):
         print(f"Bake runtime: {total_runtime:.3f} s")
         print("################################################################")
 
+
 if __name__ == "__main__":
     import json
     import sys
     import traceback
-    from pathlib import Path
 
     try:
         if len(sys.argv) < 2:

@@ -29,8 +29,7 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
         max_v = 0.0
         max_w = 0.0
 
-        idx = part_idx
-        while idx < total_size:
+        for idx in range(part_idx, total_size, partial_count):
             val_u = abs(u_flat[idx])
             val_v = abs(v_flat[idx])
             val_w = abs(w_flat[idx])
@@ -41,8 +40,6 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
                 max_v = val_v
             if val_w > max_w:
                 max_w = val_w
-
-            idx += partial_count
 
         maxima[part_idx, 0] = max_u
         maxima[part_idx, 1] = max_v
