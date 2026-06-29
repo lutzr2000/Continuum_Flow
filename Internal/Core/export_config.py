@@ -17,14 +17,14 @@ _DOMAIN_BOUNDARY_AXES = ("x_low", "x_high", "y_low", "y_high", "z_low", "z_high"
 _SYNC_DEBUGGED_ACTIONS = set()
 
 PERCENTAGE_MAPPED_PROPERTY_RANGES = {
-    "temperature_dissipation": (0.0, 0.5),
-    "temperature_production_rate": (0.0, 0.05),
+    "temperature_dissipation": (0.0, 10),
+    "temperature_production_rate": (0.0, 1),
     "buoyancy": (0.0, 0.01),
-    "expansion_rate": (0.0, 0.01),
-    "smoke_dissipation": (0.0, 5),
-    "smoke_production_rate": (0.0, 0.05),
-    "fuel_dissipation": (0.0, 1.0),
-    "fuel_burn_rate": (0.0, 1.0),
+    "expansion_rate": (0.0, 0.1),
+    "smoke_dissipation": (0.0, 10),
+    "smoke_production_rate": (0.0, 1),
+    "fuel_dissipation": (0.0, 10),
+    "fuel_burn_rate": (0.0, 20.0),
     "vorticity": (0.0, 1.0),
 }
 

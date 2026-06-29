@@ -35,9 +35,9 @@ class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
         ("INFLOW", "Inflow", "Inflow boundary with prescribed velocity"),
     )
     resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.000001, unit="LENGTH", description="Grid resolution", options=set())  # type: ignore
-    nx: IntProperty(name="NX", default=128, min=32, max=8192, soft_min=32, description="Grid cells in x", options=set())  # type: ignore
-    ny: IntProperty(name="NY", default=128, min=32, max=8192, soft_min=32, description="Grid cells in y", options=set())  # type: ignore
-    nz: IntProperty(name="NZ", default=128, min=32, max=8192, soft_min=32, description="Grid cells in z", options=set())  # type: ignore
+    nx: IntProperty(name="NX", default=128, min=32, max=4096, soft_min=32, description="Grid cells in x", options=set())  # type: ignore
+    ny: IntProperty(name="NY", default=128, min=32, max=4096, soft_min=32, description="Grid cells in y", options=set())  # type: ignore
+    nz: IntProperty(name="NZ", default=128, min=32, max=4096, soft_min=32, description="Grid cells in z", options=set())  # type: ignore
     x_low_bc: EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
     x_high_bc: EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
     y_low_bc: EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore

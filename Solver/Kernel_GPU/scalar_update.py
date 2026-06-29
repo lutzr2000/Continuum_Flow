@@ -310,36 +310,32 @@ def update_scalar_fields_maccormack(
     fuel_corrected = advection_schemes._clamp(fuel_corrected, fuel_lower, fuel_upper)
 
     # oxygen
-    oxygen_center = 100.0 - smoke_corrected
+    oxygen_center = max(0.0, min(1.0, (100.0 - smoke_corrected) / 100.0))
 
     # burn logic
     if (
         T_corrected > fuel_ignition_temperature
         and fuel_corrected > 0.0
-        and oxygen_center >= minimum_oxygen_concentration
     ):
-        combustion_fuel_source = -fuel_burn_rate * fuel_corrected
+        fuel_burn_source = -fuel_burn_rate * fuel_corrected * oxygen_center
+        temperature_burn_source = temperature_production_rate * -fuel_burn_source 
+        smoke_burn_source = smoke_production_rate * -fuel_burn_source
     else:
-        combustion_fuel_source = 0.0
+        temperature_burn_source = 0.0
+        smoke_burn_source = 0.0
+        fuel_burn_source = 0.0
 
-    fuel_source = -fuel_dissipation_rate * fuel_corrected + combustion_fuel_source
+    # dissipation
+    temperature_dissipation = -temperature_dissipation_rate * (T_corrected - t_reference)
+    smoke_dissipation = - smoke_dissipation_rate * smoke_corrected
+    fuel_dissipation = -fuel_dissipation_rate * fuel_corrected
 
-    # temperature source
-    temperature_source = -temperature_dissipation_rate * (
-        T_corrected - t_reference
-    ) + temperature_production_rate * fuel_corrected
-    # smoke source
-    smoke_source = (
-        smoke_production_rate * fuel_corrected
-        - smoke_dissipation_rate * smoke_corrected
-    )
-
-    T_updated = T_corrected + dt * temperature_source
-    smoke_updated = smoke_corrected + dt * smoke_source
-    fuel_updated = fuel_corrected + dt * fuel_source
+    T_updated = T_corrected + dt * temperature_burn_source + dt * temperature_dissipation
+    smoke_updated = smoke_corrected + dt * smoke_burn_source + dt * smoke_dissipation
+    fuel_updated = fuel_corrected + dt * fuel_burn_source + dt * fuel_dissipation
 
     # ensure physically reasonable bounds
     T_out[i, j, k] = max(T_updated, 0.0)
     smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
     fuel_out[i, j, k] = min(max(fuel_updated, 0.0), 100.0)
-    flame_out[i, j, k] = max(-combustion_fuel_source, 0.0)
+    flame_out[i, j, k] = max(-fuel_burn_source, 0.0)
