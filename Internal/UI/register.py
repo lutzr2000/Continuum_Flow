@@ -21,7 +21,11 @@ from ..UI.node_domain import ContinuumFlowDomainNode
 from ..UI.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
 from ..UI.node_geometry import ContinuumFlowGeometryNode
 from ..UI.node_obstacle import ContinuumFlowObstacleNode
-from ..UI.node_output import ContinuumFlowOutputNode, CONTINUUM_FLOW_OT_output_bake_button
+from ..UI.node_output import (
+    ContinuumFlowOutputNode,
+    CONTINUUM_FLOW_OT_output_bake_button,
+    CONTINUUM_FLOW_OT_output_free_bake_button,
+)
 from ..UI.node_physics import ContinuumFlowPhysicsNode0
 from ..UI.node_simulation import ContinuumFlowSimulationNode
 from ..UI.node_source import ContinuumFlowSourceNode
@@ -33,7 +37,7 @@ from ..Core.runtime_handlers import (
     sync_runtime_state,
     sync_ui_animation_state,
 )
-from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake
+from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake, CONTINUUM_FLOW_OT_free_bake
 from ..Core import forces
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
@@ -52,6 +56,7 @@ classes = (
     ContinuumFlowGeometryNode,
     ContinuumFlowOutputNode,
     CONTINUUM_FLOW_OT_output_bake_button,
+    CONTINUUM_FLOW_OT_output_free_bake_button,
     ContinuumFlowPhysicsNode0,
     ContinuumFlowSimulationNode,
     ContinuumFlowSourceNode,
@@ -65,6 +70,7 @@ classes = (
     ContinuumFlow_OT_add_basic_setup,
     ContinuumFlow_OT_viewer_toggle_domain,
     CONTINUUM_FLOW_OT_cancel_bake,
+    CONTINUUM_FLOW_OT_free_bake,
     main,
 )
 

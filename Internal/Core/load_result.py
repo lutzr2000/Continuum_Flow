@@ -1,5 +1,18 @@
-﻿import bpy
+import bpy
 from pathlib import Path
+
+
+_OUTPUT_DIRECTORY_PROPERTY = "continuum_flow_output_directory"
+
+
+def _normalize_directory_path(path_value):
+    if not path_value:
+        return None
+
+    try:
+        return str(Path(path_value).resolve())
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 class VDBWatcher:
@@ -10,10 +23,12 @@ class VDBWatcher:
         self.volume_object = None
         self.sequence_files = []
         self.progress_callback = None
+        self.loaded_output_directory = None
 
     def start(self, watch_dir, progress_callback=None):
-        self.clear_loaded_sequence()
         self.watch_dir = Path(watch_dir).resolve()
+        self.volume_object = None
+        self.loaded_output_directory = None
         self.file_sizes.clear()
         self.sequence_files.clear()
         self.progress_callback = progress_callback
@@ -21,21 +36,72 @@ class VDBWatcher:
 
         bpy.app.timers.register(self.timer, first_interval=0.5)
 
-
     def stop(self):
         self.running = False
         self.progress_callback = None
 
-    def clear_loaded_sequence(self):
-        volume_object = self.volume_object
-        self.volume_object = None
-        self.sequence_files.clear()
-        self.file_sizes.clear()
+    def _volume_object_matches_directory(self, volume_object, output_directory):
+        if volume_object is None or output_directory is None:
+            return False
 
+        try:
+            tagged_directory = volume_object.get(_OUTPUT_DIRECTORY_PROPERTY)
+        except Exception:
+            tagged_directory = None
+
+        if _normalize_directory_path(tagged_directory) == output_directory:
+            return True
+
+        try:
+            volume_data = getattr(volume_object, "data", None)
+        except Exception:
+            volume_data = None
+
+        if volume_data is not None:
+            try:
+                tagged_directory = volume_data.get(_OUTPUT_DIRECTORY_PROPERTY)
+            except Exception:
+                tagged_directory = None
+
+            if _normalize_directory_path(tagged_directory) == output_directory:
+                return True
+
+            try:
+                filepath = getattr(volume_data, "filepath", "")
+            except Exception:
+                filepath = ""
+
+            normalized_filepath = _normalize_directory_path(filepath)
+            if normalized_filepath is not None:
+                try:
+                    if str(Path(normalized_filepath).parent) == output_directory:
+                        return True
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
+
+        return False
+
+    def _find_loaded_sequence_objects(self, output_directory):
+        if output_directory is None:
+            return []
+
+        matches = []
+        for volume_object in bpy.data.objects:
+            if getattr(volume_object, "type", "") != 'VOLUME':
+                continue
+            if self._volume_object_matches_directory(volume_object, output_directory):
+                matches.append(volume_object)
+
+        return matches
+
+    def _remove_volume_object(self, volume_object):
         if volume_object is None:
             return
 
-        volume_data = getattr(volume_object, "data", None)
+        try:
+            volume_data = getattr(volume_object, "data", None)
+        except Exception:
+            return
 
         try:
             bpy.data.objects.remove(volume_object, do_unlink=True)
@@ -49,6 +115,32 @@ class VDBWatcher:
         except Exception as exc:
             print("Failed to remove VDB volume data:", exc)
 
+    def clear_loaded_sequence(self):
+        volume_object = self.volume_object
+        self.volume_object = None
+        self.sequence_files.clear()
+        self.file_sizes.clear()
+        self.loaded_output_directory = None
+
+        if volume_object is not None:
+            self._remove_volume_object(volume_object)
+
+    def clear_loaded_sequence_for_directory(self, output_directory):
+        normalized_output_directory = _normalize_directory_path(output_directory)
+        if normalized_output_directory is None:
+            return
+
+        matching_objects = self._find_loaded_sequence_objects(normalized_output_directory)
+        for volume_object in matching_objects:
+            if volume_object is self.volume_object:
+                self.volume_object = None
+            self._remove_volume_object(volume_object)
+
+        if self.loaded_output_directory == normalized_output_directory:
+            self.volume_object = None
+            self.sequence_files.clear()
+            self.file_sizes.clear()
+            self.loaded_output_directory = None
 
     def _stable_vdbs(self):
         stable = []
@@ -71,10 +163,13 @@ class VDBWatcher:
         bpy.ops.object.volume_import(filepath=str(first_vdb))
 
         self.volume_object = bpy.context.object
+        self.loaded_output_directory = str(self.watch_dir)
         if self.volume_object is not None:
             self.volume_object.location = (0.0, 0.0, 0.0)
-        volume = self.volume_object.data
+            self.volume_object[_OUTPUT_DIRECTORY_PROPERTY] = self.loaded_output_directory
 
+        volume = self.volume_object.data
+        volume[_OUTPUT_DIRECTORY_PROPERTY] = self.loaded_output_directory
         volume.filepath = str(first_vdb)
         volume.is_sequence = True
         volume.frame_start = 1
@@ -83,7 +178,6 @@ class VDBWatcher:
         volume.sequence_mode = 'CLIP'
 
         bpy.context.scene.frame_set(len(stable_vdbs))
-
 
     def _refresh_sequence(self, stable_vdbs):
         volume = self.volume_object.data
@@ -95,7 +189,6 @@ class VDBWatcher:
         volume.frame_duration = new_duration
 
         bpy.context.scene.frame_set(new_duration)
-
 
     def timer(self):
         if not self.running:

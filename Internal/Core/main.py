@@ -1,4 +1,4 @@
-﻿import bpy
+import bpy
 import json
 import shutil
 import subprocess
@@ -268,6 +268,15 @@ def _clear_bake_directory(output_directory):
     return deleted_count
 
 
+def _free_bake_output(output_node):
+    output_directory = _resolved_output_node_bake_directory(output_node, persist=False)
+    _vdb_watcher.clear_loaded_sequence_for_directory(output_directory)
+    deleted_count = _clear_bake_directory(output_directory)
+    _store_output_node_last_bake_directory(output_node, None)
+    refresh_bake_state_from_output_nodes()
+    return deleted_count
+
+
 class CONTINUUM_FLOW_OT_cancel_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.cancel_bake"
     bl_label = "Cancel Bake"
@@ -283,6 +292,20 @@ class CONTINUUM_FLOW_OT_cancel_bake(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class CONTINUUM_FLOW_OT_free_bake(bpy.types.Operator):
+    bl_idname = "continuum_flow.free_bake"
+    bl_label = "Free Bake"
+
+    def execute(self, context):
+        output_node = _resolve_output_node_from_context(context)
+        deleted_count = _free_bake_output(output_node)
+        if deleted_count:
+            self.report({'INFO'}, f"Removed {deleted_count} VDB files")
+        else:
+            self.report({'INFO'}, "No VDB files found to remove")
+        return {'FINISHED'}
+
+
 class main(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
@@ -294,14 +317,6 @@ class main(bpy.types.Operator):
         if solver_status.bake_running:
             self.report({'WARNING'}, "Bake is already running")
             return {'CANCELLED'}
-
-        if output_node_has_baked_data(self.output_node):
-            deleted_count = self.free_bake()
-            if deleted_count:
-                self.report({'INFO'}, f"Removed {deleted_count} VDB files")
-            else:
-                self.report({'INFO'}, "No VDB files found to remove")
-            return {'FINISHED'}
 
         self.process = None
         self.writer_server = None
@@ -396,17 +411,6 @@ class main(bpy.types.Operator):
                 print("Failed to terminate solver:", exc)
 
         self.cleanup()
-
-    def free_bake(self):
-        output_directory = _resolved_output_node_bake_directory(self.output_node, persist=False)
-        if output_directory is None:
-            output_directory = solver_status.last_output_directory
-
-        _vdb_watcher.clear_loaded_sequence()
-        deleted_count = _clear_bake_directory(output_directory)
-        _store_output_node_last_bake_directory(self.output_node, None)
-        refresh_bake_state_from_output_nodes()
-        return deleted_count
 
     def _update_progress_from_loaded_frames(self, loaded_frame_count):
         _set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)

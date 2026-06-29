@@ -1,4 +1,4 @@
-﻿import bpy
+import bpy
 from . import helper_functions
 from . import sockets
 from . import node_base
@@ -12,17 +12,19 @@ from bpy.props import StringProperty
 class CONTINUUM_FLOW_OT_output_bake_button(bpy.types.Operator):
     bl_idname = "continuum_flow.output_bake_button"
     bl_label = "Bake"
-    bl_description = "Start a new bake or remove the last baked result for this output"
-
-    @classmethod
-    def description(cls, context, _properties):
-        output_node = getattr(context, "node", None)
-        if bake_main.output_node_has_baked_data(output_node):
-            return "Delete the last baked VDB result folder for this output"
-        return "Run the solver and write a new baked VDB sequence for this output"
+    bl_description = "Run the solver and write a new baked VDB sequence for this output"
 
     def execute(self, context):
         return bpy.ops.continuum_flow.bake()
+
+
+class CONTINUUM_FLOW_OT_output_free_bake_button(bpy.types.Operator):
+    bl_idname = "continuum_flow.output_free_bake_button"
+    bl_label = "Free Bake"
+    bl_description = "Delete the last baked VDB result folder for this output"
+
+    def execute(self, context):
+        return bpy.ops.continuum_flow.free_bake()
 
 
 class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
@@ -164,9 +166,10 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
 
         button_row = layout.row()
         button_row.enabled = disable_reason is None and not solver_status.bake_running
-        button_text = "Free Bake" if is_free_bake else "Bake"
-        button_icon = 'TRASH' if is_free_bake else 'RENDER_STILL'
-        button_row.operator("continuum_flow.output_bake_button", text=button_text, icon=button_icon)
+        if is_free_bake:
+            button_row.operator("continuum_flow.output_free_bake_button", text="Free Bake", icon='TRASH')
+        else:
+            button_row.operator("continuum_flow.output_bake_button", text="Bake", icon='RENDER_STILL')
 
         if disable_reason is not None:
             layout.label(text=disable_reason, icon='INFO')

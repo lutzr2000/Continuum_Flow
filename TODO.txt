@@ -1,11 +1,5 @@
 TODO
 
-UI:
-free bake does not always delete object in .blend, but sometimes it deletes all
-if i manually delete the vdb from  .blend free bake produces an error
-Bake button sometimes deletes vdbs?
-Remove writer process count, find some general solution
-
 General:
 At very high res run, the live preview struggles to load vdbs properly
 
