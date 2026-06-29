@@ -578,6 +578,24 @@ def _build_swirl_force_segments(force_node):
 # turbulence force
 ###########################
 
+_TURBULENCE_VIEWER_CACHE = {}
+
+
+def _turbulence_cache_key(force_node, domain_node, sample_count, plane):
+    return (
+        force_node.name,
+        int(force_node.seed),
+        round(float(force_node.scale), 6),
+        round(float(force_node.amplitude), 6),
+        round(float(force_node.frequency), 6),
+        int(bpy.context.scene.frame_current),
+        sample_count,
+        tuple(round(x, 4) for x in plane["normal"]),
+        tuple(round(x, 4) for x in _domain_center(domain_node)),
+        round(float(domain_node.resolution), 6),
+    )
+
+
 def _current_view_direction():
     region_data = getattr(bpy.context, "region_data", None)
     if region_data is None:
@@ -694,6 +712,11 @@ def _build_turbulence_force_triangles(force_node, sample_count=64):
         return [], []
 
     plane = _choose_turbulence_plane(domain_node)
+    cache_key = _turbulence_cache_key(force_node, domain_node, sample_count, plane)
+
+    cached = _TURBULENCE_VIEWER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     time_value = _solver_time_seconds()
 
     size_u = max(float(plane["size_u"]), float(domain_node.resolution))
@@ -754,4 +777,7 @@ def _build_turbulence_force_triangles(force_node, sample_count=64):
             positions.extend((p00, p10, p11, p00, p11, p01))
             colors.extend((c00, c10, c11, c00, c11, c01))
 
-    return positions, colors
+    result = (positions, colors)
+    _TURBULENCE_VIEWER_CACHE.clear()
+    _TURBULENCE_VIEWER_CACHE[cache_key] = result
+    return result

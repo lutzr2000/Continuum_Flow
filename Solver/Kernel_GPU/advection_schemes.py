@@ -204,14 +204,11 @@ def apply_turbulence_forces(
         y = py * inv_scale
         z = pz * inv_scale + time_offset
 
-        # gleiches Noise-Feld, aber räumlich versetzte Samples pro Richtung
-        nx = _value_noise_3d(x, y, z, seed)
-        ny = _value_noise_3d(x + 19.17, y + 7.31, z + 11.73, seed)
-        nz = _value_noise_3d(x + 3.43, y + 23.11, z + 17.89, seed)
+        noise = _value_noise_3d(x, y, z, seed)
 
-        Fx += amplitude * nx
-        Fy += amplitude * ny
-        Fz += amplitude * nz
+        Fx += amplitude * noise
+        Fy += amplitude * noise
+        Fz += amplitude * noise
 
     return Fx, Fy, Fz
 
