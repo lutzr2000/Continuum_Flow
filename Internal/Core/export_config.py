@@ -25,6 +25,7 @@ PERCENTAGE_MAPPED_PROPERTY_RANGES = {
     "smoke_production_rate": (0.0, 1),
     "fuel_dissipation": (0.0, 10),
     "fuel_burn_rate": (0.0, 20.0),
+    "burn_noise_amplitude": (0.0, 1.0),
     "vorticity": (0.0, 1.0),
 }
 
@@ -48,6 +49,10 @@ _PHYSICS_SECTION_FIELDS = {
         ("dissipation", "fuel_dissipation", float, 0.0),
         ("burn_rate", "fuel_burn_rate", float, 0.0),
         ("ignition_temperature", "fuel_ignition_temperature", float, 0.0),
+    ),
+    "burning": (
+        ("scale", "burn_noise_scale", float, 0.2),
+        ("amplitude", "burn_noise_amplitude", float, 1.0),
     ),
     "extras": (("vorticity", "vorticity", float, 0.0),),
 }

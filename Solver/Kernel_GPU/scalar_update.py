@@ -208,6 +208,8 @@ def update_scalar_fields_maccormack(
     fuel_dissipation_rate,
     fuel_burn_rate,
     fuel_ignition_temperature,
+    burn_noise_scale,
+    burn_noise_amplitude,
     t_reference,
     active_tile_mask,
 ):
@@ -316,7 +318,17 @@ def update_scalar_fields_maccormack(
         T_corrected > fuel_ignition_temperature
         and fuel_corrected > 0.0
     ):
-        fuel_burn_source = -fuel_burn_rate * fuel_corrected * oxygen_center
+        n = advection_schemes._value_noise_3d(
+            float(i) * burn_noise_scale,
+            float(j) * burn_noise_scale,
+            float(k) * burn_noise_scale,
+            0,
+        )
+
+        burn_noise = 1.0 + burn_noise_amplitude * n
+        burn_noise = max(0.0, min(burn_noise, 2.0))
+
+        fuel_burn_source = -fuel_burn_rate * fuel_corrected * oxygen_center * burn_noise
         temperature_burn_source = temperature_production_rate * -fuel_burn_source 
         smoke_burn_source = smoke_production_rate * -fuel_burn_source
     else:

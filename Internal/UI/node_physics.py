@@ -35,6 +35,13 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
                 "fuel_ignition_temperature",
             ),
         ),
+        (
+            "Burning",
+            (
+                "burn_noise_scale",
+                "burn_noise_amplitude",
+            ),
+        ),
         ("Extras", ("vorticity",)),
     )
 
@@ -50,6 +57,8 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how quickly fuel dissipates")  # type: ignore
     fuel_burn_rate: FloatProperty(name="Fuel Burn Rate", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="How quickly fuel burns away")  # type: ignore
     fuel_ignition_temperature: FloatProperty(name="Fuel Ignition Temperature", default=500.0, min=0.0, max=2000.0, soft_min=0.0, soft_max=2000.0, unit="TEMPERATURE", description="If the air is warmer than this and contains fuel, the fuel will ignite")  # type: ignore
+    burn_noise_scale: FloatProperty(name="Scale", default=0.2, min=0.0, soft_min=0.0, soft_max=10.0, precision=3, description="Spatial scale of the burning noise pattern")  # type: ignore
+    burn_noise_amplitude: FloatProperty(name="Amplitude", default=50.0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="Strength of the burning noise modulation")  # type: ignore
     vorticity: FloatProperty(name="Vorticity", default=40, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="How much extra vorticity is added")  # type: ignore
 
     def _sync_node(self):

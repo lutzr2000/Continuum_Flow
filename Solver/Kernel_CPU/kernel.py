@@ -685,6 +685,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             simulations[0].get("physics").get("fuel").get("dissipation"),
             simulations[0].get("physics").get("fuel").get("burn_rate"),
             simulations[0].get("physics").get("fuel").get("ignition_temperature"),
+            simulations[0].get("physics").get("burning").get("scale"),
+            simulations[0].get("physics").get("burning").get("amplitude"),
             ref_temp,
             scalar_active_tiles_dilated,
         )
