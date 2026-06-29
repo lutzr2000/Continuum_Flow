@@ -325,7 +325,15 @@ def update_scalar_fields_maccormack(
         fuel_burn_source = 0.0
 
     # dissipation
-    temperature_dissipation = -temperature_dissipation_rate * (T_corrected - t_reference)
+    dT = T_corrected - t_reference
+
+    cool_factor = abs(dT) / (abs(dT) + 200)
+
+    temperature_dissipation = (
+        -temperature_dissipation_rate
+        * dT
+        * cool_factor
+    )
     smoke_dissipation = - smoke_dissipation_rate * smoke_corrected
     fuel_dissipation = -fuel_dissipation_rate * fuel_corrected
 
