@@ -640,9 +640,9 @@ def update_velocity_maccormack(
 
 
     # Constant force
-    Fx += fx_const
-    Fy += fy_const
-    Fz += fz_const
+    Fx += fx_const * 10
+    Fy += fy_const * 10
+    Fz += fz_const * 10
 
     # Buoyancy
     Fz += buoyancy_approximation(
