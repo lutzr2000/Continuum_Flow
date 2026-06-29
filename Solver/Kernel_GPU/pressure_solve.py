@@ -358,13 +358,6 @@ def add_artifical_divergence(
     b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
 
 
-@cuda.jit(cache=True)
-def mg_clear(field):
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = field.shape
-    if i < nx and j < ny and k < nz:
-        field[i, j, k] = 0.0
-
 
 @cuda.jit(cache=True)
 def mg_restrict_residual_8cell(p, b, coarse_b, delta):
@@ -415,6 +408,35 @@ def mg_restrict_residual_8cell(p, b, coarse_b, delta):
 
 
 @cuda.jit(cache=True)
+def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, active_tile_mask):
+    I, J, K = cuda.grid(3)
+    cnx, cny, cnz = coarse_e.shape
+    fnx, fny, fnz = fine_p.shape
+
+    if I >= cnx or J >= cny or K >= cnz:
+        return
+
+    e = 0.25 * coarse_e[I, J, K]
+
+    i0 = 2 * I
+    j0 = 2 * J
+    k0 = 2 * K
+
+    for di in range(2):
+        for dj in range(2):
+            for dk in range(2):
+                i = i0 + di
+                j = j0 + dj
+                k = k0 + dk
+
+                if (
+                    i < fnx and j < fny and k < fnz and
+                    _is_active_pressure_cell(active_tile_mask, i, j, k)
+                ):
+                    fine_p[i, j, k] += e        
+
+
+@cuda.jit(cache=True)
 def mg_restrict_8cell(fine_r, coarse_b):
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_b.shape
@@ -445,6 +467,50 @@ def mg_restrict_8cell(fine_r, coarse_b):
         coarse_b[I, J, K] = s / count
     else:
         coarse_b[I, J, K] = 0.0
+
+
+@cuda.jit(cache=True)
+def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, active_tile_mask):
+    I, J, K = cuda.grid(3)
+
+    cnx, cny, cnz = coarse_b.shape
+    nx, ny, nz = p.shape
+
+    if I >= cnx or J >= cny or K >= cnz:
+        return
+
+    inv_delta2 = 1.0 / (delta * delta)
+
+    i0 = 2 * I
+    j0 = 2 * J
+    k0 = 2 * K
+
+    s = 0.0
+    count = 0.0
+
+    for di in range(2):
+        for dj in range(2):
+            for dk in range(2):
+                i = i0 + di
+                j = j0 + dj
+                k = k0 + dk
+
+                if (
+                    i >= 1 and j >= 1 and k >= 1 and
+                    i < nx - 1 and j < ny - 1 and k < nz - 1 and
+                    _is_active_pressure_cell(active_tile_mask, i, j, k)
+                ):
+                    lap = (
+                        p[i + 1, j, k] + p[i - 1, j, k] +
+                        p[i, j + 1, k] + p[i, j - 1, k] +
+                        p[i, j, k + 1] + p[i, j, k - 1] -
+                        6.0 * p[i, j, k]
+                    ) * inv_delta2
+
+                    s += b[i, j, k] - lap
+                    count += 1.0
+
+    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @cuda.jit(cache=True)
@@ -497,21 +563,58 @@ def mg_rbgs_step(p, b, delta, parity):
     ) / 6.0
 
 
-def _mg_smooth(p, b, delta, iterations):
+@cuda.jit(cache=True)
+def mg_rbgs_step_sparse_level0(p, b, delta, parity, active_tile_mask):
+    i, j, k = cuda.grid(3)
+    nx, ny, nz = p.shape
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    if (
+        i < 1 or j < 1 or k < 1 or
+        i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
+        ((i + j + k) & 1) != parity or
+        not _is_active_pressure_cell(active_tile_mask, i, j, k)
+    ):
+        return
+
+    delta2 = delta * delta
+
+    p[i, j, k] = (
+        p[i + 1, j, k] + p[i - 1, j, k] +
+        p[i, j + 1, k] + p[i, j - 1, k] +
+        p[i, j, k + 1] + p[i, j, k - 1] -
+        delta2 * b[i, j, k]
+    ) / 6.0
+    
+
+def _mg_smooth(p, b, delta, iterations, level=0, active_tile_mask=None):
     blocks = kernel_config.volume_blocks_per_grid(
         p.shape,
         kernel_config.THREADS_PER_BLOCK_3D,
     )
 
-    for _ in range(iterations):
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-            p, b, delta, 0
-        )
-        mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-            p, b, delta, 1
-        )
+    use_sparse = level == 0 and active_tile_mask is not None
 
-    # only call BCs once, not in loop    
+    for _ in range(iterations):
+        if use_sparse:
+            mg_rbgs_step_sparse_level0[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 0, active_tile_mask)
+
+            mg_rbgs_step_sparse_level0[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 1, active_tile_mask)
+        else:
+            mg_rbgs_step[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 0)
+
+            mg_rbgs_step[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 1)
+
     BC._pressure_poisson_apply_neumann_bcs[
         blocks, kernel_config.THREADS_PER_BLOCK_3D
     ](p)
@@ -523,20 +626,35 @@ def _mg_vcycle(
     b_levels,
     zero_levels,
     delta_levels,
-    pre_smooth=3,
-    post_smooth=3,
-    coarse_smooth=10,
+    pre_smooth,
+    post_smooth,
+    coarse_smooth,
+    active_tile_mask=None,
 ):
     p = p_levels[level]
     b = b_levels[level]
     delta = delta_levels[level]
 
-    _mg_smooth(p, b, delta, pre_smooth)
+    _mg_smooth(
+        p,
+        b,
+        delta,
+        pre_smooth,
+        level=level,
+        active_tile_mask=active_tile_mask,
+    )
 
     last_level = len(p_levels) - 1
 
     if level == last_level:
-        _mg_smooth(p, b, delta, coarse_smooth)
+        _mg_smooth(
+            p,
+            b,
+            delta,
+            coarse_smooth,
+            level=level,
+            active_tile_mask=active_tile_mask,
+        )
         return
 
     coarse_p = p_levels[level + 1]
@@ -549,15 +667,27 @@ def _mg_vcycle(
 
     coarse_p.copy_to_device(zero_levels[level + 1])
 
-    mg_restrict_residual_8cell[
-        coarse_blocks,
-        kernel_config.THREADS_PER_BLOCK_3D,
-    ](
-        p,
-        b,
-        coarse_b,
-        delta,
-    )
+    if level == 0 and active_tile_mask is not None:
+        mg_restrict_residual_8cell_sparse_level0[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            p,
+            b,
+            coarse_b,
+            delta,
+            active_tile_mask,
+        )
+    else:
+        mg_restrict_residual_8cell[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            p,
+            b,
+            coarse_b,
+            delta,
+        )
 
     _mg_vcycle(
         level + 1,
@@ -568,14 +698,35 @@ def _mg_vcycle(
         pre_smooth,
         post_smooth,
         coarse_smooth,
+        active_tile_mask=None,  # ab Level 1 dense
     )
 
-    mg_prolongate_add_nearest[coarse_blocks, kernel_config.THREADS_PER_BLOCK_3D](
-        coarse_p,
+    if level == 0 and active_tile_mask is not None:
+        mg_prolongate_add_nearest_sparse_level0[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            coarse_p,
+            p,
+            active_tile_mask,
+        )
+    else:
+        mg_prolongate_add_nearest[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            coarse_p,
+            p,
+        )
+
+    _mg_smooth(
         p,
+        b,
+        delta,
+        post_smooth,
+        level=level,
+        active_tile_mask=active_tile_mask,
     )
-
-    _mg_smooth(p, b, delta, post_smooth)
 
 
 def pressure_poisson_multigrid(
@@ -656,6 +807,7 @@ def pressure_poisson_multigrid(
             pre_smooth=2,
             post_smooth=4,
             coarse_smooth=20,
+            active_tile_mask=active_tile_mask,
         )
 
     return p_levels[0]

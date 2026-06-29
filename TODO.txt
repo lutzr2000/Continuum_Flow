@@ -1,10 +1,6 @@
 TODO
 
 Solver:
-make multigrid adaptive again
-Optimize multigrid code, make sure it is resolution consistent
-time multigrid code
-Understand multigrid math
 Maybe look at output performance again, mainly the to host copies
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
 Random noise emission from source 
@@ -35,3 +31,4 @@ Bug testing
 Init should build venv with UV
 Test install
 Rebuild example files
+Documentation (also for multigrid)
