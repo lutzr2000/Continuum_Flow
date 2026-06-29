@@ -28,6 +28,9 @@ def source_bc_kernel(
     if i >= nx or j >= ny or k >= nz:
         return
 
+    if i == 0 or i == nx - 1 or j == 0 or j == ny - 1 or k == 0 or k == nz - 1:
+        return
+
     if not source_mask[i, j, k]:
         return
 

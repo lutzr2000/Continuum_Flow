@@ -1,10 +1,8 @@
 TODO
 
 Solver:
-Maybe look at output performance again, mainly the to host copies
 Turbulence force do not compute every step, build one base field for ONE dimension and upload, than alternate with sin()
 Random noise emission from source 
-If a source intersects with a boundary and the source is turned off the boundary continues emitting
 Outputs 2 frames too much
 Rebuild CPU kernel
 
@@ -18,7 +16,7 @@ Remove writer process count, find some general solution
 Cancelling the solve should still give a timing
 
 Output:
-Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w), probably because one field might be non zero sometimes
+Writing velocity is a lot slower than writing other fields why? (maybe write as u,v,w)
 
 General:
 At very high res run, the live preview struggles to load vdbs properly
