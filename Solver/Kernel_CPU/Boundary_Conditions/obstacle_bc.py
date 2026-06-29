@@ -15,10 +15,7 @@ def obstacle_bc_kernel(
     obstacle_velocity_z,
 ):
     """
-    applies all obstacle zeroing conditions inside a 3D obstacle mask on the CPU.
-
-    Each iteration checks one obstacle cell and clears velocity and the supported
-    scalar values when the mask marks that cell as solid.
+    Apply obstacle boundary conditions inside the obstacle mask.
     """
     nx, ny, nz = mask.shape
     total = nx * ny * nz

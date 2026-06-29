@@ -53,13 +53,7 @@ def convert_bc_config_format(bc_config):
 @njit(cache=True, parallel=True)
 def _pressure_poisson_apply_neumann_bcs(p):
     """
-    applies the hard-coded zero-gradient pressure boundary conditions on all
-    six domain faces on the CPU.
-
-    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
-    meaning the pressure at the boundary is copied from the adjacent interior
-    cell. This kernel writes the boundary values after each iteration so
-    the next iteration starts from a pressure field with valid boundary values.
+    Apply zero-gradient pressure boundary conditions on all domain faces.
     """
     nx, ny, nz = p.shape
     total = nx * ny * nz
@@ -111,7 +105,7 @@ def _apply_face_state(
     use_temp,
 ):
     """
-    applies one configured domain-face boundary condition to a single CPU cell.
+    Apply one configured domain-face boundary condition to one cell.
     """
     neighbor_u = u[src_i, src_j, src_k]
     neighbor_v = v[src_i, src_j, src_k]
@@ -263,7 +257,7 @@ def _domain_bc_kernel(
 
 def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
     """
-    Apply all configured domain boundary conditions to the CPU field state.
+    Apply all configured domain boundary conditions.
     """
     bc_config = convert_bc_config_format(bc_config)
     face_args = {}

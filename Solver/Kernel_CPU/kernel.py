@@ -23,9 +23,9 @@ CPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
+def _current_output_fields(u, v, w, p, temperature, smoke, fuel, flame):
     """
-    Return the currently active buffers for output export.
+    Return the active field buffers for output export.
     """
     return {
         "u": u,
@@ -132,7 +132,7 @@ def build_source_noise_fields(source_entries, source_base_masks):
     return noise_fields
 
 
-def _prepare_force_config_device(config_array, row_width):
+def _prepare_force_config(config_array, row_width):
     return np.ascontiguousarray(
         np.asarray(config_array, dtype=CPU_FIELD_DTYPE).reshape((-1, row_width))
     )
@@ -158,9 +158,7 @@ def apply_all_BC(
     source_noise,
 ):
     """
-    Apply domain, obstacle and source constraints in the fixed overwrite order.
-    Domain BCs are applied always, source and obstacles are optional depending on
-    user config.
+    Apply domain, obstacle, and source boundary conditions.
     """
     bc_config = simulations[0].get("domain", {}).get("boundary_conditions", {})
     u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
@@ -380,7 +378,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             break
 
         time_step.reset_velocity_maxima(velocity_maxima, velocity_maxima_host_zeros)
-        dt = time_step.compute_new_timestep_gpu(
+        dt = time_step.compute_new_timestep(
             u,
             v,
             w,
@@ -489,8 +487,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0], t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0], t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0], t)
-        swirl_config_device = _prepare_force_config_device(swirl_config, 8)
-        turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
+        swirl_config_buffer = _prepare_force_config(swirl_config, 8)
+        turbulence_config_buffer = _prepare_force_config(turbulence_config, 4)
 
         u_work[...] = u
         v_work[...] = v
@@ -531,12 +529,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             fy_const,
             fz_const,
             has_swirl_nodes,
-            swirl_config_device,
+            swirl_config_buffer,
             origin_x,
             origin_y,
             origin_z,
             has_turbulence_nodes,
-            turbulence_config_device,
+            turbulence_config_buffer,
             t,
         )
 
@@ -633,14 +631,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
 
         t = t + dt
 
-        device_fields = _current_device_fields(
+        output_fields = _current_output_fields(
             u, v, w, p, temperature, smoke, fuel, flame
         )
         while t >= next_output_time:
-            output.enqueue_device_output(
+            output.enqueue_output(
                 simulations[0],
                 writer_slots,
-                device_fields,
+                output_fields,
                 output_index,
                 t,
             )

@@ -14,7 +14,7 @@ def buoyancy_approximation(
     t_reference,
 ):
     """
-    computes the buoyancy force in z-direction with the Boussinesq approximation on the CPU.
+    Compute the buoyancy force in the z direction.
     """
     g = 9.81
     return g * buoyancy_factor * (T[i, j, k] - t_reference)
@@ -318,8 +318,7 @@ def _sample_cell_extrema_inner(field, x0, y0, z0, x1, y1, z1):
 @njit(cache=True, inline="always")
 def _sample_trilinear_vec3(field_x, field_y, field_z, x, y, z, nx, ny, nz):
     """
-    Sample three scalar fields at one position while reusing the same coordinates.
-    Can be used if a vector instead of a scalar value is backtraced.
+    Sample three fields at one position with shared trilinear coordinates.
     """
     x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
 
@@ -536,13 +535,7 @@ def update_velocity_maccormack(
     t,
 ):
     """
-    CPU kernel that updates velocity with a MacCormack-corrected
-    semi-Lagrangian advection step.
-
-    A forward semi-Lagrangian predictor is supplied in `predictor_*`. The
-    corrector reverses that predictor, applies the standard MacCormack
-    compensation term, clamps the result to the departure cell range, and then
-    adds pressure, diffusion and external forces explicitly.
+    Update velocity with a MacCormack-corrected semi-Lagrangian step.
     """
     nx, ny, nz = u.shape
     total = nx * ny * nz

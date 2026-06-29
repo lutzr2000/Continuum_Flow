@@ -90,7 +90,7 @@ def _get_writer_slot(writer_slots, output_index):
     return slot
 
 
-def enqueue_device_output(
+def enqueue_output(
     simulations,
     writer_slots,
     sim_fields,

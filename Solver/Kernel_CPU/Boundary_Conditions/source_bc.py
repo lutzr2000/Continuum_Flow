@@ -31,7 +31,7 @@ def source_bc_kernel(
     dt,
 ):
     """
-    Apply source velocity/temperature and inject smoke/fuel rates on the CPU.
+    Apply source values and inject smoke and fuel rates.
     """
     nx, ny, nz = source_mask.shape
     total = nx * ny * nz

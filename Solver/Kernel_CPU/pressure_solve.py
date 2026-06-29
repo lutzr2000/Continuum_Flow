@@ -13,6 +13,16 @@ def _is_active_pressure_cell(active_tile_mask, i, j, k):
     return active_tile_mask[i // tile_size, j // tile_size, k // tile_size] != 0
 
 
+def _expand_active_pressure_mask(active_tile_mask, shape):
+    tile_size = kernel_config.ACTIVE_TILE_SIZE
+    expanded = np.repeat(
+        np.repeat(np.repeat(active_tile_mask, tile_size, axis=0), tile_size, axis=1),
+        tile_size,
+        axis=2,
+    )
+    return expanded[: shape[0], : shape[1], : shape[2]] != 0
+
+
 @njit(cache=True, parallel=True)
 def pressure_equation_right_side(
     u,
@@ -25,8 +35,7 @@ def pressure_equation_right_side(
     active_tile_mask,
 ):
     """
-    CPU kernel that computes the right hand side of the pressure Poisson equation.
-    Only the divergence of the velocity field is used, we neglect non linear terms.
+    Compute the right-hand side of the pressure Poisson equation.
     """
     nx, ny, nz = u.shape
     total = nx * ny * nz
@@ -56,95 +65,6 @@ def pressure_equation_right_side(
         dw_dz = (w[i, j, k + 1] - w[i, j, k - 1]) * half_inv_delta
 
         b[i, j, k] = rho_over_dt * (du_dx + dv_dy + dw_dz)
-
-
-@njit(cache=True, parallel=True)
-def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
-    nx, ny, nz = b.shape
-    interior_nx = nx - 2
-    interior_ny = ny - 2
-    interior_nz = nz - 2
-    interior_cell_count = interior_nx * interior_ny * interior_nz
-    partial_count = partial_sums.shape[0]
-
-    if interior_cell_count <= 0:
-        for idx in prange(partial_count):
-            partial_sums[idx] = 0.0
-        return
-
-    plane_size = interior_ny * interior_nz
-
-    for part_idx in prange(partial_count):
-        local_sum = np.float32(0.0)
-        for flat_idx in range(part_idx, interior_cell_count, partial_count):
-            i = flat_idx // plane_size + 1
-            remainder = flat_idx % plane_size
-            j = remainder // interior_nz + 1
-            k = remainder % interior_nz + 1
-            if _is_active_pressure_cell(active_tile_mask, i, j, k):
-                local_sum += b[i, j, k]
-        partial_sums[part_idx] = local_sum
-
-
-@njit(cache=True, parallel=True)
-def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
-    nx, ny, nz = b.shape
-    interior_nx = nx - 2
-    interior_ny = ny - 2
-    interior_nz = nz - 2
-    interior_cell_count = interior_nx * interior_ny * interior_nz
-    partial_count = partial_counts.shape[0]
-
-    if interior_cell_count <= 0:
-        for idx in prange(partial_count):
-            partial_counts[idx] = 0.0
-        return
-
-    plane_size = interior_ny * interior_nz
-
-    for part_idx in prange(partial_count):
-        local_count = np.float32(0.0)
-        for flat_idx in range(part_idx, interior_cell_count, partial_count):
-            i = flat_idx // plane_size + 1
-            remainder = flat_idx % plane_size
-            j = remainder // interior_nz + 1
-            k = remainder % interior_nz + 1
-            if _is_active_pressure_cell(active_tile_mask, i, j, k):
-                local_count += np.float32(1.0)
-        partial_counts[part_idx] = local_count
-
-
-@njit(cache=True)
-def _sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
-    total_sum = np.float32(0.0)
-    for idx in range(partial_count):
-        total_sum += partial_sums[idx]
-    rhs_sum[0] = total_sum
-
-
-@njit(cache=True, parallel=True)
-def _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask):
-    nx, ny, nz = b.shape
-    total = nx * ny * nz
-
-    for n in prange(total):
-        i = n // (ny * nz)
-        rem = n - i * ny * nz
-        j = rem // nz
-        k = rem - j * nz
-
-        if (
-            i < 1
-            or j < 1
-            or k < 1
-            or i >= nx - 1
-            or j >= ny - 1
-            or k >= nz - 1
-            or not _is_active_pressure_cell(active_tile_mask, i, j, k)
-        ):
-            continue
-
-        b[i, j, k] -= rhs_mean
 
 
 @njit(cache=True, parallel=True)
@@ -178,27 +98,27 @@ def _remove_rhs_mean(
     rhs_sum_buffer,
 ):
     """
-    This is a wrapper method for enforcing the Neumann compatibility condition by removing the RHS mean.
+    Remove the mean value from the active interior right-hand side.
     """
+    del threadsperblock_3d, rhs_partial_sums, rhs_sum_buffer
+
     nx, ny, nz = b.shape
-    interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
-    reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
+    if nx <= 2 or ny <= 2 or nz <= 2:
+        return
 
-    _sum_rhs_partial_kernel(b, active_tile_mask, rhs_partial_sums)
-    _sum_partial_sums_kernel(rhs_partial_sums, reduction_blocks, rhs_sum_buffer)
-    rhs_sum = float(rhs_sum_buffer[0])
+    active_mask = _expand_active_pressure_mask(active_tile_mask, b.shape)
+    interior_active = active_mask[1:-1, 1:-1, 1:-1]
 
-    _count_rhs_active_partial_kernel(b, active_tile_mask, rhs_partial_sums)
-    _sum_partial_sums_kernel(rhs_partial_sums, reduction_blocks, rhs_sum_buffer)
-    active_cell_count = int(rhs_sum_buffer[0])
+    active_cell_count = int(np.count_nonzero(interior_active))
     if active_cell_count <= 0:
         return
 
-    rhs_mean = rhs_sum / float(active_cell_count)
+    interior_b = b[1:-1, 1:-1, 1:-1]
+    rhs_mean = float(interior_b[interior_active].mean())
     if abs(rhs_mean) <= 1.0e-12:
         return
 
-    _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask)
+    interior_b[interior_active] -= rhs_mean
 
 
 @njit(cache=True, parallel=True)
