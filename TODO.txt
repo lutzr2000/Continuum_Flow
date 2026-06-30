@@ -3,7 +3,6 @@ TODO
 General:
 At very high res run, the live preview struggles to load vdbs properly
 make sure geometry folder is deleted properly
-On high res run cpu hast non continmues loading, are writers and solver clearly seperated? are solver counts per core? are these cores substracted from solver pool?
 Closing Blender produces an error
 
 Final:
