@@ -419,6 +419,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     fuel[...] = np.full(shape, 0, dtype=CPU_FIELD_DTYPE)
     flame[...] = np.full(shape, 0, dtype=CPU_FIELD_DTYPE)
 
+    velocity_maxima = np.zeros(3, dtype=np.float32)
+
     if source_noise_base_fields:
         update_masks.update_source_values(
             source_noise,
@@ -460,6 +462,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             u,
             v,
             w,
+            velocity_maxima,
             delta,
             cfl,
             output_time_step,
