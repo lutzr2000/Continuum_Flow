@@ -2,8 +2,6 @@ TODO
 
 General:
 At very high res run, the live preview struggles to load vdbs properly
-make sure geometry folder is deleted properly
-Closing Blender produces an error
 
 Final:
 Bug testing

@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from . import export_config
@@ -332,6 +333,31 @@ def _clear_bake_directory(output_directory):
     return deleted_count
 
 
+def _clear_geometry_directory(output_directory, retries=5, retry_delay=0.2):
+    output_directory = _normalize_directory_path(output_directory)
+    if output_directory is None:
+        return False
+
+    geometry_directory = output_directory / "geometry"
+    if not geometry_directory.exists():
+        return False
+
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(geometry_directory)
+            print("Removed geometry directory:", geometry_directory)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            if attempt == retries - 1:
+                print("Failed to remove geometry directory:", geometry_directory, exc)
+                return False
+            time.sleep(retry_delay)
+
+    return False
+
+
 def _free_bake_output(output_node):
     output_directory = _resolved_output_node_bake_directory(output_node, persist=False)
     _vdb_watcher.clear_loaded_sequence_for_directory(output_directory)
@@ -459,6 +485,8 @@ class main(bpy.types.Operator):
                     self.cancel_flag_path.unlink(missing_ok=True)
                 except Exception as exc:
                     print("Failed to remove cancel flag:", exc)
+
+            _clear_geometry_directory(self.output_directory)
 
             has_vdbs = _update_bake_available_from_output(self.output_directory)
             _store_output_node_last_bake_directory(
