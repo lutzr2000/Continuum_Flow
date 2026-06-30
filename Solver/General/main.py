@@ -102,7 +102,7 @@ def main(config=None):
             origin_z=origin_z,
         )
         obstacle_voxelise_runtime = perf_counter() - obstacle_voxelise_start_time
-        print(f"Obstacle voxelisation runtime: {obstacle_voxelise_runtime:.3f} s")
+        print(f"Time to voxelise obstacles: {obstacle_voxelise_runtime:.3f} s")
         if _cancel_requested(config):
             print("Bake cancelled during preprocessing.")
             return
@@ -129,7 +129,7 @@ def main(config=None):
                 print("Bake cancelled during preprocessing.")
                 return
         source_voxelise_runtime = perf_counter() - source_voxelise_start_time
-        print(f"Source voxelisation runtime: {source_voxelise_runtime:.3f} s")
+        print(f"Time to voxelise sources: {source_voxelise_runtime:.3f} s")
 
         return solver_kernel_module.solver(
             config,
