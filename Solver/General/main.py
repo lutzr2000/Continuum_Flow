@@ -90,6 +90,7 @@ def main(config=None):
             source_mesh_objects
         )
 
+        obstacle_voxelise_start_time = perf_counter()
         obstacle_base_masks, obstacle_mask = voxelise_mesh_module.voxelise_mesh_all(
             nx,
             ny,
@@ -100,12 +101,15 @@ def main(config=None):
             origin_y=origin_y,
             origin_z=origin_z,
         )
+        obstacle_voxelise_runtime = perf_counter() - obstacle_voxelise_start_time
+        print(f"Obstacle voxelisation runtime: {obstacle_voxelise_runtime:.3f} s")
         if _cancel_requested(config):
             print("Bake cancelled during preprocessing.")
             return
 
         source_base_masks = []
         source_masks = []
+        source_voxelise_start_time = perf_counter()
         for source_entry in source_entries:
             source_mesh_objects = _collect_mesh_objects([source_entry])
             source_base_mask, source_mask = voxelise_mesh_module.voxelise_mesh_all(
@@ -124,6 +128,8 @@ def main(config=None):
             if _cancel_requested(config):
                 print("Bake cancelled during preprocessing.")
                 return
+        source_voxelise_runtime = perf_counter() - source_voxelise_start_time
+        print(f"Source voxelisation runtime: {source_voxelise_runtime:.3f} s")
 
         return solver_kernel_module.solver(
             config,
