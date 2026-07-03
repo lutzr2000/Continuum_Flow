@@ -65,23 +65,6 @@ def _process_ram_usage_bytes():
     return int(counters.WorkingSetSize)
 
 
-def _record_timing(timings, name, duration):
-    timings[name] = timings.get(name, 0.0) + float(duration)
-
-
-def _print_timing_summary(timings, total_runtime, step_count, output_frame_count):
-    print("Solver timing summary:")
-    print(f"  total_runtime: {total_runtime:.3f} s")
-    print(f"  time_steps: {step_count}")
-    print(f"  output_frames: {output_frame_count}")
-    for name, total_duration in sorted(timings.items(), key=lambda item: item[1], reverse=True):
-        if step_count > 0 and name.startswith("loop_"):
-            avg_duration = total_duration / float(step_count)
-            print(f"  {name}: total {total_duration:.3f} s, avg {avg_duration * 1000.0:.3f} ms/step")
-        else:
-            print(f"  {name}: {total_duration:.3f} s")
-
-
 def _current_output_fields(u, v, w, p, temperature, smoke, fuel, flame):
     """
     Return the active field buffers for output export.
@@ -322,14 +305,10 @@ def create_multigrid_levels(shape, delta, min_size=8):
 
 def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source_masks, animated_obstacles, animated_sources):
     total_start_time = perf_counter()
-    timings = {}
-    step_count = 0
     simulations = config.get("simulations")
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
-    output_frame_count = 0
 
-    section_start = perf_counter()
     # ------------time-------------------
     t = 0.0
     cfl = float(simulations[0].get("settings", {}).get("cfl", 10.0))
@@ -345,7 +324,6 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
-    _record_timing(timings, "init_config", perf_counter() - section_start)
 
     print("################################################################")
     print("Initialise")
@@ -403,7 +381,6 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         min_size=8,
     )
 
-    section_start = perf_counter()
     # ------------intitialise------------------
     u_initial, v_initial, w_initial = compute_inital_velocity(simulations[0])
 
@@ -431,10 +408,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             origin_y,
             origin_z,
         )
-    _record_timing(timings, "init_fields", perf_counter() - section_start)
 
     # ------------output------------------
-    section_start = perf_counter()
     output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
@@ -443,21 +418,19 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         simulations[0].get("outputs")[0].get("output_path"),
         shape,
     )
-    _record_timing(timings, "init_output_setup", perf_counter() - section_start)
 
 
     # ------------time loop------------------
     print("Start time iteration")
     next_output_time = 0.0
     output_index = 0
+    time_step_count = 0
     while t < t_max:
-        step_start = perf_counter()
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        section_start = perf_counter()
         dt = time_step.compute_new_timestep(
             u,
             v,
@@ -467,10 +440,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             cfl,
             output_time_step,
         )
-        _record_timing(timings, "loop_timestep", perf_counter() - section_start)
 
         # ------------Clear scratch-------------------
-        section_start = perf_counter()
         scratch_A_x[...] = zero_levels[0]
         scratch_A_y[...] = zero_levels[0]
         scratch_A_z[...] = zero_levels[0]
@@ -510,9 +481,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scratch_A_y,
                 scratch_A_z,
             )
-        _record_timing(timings, "loop_masks", perf_counter() - section_start)
         # ------------BC-------------------
-        section_start = perf_counter()
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
             simulations,
             t,
@@ -532,9 +501,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             source_masks,
             source_noise,
         )
-        _record_timing(timings, "loop_apply_boundaries", perf_counter() - section_start)
         # ------------Start Active tiles-------------------
-        section_start = perf_counter()
         if simulations[0].get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask(
                 temperature,
@@ -559,9 +526,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 scalar_active_tiles_dilated,
                 np.bool_(True),
             )
-        _record_timing(timings, "loop_active_tiles", perf_counter() - section_start)
         # ------------Vorticity-------------------
-        section_start = perf_counter()
         if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
             vorticity.compute_vorticity(
                 u,
@@ -572,17 +537,13 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 delta,
                 scalar_active_tiles_dilated,
             )
-        _record_timing(timings, "loop_vorticity", perf_counter() - section_start)
         # ------------force params-------------------
-        section_start = perf_counter()
         fx_const, fy_const, fz_const = forces.constant_force(simulations[0], t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0], t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0], t)
         swirl_config_buffer = _prepare_force_config(swirl_config, 8)
         turbulence_config_buffer = _prepare_force_config(turbulence_config, 4)
-        _record_timing(timings, "loop_forces", perf_counter() - section_start)
         # ------------Velocity update-------------------
-        section_start = perf_counter()
         u_work[...] = u
         v_work[...] = v
         w_work[...] = w
@@ -634,10 +595,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
-        _record_timing(timings, "loop_velocity", perf_counter() - section_start)
 
         # ------------Pressure solve-------------------
-        section_start = perf_counter()
         extra_pressure = get_source_values(simulations, "extra_pressure", t)
         noise_amplitudes = get_source_values(simulations, "noise_amplitude", t) / np.float32(100.0)
 
@@ -662,9 +621,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             simulations[0].get("settings").get("iterations"),
             zero_levels,
         )
-        _record_timing(timings, "loop_pressure", perf_counter() - section_start)
         # ------------Velocity projection-------------------
-        section_start = perf_counter()
         pressure_solve.project_velocity_kernel(
             u,
             v,
@@ -676,9 +633,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             simulations[0].get("physics").get("fluid").get("density"),
             scalar_active_tiles_dilated,
         )
-        _record_timing(timings, "loop_projection", perf_counter() - section_start)
         # ------------Scalar update-------------------
-        section_start = perf_counter()
         temperature_work[...] = temperature
         smoke_work[...] = smoke
         fuel_work[...] = fuel
@@ -728,13 +683,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         temperature, temperature_work = temperature_work, temperature
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
-        _record_timing(timings, "loop_scalars", perf_counter() - section_start)
 
         # ------------time updated-------------------
         t = t + dt
+        time_step_count += 1
 
         # ------------Output-------------------
-        section_start = perf_counter()
         output_fields = _current_output_fields(
             u, v, w, p, temperature, smoke, fuel, flame
         )
@@ -748,22 +702,14 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             )
 
             output_index += 1
-            output_frame_count += 1
             next_output_time += output_time_step
-        _record_timing(timings, "loop_output", perf_counter() - section_start)
         # ------------Memory track-------------------
-        section_start = perf_counter()
-        if output_index == 10:
+        if time_step_count == 10:
             ram_usage = _process_ram_usage_bytes()
             print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
-        _record_timing(timings, "loop_memory_sample", perf_counter() - section_start)
-        step_count += 1
-        _record_timing(timings, "loop_total", perf_counter() - step_start)
 
     # ------------Shutdown output-------------------
-    section_start = perf_counter()
     output.shutdown_output(shared_memory_blocks, writer_slots)
-    _record_timing(timings, "shutdown_output", perf_counter() - section_start)
 
     # ------------Conclusion-------------------
     if cancel_requested:
@@ -772,5 +718,5 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
         print("Simulation finished!")
 
     total_runtime = perf_counter() - total_start_time
-    _print_timing_summary(timings, total_runtime, step_count, output_frame_count)
     print(f"Solver runtime: {total_runtime:.3f} s")
+
