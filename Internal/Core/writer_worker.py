@@ -2,11 +2,13 @@ import json
 import os
 import sys
 from multiprocessing import shared_memory
+
 import numpy as np
 import openvdb
 
 
 WRITER_CONFIG = {}
+
 
 def _load_writer_config_from_argv(argv):
     if len(argv) < 2:
@@ -86,7 +88,17 @@ def write_vdb(payload):
             grids.append(grid)
 
         os.makedirs(os.path.dirname(output_vdb_path), exist_ok=True)
-        openvdb.write(output_vdb_path, grids=grids)
+        output_tmp_path = f"{output_vdb_path}.tmp"
+        try:
+            openvdb.write(output_tmp_path, grids=grids)
+            os.replace(output_tmp_path, output_vdb_path)
+        except Exception:
+            try:
+                if os.path.exists(output_tmp_path):
+                    os.remove(output_tmp_path)
+            except OSError:
+                pass
+            raise
 
     finally:
         for shm in open_shared_memory:

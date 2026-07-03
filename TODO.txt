@@ -1,9 +1,7 @@
 TODO
+When live preview is turned off, progress is laggy
 Start frame has no effect
-At very high res run, the live preview struggles to load vdbs properly, partially because writers do not write in order, check by naming order, wait for next frame in order count
 Fake user can not be deacitvated
-Live Preview has no effect
-Live Preview has a lot of RAM usage why? Maybe only load current frame and than the whole series in the end?
 Bug testing
 Init should build venv with UV
 Test install

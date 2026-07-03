@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 
 from . import export_config
-from . import writer_manager
 from . import load_result
 from . import solver_status
+from . import writer_manager
 
 
 def _venv_python_path():
@@ -65,6 +65,7 @@ def draw_bake_progress(self, context):
         emboss=False,
     )
     layout.separator_spacer()
+
 
 def _tag_ui_redraw():
     window_manager = getattr(bpy.context, "window_manager", None)
@@ -155,6 +156,29 @@ def _resolve_output_node_from_simulation_node(simulation_node):
         if getattr(output_node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
             return output_node
     return None
+
+
+def _linked_viewer_nodes_from_simulation_node(simulation_node):
+    if simulation_node is None:
+        return []
+
+    result_socket = simulation_node.outputs.get("Result")
+    if result_socket is None or not result_socket.is_linked:
+        return []
+
+    viewer_nodes = []
+    for link in result_socket.links:
+        viewer_node = getattr(link, "to_node", None)
+        if getattr(viewer_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE":
+            viewer_nodes.append(viewer_node)
+    return viewer_nodes
+
+
+def _simulation_live_preview_enabled(simulation_node):
+    viewer_nodes = _linked_viewer_nodes_from_simulation_node(simulation_node)
+    if not viewer_nodes:
+        return False
+    return any(bool(getattr(viewer_node, "live_preview", True)) for viewer_node in viewer_nodes)
 
 
 def _resolve_selected_simulation_node(context):
@@ -259,7 +283,7 @@ def refresh_bake_state_from_output_nodes():
     active_output_directory = None
 
     for node_tree in getattr(bpy.data, "node_groups", ()):
-        for node in getattr(node_tree, "nodes", ()): 
+        for node in getattr(node_tree, "nodes", ()):
             if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_OUTPUT_NODE":
                 continue
 
@@ -423,6 +447,7 @@ class main(bpy.types.Operator):
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
         self._event_timer = None
+        self._cancel_requested = False
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
@@ -472,7 +497,11 @@ class main(bpy.types.Operator):
                     pass
                 self._event_timer = None
 
-            _vdb_watcher.stop()
+            bake_completed_successfully = (
+                not self._cancel_requested
+                and self.process is not None
+                and self.process.returncode == 0
+            )
 
             if self.writer_server:
                 try:
@@ -486,6 +515,13 @@ class main(bpy.types.Operator):
                 except Exception as exc:
                     print("Failed to remove cancel flag:", exc)
 
+            if bake_completed_successfully:
+                try:
+                    _vdb_watcher.finish_bake()
+                except Exception as exc:
+                    print("Failed to load final VDB sequence:", exc)
+
+            _vdb_watcher.stop()
             _clear_geometry_directory(self.output_directory)
 
             has_vdbs = _update_bake_available_from_output(self.output_directory)
@@ -499,6 +535,7 @@ class main(bpy.types.Operator):
                 _clear_status_progress(bpy.context)
 
     def cancel_bake(self):
+        self._cancel_requested = True
         _vdb_watcher.stop()
 
         if self.process and self.process.poll() is None:
@@ -569,6 +606,8 @@ class main(bpy.types.Operator):
 
         _vdb_watcher.start(
             vdb_output_dir,
+            start_frame_index=start_frame,
+            live_preview_enabled=_simulation_live_preview_enabled(self.simulation_node),
             progress_callback=self._update_progress_from_loaded_frames,
         )
 
@@ -599,5 +638,3 @@ class main(bpy.types.Operator):
             args=(self.process,),
             daemon=True,
         ).start()
-
-
