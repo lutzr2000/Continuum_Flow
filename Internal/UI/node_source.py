@@ -4,7 +4,6 @@ from . import node_base
 from bpy.props import BoolProperty
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
-from bpy.props import EnumProperty
 from bpy.props import IntProperty
 
 class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
@@ -19,14 +18,6 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 200.0
     bl_width_max = 360.0
     scalar_property_names = ("fuel", "smoke", "temperature", "extra_pressure")
-    velocity_space_items = (
-        ("WORLD", "World Space", "Apply the source velocity in world coordinates"),
-        (
-            "LOCAL",
-            "Local Space",
-            "Apply the source velocity in each linked object's local coordinates",
-        ),
-    )
 
     fuel: FloatProperty(name="Fuel Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How much fuel is emitted", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How much smoke is emitted", options={"ANIMATABLE"})  # type: ignore
@@ -36,7 +27,6 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     noise_scale: FloatProperty(name="Scale", default=6.0, min=1.0, soft_min=1.0, soft_max=64.0, precision=2, description="Approximate noise feature size in source voxels", options=set())  # type: ignore
     noise_seed: IntProperty(name="Seed", default=0, description="Random seed used for the source noise pattern", options=set())  # type: ignore
     noise_amplitude: FloatProperty(name="Amplitude", default=25.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How strongly the source noise modulates temperature, smoke, fuel and extra pressure", options=set())  # type: ignore
-    velocity_space: EnumProperty(name="Space", items=velocity_space_items, default="WORLD", options=set())  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
@@ -58,5 +48,6 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
 
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
-        velocity_col.prop(self, "velocity_space", text="Space")
         velocity_col.prop(self, "velocity", text="")
+
+
