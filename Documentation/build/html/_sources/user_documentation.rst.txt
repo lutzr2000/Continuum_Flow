@@ -1,6 +1,6 @@
 User Documentation
 ==================
-All nodes provided by Continuum Flow are documented here. For some physical parameters, you can refer to the theory section to better understand what they do.
+All nodes provided by Continuum Flow are documented here.
 
 General Workflow
 ----------------
@@ -31,16 +31,13 @@ This is the core node of every simulation. It controls the frame range for your 
     The frame at which the simulation ends.
 
 **CFL**
-    This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers. Refer to the best-practice section for more information.
+    This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers.
 
 **Iterations**
-    Number of pressure iterations. Usually the default of ten is fine. Smaller values can be faster but may become unstable. Larger values are more stable but take longer.
-
-**MacCormack Factor**
-    For the purpose of this factor, refer to the theory documentation. In general, larger values make the flow more swirly and detailed, but can introduce artifacts.
+    Number of solver iterations. Usually the default of two is fine. Less itterations means a faster solve, but this can come at the cost of visual consistency.
 
 **Adaptive Domain**
-    Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance. In some cases, however, it is worth turning it off. Refer to the best-practice section.
+    Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.
 
 **Threshold**
     Threshold for when a cell is considered empty for the adaptive domain.
@@ -116,11 +113,14 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
-**Minimum Oxygen Concentration**
-    Minimum oxygen concentration required for fuel to burn. Oxygen concentration is approximated as 100 % minus the local smoke concentration, so higher smoke concentration leaves less oxygen available for combustion.
+**Scale**
+    Scale of the randomness of the combustion process.
+
+**Amplitude**
+    How random the combustion process is. Higher values mean more randomness.
 
 **Vorticity**
-    Amount of extra vorticity in the simulation. Zero is physically accurate, but usually a small extra amount looks better.
+    Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
     
 
 Viewer
@@ -158,7 +158,7 @@ This node lets you specify the output of your simulation. It is worth paying som
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
 **Fields**
-    Lets you select which of the available fields you want to save. The additional checkbox "sparse" can reduce the file size significantly for fields like fuel, flame, and density, since they usually do not fill the complete domain. If you select sparse for velocity, temperature, or pressure, the data is only saved in cells that also contain density. Be aware that in a simulation without any smoke, a sparse velocity field is empty.
+    Lets you select which of the available fields you want to save.
 
 **Path**
     Path on your disk where to save the data. You can use the usual Blender file browser.
@@ -188,19 +188,28 @@ Source
 The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
 
 **Fuel Concentration**
-    Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.
+    Fuel concentration spawned within the source. 
 
 **Smoke Concentration**
-    Smoke concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.
+    Smoke concentration spawned within the source. 
 
 **Temperature**
     Temperature spawned within the source.
 
 **Extra Pressure**
-    Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.
+    Additional pressure spawned.
 
-**Space**
-    Choose whether the source velocity is interpreted in world coordinates or in the local coordinate system of each linked geometry object. With multiple geometry inputs in local space, each object applies the same authored velocity vector in its own local axes.
+**Source Noise**
+    Activates random variations of the source fields to create more dynamic and interesting flow. Does not affect velocity.
+
+**Scale**
+    Scale of the random noise
+
+**Seed**
+    Random seed for the noise generation
+
+**Amplitude**
+    Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.
@@ -279,20 +288,3 @@ Adds swirly forcing to your simulation.
     Radius within which the swirl motion should be applied.
 
 
-Force-Point
-~~~~~~~~~~~
-
-.. figure:: ../images/force_point_node.jpg
-   :class: block-image-left
-   :width: 300px
-
-Adds a point force that can attract flow or push it away.
-
-**Strength**
-    Negative values mean attraction, while positive values push the flow away.
-
-**Origin**
-    Origin of the point force.
-
-**Radius**
-    Radius at which the force is still in effect.

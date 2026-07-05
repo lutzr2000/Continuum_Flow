@@ -195,9 +195,6 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="user_documentation.html">User Documentation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="custom_geo_nodes.html">Custom Geometry Nodes</a></li>
-<li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a></li>
-<li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Best Practice</a></li>
 </ul>
@@ -243,10 +240,10 @@
 <p>In this final section, a few tips for working with Continuum Flow are collected.</p>
 <ul class="simple">
 <li><p>The most important rule: when something looks weird or the solver diverges, try reducing the CFL number. This sadly comes at the cost of longer compute times, but it can often fix issues.</p></li>
-<li><p>While a large CFL value is desirable for quick simulations, some cases really benefit from lower CFL values, like the 04 explosion example.</p></li>
+<li><p>While a large CFL value is desirable for quick simulations, some cases really benefit from lower CFL values.</p></li>
 <li><p>When setting up your simulation, start with low resolutions and only go higher towards the end of your iteration procedure.</p></li>
 <li><p>Only output the data you really need. Saving volume grids can produce very large amounts of data very quickly, which can fill up your disk and slow the solver down.</p></li>
-<li><p>When doing your final high-resolution simulation, turn off the “live preview”. This frees up RAM for the solver.</p></li>
+<li><p>When doing your final high-resolution simulation, turning off the “live preview” can sometimes help performance and reduce RAM usage.</p></li>
 </ul>
 <p>With these tips, I wish you fun and success while gathering experience with Continuum Flow!</p>
 </section>

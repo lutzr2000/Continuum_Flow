@@ -6,7 +6,7 @@ The add-on comes with some example scenes. You can use these for testing and as 
 ---------------
 A simple example of smoke rising from a source due to temperature, for example warm smoke rising from a chimney.
 
-.. figure:: ../images/01_rising_smoke_render.jpg
+.. figure:: ../images/01_rising_smoke.jpg
    :class: block-image-left
    :width: 600px
 
@@ -14,15 +14,15 @@ A simple example of smoke rising from a source due to temperature, for example w
 ------------
 A campfire example with smoke and burning.
 
-.. figure:: ../images/02_camp_fire_render.jpg
+.. figure:: ../images/02_camp_fire.jpg
    :class: block-image-left
    :width: 600px
 
 03 explosion
 ------------
-An explosion example. This is one of the cases where smaller CFL values might be necessary for good-looking results.
+An explosion example.
 
-.. figure:: ../images/03_explosion_render.png
+.. figure:: ../images/03_explosion.jpg
    :class: block-image-left
    :width: 600px
 
@@ -30,7 +30,7 @@ An explosion example. This is one of the cases where smaller CFL values might be
 ------------------
 Airflow over a car like in a wind tunnel. The flow is simulated at 10 m/s (36 km/h).
 
-.. figure:: ../images/04_car_wind_tunnel_render.png
+.. figure:: ../images/04_car_wind_tunnel.jpg
    :class: block-image-left
    :width: 600px
 
@@ -38,7 +38,7 @@ Airflow over a car like in a wind tunnel. The flow is simulated at 10 m/s (36 km
 ------------
 A drifting car.
 
-.. figure:: ../images/05_car_drift_render.png
+.. figure:: ../images/05_car_drift.jpg
    :class: block-image-left
    :width: 600px
 

@@ -3,7 +3,7 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Custom Geometry Nodes" href="custom_geo_nodes.html"><link rel="prev" title="Installation" href="install.html">
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Examples" href="examples.html"><link rel="prev" title="Installation" href="install.html">
 
     <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
         <title>User Documentation - Continuum Flow documentation</title>
@@ -195,9 +195,6 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">User Documentation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="custom_geo_nodes.html">Custom Geometry Nodes</a></li>
-<li class="toctree-l1"><a class="reference internal" href="solver_theory.html">Solver Theory</a></li>
-<li class="toctree-l1"><a class="reference internal" href="performance.html">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
 <li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best Practice</a></li>
 </ul>
@@ -240,7 +237,7 @@
         <article role="main" id="furo-main-content">
           <section id="user-documentation">
 <h1>User Documentation<a class="headerlink" href="#user-documentation" title="Link to this heading">¶</a></h1>
-<p>All nodes provided by Continuum Flow are documented here. For some physical parameters, you can refer to the theory section to better understand what they do.</p>
+<p>All nodes provided by Continuum Flow are documented here.</p>
 <section id="general-workflow">
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
 <p>In general, Continuum Flow’s workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.</p>
@@ -263,13 +260,11 @@
 </dd>
 <dt><strong>End Frame</strong></dt><dd><p>The frame at which the simulation ends.</p>
 </dd>
-<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate many more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers. Refer to the best-practice section for more information.</p>
+<dt><strong>CFL</strong></dt><dd><p>This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers.</p>
 </dd>
-<dt><strong>Iterations</strong></dt><dd><p>Number of pressure iterations. Usually the default of ten is fine. Smaller values can be faster but may become unstable. Larger values are more stable but take longer.</p>
+<dt><strong>Iterations</strong></dt><dd><p>Number of solver iterations. Usually the default of two is fine. Less itterations means a faster solve, but this can come at the cost of visual consistency.</p>
 </dd>
-<dt><strong>MacCormack Factor</strong></dt><dd><p>For the purpose of this factor, refer to the theory documentation. In general, larger values make the flow more swirly and detailed, but can introduce artifacts.</p>
-</dd>
-<dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blender’s native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance. In some cases, however, it is worth turning it off. Refer to the best-practice section.</p>
+<dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blender’s native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.</p>
 </dd>
 <dt><strong>Threshold</strong></dt><dd><p>Threshold for when a cell is considered empty for the adaptive domain.</p>
 </dd>
@@ -329,9 +324,11 @@ Wall: wall with friction.</p>
 </dd>
 <dt><strong>Fuel Ignition Temperature</strong></dt><dd><p>If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.</p>
 </dd>
-<dt><strong>Minimum Oxygen Concentration</strong></dt><dd><p>Minimum oxygen concentration required for fuel to burn. Oxygen concentration is approximated as 100 % minus the local smoke concentration, so higher smoke concentration leaves less oxygen available for combustion.</p>
+<dt><strong>Scale</strong></dt><dd><p>Scale of the randomness of the combustion process.</p>
 </dd>
-<dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Zero is physically accurate, but usually a small extra amount looks better.</p>
+<dt><strong>Amplitude</strong></dt><dd><p>How random the combustion process is. Higher values mean more randomness.</p>
+</dd>
+<dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.</p>
 </dd>
 </dl>
 </section>
@@ -363,7 +360,7 @@ Wall: wall with friction.</p>
 </dd>
 <dt><strong>Precision</strong></dt><dd><p>The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.</p>
 </dd>
-<dt><strong>Fields</strong></dt><dd><p>Lets you select which of the available fields you want to save. The additional checkbox “sparse” can reduce the file size significantly for fields like fuel, flame, and density, since they usually do not fill the complete domain. If you select sparse for velocity, temperature, or pressure, the data is only saved in cells that also contain density. Be aware that in a simulation without any smoke, a sparse velocity field is empty.</p>
+<dt><strong>Fields</strong></dt><dd><p>Lets you select which of the available fields you want to save.</p>
 </dd>
 <dt><strong>Path</strong></dt><dd><p>Path on your disk where to save the data. You can use the usual Blender file browser.</p>
 </dd>
@@ -388,15 +385,21 @@ Free Bake: deletes the baked data.</p>
 </figure>
 <p>The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.</p>
 <dl class="simple">
-<dt><strong>Fuel Concentration</strong></dt><dd><p>Fuel concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
+<dt><strong>Fuel Concentration</strong></dt><dd><p>Fuel concentration spawned within the source.</p>
 </dd>
-<dt><strong>Smoke Concentration</strong></dt><dd><p>Smoke concentration spawned within the source. This value is specified in percent and limited to the range 0 to 100.</p>
+<dt><strong>Smoke Concentration</strong></dt><dd><p>Smoke concentration spawned within the source.</p>
 </dd>
 <dt><strong>Temperature</strong></dt><dd><p>Temperature spawned within the source.</p>
 </dd>
-<dt><strong>Extra Pressure</strong></dt><dd><p>Additional source term for the pressure solve. Positive values add extra pressure influence inside the source region, negative values remove it.</p>
+<dt><strong>Extra Pressure</strong></dt><dd><p>Additional pressure spawned.</p>
 </dd>
-<dt><strong>Space</strong></dt><dd><p>Choose whether the source velocity is interpreted in world coordinates or in the local coordinate system of each linked geometry object. With multiple geometry inputs in local space, each object applies the same authored velocity vector in its own local axes.</p>
+<dt><strong>Source Noise</strong></dt><dd><p>Activates random variations of the source fields to create more dynamic and interesting flow. Does not affect velocity.</p>
+</dd>
+<dt><strong>Scale</strong></dt><dd><p>Scale of the random noise</p>
+</dd>
+<dt><strong>Seed</strong></dt><dd><p>Random seed for the noise generation</p>
+</dd>
+<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.</p>
 </dd>
 <dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>
@@ -462,22 +465,6 @@ Free Bake: deletes the baked data.</p>
 </dd>
 </dl>
 </section>
-<section id="force-point">
-<h3>Force-Point<a class="headerlink" href="#force-point" title="Link to this heading">¶</a></h3>
-<figure class="align-default">
-<a class="block-image-left reference internal image-reference" href="_images/force_point_node.jpg"><img alt="_images/force_point_node.jpg" class="block-image-left" src="_images/force_point_node.jpg" style="width: 300px;" />
-</a>
-</figure>
-<p>Adds a point force that can attract flow or push it away.</p>
-<dl class="simple">
-<dt><strong>Strength</strong></dt><dd><p>Negative values mean attraction, while positive values push the flow away.</p>
-</dd>
-<dt><strong>Origin</strong></dt><dd><p>Origin of the point force.</p>
-</dd>
-<dt><strong>Radius</strong></dt><dd><p>Radius at which the force is still in effect.</p>
-</dd>
-</dl>
-</section>
 </section>
 </section>
 
@@ -486,12 +473,12 @@ Free Bake: deletes the baked data.</p>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="custom_geo_nodes.html">
+          <a class="next-page" href="examples.html">
               <div class="page-info">
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">Custom Geometry Nodes</div>
+                <div class="title">Examples</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
@@ -550,7 +537,6 @@ Free Bake: deletes the baked data.</p>
 <li><a class="reference internal" href="#force-constant">Force-Constant</a></li>
 <li><a class="reference internal" href="#force-turbulence">Force-Turbulence</a></li>
 <li><a class="reference internal" href="#force-swirl">Force-Swirl</a></li>
-<li><a class="reference internal" href="#force-point">Force-Point</a></li>
 </ul>
 </li>
 </ul>

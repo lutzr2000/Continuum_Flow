@@ -1,7 +1,4 @@
 TODO
 Init should build venv with UV
 Test install
-Remove scaling tests from Documentation (no one cares), just say 2-20x
-Remove custom geo nodes from docu
-Also remove solver theory for now (or at least hide it)
 
