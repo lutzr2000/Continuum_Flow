@@ -257,16 +257,19 @@ class VDBWatcher:
         contiguous_vdbs = self._contiguous_vdbs(ordered_vdbs)
         self.sequence_files = contiguous_vdbs
 
-        if self.live_preview_enabled and contiguous_vdbs:
+        if contiguous_vdbs:
             latest_vdb = contiguous_vdbs[-1]
-            needs_reload = (
-                not self._volume_object_is_valid()
-                or getattr(self.volume_object.data, "filepath", "") != str(contiguous_vdbs[0])
-                or not bool(getattr(self.volume_object.data, "is_sequence", False))
-                or int(getattr(self.volume_object.data, "frame_duration", 0)) != len(contiguous_vdbs)
-            )
-            if needs_reload:
-                self._load_full_sequence(contiguous_vdbs)
+            if self.live_preview_enabled:
+                needs_reload = (
+                    not self._volume_object_is_valid()
+                    or getattr(self.volume_object.data, "filepath", "") != str(contiguous_vdbs[0])
+                    or not bool(getattr(self.volume_object.data, "is_sequence", False))
+                    or int(getattr(self.volume_object.data, "frame_duration", 0)) != len(contiguous_vdbs)
+                )
+                if needs_reload:
+                    self._load_full_sequence(contiguous_vdbs)
+                else:
+                    bpy.context.scene.frame_set(self._frame_index_from_path(latest_vdb) or self.start_frame_index)
             else:
                 bpy.context.scene.frame_set(self._frame_index_from_path(latest_vdb) or self.start_frame_index)
 

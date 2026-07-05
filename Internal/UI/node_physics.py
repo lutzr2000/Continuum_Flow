@@ -51,7 +51,7 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     temperature_production_rate: FloatProperty(name="Temperature Production Rate", default=10, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how much temperature is produced due to burning")  # type: ignore
     reference_temperature: FloatProperty(name="Reference Temperature", default=300.0, min=0.0, max=2000, unit="TEMPERATURE", description="Air cooler than this goes down, warmer than this goes up")  # type: ignore
     buoyancy: FloatProperty(name="Buoyancy", default=30, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="Strength of buoyancy")  # type: ignore
-    expansion_rate: FloatProperty(name="Expansion Rate", default=10, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how strongly hot air expands")  # type: ignore
+    expansion_rate: FloatProperty(name="Expansion Rate", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how strongly hot air expands")  # type: ignore
     smoke_dissipation: FloatProperty(name="Smoke Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how quickly smoke dissipates")  # type: ignore
     smoke_production_rate: FloatProperty(name="Smoke Production Rate", default=50, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how much smoke is produced due to burning")  # type: ignore
     fuel_dissipation: FloatProperty(name="Fuel Dissipation", default=0, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="how quickly fuel dissipates")  # type: ignore

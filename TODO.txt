@@ -1,5 +1,4 @@
 TODO
-When live preview is turned off, progress is laggy
 Start frame has no effect
 Bug testing
 Init should build venv with UV
