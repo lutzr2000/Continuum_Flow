@@ -234,9 +234,9 @@ class VDBWatcher:
 
         volume.filepath = str(first_vdb)
         volume.is_sequence = True
-        volume.frame_start = self.start_frame_index
+        volume.frame_start = 1
         volume.frame_offset = 0
-        volume.frame_duration = len(ordered_vdbs)
+        volume.frame_duration = self.start_frame_index + len(ordered_vdbs)
         volume.sequence_mode = 'CLIP'
 
         last_frame_index = self._frame_index_from_path(ordered_vdbs[-1])
