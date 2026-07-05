@@ -5,6 +5,8 @@ from . import forces, main as bake_main, viewer
 from .export_config import sync_all_continuum_flow_node_animations
 from ..UI.node_tree import NODE_TREE_ID
 
+_FAKE_USER_INITIALIZED_KEY = "_continuum_flow_fake_user_initialized"
+
 
 def _tag_animation_editors_redraw():
     window_manager = getattr(bpy.context, "window_manager", None)
@@ -21,14 +23,33 @@ def _tag_animation_editors_redraw():
 
 
 @persistent
+def initialize_fake_user_state(_scene=None, _depsgraph=None):
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for tree in node_groups:
+        if tree.bl_idname == NODE_TREE_ID:
+            tree[_FAKE_USER_INITIALIZED_KEY] = True
+
+
+@persistent
 def ensure_fake_user(_scene=None, _depsgraph=None):
     node_groups = getattr(bpy.data, "node_groups", None)
     if node_groups is None:
         return
 
     for tree in node_groups:
-        if tree.bl_idname == NODE_TREE_ID and not tree.use_fake_user:
+        if tree.bl_idname != NODE_TREE_ID:
+            continue
+
+        if tree.get(_FAKE_USER_INITIALIZED_KEY):
+            continue
+
+        if not tree.use_fake_user:
             tree.use_fake_user = True
+
+        tree[_FAKE_USER_INITIALIZED_KEY] = True
 
 
 @persistent

@@ -1,10 +1,10 @@
 TODO
 When live preview is turned off, progress is laggy
 Start frame has no effect
-Fake user can not be deacitvated
 Bug testing
 Init should build venv with UV
 Test install
 Remove scaling tests from Documentation (no one cares), just say 2-20x
-Documentation (also for multigrid)
+Remove custom geo nodes from docu
+Also remove solver theory for now (or at least hide it)
 

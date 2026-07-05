@@ -34,6 +34,7 @@ from ..UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from ..Core.runtime_handlers import (
     continuum_flow_frame_change_post,
     ensure_fake_user,
+    initialize_fake_user_state,
     sync_runtime_state,
     sync_ui_animation_state,
 )
@@ -123,6 +124,8 @@ def register():
         build_node_categories(),
     )
 
+    initialize_fake_user_state()
+
     if not bpy.app.timers.is_registered(ensure_fake_user):
         bpy.app.timers.register(ensure_fake_user, first_interval=0.1)
 
@@ -134,6 +137,9 @@ def register():
 
     if sync_runtime_state not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(sync_runtime_state)
+
+    if initialize_fake_user_state not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(initialize_fake_user_state)
 
     if continuum_flow_frame_change_post not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(continuum_flow_frame_change_post)
@@ -160,6 +166,9 @@ def unregister():
 
     if sync_runtime_state in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(sync_runtime_state)
+
+    if initialize_fake_user_state in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(initialize_fake_user_state)
 
     try:
         unregister_node_categories(NODE_CATEGORIES_ID)
