@@ -45,9 +45,11 @@ def source_bc_kernel(
 
                 scalar_multiplier = _noise_multiplier(source_noise[i, j, k], noise_amplitude)
 
-                if velocity_x_value != 0 and velocity_y_value != 0 and velocity_z_value != 0:
+                if velocity_x_value != 0:
                     u[i, j, k] = velocity_x_value
+                if velocity_y_value != 0:
                     v[i, j, k] = velocity_y_value
+                if velocity_z_value != 0:
                     w[i, j, k] = velocity_z_value
 
                 T[i, j, k] = max(temperature_value * scalar_multiplier, 0.0)

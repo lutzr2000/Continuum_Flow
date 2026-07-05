@@ -1,6 +1,5 @@
 TODO
 Start frame has no effect
-Bug testing
 Init should build venv with UV
 Test install
 Remove scaling tests from Documentation (no one cares), just say 2-20x
