@@ -1,6 +1,5 @@
 import bpy
 from nodeitems_utils import register_node_categories, unregister_node_categories
-from pathlib import Path
 import subprocess
 
 from ..UI.node_tree import (
@@ -39,6 +38,7 @@ from ..Core.runtime_handlers import (
     sync_ui_animation_state,
 )
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake, CONTINUUM_FLOW_OT_free_bake
+from ..Core import environment
 from ..Core import forces
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
@@ -77,8 +77,7 @@ classes = (
 
 
 def check_solver_status():
-    addon_root = Path(__file__).resolve().parents[2]
-    py = addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
+    py = environment.solver_python_executable(__file__)
 
     solver_status.environment_ready = py.exists()
     solver_status.gpu_available = False

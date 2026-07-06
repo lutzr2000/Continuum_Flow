@@ -6,6 +6,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import environment
 from . import export_config
 from . import load_result
 from . import solver_status
@@ -13,8 +14,7 @@ from . import writer_manager
 
 
 def _venv_python_path():
-    addon_root = Path(__file__).resolve().parents[2]
-    return addon_root / "ContinuumFlow_env" / "Scripts" / "python.exe"
+    return environment.solver_python_executable(__file__)
 
 
 def _read_solver_stdout(process):
@@ -611,7 +611,7 @@ class main(bpy.types.Operator):
             progress_callback=self._update_progress_from_loaded_frames,
         )
 
-        addon_root = Path(__file__).resolve().parents[2]
+        addon_root = environment.project_root_directory(__file__)
 
         self.process = subprocess.Popen(
             [
@@ -638,3 +638,5 @@ class main(bpy.types.Operator):
             args=(self.process,),
             daemon=True,
         ).start()
+
+

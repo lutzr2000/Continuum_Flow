@@ -1,4 +1,0 @@
-TODO
-Init should build venv with UV
-Test install
-
