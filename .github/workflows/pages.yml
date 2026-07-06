@@ -19,6 +19,6 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: Documentation/_build/html
+          path: Documentation/build/html
 
       - uses: actions/deploy-pages@v4
