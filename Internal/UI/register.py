@@ -88,6 +88,7 @@ def safe_register_class(cls):
 
 
 def register():
+    solver_status.gpu_available = solver_status.detect_gpu_available()
 
     for cls in classes:
         safe_register_class(cls)

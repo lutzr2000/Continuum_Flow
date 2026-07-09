@@ -16,41 +16,52 @@ def _extend_sys_path(config):
             sys.path.insert(0, path)
 
 
-def _prepare_cuda_dlls():
+def _prepare_cuda_libraries():
     import os
     import sys
     import shutil
     import platform
     from pathlib import Path
 
-    if platform.system() != "Windows":
-        return []
-
-    added = set()
+    system = platform.system()
 
     for entry in map(Path, sys.path):
         nvidia = entry / "nvidia"
         if not nvidia.exists():
             continue
 
-        for bin_dir in nvidia.rglob("bin"):
-            os.add_dll_directory(str(bin_dir))
-            added.add(str(bin_dir))
+        lib_dirs = set()
 
-        for src in nvidia.rglob("cudart64_12.dll"):
-            os.add_dll_directory(str(src.parent))
-            added.add(str(src.parent))
+        if system == "Windows":
+            for dll in nvidia.rglob("*.dll"):
+                lib_dirs.add(dll.parent)
 
-            dst = src.parent / "cudart.dll"
-            if not dst.exists():
-                shutil.copy2(src, dst)
+                name = dll.name.lower()
 
-        for src in nvidia.rglob("nvvm64_*.dll"):
-            os.add_dll_directory(str(src.parent))
-            added.add(str(src.parent))
-            dst = src.parent / "nvvm.dll"
-            if not dst.exists():
-                shutil.copy2(src, dst)
+                if name.startswith("cudart64_"):
+                    alias = dll.parent / "cudart.dll"
+                    if not alias.exists():
+                        shutil.copy2(dll, alias)
+
+                elif name.startswith("nvvm64_"):
+                    alias = dll.parent / "nvvm.dll"
+                    if not alias.exists():
+                        shutil.copy2(dll, alias)
+
+            for lib_dir in lib_dirs:
+                os.add_dll_directory(str(lib_dir))
+
+        elif system == "Linux":
+            for so in nvidia.rglob("*.so*"):
+                lib_dirs.add(so.parent)
+
+            if lib_dirs:
+                old = os.environ.get("LD_LIBRARY_PATH", "")
+                new = os.pathsep.join(str(p) for p in sorted(lib_dirs))
+                os.environ["LD_LIBRARY_PATH"] = new + (os.pathsep + old if old else "")
+
+        elif system == "Darwin":
+            return
 
 
 def _collect_mesh_objects(entries):
@@ -94,7 +105,7 @@ def main(config=None):
         config = config or {}
         _extend_sys_path(config)
 
-        _prepare_cuda_dlls()
+        _prepare_cuda_libraries()
 
         if np is None:
             import numpy as _np
