@@ -38,7 +38,6 @@ from ..Core.runtime_handlers import (
     sync_ui_animation_state,
 )
 from ..Core.main import main, CONTINUUM_FLOW_OT_cancel_bake, CONTINUUM_FLOW_OT_free_bake
-from ..Core import environment
 from ..Core import forces
 from ..Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from ..Core import solver_status
@@ -76,25 +75,6 @@ classes = (
 )
 
 
-def check_solver_status():
-    py = environment.solver_python_executable(__file__)
-
-    solver_status.environment_ready = py.exists()
-    solver_status.gpu_available = False
-
-    if solver_status.environment_ready:
-        result = subprocess.run(
-            [
-                str(py),
-                "-c",
-                "from numba import cuda; cuda.get_current_device()",
-            ],
-            capture_output=True,
-        )
-
-        solver_status.gpu_available = result.returncode == 0
-
-
 def safe_unregister_class(cls):
     try:
         bpy.utils.unregister_class(cls)
@@ -108,7 +88,6 @@ def safe_register_class(cls):
 
 
 def register():
-    check_solver_status()
 
     for cls in classes:
         safe_register_class(cls)
@@ -148,7 +127,6 @@ def register():
 
 
 def unregister():
-    solver_status.environment_ready = False
     solver_status.gpu_available = False
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):

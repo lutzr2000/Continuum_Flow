@@ -80,15 +80,6 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
 
-        if not solver_status.environment_ready:
-            warning_box = layout.box()
-            warning_box.label(text="Solver environment missing", icon="ERROR")
-            warning_box.label(text="Use the install button to create .venv with uv.")
-            warning_box.operator(
-                "continuum_flow.install_solver_environment",
-                icon="CONSOLE",
-            )
-
         solver_row = layout.row(align=True)
 
         solver_row.prop_enum(self, "solver_backend", "CPU")

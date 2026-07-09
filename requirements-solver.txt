@@ -1,5 +1,0 @@
-numpy
-numba
-numba-cuda
-scipy
-trimesh

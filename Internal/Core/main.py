@@ -4,17 +4,13 @@ import shutil
 import subprocess
 import threading
 import time
+import sys
 from pathlib import Path
 
-from . import environment
 from . import export_config
 from . import load_result
 from . import solver_status
 from . import writer_manager
-
-
-def _venv_python_path():
-    return environment.solver_python_executable(__file__)
 
 
 def _read_solver_stdout(process):
@@ -611,11 +607,11 @@ class main(bpy.types.Operator):
             progress_callback=self._update_progress_from_loaded_frames,
         )
 
-        addon_root = environment.project_root_directory(__file__)
+        addon_root = Path(__file__).resolve().parents[2]
 
         self.process = subprocess.Popen(
             [
-                str(_venv_python_path()),
+                sys.executable,
                 "-u",
                 "-m",
                 "Solver.General.main",

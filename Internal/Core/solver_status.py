@@ -1,5 +1,4 @@
-﻿environment_ready = False
-gpu_available = False
+gpu_available = True
 bake_running = False
 bake_available = False
 active_bake_operator = None
