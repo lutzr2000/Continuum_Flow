@@ -7,6 +7,15 @@ cpu_kernel_module = None
 np = None
 
 
+def _extend_sys_path(config):
+    import sys
+
+    extra_paths = ((config.get("meta") or {}).get("parent_sys_path") or ())
+    for path in reversed(extra_paths):
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
+
+
 def _collect_mesh_objects(entries):
     mesh_objects = []
 
@@ -45,6 +54,9 @@ def main(config=None):
 
     total_start_time = perf_counter()
     try:
+        config = config or {}
+        _extend_sys_path(config)
+
         if np is None:
             import numpy as _np
             np = _np

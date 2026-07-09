@@ -588,7 +588,9 @@ class main(bpy.types.Operator):
 
         self.bake_directory = Path(bake_directory).resolve()
         self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
-        config_dict.setdefault("meta", {})["cancel_flag_path"] = str(self.cancel_flag_path)
+        meta_config = config_dict.setdefault("meta", {})
+        meta_config["cancel_flag_path"] = str(self.cancel_flag_path)
+        meta_config["parent_sys_path"] = list(sys.path)
 
         output_config = config_dict["simulations"][0]["outputs"][0]
         simulation_settings = config_dict["simulations"][0].get("settings") or {}
@@ -634,5 +636,3 @@ class main(bpy.types.Operator):
             args=(self.process,),
             daemon=True,
         ).start()
-
-
