@@ -1,5 +1,7 @@
 import ctypes
 import math
+import os
+import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -24,45 +26,110 @@ CPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-class _ProcessMemoryCountersEx(ctypes.Structure):
-    _fields_ = [
-        ("cb", ctypes.c_ulong),
-        ("PageFaultCount", ctypes.c_ulong),
-        ("PeakWorkingSetSize", ctypes.c_size_t),
-        ("WorkingSetSize", ctypes.c_size_t),
-        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-        ("PagefileUsage", ctypes.c_size_t),
-        ("PeakPagefileUsage", ctypes.c_size_t),
-        ("PrivateUsage", ctypes.c_size_t),
+if sys.platform == "win32":
+    class _ProcessMemoryCountersEx(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_ulong),
+            ("PageFaultCount", ctypes.c_ulong),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    _psapi.GetProcessMemoryInfo.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
     ]
+    _psapi.GetProcessMemoryInfo.restype = ctypes.c_long
+elif sys.platform == "darwin":
+    _mach = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+
+    class _TimeValue(ctypes.Structure):
+        _fields_ = [("seconds", ctypes.c_int), ("microseconds", ctypes.c_int)]
 
 
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-_psapi = ctypes.WinDLL("psapi", use_last_error=True)
-_kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-_psapi.GetProcessMemoryInfo.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_ulong,
-]
-_psapi.GetProcessMemoryInfo.restype = ctypes.c_long
+    class _TaskBasicInfo64(ctypes.Structure):
+        _fields_ = [
+            ("virtual_size", ctypes.c_uint64),
+            ("resident_size", ctypes.c_uint64),
+            ("resident_size_max", ctypes.c_uint64),
+            ("user_time", _TimeValue),
+            ("system_time", _TimeValue),
+            ("policy", ctypes.c_int),
+            ("suspend_count", ctypes.c_int),
+        ]
+
+
+    _TASK_BASIC_INFO_64 = 5
+    _TASK_BASIC_INFO_64_COUNT = ctypes.c_uint32(
+        ctypes.sizeof(_TaskBasicInfo64) // ctypes.sizeof(ctypes.c_int)
+    )
+    _mach.mach_task_self.restype = ctypes.c_uint32
+    _mach.task_info.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    _mach.task_info.restype = ctypes.c_int
 
 
 def _process_ram_usage_bytes():
-    counters = _ProcessMemoryCountersEx()
-    counters.cb = ctypes.sizeof(_ProcessMemoryCountersEx)
-    process_handle = _kernel32.GetCurrentProcess()
-    ok = _psapi.GetProcessMemoryInfo(
-        process_handle,
-        ctypes.byref(counters),
-        counters.cb,
-    )
-    if not ok:
-        raise OSError(ctypes.get_last_error(), "GetProcessMemoryInfo failed")
-    return int(counters.WorkingSetSize)
+    if sys.platform == "win32":
+        counters = _ProcessMemoryCountersEx()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCountersEx)
+        process_handle = _kernel32.GetCurrentProcess()
+        ok = _psapi.GetProcessMemoryInfo(
+            process_handle,
+            ctypes.byref(counters),
+            counters.cb,
+        )
+        if not ok:
+            raise OSError(ctypes.get_last_error(), "GetProcessMemoryInfo failed")
+        return int(counters.WorkingSetSize)
+
+    if sys.platform.startswith("linux"):
+        with open("/proc/self/statm", "r", encoding="ascii") as statm_file:
+            statm_fields = statm_file.read().split()
+        if len(statm_fields) < 2:
+            raise RuntimeError("Unexpected /proc/self/statm format")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        return int(statm_fields[1]) * int(page_size)
+
+    if sys.platform == "darwin":
+        task_info = _TaskBasicInfo64()
+        task_info_count = ctypes.c_uint32(_TASK_BASIC_INFO_64_COUNT.value)
+        result = _mach.task_info(
+            _mach.mach_task_self(),
+            _TASK_BASIC_INFO_64,
+            ctypes.byref(task_info),
+            ctypes.byref(task_info_count),
+        )
+        if result != 0:
+            raise OSError(ctypes.get_errno(), "task_info failed")
+        return int(task_info.resident_size)
+
+    try:
+        import resource
+
+        rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except (ImportError, AttributeError, OSError, ValueError) as exc:
+        raise OSError(f"Memory tracking is not supported on platform '{sys.platform}'") from exc
+
+    if "bsd" in sys.platform or sys.platform.startswith("dragonfly"):
+        return rss
+    return rss * 1024
 
 
 def _current_output_fields(u, v, w, p, temperature, smoke, fuel, flame):
@@ -705,8 +772,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             next_output_time += output_time_step
         # ------------Memory track-------------------
         if time_step_count == 10:
-            ram_usage = _process_ram_usage_bytes()
-            print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
+            try:
+                ram_usage = _process_ram_usage_bytes()
+            except OSError as exc:
+                print(f"RAM usage tracking unavailable: {exc}")
+            else:
+                print(f"RAM used: {ram_usage / 1024**2:.1f} MB")
 
     # ------------Shutdown output-------------------
     output.shutdown_output(shared_memory_blocks, writer_slots)
