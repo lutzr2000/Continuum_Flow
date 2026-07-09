@@ -20,32 +20,13 @@ def _bake_directory():
     return (Path.cwd() / "UI" / "Bake").resolve()
 
 
-def _resolve_blender_python_executable():
-    """
-    Return Blender's bundled python executable for VDB writer processes.
-    """
-    candidates = [
-        Path(sys.executable),
-        Path(sys.prefix) / "bin" / "python.exe",
-        Path(sys.prefix) / "python" / "bin" / "python.exe",
-    ]
-
-    for candidate in candidates:
-        if candidate.exists() and candidate.name.lower() == "python.exe":
-            return str(candidate)
-
-    raise FileNotFoundError(
-        "Could not resolve Blender's bundled python.exe for VDB writer processes."
-    )
-
-
 class _VDBWriterProcess:
     """
     One persistent UI-side VDB writer process.
     """
 
-    def __init__(self, python_executable, writer_script, writer_config=None):
-        command = [python_executable, str(writer_script)]
+    def __init__(self, writer_script, writer_config=None):
+        command = [sys.executable, str(writer_script)]
         if writer_config is not None:
             command.append(json.dumps(writer_config))
         self._process = subprocess.Popen(
@@ -106,13 +87,11 @@ class _VDBWriterProcessPool:
         if not writer_script.exists():
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
 
-        python_executable = _resolve_blender_python_executable()
         self._processes = []
         try:
             for _ in range(process_count):
                 self._processes.append(
                     _VDBWriterProcess(
-                        python_executable,
                         writer_script,
                         writer_config=writer_config,
                     )

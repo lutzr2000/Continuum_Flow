@@ -3,9 +3,6 @@ This is Continuum Flow, a free open source addon for Blender for simulating smok
 
 # Requirements
 - Blender 5.0.0 or higher
-- `uv` package manager  
-  Install with:
-  `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 - Optional for GPU: CUDA Toolkit  
   Download: [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
 
@@ -16,8 +13,7 @@ This is Continuum Flow, a free open source addon for Blender for simulating smok
 4. Go to Edit > Preference > Add-ons
 5. In the top right corner, click on the downwards arrow and select install from disk
 6. Navigate to the downloaded .zip and click Install from Disk
-7. In the add-ons outliner go to Continuum Flow and click "Install Solver Enviroment" (This may take a moment)
-8. When you start a bake for the first time the start may take a moment since the code needs to be compiled. 
+7. When you start a bake for the first time the start may take a moment since the code needs to be compiled. 
 
 You're done!
 
