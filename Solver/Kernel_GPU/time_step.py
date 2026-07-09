@@ -32,18 +32,14 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
     stride = cuda.blockDim.x * cuda.gridDim.x
     idx = cuda.grid(1)
 
-    u_flat = u.reshape(total_size)
-    v_flat = v.reshape(total_size)
-    w_flat = w.reshape(total_size)
-
-    max_u = 0.0
-    max_v = 0.0
-    max_w = 0.0
+    max_u = np.float32(0.0)
+    max_v = np.float32(0.0)
+    max_w = np.float32(0.0)
 
     while idx < total_size:
-        val_u = abs(u_flat[idx])
-        val_v = abs(v_flat[idx])
-        val_w = abs(w_flat[idx])
+        val_u = abs(u.flat[idx])
+        val_v = abs(v.flat[idx])
+        val_w = abs(w.flat[idx])
 
         if val_u > max_u:
             max_u = val_u
@@ -75,7 +71,6 @@ def _velocity_maxima_timestep(u, v, w, maxima, total_size):
         cuda.atomic.max(maxima, 0, s_u[0])
         cuda.atomic.max(maxima, 1, s_v[0])
         cuda.atomic.max(maxima, 2, s_w[0])
-
 
 def compute_new_timestep_gpu(
     u, v, w, maxima, delta, cfl_max, max_dt=None

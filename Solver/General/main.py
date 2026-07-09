@@ -16,6 +16,43 @@ def _extend_sys_path(config):
             sys.path.insert(0, path)
 
 
+def _prepare_cuda_dlls():
+    import os
+    import sys
+    import shutil
+    import platform
+    from pathlib import Path
+
+    if platform.system() != "Windows":
+        return []
+
+    added = set()
+
+    for entry in map(Path, sys.path):
+        nvidia = entry / "nvidia"
+        if not nvidia.exists():
+            continue
+
+        for bin_dir in nvidia.rglob("bin"):
+            os.add_dll_directory(str(bin_dir))
+            added.add(str(bin_dir))
+
+        for src in nvidia.rglob("cudart64_12.dll"):
+            os.add_dll_directory(str(src.parent))
+            added.add(str(src.parent))
+
+            dst = src.parent / "cudart.dll"
+            if not dst.exists():
+                shutil.copy2(src, dst)
+
+        for src in nvidia.rglob("nvvm64_*.dll"):
+            os.add_dll_directory(str(src.parent))
+            added.add(str(src.parent))
+            dst = src.parent / "nvvm.dll"
+            if not dst.exists():
+                shutil.copy2(src, dst)
+
+
 def _collect_mesh_objects(entries):
     mesh_objects = []
 
@@ -56,6 +93,8 @@ def main(config=None):
     try:
         config = config or {}
         _extend_sys_path(config)
+
+        _prepare_cuda_dlls()
 
         if np is None:
             import numpy as _np
