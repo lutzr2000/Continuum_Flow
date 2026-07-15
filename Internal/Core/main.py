@@ -1,7 +1,5 @@
 import bpy
-import json
 import shutil
-import subprocess
 import threading
 import time
 import sys
@@ -9,13 +7,9 @@ from pathlib import Path
 
 from . import export_config
 from . import load_result
+from . import solver_process
 from . import solver_status
 from . import writer_manager
-
-
-def _read_solver_stdout(process):
-    for line in process.stdout:
-        print("[Solver]", line, end="")
 
 
 _vdb_watcher = load_result.VDBWatcher()
@@ -435,7 +429,8 @@ class main(bpy.types.Operator):
             self.report({'ERROR'}, "No active Continuum Flow simulation found")
             return {'CANCELLED'}
 
-        self.process = None
+        self.job_id = None
+        self.job_result = None
         self.writer_server = None
         self.bake_directory = None
         self.output_directory = None
@@ -455,7 +450,7 @@ class main(bpy.types.Operator):
             context.window_manager.modal_handler_add(self)
         except Exception as exc:
             print("Failed to start bake:", exc)
-            if self.process and self.process.poll() is None:
+            if self.job_id is not None:
                 self.cancel_bake()
             else:
                 self.cleanup()
@@ -470,9 +465,24 @@ class main(bpy.types.Operator):
             self.cancel_bake()
             return {'CANCELLED'}
 
-        if event.type == 'TIMER' and self.process and self.process.poll() is not None:
-            self.cleanup()
-            return {'FINISHED'}
+        if event.type == 'TIMER' and self.job_id is not None:
+            job_result = solver_process.get_job_result(self.job_id)
+            if job_result is not None:
+                self.job_result = job_result
+                self.cleanup()
+
+                if self._cancel_requested:
+                    return {'CANCELLED'}
+
+                if not bool(job_result.get("success", False)):
+                    message = job_result.get("message") or "Bake failed"
+                    traceback_text = job_result.get("traceback")
+                    if traceback_text:
+                        print(traceback_text)
+                    self.report({'ERROR'}, message)
+                    return {'CANCELLED'}
+
+                return {'FINISHED'}
 
         return {'PASS_THROUGH'}
 
@@ -495,8 +505,8 @@ class main(bpy.types.Operator):
 
             bake_completed_successfully = (
                 not self._cancel_requested
-                and self.process is not None
-                and self.process.returncode == 0
+                and bool(self.job_result)
+                and bool(self.job_result.get("success", False))
             )
 
             if self.writer_server:
@@ -534,23 +544,25 @@ class main(bpy.types.Operator):
         self._cancel_requested = True
         _vdb_watcher.stop()
 
-        if self.process and self.process.poll() is None:
-            if self.cancel_flag_path is not None:
-                try:
-                    self.cancel_flag_path.touch()
-                except Exception as exc:
-                    print("Failed to create cancel flag:", exc)
-
+        if self.cancel_flag_path is not None:
             try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                try:
-                    self.process.terminate()
-                    self.process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
+                self.cancel_flag_path.touch()
             except Exception as exc:
-                print("Failed to terminate solver:", exc)
+                print("Failed to create cancel flag:", exc)
+
+        if self.job_id is not None:
+            job_result = solver_process.wait_for_job(self.job_id, timeout=10.0)
+            if job_result is None:
+                print("Solver worker did not stop promptly; restarting worker")
+                solver_process.shutdown_worker(restart=True)
+                self.job_result = {
+                    "type": "job_finished",
+                    "job_id": self.job_id,
+                    "success": False,
+                    "message": "Bake cancelled",
+                }
+            else:
+                self.job_result = job_result
 
         self.cleanup()
 
@@ -588,12 +600,14 @@ class main(bpy.types.Operator):
 
         self.bake_directory = Path(bake_directory).resolve()
         self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
+        config_dict["bake_directory"] = str(self.bake_directory)
         meta_config = config_dict.setdefault("meta", {})
         meta_config["cancel_flag_path"] = str(self.cancel_flag_path)
         meta_config["parent_sys_path"] = list(sys.path)
 
         output_config = config_dict["simulations"][0]["outputs"][0]
         simulation_settings = config_dict["simulations"][0].get("settings") or {}
+        solver_backend = str(simulation_settings.get("solver_backend", "GPU")).strip().upper()
         start_frame = int(simulation_settings.get("start_frame", 1))
         end_frame = int(simulation_settings.get("end_frame", start_frame))
         total_frames = max(0, end_frame - start_frame)
@@ -609,30 +623,10 @@ class main(bpy.types.Operator):
             progress_callback=self._update_progress_from_loaded_frames,
         )
 
-        addon_root = Path(__file__).resolve().parents[2]
-
-        self.process = subprocess.Popen(
-            [
-                sys.executable,
-                "-u",
-                "-m",
-                "Solver.General.main",
-                str(self.bake_directory),
-            ],
-            cwd=str(addon_root),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+        solver_process.ensure_worker_running(
+            wait=True,
+            timeout=120.0,
+            preload_backend=solver_backend,
         )
+        self.job_id = solver_process.start_job(config_dict)
 
-        if self.process.stdin is not None:
-            self.process.stdin.write(json.dumps(config_dict))
-            self.process.stdin.close()
-
-        threading.Thread(
-            target=_read_solver_stdout,
-            args=(self.process,),
-            daemon=True,
-        ).start()
