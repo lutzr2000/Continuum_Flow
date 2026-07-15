@@ -1,4 +1,3 @@
-from . import helper_functions
 from . import sockets
 from . import node_base
 
@@ -15,5 +14,5 @@ class ContinuumFlowObstacleNode(node_base.ContinuumFlowBaseNode):
     bl_width_max = 360.0
 
     def _sync_node(self):
-        helper_functions.ensure_geometry_input(self)
-        helper_functions.ensure_named_output(self, sockets.ContinuumFlowIntSocket.bl_idname, "Obstacle")
+        self._ensure_geometry_input()
+        self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Obstacle")

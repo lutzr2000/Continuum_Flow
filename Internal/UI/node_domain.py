@@ -1,4 +1,3 @@
-from . import helper_functions
 from . import sockets
 from . import node_base
 import bpy
@@ -52,7 +51,7 @@ class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
     z_high_velocity: FloatVectorProperty(name="Velocity", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="VELOCITY", options=set())  # type: ignore
 
     def _sync_node(self):
-        helper_functions.ensure_named_output(self, sockets.ContinuumFlowIntSocket.bl_idname, "Domain")
+        self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Domain")
 
     def _draw_boundary_controls(self, layout, label, condition_attr, velocity_attr):
         box = layout.box()

@@ -1,4 +1,3 @@
-from . import helper_functions
 from . import sockets
 from . import node_base
 from bpy.props import FloatProperty
@@ -62,7 +61,7 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     vorticity: FloatProperty(name="Vorticity", default=40, min=0.0, soft_min=0.0, soft_max=100.0, precision=2, subtype="PERCENTAGE", description="How much extra vorticity is added")  # type: ignore
 
     def _sync_node(self):
-        helper_functions.ensure_named_output(self, sockets.ContinuumFlowIntSocket.bl_idname, "Physics")
+        self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Physics")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)

@@ -1,5 +1,4 @@
 import bpy
-from . import helper_functions
 from . import sockets
 from . import node_base
 from ..Core import solver_status
@@ -56,7 +55,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
             if name == "Forces"
             else sockets.ContinuumFlowLinkSocket.bl_idname
         )
-        return helper_functions.ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
+        return self._ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
 
     def _sync_node(self):
         self._ensure_input_socket("Domain")
@@ -64,7 +63,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         self._ensure_input_socket("Obstacles")
         self._ensure_input_socket("Source", multi_input=True)
         self._ensure_input_socket("Forces", multi_input=True)
-        helper_functions.ensure_named_output(self, sockets.ContinuumFlowResultSocket.bl_idname, "Result")
+        self._ensure_named_output(sockets.ContinuumFlowResultSocket.bl_idname, "Result")
 
     def init(self, context):
         scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)

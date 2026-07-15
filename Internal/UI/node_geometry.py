@@ -1,4 +1,3 @@
-from . import helper_functions
 from . import sockets
 from . import node_base
 import bpy
@@ -20,7 +19,7 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
     source_object: PointerProperty(name="Object", type=bpy.types.Object)  # type: ignore
 
     def _sync_node(self):
-        helper_functions.ensure_named_output(self, "NodeSocketGeometry", "Geometry")
+        self._ensure_named_output("NodeSocketGeometry", "Geometry")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)

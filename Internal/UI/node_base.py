@@ -34,3 +34,28 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         col = box.column(align=True)
         for property_name in property_names:
             col.prop(self, property_name)
+
+    def _ensure_socket(self, collection, socket_type, name, multi_input=False):
+        """
+        Return a socket, creating it on demand with optional multi-input support.
+        """
+        socket = collection.get(name)
+        if socket is None:
+            socket = collection.new(socket_type, name, use_multi_input=multi_input)
+        if multi_input and hasattr(socket, "link_limit"):
+            socket.link_limit = 0
+        return socket
+
+    def _ensure_named_output(self, socket_type, name):
+        """
+        Ensure that this node exposes one named output socket of the given type.
+        """
+        return self._ensure_socket(self.outputs, socket_type, name)
+
+    def _ensure_geometry_input(self):
+        """
+        Ensure that this node exposes the standard multi-input geometry socket.
+        """
+        return self._ensure_socket(
+            self.inputs, "NodeSocketGeometry", "Geometry", multi_input=True
+        )

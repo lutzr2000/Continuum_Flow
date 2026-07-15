@@ -1,4 +1,3 @@
-from . import helper_functions
 from . import sockets
 from . import node_base
 from bpy.props import BoolProperty
@@ -30,8 +29,8 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
-        helper_functions.ensure_geometry_input(self)
-        helper_functions.ensure_named_output(self, sockets.ContinuumFlowIntSocket.bl_idname, "Source")
+        self._ensure_geometry_input()
+        self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Source")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)

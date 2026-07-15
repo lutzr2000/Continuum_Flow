@@ -6,4 +6,4 @@ bl_info = {
     "category": "Node",
 }
 
-from .Internal.UI.register import register, unregister
+from .Internal.register import register, unregister
