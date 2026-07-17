@@ -244,19 +244,14 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     def cancel_bake(self):
         self.cancel_requested = True
 
-        if self.job_id is not None:
-            job_result = solver_process.wait_for_job(self.job_id, timeout=10.0)
-            if job_result is None:
-                print("Solver worker did not stop promptly; restarting worker")
-                solver_process.shutdown_worker(restart=True)
-                self.job_result = {
-                    "type": "job_finished",
-                    "job_id": self.job_id,
-                    "success": False,
-                    "message": "Bake cancelled",
-                }
-            else:
-                self.job_result = job_result
+        solver_process.shutdown_worker()
+        self.job_result = {
+            "type": "job_finished",
+            "job_id": self.job_id,
+            "success": False,
+            "message": "Bake cancelled",
+        }
+        solver_process.start_worker_in_background()
 
         self.cleanup()
 

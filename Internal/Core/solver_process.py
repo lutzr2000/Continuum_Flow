@@ -321,9 +321,6 @@ def shutdown_worker(restart=False):
         _reset_runtime_state_locked()
         _PROCESS_CONDITION.notify_all()
 
-    if restart:
-        start_worker_in_background()
-
 
 def is_worker_ready():
     with _PROCESS_LOCK:
