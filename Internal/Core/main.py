@@ -22,19 +22,40 @@ def get_output_node(context):
         return node
     return None
 
+
 def get_connected_simulation_node(output_node):
-    linked_simulation_nodes = _linked_simulation_nodes_from_output_node(output_node)
+    linked_simulation_nodes = get_linked_simulation_nodes(output_node)
     return linked_simulation_nodes[0]
 
 
+def get_linked_simulation_nodes(output_node):
+    result_socket = output_node.inputs.get("Result")
+    if result_socket is None or not result_socket.is_linked:
+        return []
+
+    simulation_nodes = []
+    for link in result_socket.links:
+        simulation_node = getattr(link, "from_node", None)
+        if getattr(simulation_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+            simulation_nodes.append(simulation_node)
+    return simulation_nodes
 
 
+def get_linked_viewer_node(simulation_node):
+    result_socket = simulation_node.outputs.get("Result")
+    if result_socket is None or not result_socket.is_linked:
+        return []
 
+    viewer_nodes = []
+    for link in result_socket.links:
+        viewer_node = getattr(link, "to_node", None)
+        if getattr(viewer_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE":
+            viewer_nodes.append(viewer_node)
+    return viewer_nodes
 
 
 #-------------- progress managment ----------------
 def draw_bake_progress(self, context):
-    window_manager = getattr(context, "window_manager")
     layout = self.layout
     layout.separator_spacer()
     layout.label(text="Bake:")
@@ -46,14 +67,6 @@ def draw_bake_progress(self, context):
         factor=float(solver_status.progress),
         type='BAR',
         text=solver_status.progress_text,
-    )
-
-    cancel_row = layout.row(align=True)
-    cancel_row.operator(
-        "continuum_flow.cancel_bake",
-        text="",
-        icon="PANEL_CLOSE",
-        emboss=False,
     )
     layout.separator_spacer()
 
@@ -90,31 +103,7 @@ def clear_status_progress(context):
     ui_redraw()
 
 
-
-
-
-
-
-#-------------- clean-up ----------------
-def clear_geometry_directory(output_directory, retries=5, retry_delay=0.2):
-    geometry_directory = Path(output_directory).resolve() / "geometry"
-    for attempt in range(retries):
-        try:
-            shutil.rmtree(geometry_directory)
-            print("Removed geometry directory:", geometry_directory)
-        except FileNotFoundError:
-            print("Failed to remove geometry folder")
-
-
-
-
-
-
-
-
-
-
-
+#-------------- UI ----------------
 def ui_redraw():
     window_manager = getattr(bpy.context, "window_manager")
 
@@ -126,6 +115,7 @@ def ui_redraw():
                 area.tag_redraw()
 
 
+#-------------- Data and paths ----------------
 def normalize_directory_path(path_value):
     try:
         return Path(path_value).resolve()
@@ -143,183 +133,15 @@ def output_directory_has_vdbs(output_directory):
     )
 
 
-def _linked_simulation_nodes_from_output_node(output_node):
-    if output_node is None:
-        return []
-
-    result_socket = output_node.inputs.get("Result")
-    if result_socket is None or not result_socket.is_linked:
-        return []
-
-    simulation_nodes = []
-    for link in result_socket.links:
-        simulation_node = getattr(link, "from_node", None)
-        if getattr(simulation_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
-            simulation_nodes.append(simulation_node)
-    return simulation_nodes
-
-
-def _linked_viewer_nodes_from_simulation_node(simulation_node):
-    if simulation_node is None:
-        return []
-
-    result_socket = simulation_node.outputs.get("Result")
-    if result_socket is None or not result_socket.is_linked:
-        return []
-
-    viewer_nodes = []
-    for link in result_socket.links:
-        viewer_node = getattr(link, "to_node", None)
-        if getattr(viewer_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE":
-            viewer_nodes.append(viewer_node)
-    return viewer_nodes
-
-
-def _simulation_live_preview_enabled(simulation_node):
-    viewer_nodes = _linked_viewer_nodes_from_simulation_node(simulation_node)
+#-------------- bake ----------------
+def is_live_preview_enabled(simulation_node):
+    viewer_nodes = get_linked_viewer_node(simulation_node)
     if not viewer_nodes:
         return False
     return any(bool(getattr(viewer_node, "live_preview", True)) for viewer_node in viewer_nodes)
 
 
-
-def _output_node_last_bake_directory(output_node):
-    if output_node is None:
-        return None
-    return normalize_directory_path(getattr(output_node, "last_bake_directory", ""))
-
-
-def _output_node_target_directory(output_node):
-    if output_node is None:
-        return None
-    return normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
-
-
-def _is_bake_directory_inside_target(output_node, bake_directory):
-    target_directory = _output_node_target_directory(output_node)
-    bake_directory = normalize_directory_path(bake_directory)
-    if target_directory is None or bake_directory is None:
-        return False
-
-    try:
-        bake_directory.relative_to(target_directory)
-    except ValueError:
-        return False
-    return True
-
-
-def _discover_latest_bake_directory(output_node):
-    target_directory = _output_node_target_directory(output_node)
-    if target_directory is None or not target_directory.exists() or not target_directory.is_dir():
-        return None
-
-    candidates = []
-    for child in target_directory.iterdir():
-        if not child.is_dir():
-            continue
-        if not output_directory_has_vdbs(child):
-            continue
-        candidates.append(child)
-
-    if not candidates:
-        return None
-
-    return max(candidates, key=lambda directory: directory.stat().st_mtime)
-
-
-def _resolved_output_node_bake_directory(output_node, persist=False):
-    bake_directory = _output_node_last_bake_directory(output_node)
-    if _is_bake_directory_inside_target(output_node, bake_directory) and output_directory_has_vdbs(bake_directory):
-        return bake_directory
-
-    discovered_directory = _discover_latest_bake_directory(output_node)
-    if persist and discovered_directory is not None:
-        store_last_bake_directory(output_node, discovered_directory)
-    return discovered_directory
-
-
-def store_last_bake_directory(output_node, output_directory):
-    output_node.last_bake_directory = str(output_directory) 
-
-
-def output_node_has_baked_data(output_node):
-    return _resolved_output_node_bake_directory(output_node, persist=False) is not None
-
-
-
-
-def _set_bake_available_state(is_available, output_directory=None):
-    solver_status.bake_available = bool(is_available)
-    solver_status.last_output_directory = str(output_directory) if output_directory else None
-    ui_redraw()
-
-
-def _update_bake_available_from_output(output_directory):
-    has_vdbs = output_directory_has_vdbs(output_directory)
-    output_directory = normalize_directory_path(output_directory)
-    _set_bake_available_state(has_vdbs, output_directory if has_vdbs else None)
-    return has_vdbs
-
-
-def _clear_bake_directory(output_directory):
-    if output_directory is None:
-        return 0
-
-    output_directory = Path(output_directory).resolve()
-    if not output_directory.exists() or not output_directory.is_dir():
-        return 0
-
-    deleted_count = sum(1 for _ in output_directory.glob("*.vdb"))
-
-    try:
-        shutil.rmtree(output_directory)
-    except OSError as exc:
-        print("Failed to remove bake directory:", output_directory, exc)
-        return 0
-
-    print("Removed bake directory:", output_directory)
-    return deleted_count
-
-
-
-def _free_bake_output(output_node):
-    output_directory = _resolved_output_node_bake_directory(output_node, persist=False)
-    VDBWatcher.clear_loaded_sequence_for_directory(output_directory)
-    deleted_count = _clear_bake_directory(output_directory)
-    store_last_bake_directory(output_node, None)
-    return deleted_count
-
-
-class CONTINUUM_FLOW_OT_cancel_bake(bpy.types.Operator):
-    bl_idname = "continuum_flow.cancel_bake"
-    bl_label = "Cancel Bake"
-
-    def execute(self, context):
-        active_operator = solver_status.active_bake_operator
-        if not solver_status.bake_running or active_operator is None:
-            self.report({'WARNING'}, "No bake is currently running")
-            return {'CANCELLED'}
-
-        print("Bake cancelled by user")
-        active_operator.cancel_bake()
-        return {'FINISHED'}
-
-
-class CONTINUUM_FLOW_OT_free_bake(bpy.types.Operator):
-    bl_idname = "continuum_flow.free_bake"
-    bl_label = "Free Bake"
-
-    def execute(self, context):
-        output_node = get_output_node(context)
-        deleted_count = _free_bake_output(output_node)
-        if deleted_count:
-            self.report({'INFO'}, f"Removed {deleted_count} VDB files")
-        else:
-            self.report({'INFO'}, "No VDB files found to remove")
-        return {'FINISHED'}
-
-
-class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
+class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
 
@@ -409,7 +231,10 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 VDBWatcher.finish_bake()
 
             VDBWatcher.stop()
-            clear_geometry_directory(self.output_directory)
+
+            geometry_directory = Path(self.output_directory).resolve() / "geometry"
+            shutil.rmtree(geometry_directory)
+            print("Removed geometry directory:", geometry_directory)
         
             self.output_node.last_bake_directory = str(self.output_directory) 
             set_bake_progress(0, 0)
@@ -418,7 +243,6 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
     def cancel_bake(self):
         self.cancel_requested = True
-        VDBWatcher.stop()
 
         if self.job_id is not None:
             job_result = solver_process.wait_for_job(self.job_id, timeout=10.0)
@@ -435,10 +259,6 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 self.job_result = job_result
 
         self.cleanup()
-
-
-    def _update_progress_from_loaded_frames(self, loaded_frame_count):
-        set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
 
 
     def launch_writer_manager(self, config_dict):
@@ -461,6 +281,10 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         )
         server.start()
         return server
+
+
+    def update_bake_progress(self, loaded_frame_count):
+        set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
 
 
     def run_bake(self, context):
@@ -492,8 +316,8 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         VDBWatcher.start(
             vdb_output_dir,
             start_frame_index=start_frame,
-            live_preview_enabled=_simulation_live_preview_enabled(self.simulation_node),
-            progress_callback=self._update_progress_from_loaded_frames,
+            live_preview_enabled=is_live_preview_enabled(self.simulation_node),
+            progress_callback=self.update_bake_progress,
         )
 
         solver_process.ensure_worker_running(
@@ -503,3 +327,81 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         )
         self.job_id = solver_process.start_job(config_dict)
 
+
+#-------------- free bake ----------------
+def output_node_has_baked_data(output_node):
+    return get_bake_directory(output_node, persist=False) is not None
+
+
+def bake_directory_is_old(output_node, bake_directory):
+    target_directory = normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
+    try:
+        bake_directory.relative_to(target_directory)
+    except ValueError:
+        return False
+    return True
+
+
+def get_latest_bake_directory(output_node):
+    target_directory = normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
+    if target_directory is None or not target_directory.exists() or not target_directory.is_dir():
+        return None
+
+    candidates = []
+    for child in target_directory.iterdir():
+        if not child.is_dir():
+            continue
+        if not output_directory_has_vdbs(child):
+            continue
+        candidates.append(child)
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda directory: directory.stat().st_mtime)
+
+
+def get_bake_directory(output_node, persist=False):
+    bake_directory = normalize_directory_path(getattr(output_node, "last_bake_directory", ""))
+    if bake_directory_is_old(output_node, bake_directory) and output_directory_has_vdbs(bake_directory):
+        return bake_directory
+
+    discovered_directory = get_latest_bake_directory(output_node)
+    if persist and discovered_directory is not None:
+        output_node.last_bake_directory = str(discovered_directory)
+    return discovered_directory
+
+
+def clear_bake_directory(output_directory):
+    output_directory = Path(output_directory).resolve()
+    deleted_count = sum(1 for _ in output_directory.glob("*.vdb"))
+    try:
+        shutil.rmtree(output_directory)
+    except OSError as exc:
+        print("Failed to remove bake directory:", output_directory, exc)
+        return 0
+
+    print("Removed bake directory:", output_directory)
+    return deleted_count
+
+
+def free_bake_output(output_node):
+    output_directory = get_bake_directory(output_node, persist=False)
+    VDBWatcher.clear_loaded_sequence_for_directory(output_directory)
+    deleted_count = clear_bake_directory(output_directory)
+    output_node.last_bake_directory = str(output_directory)
+    return deleted_count
+
+
+class CONTINUUM_FLOW_OT_free_bake(bpy.types.Operator):
+    bl_idname = "continuum_flow.free_bake"
+    bl_label = "Free Bake"
+
+    def execute(self, context):
+        output_node = get_output_node(context)
+        deleted_count = free_bake_output(output_node)
+        if deleted_count:
+            self.report({'INFO'}, f"Removed {deleted_count} VDB files")
+        else:
+            self.report({'INFO'}, "No VDB files found to remove")
+        return {'FINISHED'}
