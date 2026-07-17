@@ -13,7 +13,7 @@ from . import writer_manager
 
 
 _vdb_watcher = load_result.VDBWatcher()
-_status_workspace = None
+status_workspace = None
 
 #-------------- get methods ----------------
 def get_output_node(context):
@@ -22,7 +22,7 @@ def get_output_node(context):
         return node
     return None
 
-def get_connected_simulation_node(context, output_node):
+def get_connected_simulation_node(output_node):
     linked_simulation_nodes = _linked_simulation_nodes_from_output_node(output_node)
     return linked_simulation_nodes[0]
 
@@ -32,18 +32,9 @@ def get_connected_simulation_node(context, output_node):
 
 
 
-
-
-
-
+#-------------- progress managment ----------------
 def draw_bake_progress(self, context):
-    if not solver_status.bake_running:
-        return
-
-    window_manager = getattr(context, "window_manager", None)
-    if window_manager is None:
-        return
-
+    window_manager = getattr(context, "window_manager")
     layout = self.layout
     layout.separator_spacer()
     layout.label(text="Bake:")
@@ -51,21 +42,14 @@ def draw_bake_progress(self, context):
     progress_row = layout.row(align=True)
     progress_row.ui_units_x = 13
 
-    if hasattr(progress_row, "progress"):
-        progress_row.progress(
-            factor=float(solver_status.progress),
-            type='BAR',
-            text=solver_status.progress_text,
-        )
-    elif hasattr(window_manager, "continuum_flow_bake_progress"):
-        fallback_row = progress_row.row(align=True)
-        fallback_row.enabled = False
-        fallback_row.prop(
-            window_manager,
-            "continuum_flow_bake_progress",
-            text=solver_status.progress_text,
-            slider=True,
-        )
+    row = progress_row.row(align=True)
+    row.enabled = False
+    row.prop(
+        window_manager,
+        "continuum_flow_bake_progress",
+        text=solver_status.progress_text,
+        slider=True,
+    )
 
     cancel_row = layout.row(align=True)
     cancel_row.operator(
@@ -77,38 +61,39 @@ def draw_bake_progress(self, context):
     layout.separator_spacer()
 
 
-def _tag_ui_redraw():
-    window_manager = getattr(bpy.context, "window_manager", None)
-    if window_manager is None:
+def set_status_progress(context):
+    global status_workspace
+    workspace = getattr(context, "workspace", None)
+    if workspace is None:
         return
+    status_workspace = workspace
+    workspace.status_text_set(draw_bake_progress)
+    ui_redraw()
+
+
+def _clear_status_progress(context):
+    global status_workspace
+    workspace = status_workspace or getattr(context, "workspace", None)
+    if workspace is not None:
+        workspace.status_text_set(None)
+    status_workspace = None
+    ui_redraw()
+
+
+
+
+
+
+
+def ui_redraw():
+    window_manager = getattr(bpy.context, "window_manager")
 
     for window in window_manager.windows:
-        screen = getattr(window, "screen", None)
-        if screen is None:
-            continue
+        screen = getattr(window, "screen")
 
         for area in screen.areas:
             if area.type in {"STATUSBAR", "NODE_EDITOR", "PROPERTIES"}:
                 area.tag_redraw()
-
-
-def _set_status_progress(context):
-    global _status_workspace
-    workspace = getattr(context, "workspace", None)
-    if workspace is None:
-        return
-    _status_workspace = workspace
-    workspace.status_text_set(draw_bake_progress)
-    _tag_ui_redraw()
-
-
-def _clear_status_progress(context):
-    global _status_workspace
-    workspace = _status_workspace or getattr(context, "workspace", None)
-    if workspace is not None:
-        workspace.status_text_set(None)
-    _status_workspace = None
-    _tag_ui_redraw()
 
 
 def _normalize_directory_path(path_value):
@@ -144,21 +129,6 @@ def _linked_simulation_nodes_from_output_node(output_node):
         if getattr(simulation_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
             simulation_nodes.append(simulation_node)
     return simulation_nodes
-
-
-def _resolve_output_node_from_simulation_node(simulation_node):
-    if simulation_node is None:
-        return None
-
-    result_socket = simulation_node.outputs.get("Result")
-    if result_socket is None or not result_socket.is_linked:
-        return None
-
-    for link in result_socket.links:
-        output_node = getattr(link, "to_node", None)
-        if getattr(output_node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
-            return output_node
-    return None
 
 
 def _linked_viewer_nodes_from_simulation_node(simulation_node):
@@ -250,26 +220,6 @@ def output_node_has_baked_data(output_node):
     return _resolved_output_node_bake_directory(output_node, persist=False) is not None
 
 
-def refresh_bake_state_from_output_nodes():
-    active_output_directory = None
-
-    for node_tree in getattr(bpy.data, "node_groups", ()):
-        for node in getattr(node_tree, "nodes", ()):
-            if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_OUTPUT_NODE":
-                continue
-
-            candidate_directory = _resolved_output_node_bake_directory(node, persist=False)
-            if candidate_directory is not None:
-                active_output_directory = candidate_directory
-                break
-
-        if active_output_directory is not None:
-            break
-
-    _set_bake_available_state(active_output_directory is not None, active_output_directory)
-    return active_output_directory
-
-
 def _set_bake_progress(current_frames, total_frames):
     current_frames = max(0, int(current_frames or 0))
     total_frames = max(0, int(total_frames or 0))
@@ -292,13 +242,13 @@ def _set_bake_progress(current_frames, total_frames):
 
     if hasattr(window_manager, "continuum_flow_bake_progress"):
         window_manager.continuum_flow_bake_progress = float(solver_status.progress)
-    _tag_ui_redraw()
+    ui_redraw()
 
 
 def _set_bake_available_state(is_available, output_directory=None):
     solver_status.bake_available = bool(is_available)
     solver_status.last_output_directory = str(output_directory) if output_directory else None
-    _tag_ui_redraw()
+    ui_redraw()
 
 
 def _update_bake_available_from_output(output_directory):
@@ -358,7 +308,6 @@ def _free_bake_output(output_node):
     _vdb_watcher.clear_loaded_sequence_for_directory(output_directory)
     deleted_count = _clear_bake_directory(output_directory)
     _store_output_node_last_bake_directory(output_node, None)
-    refresh_bake_state_from_output_nodes()
     return deleted_count
 
 
@@ -397,10 +346,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
     def execute(self, context):
         self.output_node = get_output_node(context)
-        self.simulation_node = get_connected_simulation_node(context)
-
-        refresh_bake_state_from_output_nodes()
-
+        self.simulation_node = get_connected_simulation_node(self.output_node)
         self.job_id = None
         self.job_result = None
         self.writer_server = None
@@ -414,7 +360,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
-        _set_status_progress(context)
+        set_status_progress(context)
 
         try:
             self.do_bake(context)
@@ -507,7 +453,6 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 self.output_node,
                 self.output_directory if has_vdbs else None,
             )
-            refresh_bake_state_from_output_nodes()
             _set_bake_progress(0, 0)
             if bpy.context is not None:
                 _clear_status_progress(bpy.context)
