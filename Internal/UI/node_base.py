@@ -1,6 +1,6 @@
 ﻿import bpy
 from .node_tree import ContinuumFlowNodeTree
-from ..Core import solver_status
+from ..Core.solver import solver_status
 
 class ContinuumFlowBaseNode(bpy.types.Node):
     """

@@ -259,7 +259,7 @@ class SolverManager:
 
     @staticmethod
     def _addon_root():
-        return Path(__file__).resolve().parents[2]
+        return Path(__file__).resolve().parents[3]
 
     @staticmethod
     def _creation_flags():

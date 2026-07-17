@@ -1,7 +1,7 @@
 import bpy
 from . import sockets
 from . import node_base
-from ..Core import solver_status
+from ..Core.solver import solver_status
 from bpy.props import FloatProperty
 from bpy.props import IntProperty
 from bpy.props import EnumProperty

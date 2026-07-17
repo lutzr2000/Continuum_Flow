@@ -5,11 +5,11 @@ import time
 import sys
 from pathlib import Path
 
-from . import export_config
+from .export import export_config
 from . import load_result
-from . import solver_worker
-from . import solver_status
-from . import writer_manager
+from .solver import solver_worker
+from .solver import solver_status
+from .writer import writer_manager
 
 
 VDBWatcher = load_result.VDBWatcher()

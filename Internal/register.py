@@ -38,9 +38,9 @@ from .Core.runtime_handlers import (
 )
 from .Core.baking import CONTINUUM_FLOW_OT_bake, CONTINUUM_FLOW_OT_free_bake
 from .Core import forces
-from .Core import solver_worker
+from .Core.solver import solver_worker
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
-from .Core import solver_status
+from .Core.solver import solver_status
 
 
 classes = (

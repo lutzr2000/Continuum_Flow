@@ -2,7 +2,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import baking as bake_main, forces, viewer
-from .export_config import sync_all_continuum_flow_node_animations
+from .export.export_config import sync_all_continuum_flow_node_animations
 from ..UI.node_tree import NODE_TREE_ID
 
 _FAKE_USER_INITIALIZED_KEY = "_continuum_flow_fake_user_initialized"
