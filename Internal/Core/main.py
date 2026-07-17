@@ -12,7 +12,7 @@ from . import solver_status
 from . import writer_manager
 
 
-_vdb_watcher = load_result.VDBWatcher()
+VDBWatcher = load_result.VDBWatcher()
 status_workspace = None
 
 #-------------- get methods ----------------
@@ -68,6 +68,23 @@ def set_status_progress(context):
         return
     status_workspace = workspace
     workspace.status_text_set(draw_bake_progress)
+    ui_redraw()
+
+
+def set_bake_progress(current_frames, total_frames):
+    total_frames = max(1, total_frames)
+    solver_status.progress_current_frames = current_frames
+    solver_status.progress_total_frames = total_frames
+
+    progress = min(1.0, current_frames / total_frames)
+    percent = int(round(progress * 100.0))
+    solver_status.progress = progress
+    solver_status.progress_text = f"{percent}%"
+
+    window_manager = getattr(bpy.context, "window_manager")
+
+    if hasattr(window_manager, "continuum_flow_bake_progress"):
+        window_manager.continuum_flow_bake_progress = float(solver_status.progress)
     ui_redraw()
 
 
@@ -220,29 +237,6 @@ def output_node_has_baked_data(output_node):
     return _resolved_output_node_bake_directory(output_node, persist=False) is not None
 
 
-def _set_bake_progress(current_frames, total_frames):
-    current_frames = max(0, int(current_frames or 0))
-    total_frames = max(0, int(total_frames or 0))
-
-    solver_status.progress_current_frames = current_frames
-    solver_status.progress_total_frames = total_frames
-
-    if total_frames > 0:
-        progress = min(1.0, float(current_frames) / float(total_frames))
-        percent = int(round(progress * 100.0))
-        solver_status.progress = progress
-        solver_status.progress_text = f"{percent}%"
-    else:
-        solver_status.progress = 0.0
-        solver_status.progress_text = "0%"
-
-    window_manager = getattr(bpy.context, "window_manager", None)
-    if window_manager is None:
-        return
-
-    if hasattr(window_manager, "continuum_flow_bake_progress"):
-        window_manager.continuum_flow_bake_progress = float(solver_status.progress)
-    ui_redraw()
 
 
 def _set_bake_available_state(is_available, output_directory=None):
@@ -305,7 +299,7 @@ def _clear_geometry_directory(output_directory, retries=5, retry_delay=0.2):
 
 def _free_bake_output(output_node):
     output_directory = _resolved_output_node_bake_directory(output_node, persist=False)
-    _vdb_watcher.clear_loaded_sequence_for_directory(output_directory)
+    VDBWatcher.clear_loaded_sequence_for_directory(output_directory)
     deleted_count = _clear_bake_directory(output_directory)
     _store_output_node_last_bake_directory(output_node, None)
     return deleted_count
@@ -356,14 +350,14 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
         self._event_timer = None
-        self._cancel_requested = False
+        self.cancel_requested = False
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
         set_status_progress(context)
 
         try:
-            self.do_bake(context)
+            self.run_bake(context)
             self._event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
             context.window_manager.modal_handler_add(self)
         except Exception as exc:
@@ -389,7 +383,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 self.job_result = job_result
                 self.cleanup()
 
-                if self._cancel_requested:
+                if self.cancel_requested:
                     return {'CANCELLED'}
 
                 if not bool(job_result.get("success", False)):
@@ -422,7 +416,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 self._event_timer = None
 
             bake_completed_successfully = (
-                not self._cancel_requested
+                not self.cancel_requested
                 and bool(self.job_result)
                 and bool(self.job_result.get("success", False))
             )
@@ -441,11 +435,11 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
             if bake_completed_successfully:
                 try:
-                    _vdb_watcher.finish_bake()
+                    VDBWatcher.finish_bake()
                 except Exception as exc:
                     print("Failed to load final VDB sequence:", exc)
 
-            _vdb_watcher.stop()
+            VDBWatcher.stop()
             _clear_geometry_directory(self.output_directory)
 
             has_vdbs = _update_bake_available_from_output(self.output_directory)
@@ -453,19 +447,13 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
                 self.output_node,
                 self.output_directory if has_vdbs else None,
             )
-            _set_bake_progress(0, 0)
+            set_bake_progress(0, 0)
             if bpy.context is not None:
                 _clear_status_progress(bpy.context)
 
     def cancel_bake(self):
-        self._cancel_requested = True
-        _vdb_watcher.stop()
-
-        if self.cancel_flag_path is not None:
-            try:
-                self.cancel_flag_path.touch()
-            except Exception as exc:
-                print("Failed to create cancel flag:", exc)
+        self.cancel_requested = True
+        VDBWatcher.stop()
 
         if self.job_id is not None:
             job_result = solver_process.wait_for_job(self.job_id, timeout=10.0)
@@ -484,7 +472,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         self.cleanup()
 
     def _update_progress_from_loaded_frames(self, loaded_frame_count):
-        _set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
+        set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
 
     def launch_writer_manager(self, config_dict):
         simulation_config = ((config_dict.get("simulations") or [{}])[0])
@@ -507,7 +495,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         server.start()
         return server
 
-    def do_bake(self, context):
+    def run_bake(self, context):
         config_dict = export_config.build_config_dict(context=context, simulation_node=self.simulation_node)
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 
@@ -527,13 +515,13 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         solver_backend = str(simulation_settings.get("solver_backend", "GPU")).strip().upper()
         start_frame = int(simulation_settings.get("start_frame", 1))
         end_frame = int(simulation_settings.get("end_frame", start_frame))
-        total_frames = max(0, end_frame - start_frame)
-        _set_bake_progress(0, total_frames)
+        total_frames = max(1, end_frame - start_frame)
+        set_bake_progress(0, total_frames)
 
         vdb_output_dir = Path(output_config["output_path"]).resolve()
         self.output_directory = vdb_output_dir
 
-        _vdb_watcher.start(
+        VDBWatcher.start(
             vdb_output_dir,
             start_frame_index=start_frame,
             live_preview_enabled=_simulation_live_preview_enabled(self.simulation_node),
