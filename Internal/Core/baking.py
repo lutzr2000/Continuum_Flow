@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import export_config
 from . import load_result
-from . import solver_process
+from . import solver_worker
 from . import solver_status
 from . import writer_manager
 
@@ -185,7 +185,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             return {'CANCELLED'}
 
         if event.type == 'TIMER' and self.job_id is not None:
-            job_result = solver_process.get_job_result(self.job_id)
+            job_result = solver_worker.get_job_result(self.job_id)
             if job_result is not None:
                 self.job_result = job_result
                 self.cleanup()
@@ -244,14 +244,14 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     def cancel_bake(self):
         self.cancel_requested = True
 
-        solver_process.shutdown_worker()
+        solver_worker.shutdown_worker()
         self.job_result = {
             "type": "job_finished",
             "job_id": self.job_id,
             "success": False,
             "message": "Bake cancelled",
         }
-        solver_process.start_worker_in_background()
+        solver_worker.start_worker_in_background()
 
         self.cleanup()
 
@@ -315,12 +315,12 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             progress_callback=self.update_bake_progress,
         )
 
-        solver_process.ensure_worker_running(
+        solver_worker.ensure_worker_running(
             wait=True,
             timeout=120.0,
             preload_backend=solver_backend,
         )
-        self.job_id = solver_process.start_job(config_dict)
+        self.job_id = solver_worker.start_job(config_dict)
 
 
 #-------------- free bake ----------------

@@ -1,7 +1,7 @@
 import bpy
 from bpy.app.handlers import persistent
 
-from . import forces, main as bake_main, viewer
+from . import baking as bake_main, forces, viewer
 from .export_config import sync_all_continuum_flow_node_animations
 from ..UI.node_tree import NODE_TREE_ID
 

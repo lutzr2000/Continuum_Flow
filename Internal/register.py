@@ -36,9 +36,9 @@ from .Core.runtime_handlers import (
     sync_runtime_state,
     sync_ui_animation_state,
 )
-from .Core.main import CONTINUUM_FLOW_OT_bake, CONTINUUM_FLOW_OT_free_bake
+from .Core.baking import CONTINUUM_FLOW_OT_bake, CONTINUUM_FLOW_OT_free_bake
 from .Core import forces
-from .Core import solver_process
+from .Core import solver_worker
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from .Core import solver_status
 
@@ -124,13 +124,13 @@ def register():
 
     sync_runtime_state()
     sync_ui_animation_state(getattr(bpy.context, "scene", None))
-    solver_process.start_worker_in_background(
+    solver_worker.start_worker_in_background(
         preload_backend="GPU" if solver_status.gpu_available else "CPU"
     )
 
 
 def unregister():
-    solver_process.shutdown_worker(restart=False)
+    solver_worker.shutdown_worker(restart=False)
     solver_status.gpu_available = False
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):
