@@ -42,13 +42,10 @@ def draw_bake_progress(self, context):
     progress_row = layout.row(align=True)
     progress_row.ui_units_x = 13
 
-    row = progress_row.row(align=True)
-    row.enabled = False
-    row.prop(
-        window_manager,
-        "continuum_flow_bake_progress",
+    progress_row.progress(
+        factor=float(solver_status.progress),
+        type='BAR',
         text=solver_status.progress_text,
-        slider=True,
     )
 
     cancel_row = layout.row(align=True)
@@ -81,20 +78,36 @@ def set_bake_progress(current_frames, total_frames):
     solver_status.progress = progress
     solver_status.progress_text = f"{percent}%"
 
-    window_manager = getattr(bpy.context, "window_manager")
-
-    if hasattr(window_manager, "continuum_flow_bake_progress"):
-        window_manager.continuum_flow_bake_progress = float(solver_status.progress)
     ui_redraw()
 
 
-def _clear_status_progress(context):
+def clear_status_progress(context):
     global status_workspace
     workspace = status_workspace or getattr(context, "workspace", None)
     if workspace is not None:
         workspace.status_text_set(None)
     status_workspace = None
     ui_redraw()
+
+
+
+
+
+
+
+#-------------- clean-up ----------------
+def clear_geometry_directory(output_directory, retries=5, retry_delay=0.2):
+    geometry_directory = Path(output_directory).resolve() / "geometry"
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(geometry_directory)
+            print("Removed geometry directory:", geometry_directory)
+        except FileNotFoundError:
+            print("Failed to remove geometry folder")
+
+
+
+
 
 
 
@@ -113,9 +126,7 @@ def ui_redraw():
                 area.tag_redraw()
 
 
-def _normalize_directory_path(path_value):
-    if not path_value:
-        return None
+def normalize_directory_path(path_value):
     try:
         return Path(path_value).resolve()
     except (OSError, RuntimeError, TypeError, ValueError):
@@ -123,7 +134,7 @@ def _normalize_directory_path(path_value):
 
 
 def output_directory_has_vdbs(output_directory):
-    output_directory = _normalize_directory_path(output_directory)
+    output_directory = normalize_directory_path(output_directory)
     return bool(
         output_directory
         and output_directory.exists()
@@ -175,18 +186,18 @@ def _simulation_live_preview_enabled(simulation_node):
 def _output_node_last_bake_directory(output_node):
     if output_node is None:
         return None
-    return _normalize_directory_path(getattr(output_node, "last_bake_directory", ""))
+    return normalize_directory_path(getattr(output_node, "last_bake_directory", ""))
 
 
 def _output_node_target_directory(output_node):
     if output_node is None:
         return None
-    return _normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
+    return normalize_directory_path(bpy.path.abspath(getattr(output_node, "output_path", "")))
 
 
 def _is_bake_directory_inside_target(output_node, bake_directory):
     target_directory = _output_node_target_directory(output_node)
-    bake_directory = _normalize_directory_path(bake_directory)
+    bake_directory = normalize_directory_path(bake_directory)
     if target_directory is None or bake_directory is None:
         return False
 
@@ -223,14 +234,12 @@ def _resolved_output_node_bake_directory(output_node, persist=False):
 
     discovered_directory = _discover_latest_bake_directory(output_node)
     if persist and discovered_directory is not None:
-        _store_output_node_last_bake_directory(output_node, discovered_directory)
+        store_last_bake_directory(output_node, discovered_directory)
     return discovered_directory
 
 
-def _store_output_node_last_bake_directory(output_node, output_directory):
-    if output_node is None:
-        return
-    output_node.last_bake_directory = str(output_directory) if output_directory else ""
+def store_last_bake_directory(output_node, output_directory):
+    output_node.last_bake_directory = str(output_directory) 
 
 
 def output_node_has_baked_data(output_node):
@@ -247,7 +256,7 @@ def _set_bake_available_state(is_available, output_directory=None):
 
 def _update_bake_available_from_output(output_directory):
     has_vdbs = output_directory_has_vdbs(output_directory)
-    output_directory = _normalize_directory_path(output_directory)
+    output_directory = normalize_directory_path(output_directory)
     _set_bake_available_state(has_vdbs, output_directory if has_vdbs else None)
     return has_vdbs
 
@@ -272,36 +281,12 @@ def _clear_bake_directory(output_directory):
     return deleted_count
 
 
-def _clear_geometry_directory(output_directory, retries=5, retry_delay=0.2):
-    output_directory = _normalize_directory_path(output_directory)
-    if output_directory is None:
-        return False
-
-    geometry_directory = output_directory / "geometry"
-    if not geometry_directory.exists():
-        return False
-
-    for attempt in range(retries):
-        try:
-            shutil.rmtree(geometry_directory)
-            print("Removed geometry directory:", geometry_directory)
-            return True
-        except FileNotFoundError:
-            return False
-        except OSError as exc:
-            if attempt == retries - 1:
-                print("Failed to remove geometry directory:", geometry_directory, exc)
-                return False
-            time.sleep(retry_delay)
-
-    return False
-
 
 def _free_bake_output(output_node):
     output_directory = _resolved_output_node_bake_directory(output_node, persist=False)
     VDBWatcher.clear_loaded_sequence_for_directory(output_directory)
     deleted_count = _clear_bake_directory(output_directory)
-    _store_output_node_last_bake_directory(output_node, None)
+    store_last_bake_directory(output_node, None)
     return deleted_count
 
 
@@ -347,9 +332,9 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         self.bake_directory = None
         self.output_directory = None
         self.cancel_flag_path = None
-        self._cleanup_done = False
-        self._cleanup_lock = threading.Lock()
-        self._event_timer = None
+        self.cleanup_done = False
+        self.cleanup_lock = threading.Lock()
+        self.event_timer = None
         self.cancel_requested = False
 
         solver_status.bake_running = True
@@ -358,7 +343,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
         try:
             self.run_bake(context)
-            self._event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
+            self.event_timer = context.window_manager.event_timer_add(0.1, window=context.window)
             context.window_manager.modal_handler_add(self)
         except Exception as exc:
             print("Failed to start bake:", exc)
@@ -399,22 +384,15 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def cleanup(self):
-        with self._cleanup_lock:
-            if self._cleanup_done:
+        with self.cleanup_lock:
+            if self.cleanup_done:
                 return
 
-            self._cleanup_done = True
+            self.cleanup_done = True
             solver_status.bake_running = False
-            if solver_status.active_bake_operator is self:
-                solver_status.active_bake_operator = None
-
-            if self._event_timer is not None and bpy.context is not None:
-                try:
-                    bpy.context.window_manager.event_timer_remove(self._event_timer)
-                except Exception:
-                    pass
-                self._event_timer = None
-
+            solver_status.active_bake_operator = None
+            bpy.context.window_manager.event_timer_remove(self.event_timer)
+            self.event_timer = None
             bake_completed_successfully = (
                 not self.cancel_requested
                 and bool(self.job_result)
@@ -422,34 +400,21 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
             )
 
             if self.writer_server:
-                try:
-                    self.writer_server.stop()
-                except Exception as exc:
-                    print("Failed to stop writer server:", exc)
+                self.writer_server.stop()
 
-            if self.cancel_flag_path is not None:
-                try:
-                    self.cancel_flag_path.unlink(missing_ok=True)
-                except Exception as exc:
-                    print("Failed to remove cancel flag:", exc)
+            if self.cancel_flag_path:
+                self.cancel_flag_path.unlink(missing_ok=True)
 
             if bake_completed_successfully:
-                try:
-                    VDBWatcher.finish_bake()
-                except Exception as exc:
-                    print("Failed to load final VDB sequence:", exc)
+                VDBWatcher.finish_bake()
 
             VDBWatcher.stop()
-            _clear_geometry_directory(self.output_directory)
-
-            has_vdbs = _update_bake_available_from_output(self.output_directory)
-            _store_output_node_last_bake_directory(
-                self.output_node,
-                self.output_directory if has_vdbs else None,
-            )
+            clear_geometry_directory(self.output_directory)
+        
+            self.output_node.last_bake_directory = str(self.output_directory) 
             set_bake_progress(0, 0)
-            if bpy.context is not None:
-                _clear_status_progress(bpy.context)
+            clear_status_progress(bpy.context)
+
 
     def cancel_bake(self):
         self.cancel_requested = True
@@ -471,8 +436,10 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
 
         self.cleanup()
 
+
     def _update_progress_from_loaded_frames(self, loaded_frame_count):
         set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
+
 
     def launch_writer_manager(self, config_dict):
         simulation_config = ((config_dict.get("simulations") or [{}])[0])
@@ -494,6 +461,7 @@ class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
         )
         server.start()
         return server
+
 
     def run_bake(self, context):
         config_dict = export_config.build_config_dict(context=context, simulation_node=self.simulation_node)
