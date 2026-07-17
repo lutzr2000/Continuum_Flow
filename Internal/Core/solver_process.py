@@ -149,7 +149,7 @@ def _launch_worker_locked():
             sys.executable,
             "-u",
             "-m",
-            "Solver.General.main",
+            "Solver.General.dummy_main",
             "--worker",
         ],
         cwd=str(_addon_root()),

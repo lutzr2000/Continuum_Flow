@@ -15,6 +15,26 @@ from . import writer_manager
 _vdb_watcher = load_result.VDBWatcher()
 _status_workspace = None
 
+#-------------- get methods ----------------
+def get_output_node(context):
+    node = getattr(context, "node", None)
+    if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
+        return node
+    return None
+
+def get_connected_simulation_node(context, output_node):
+    linked_simulation_nodes = _linked_simulation_nodes_from_output_node(output_node)
+    return linked_simulation_nodes[0]
+
+
+
+
+
+
+
+
+
+
 
 def draw_bake_progress(self, context):
     if not solver_status.bake_running:
@@ -110,13 +130,6 @@ def output_directory_has_vdbs(output_directory):
     )
 
 
-def _resolve_output_node_from_context(context):
-    node = getattr(context, "node", None)
-    if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_OUTPUT_NODE":
-        return node
-    return None
-
-
 def _linked_simulation_nodes_from_output_node(output_node):
     if output_node is None:
         return []
@@ -170,38 +183,6 @@ def _simulation_live_preview_enabled(simulation_node):
         return False
     return any(bool(getattr(viewer_node, "live_preview", True)) for viewer_node in viewer_nodes)
 
-
-def _resolve_selected_simulation_node(context):
-    output_node = _resolve_output_node_from_context(context)
-    linked_simulation_nodes = _linked_simulation_nodes_from_output_node(output_node)
-    if linked_simulation_nodes:
-        return linked_simulation_nodes[0]
-
-    active_node = getattr(context, "active_node", None)
-    if getattr(active_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
-        return active_node
-
-    space_data = getattr(context, "space_data", None)
-    edit_tree = getattr(space_data, "edit_tree", None)
-    if getattr(edit_tree, "bl_idname", "") == "CONTINUUM_FLOW_NODE_TREE":
-        active_tree_node = getattr(getattr(edit_tree, "nodes", None), "active", None)
-        if getattr(active_tree_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
-            return active_tree_node
-
-        selected_simulation_nodes = [
-            node
-            for node in getattr(edit_tree, "nodes", ())
-            if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE"
-            and bool(getattr(node, "select", False))
-        ]
-        if selected_simulation_nodes:
-            return selected_simulation_nodes[0]
-
-    context_node = getattr(context, "node", None)
-    if getattr(context_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
-        return context_node
-
-    return None
 
 
 def _output_node_last_bake_directory(output_node):
@@ -401,7 +382,7 @@ class CONTINUUM_FLOW_OT_free_bake(bpy.types.Operator):
     bl_label = "Free Bake"
 
     def execute(self, context):
-        output_node = _resolve_output_node_from_context(context)
+        output_node = get_output_node(context)
         deleted_count = _free_bake_output(output_node)
         if deleted_count:
             self.report({'INFO'}, f"Removed {deleted_count} VDB files")
@@ -410,24 +391,15 @@ class CONTINUUM_FLOW_OT_free_bake(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class main(bpy.types.Operator):
+class CONTINUUM_FLOW_OT_BAKE(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
 
     def execute(self, context):
-        self.simulation_node = _resolve_selected_simulation_node(context)
-        self.output_node = _resolve_output_node_from_simulation_node(self.simulation_node)
-        if self.output_node is None:
-            self.output_node = _resolve_output_node_from_context(context)
+        self.output_node = get_output_node(context)
+        self.simulation_node = get_connected_simulation_node(context)
+
         refresh_bake_state_from_output_nodes()
-
-        if solver_status.bake_running:
-            self.report({'WARNING'}, "Bake is already running")
-            return {'CANCELLED'}
-
-        if self.simulation_node is None:
-            self.report({'ERROR'}, "No active Continuum Flow simulation found")
-            return {'CANCELLED'}
 
         self.job_id = None
         self.job_result = None

@@ -36,7 +36,7 @@ from .Core.runtime_handlers import (
     sync_runtime_state,
     sync_ui_animation_state,
 )
-from .Core.main import main, CONTINUUM_FLOW_OT_cancel_bake, CONTINUUM_FLOW_OT_free_bake
+from .Core.main import CONTINUUM_FLOW_OT_BAKE, CONTINUUM_FLOW_OT_cancel_bake, CONTINUUM_FLOW_OT_free_bake
 from .Core import forces
 from .Core import solver_process
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
@@ -71,7 +71,7 @@ classes = (
     ContinuumFlow_OT_viewer_toggle_domain,
     CONTINUUM_FLOW_OT_cancel_bake,
     CONTINUUM_FLOW_OT_free_bake,
-    main,
+    CONTINUUM_FLOW_OT_BAKE,
 )
 
 
