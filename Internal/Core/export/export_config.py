@@ -590,7 +590,7 @@ def build_animations(node, start_frame, end_frame):
     sampled = {
         name: []
         for name in property_names
-        if node.path_from_id(name)
+        if sync_node_tree_animations(node, name)
     }
 
     try:
@@ -608,10 +608,19 @@ def build_animations(node, start_frame, end_frame):
     finally:
         scene.frame_set(current_frame)
 
-    return {
+    animations = {
         name: {"values": values}
         for name, values in sampled.items()
     }
+    animated_values = {
+        name: sample_animated_value(
+            name,
+            getattr(node, name),
+        )
+        for name in sampled
+    }
+
+    return animations, animated_values
 
 
 def iter_action_curves(action):
@@ -666,3 +675,54 @@ def sample_animated_value(property_name, value):
         )
 
     return float(value)
+
+
+def sync_node_tree_animations(node, property_name):
+    try:
+        data_path = node.path_from_id(property_name)
+    except Exception:
+        return False
+
+    animation_data = getattr(node.id_data, "animation_data", None)
+    if animation_data is None:
+        return False
+
+    for fcurve in iter_action_curves(
+        getattr(animation_data, "action", None)
+    ):
+        if getattr(fcurve, "data_path", None) == data_path:
+            return True
+
+    for fcurve in getattr(animation_data, "drivers", ()):
+        if getattr(fcurve, "data_path", None) == data_path:
+            return True
+
+    return False
+
+
+def sync_node_tree_animations(scene=None):
+    """
+    Touch animated node properties so Blender evaluates them consistently before UI redraws.
+    """
+    del scene
+
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for node_tree in node_groups:
+        if getattr(node_tree, "bl_idname", "") != NODE_TREE_ID:
+            continue
+
+        for node in getattr(node_tree, "nodes", ()):
+            for property_name in ANIMATABLE_PROPERTIES.get(
+                getattr(node, "bl_idname", ""),
+                (),
+            ):
+                if not sync_node_tree_animations(node, property_name):
+                    continue
+
+                try:
+                    getattr(node, property_name)
+                except Exception:
+                    continue

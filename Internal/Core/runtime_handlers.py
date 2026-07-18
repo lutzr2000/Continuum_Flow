@@ -2,7 +2,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import baking as bake_main, forces, viewer
-from .export.export_config import sync_all_continuum_flow_node_animations
+from .export.export_config import sync_node_tree_animations
 from ..UI.node_tree import NODE_TREE_ID
 
 _FAKE_USER_INITIALIZED_KEY = "_continuum_flow_fake_user_initialized"
@@ -72,10 +72,10 @@ def sync_runtime_state(_scene=None):
 
 @persistent
 def continuum_flow_frame_change_post(scene, _depsgraph=None):
-    sync_all_continuum_flow_node_animations(scene)
+    sync_node_tree_animations(scene)
     _tag_animation_editors_redraw()
 
 
 def sync_ui_animation_state(scene=None):
-    sync_all_continuum_flow_node_animations(scene)
+    sync_node_tree_animations(scene)
     _tag_animation_editors_redraw()
