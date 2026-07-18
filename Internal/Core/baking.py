@@ -232,7 +232,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
             VDBWatcher.stop()
 
-            geometry_directory = Path(self.output_directory).resolve() / "geometry"
+            geometry_directory = Path(self.bake_directory).resolve() / "geometry"
             shutil.rmtree(geometry_directory)
             print("Removed geometry directory:", geometry_directory)
         

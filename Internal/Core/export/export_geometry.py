@@ -6,7 +6,7 @@ import bpy
 
 
 @contextlib.contextmanager
-def _suppress_process_output():
+def suppress_process_output():
     """
     Suppress Python- and C-level stdout/stderr during Blender operator calls.
     """
@@ -27,31 +27,11 @@ def _suppress_process_output():
         os.close(devnull_fd)
 
 
-def _evaluated_mesh_to_temporary_object(source_object, depsgraph):
-    """
-    Build one temporary mesh object from the evaluated object state.
-    """
-    object_eval = source_object.evaluated_get(depsgraph)
-    temp_mesh = bpy.data.meshes.new_from_object(
-        object_eval,
-        depsgraph=depsgraph,
-        preserve_all_data_layers=False,
-    )
-    temp_object = bpy.data.objects.new(
-        f"__continuum_flow_export__{source_object.name}",
-        temp_mesh,
-    )
-    temp_object.matrix_world.identity()
-    return temp_object, temp_mesh
-
-
-def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
+def export_object_as_local_stl(source_object, target_dir, depsgraph):
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = target_dir / f"{source_object.name}.stl"
-    if depsgraph is None:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
 
     temp_object = None
     temp_mesh = None
@@ -60,10 +40,7 @@ def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
     scene_collection = getattr(getattr(bpy.context, "scene", None), "collection", None)
 
     try:
-        if scene_collection is None:
-            raise RuntimeError("No active scene collection available for STL export.")
-
-        temp_object, temp_mesh = _evaluated_mesh_to_temporary_object(
+        temp_object, temp_mesh = mesh_to_temp_object(
             source_object,
             depsgraph,
         )
@@ -73,7 +50,7 @@ def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
         temp_object.select_set(True)
         bpy.context.view_layer.objects.active = temp_object
 
-        with _suppress_process_output():
+        with suppress_process_output():
             bpy.ops.wm.stl_export(
                 filepath=str(file_path),
                 export_selected_objects=True,
@@ -110,4 +87,22 @@ def export_object_as_local_stl(source_object, target_dir, depsgraph=None):
         except Exception:
             pass
 
-    return file_path
+
+def mesh_to_temp_object(source_object, depsgraph):
+    """
+    Build one temporary mesh object from the evaluated object state.
+    """
+    object_eval = source_object.evaluated_get(depsgraph)
+    temp_mesh = bpy.data.meshes.new_from_object(
+        object_eval,
+        depsgraph=depsgraph,
+        preserve_all_data_layers=False,
+    )
+    temp_object = bpy.data.objects.new(
+        f"__continuum_flow_export__{source_object.name}",
+        temp_mesh,
+    )
+    temp_object.matrix_world.identity()
+    return temp_object, temp_mesh
+
+

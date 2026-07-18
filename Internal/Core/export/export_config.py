@@ -117,7 +117,7 @@ def export_geomtry_stls(config_dict, export_directory):
     geometry_dir.mkdir(parents=True, exist_ok=True)
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    simulation = config_dict["simulations"][0]
+    simulation = config_dict["simulation"][0]
 
     seen = set()
 
@@ -779,7 +779,7 @@ def sync_node_tree_animations(scene=None):
                 getattr(node, "bl_idname", ""),
                 (),
             ):
-                if not sync_node_tree_animations(node, property_name):
+                if not node_property_is_animated(node, property_name):
                     continue
 
                 try:
