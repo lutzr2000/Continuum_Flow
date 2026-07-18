@@ -218,7 +218,7 @@ class SolverManager:
                 sys.executable,
                 "-u",
                 "-m",
-                "Solver.General.dummy_main",
+                "Solver.General.main",
                 "--worker",
             ],
             cwd=str(self._addon_root()),

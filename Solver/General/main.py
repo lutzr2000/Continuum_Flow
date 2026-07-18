@@ -174,8 +174,7 @@ def main(config=None):
         config = config or {}
         _ensure_common_modules(config)
 
-        simulations = config.get("simulations") or []
-        simulation_cfg = simulations[0]
+        simulation_cfg = config.get("simulation") or {}
         solver_backend = str((simulation_cfg.get("settings") or {}).get("solver_backend", "GPU")).strip().upper()
         solver_kernel_module = _get_solver_kernel_module(solver_backend)
 

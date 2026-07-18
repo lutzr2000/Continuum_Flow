@@ -62,7 +62,7 @@ def export_config_dict(config_dict):
     """
     Prepare a fresh bake subfolder and export the STL geometry assets into it.
     """
-    export_root_directory = Path(config_dict["simulation"][0]["outputs"][0]["output_path"])
+    export_root_directory = Path(config_dict["simulation"]["outputs"][0]["output_path"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
 
     export_directory = create_bake_subdirectory(export_root_directory, config_dict)
@@ -107,9 +107,9 @@ def set_subdirectory_paths(config_dict, bake_directory):
     Point every simulation output at the concrete bake subfolder for this run.
     """
     bake_directory = str(Path(bake_directory).resolve())
-    for simulation_entry in config_dict.get("simulations", []):
-        for output_entry in simulation_entry.get("outputs", []):
-            output_entry["output_path"] = bake_directory
+    simulation_entry = config_dict.get("simulation") or {}
+    for output_entry in simulation_entry.get("outputs", []):
+        output_entry["output_path"] = bake_directory
 
 
 def export_geomtry_stls(config_dict, export_directory):
@@ -117,7 +117,7 @@ def export_geomtry_stls(config_dict, export_directory):
     geometry_dir.mkdir(parents=True, exist_ok=True)
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    simulation = config_dict["simulation"][0]
+    simulation = config_dict["simulation"]
 
     seen = set()
 
@@ -154,7 +154,7 @@ def build_config_dict(context, simulation_node):
             "node_tree_name": node_tree.name,
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
         },
-        "simulation": [build_entries(simulation_node)],
+        "simulation": build_entries(simulation_node),
         "geometry_nodes": get_geometry_nodes(node_tree),
     }
     return config_dict

@@ -257,17 +257,17 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
 
     def launch_writer_manager(self, config_dict):
-        simulation_config = ((config_dict.get("simulations") or [{}])[0])
+        simulation_config = config_dict.get("simulation") or {}
         output_config = (simulation_config.get("outputs") or [{}])[0]
         performance_config = output_config.get("performance") or {}
         writer_process_count = int(performance_config.get("writer_processes", 4))
         writer_config = {
-            "simulations": [{
+            "simulation": {
                 "domain": simulation_config.get("domain") or {},
                 "outputs": [{
                     "precision": output_config.get("precision", "float32"),
                 }],
-            }],
+            },
         }
 
         server = writer_manager.HostVDBWriterServer(
@@ -288,7 +288,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         writer_server = self.launch_writer_manager(config_dict)
         self.writer_server = writer_server
-        simulation_config = config_dict["simulation"][0]
+        simulation_config = config_dict["simulation"]
         simulation_config["outputs"][0]["host_vdb_writer"] = (writer_server.endpoint())
         self.bake_directory = Path(bake_directory).resolve()
         self.cancel_flag_path = (self.bake_directory / "cancel_requested.flag")

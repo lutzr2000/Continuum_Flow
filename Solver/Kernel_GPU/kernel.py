@@ -56,10 +56,10 @@ def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
     output_mask[i, j, k] = active_tiles[tile_i, tile_j, tile_k]
 
 
-def get_source_values(simulations, var_name, t, index=None):
-    source_entries = simulations[0].get("sources") or []
+def get_source_values(simulation, var_name, t, index=None):
+    source_entries = simulation.get("sources") or []
     animation_times = (
-        (simulations[0].get("animation_timeline") or {}).get("times") or ()
+        (simulation.get("animation_timeline") or {}).get("times") or ()
     )
     values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
 
@@ -149,7 +149,7 @@ def _prepare_force_config_device(config_array, row_width):
 
 
 def apply_all_BC(
-    simulations,
+    simulation,
     t,
     u,
     v,
@@ -172,7 +172,7 @@ def apply_all_BC(
     Domain BCs are applied always, source and obstalces are optional depending on
     user config.
     """
-    bc_config = simulations[0].get("domain", {}).get("boundary_conditions", {})
+    bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
     u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
 
     if obstacle_mask is not None:
@@ -197,13 +197,13 @@ def apply_all_BC(
 
     source_count = int(source_masks.shape[0])
     if source_count > 0:
-        source_temperature_values = get_source_values(simulations,"temperature",t)
-        source_smoke_values = get_source_values(simulations,"smoke",t)
-        source_fuel_values = get_source_values(simulations,"fuel",t)
-        source_velocity_x_values = get_source_values(simulations, "velocity", t, 0)
-        source_velocity_y_values = get_source_values(simulations, "velocity", t, 1)
-        source_velocity_z_values = get_source_values(simulations, "velocity", t, 2)
-        source_noise_amplitudes = get_source_values(simulations, "noise_amplitude", t) / np.float32(100.0)
+        source_temperature_values = get_source_values(simulation,"temperature",t)
+        source_smoke_values = get_source_values(simulation,"smoke",t)
+        source_fuel_values = get_source_values(simulation,"fuel",t)
+        source_velocity_x_values = get_source_values(simulation, "velocity", t, 0)
+        source_velocity_y_values = get_source_values(simulation, "velocity", t, 1)
+        source_velocity_z_values = get_source_values(simulation, "velocity", t, 2)
+        source_noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
 
         for source_idx in range(source_count):
             source_mask_entry = source_masks[source_idx]
@@ -286,20 +286,22 @@ def create_multigrid_levels(shape, delta, min_size=8):
 
 def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
     total_start_time = perf_counter()
-    simulations = config.get("simulations")
+    simulation = config.get("simulation") or {}
+    if not simulation:
+        raise ValueError("Solver config must contain a non-empty 'simulation' object.")
     cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
     cancel_requested = False
 
     # ------------time-------------------
     t = 0
-    cfl = float(simulations[0].get("settings", {}).get("cfl", 10.0))
-    t_max = simulations[0].get("settings").get("simulation_length")
+    cfl = float(simulation.get("settings", {}).get("cfl", 10.0))
+    t_max = simulation.get("settings").get("simulation_length")
 
     # ------------dimensions------------------
-    delta = simulations[0].get("domain").get("resolution")
-    nx = simulations[0]["domain"]["grid"]["nx"]
-    ny = simulations[0]["domain"]["grid"]["ny"]
-    nz = simulations[0]["domain"]["grid"]["nz"]
+    delta = simulation.get("domain").get("resolution")
+    nx = simulation["domain"]["grid"]["nx"]
+    ny = simulation["domain"]["grid"]["ny"]
+    nz = simulation["domain"]["grid"]["nz"]
     shape = (nx,ny,nz)
 
     origin_x = -0.5 * nx * delta
@@ -359,7 +361,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
     source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
     source_masks = cuda.to_device(source_mask_stack)
-    source_noise_base_fields = build_source_noise_fields(simulations[0].get("sources") or [], source_base_masks)
+    source_noise_base_fields = build_source_noise_fields(simulation.get("sources") or [], source_base_masks)
     source_noise_host = np.zeros((len(source_noise_base_fields),) + shape, dtype=np.float32)
     source_noise = cuda.to_device(np.ascontiguousarray(source_noise_host, dtype=np.float32))
 
@@ -371,7 +373,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     )
 
     # ------------intitialise------------------
-    u_initial,v_initial,w_initial = compute_inital_velocity(simulations[0])
+    u_initial,v_initial,w_initial = compute_inital_velocity(simulation)
 
     u.copy_to_device(np.full((shape), u_initial, dtype=GPU_FIELD_DTYPE))
     v.copy_to_device(np.full((shape), v_initial, dtype=GPU_FIELD_DTYPE))
@@ -379,7 +381,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
     p.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
 
-    temperature.copy_to_device(np.full((shape), simulations[0].get("physics").get("temperature").get("reference_temperature"), dtype=GPU_FIELD_DTYPE)) 
+    temperature.copy_to_device(np.full((shape), simulation.get("physics").get("temperature").get("reference_temperature"), dtype=GPU_FIELD_DTYPE)) 
     smoke.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     fuel.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
     flame.copy_to_device(np.full((shape), 0, dtype=GPU_FIELD_DTYPE)) 
@@ -399,12 +401,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
     # ------------output------------------
-    output_cfg = ((simulations[0].get("outputs") or [None])[0]) or {}
+    output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
     shared_memory_blocks, writer_slots = output.setup_output(
-        simulations[0],
-        simulations[0].get("outputs")[0].get("output_path"),
+        simulation,
+        simulation.get("outputs")[0].get("output_path"),
         shape,
     )
 
@@ -485,7 +487,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------BC-------------------
         u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
-            simulations,
+            simulation,
             t,
             u,
             v,
@@ -505,7 +507,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Start Active tiles-------------------
-        if simulations[0].get("settings").get("simulate_sparsely"):
+        if simulation.get("settings").get("simulate_sparsely"):
             scalar_update.build_active_scalar_tile_mask[
                 active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
             ](
@@ -514,8 +516,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 fuel,
                 flame,
                 scalar_active_tiles,
-                simulations[0].get("physics").get("temperature").get("reference_temperature"),
-                simulations[0].get("settings").get("adaptive_domain_threshold"),
+                simulation.get("physics").get("temperature").get("reference_temperature"),
+                simulation.get("settings").get("adaptive_domain_threshold"),
             )
             scalar_update.dilate_active_scalar_tile_mask[
                 active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
@@ -539,7 +541,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             )
 
         # ------------Vorticity-------------------
-        if simulations[0].get("physics").get("extras").get("vorticity") > 0.0:
+        if simulation.get("physics").get("extras").get("vorticity") > 0.0:
             vorticity.compute_vorticity[
                 active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
             ](
@@ -553,9 +555,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             )   
 
         # ------------force params-------------------   
-        fx_const, fy_const, fz_const = forces.constant_force(simulations[0],t)     
-        swirl_config, has_swirl_nodes = forces.swirl_force(simulations[0],t)
-        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulations[0],t)
+        fx_const, fy_const, fz_const = forces.constant_force(simulation,t)     
+        swirl_config, has_swirl_nodes = forces.swirl_force(simulation,t)
+        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation,t)
         swirl_config_device = _prepare_force_config_device(swirl_config, 8)
         turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
 
@@ -591,13 +593,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             v_work,
             w_work,
             delta,
-            simulations[0].get("physics").get("fluid").get("density"),
-            simulations[0].get("physics").get("fluid").get("viscosity"),
+            simulation.get("physics").get("fluid").get("density"),
+            simulation.get("physics").get("fluid").get("viscosity"),
             vorticity_magnitude,
-            simulations[0].get("physics").get("extras").get("vorticity"),
+            simulation.get("physics").get("extras").get("vorticity"),
             temperature,
-            simulations[0].get("physics", {}).get("temperature", {}).get("buoyancy"),
-            simulations[0].get("physics").get("temperature").get("reference_temperature"),
+            simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
+            simulation.get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
             fx_const,
             fy_const,
@@ -618,8 +620,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         w, w_work = w_work, w
 
         # ------------Pressure solve-------------------
-        extra_pressure = get_source_values(simulations,"extra_pressure",t)
-        noise_amplitudes = get_source_values(simulations, "noise_amplitude", t) / np.float32(100.0)
+        extra_pressure = get_source_values(simulation,"extra_pressure",t)
+        noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
 
         p = pressure_solve.pressure_poisson_multigrid(
             u, v, w,
@@ -632,14 +634,14 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             source_noise,
             noise_amplitudes,
             delta,
-            simulations[0].get("physics").get("fluid").get("density"),
-            simulations[0].get("physics").get("temperature").get("expansion_rate"),
-            simulations[0].get("physics").get("temperature").get("reference_temperature"),
+            simulation.get("physics").get("fluid").get("density"),
+            simulation.get("physics").get("temperature").get("expansion_rate"),
+            simulation.get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
             p_levels,
             b_levels,
             delta_levels,
-            simulations[0].get("settings").get("iterations"),
+            simulation.get("settings").get("iterations"),
             pressure_rhs_partial_sums,
             pressure_rhs_sum,
             zero_levels,
@@ -656,7 +658,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             obstacle_mask,
             dt,
             delta,
-            simulations[0].get("physics").get("fluid").get("density"),
+            simulation.get("physics").get("fluid").get("density"),
             scalar_active_tiles_dilated,
         )
 
@@ -698,16 +700,16 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             fuel_work,
             flame,
             delta,
-            simulations[0].get("physics").get("temperature").get("dissipation"),
-            simulations[0].get("physics").get("temperature").get("production_rate"),
-            simulations[0].get("physics").get("smoke").get("dissipation"),
-            simulations[0].get("physics").get("smoke").get("production_rate"),
-            simulations[0].get("physics").get("fuel").get("dissipation"),
-            simulations[0].get("physics").get("fuel").get("burn_rate"),
-            simulations[0].get("physics").get("fuel").get("ignition_temperature"),
-            simulations[0].get("physics").get("burning").get("scale"),
-            simulations[0].get("physics").get("burning").get("amplitude"),
-            simulations[0].get("physics").get("temperature").get("reference_temperature"),
+            simulation.get("physics").get("temperature").get("dissipation"),
+            simulation.get("physics").get("temperature").get("production_rate"),
+            simulation.get("physics").get("smoke").get("dissipation"),
+            simulation.get("physics").get("smoke").get("production_rate"),
+            simulation.get("physics").get("fuel").get("dissipation"),
+            simulation.get("physics").get("fuel").get("burn_rate"),
+            simulation.get("physics").get("fuel").get("ignition_temperature"),
+            simulation.get("physics").get("burning").get("scale"),
+            simulation.get("physics").get("burning").get("amplitude"),
+            simulation.get("physics").get("temperature").get("reference_temperature"),
             scalar_active_tiles_dilated,
         )
 
@@ -726,7 +728,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
         while t >= next_output_time:
             output.enqueue_device_output(
-                simulations[0],
+                simulation,
                 writer_slots,
                 device_fields,
                 output_index,

@@ -42,12 +42,11 @@ def prune_scalar_grid(grid):
 
 def write_vdb(payload):
     config = get_writer_config()
-    simulations = config.get("simulations") or []
-    if not isinstance(simulations, list) or not simulations:
+    simulation = config.get("simulation") or {}
+    if not isinstance(simulation, dict) or not simulation:
         raise ValueError(
-            "Writer config must contain a non-empty 'simulations' list."
+            "Writer config must contain a non-empty 'simulation' object."
         )
-    simulation = simulations[0]
 
     output_cfg = simulation.get("outputs", [{}])[0]
     precision = output_cfg.get("precision", "float32")
