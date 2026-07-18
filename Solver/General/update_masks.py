@@ -65,9 +65,18 @@ def _invert_affine_matrix(matrix):
     return inv
 
 
+def _animation_times(mesh_object):
+    animation = mesh_object.get("transform_animation") or {}
+    if "times" in animation:
+        return np.asarray(animation.get("times") or (0.0,), dtype=np.float32)
+
+    timeline = mesh_object.get("animation_timeline") or {}
+    return np.asarray(timeline.get("times") or (0.0,), dtype=np.float32)
+
+
 def _world_matrix_at_time(mesh_object, time_value):
     animation = mesh_object.get("transform_animation") or {}
-    times = np.asarray(animation.get("times", (0.0,)), dtype=np.float32)
+    times = _animation_times(mesh_object)
     matrices = np.asarray(
         animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
         dtype=np.float32,
@@ -97,7 +106,7 @@ def _world_matrix_at_time(mesh_object, time_value):
 
 def _world_matrix_rate_at_time(mesh_object, time_value):
     animation = mesh_object.get("transform_animation") or {}
-    times = np.asarray(animation.get("times", (0.0,)), dtype=np.float32)
+    times = _animation_times(mesh_object)
     matrices = np.asarray(
         animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
         dtype=np.float32,

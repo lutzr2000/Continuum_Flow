@@ -93,13 +93,18 @@ def _prepare_cuda_libraries():
             return
 
 
-def _collect_mesh_objects(entries):
+def _collect_mesh_objects(entries, animation_timeline=None):
     mesh_objects = []
 
     for entry in entries or ():
         for geometry_input in entry.get("geometry_inputs", ()):
-            if geometry_input.get("mesh_file"):
-                mesh_objects.append(geometry_input)
+            if not geometry_input.get("mesh_file"):
+                continue
+
+            mesh_object = dict(geometry_input)
+            if animation_timeline is not None:
+                mesh_object["animation_timeline"] = animation_timeline
+            mesh_objects.append(mesh_object)
 
     return mesh_objects
 
@@ -189,9 +194,16 @@ def main(config=None):
         origin_y = -0.5 * ny * delta
         origin_z = 0.0
 
-        obstacle_mesh_objects = _collect_mesh_objects(simulation_cfg.get("obstacles"))
+        animation_timeline = simulation_cfg.get("animation_timeline") or {}
+        obstacle_mesh_objects = _collect_mesh_objects(
+            simulation_cfg.get("obstacles"),
+            animation_timeline=animation_timeline,
+        )
         source_entries = simulation_cfg.get("sources") or []
-        source_mesh_objects = _collect_mesh_objects(source_entries)
+        source_mesh_objects = _collect_mesh_objects(
+            source_entries,
+            animation_timeline=animation_timeline,
+        )
 
         animated_obstacles = bool(obstacle_mesh_objects) and _has_animated_mesh_objects(
             obstacle_mesh_objects
@@ -221,7 +233,10 @@ def main(config=None):
         source_masks = []
         source_voxelise_start_time = perf_counter()
         for source_entry in source_entries:
-            source_mesh_objects = _collect_mesh_objects([source_entry])
+            source_mesh_objects = _collect_mesh_objects(
+                [source_entry],
+                animation_timeline=animation_timeline,
+            )
             source_base_mask, source_mask = voxelise_mesh_module.voxelise_mesh_all(
                 nx,
                 ny,
