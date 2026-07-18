@@ -288,17 +288,18 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         writer_server = self.launch_writer_manager(config_dict)
         self.writer_server = writer_server
-        config_dict["simulations"][0]["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
-
+        simulation_config = config_dict["simulation"][0]
+        simulation_config["outputs"][0]["host_vdb_writer"] = (writer_server.endpoint())
         self.bake_directory = Path(bake_directory).resolve()
-        self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
+        self.cancel_flag_path = (self.bake_directory / "cancel_requested.flag")
         config_dict["bake_directory"] = str(self.bake_directory)
+        
         meta_config = config_dict.setdefault("meta", {})
         meta_config["cancel_flag_path"] = str(self.cancel_flag_path)
         meta_config["parent_sys_path"] = list(sys.path)
 
-        output_config = config_dict["simulations"][0]["outputs"][0]
-        simulation_settings = config_dict["simulations"][0].get("settings") or {}
+        output_config = simulation_config["outputs"][0]
+        simulation_settings = simulation_config.get("settings") or {}
         solver_backend = str(simulation_settings.get("solver_backend", "GPU")).strip().upper()
         start_frame = int(simulation_settings.get("start_frame", 1))
         end_frame = int(simulation_settings.get("end_frame", start_frame))

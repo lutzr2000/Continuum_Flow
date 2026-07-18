@@ -62,7 +62,7 @@ def export_config_dict(config_dict):
     """
     Prepare a fresh bake subfolder and export the STL geometry assets into it.
     """
-    export_root_directory = config_dict[0]["outputs"][0]["output_path"]
+    export_root_directory = Path(config_dict["simulation"][0]["outputs"][0]["output_path"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
 
     export_directory = create_bake_subdirectory(export_root_directory, config_dict)
@@ -164,13 +164,57 @@ def build_entries(simulation_node):
     """
     Build a grouped config for the connected nodes
     """
-    domain_node = linked_nodes(simulation_node, "Domain", "input")
-    physics_node = linked_nodes(simulation_node, "Physics", "input")
-    source_nodes = linked_nodes(simulation_node, "Source", "input")
-    obstacle_nodes = linked_nodes(simulation_node, "Obstacles", "input")
-    force_nodes = linked_nodes(simulation_node, "Forces", "input")
-    output_node = linked_nodes(simulation_node, "Result", "output")
-    viewer_node = linked_nodes(simulation_node, "Result", "output")
+    domain_node = linked_node(
+        simulation_node,
+        "Domain",
+        "input",
+    )
+
+    physics_node = linked_node(
+        simulation_node,
+        "Physics",
+        "input",
+    )
+
+    source_nodes = multiple_linked_nodes(
+        simulation_node,
+        "Source",
+        "input",
+    )
+
+    obstacle_nodes = multiple_linked_nodes(
+        simulation_node,
+        "Obstacles",
+        "input",
+    )
+
+    force_nodes = multiple_linked_nodes(
+        simulation_node,
+        "Forces",
+        "input",
+    )
+    result_nodes = multiple_linked_nodes(
+        simulation_node,
+        "Result",
+        "output",
+    )
+
+    output_node = next(
+        (
+            node
+            for node in result_nodes
+            if node.bl_idname == "CONTINUUM_FLOW_OUTPUT_NODE"
+        ),
+    )
+
+    viewer_node = next(
+        (
+            node
+            for node in result_nodes
+            if node.bl_idname == "CONTINUUM_FLOW_VIEWER_NODE"
+        ),
+        None,
+    )
 
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
@@ -218,7 +262,6 @@ def build_domain_node_entries(node):
     Serialize one domain node.
     """
     return {
-        "node_name": node.name,
         "resolution": float(node.resolution),
         "grid": {
             "nx": int(node.nx),
@@ -243,8 +286,6 @@ def build_physics_node_entries(node, start_frame, end_frame, fps):
     )
 
     return {
-        "node_name": node.name,
-
         "fluid": {
             "density": physics_value(node, "fluid_density"),
             "viscosity": physics_value(node, "fluid_viscosity"),
@@ -313,7 +354,7 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         end_frame,
     )
 
-    geometry_nodes = linked_nodes(
+    geometry_nodes = multiple_linked_nodes(
         node,
         "Geometry",
         direction="input",
@@ -332,7 +373,7 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "velocity": safe_float_vector(node.velocity),
         "animations": animations,
         "animated_values": animated_values,
-        **build_geometrie_entries(
+        **build_geometry_entries(
             geometry_nodes,
             start_frame,
             end_frame,
@@ -345,7 +386,7 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
     """
     Serialize one obstacle node, including linked geometry names.
     """
-    geometry_nodes = linked_nodes(
+    geometry_nodes = multiple_linked_nodes(
         node,
         "Geometry",
         direction="input",
@@ -353,7 +394,7 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
 
     return {
         "node_name": node.name,
-        **build_geometrie_entries(
+        **build_geometry_entries(
             geometry_nodes,
             start_frame,
             end_frame,
@@ -362,7 +403,7 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
     }
 
 
-def build_geometrie_entries(geometry_nodes, start_frame, end_frame, fps):
+def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
     transform_samples = get_geometry_transforms(
         geometry_nodes,
         start_frame,
@@ -445,7 +486,6 @@ def build_output_node_entries(node):
     """
     output_path = bpy.path.abspath(node.output_path) if node.output_path else ""
     return {
-        "node_name": node.name,
         "fps": int(node.fps),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
@@ -468,36 +508,56 @@ def build_viewer_node_entries(node):
     Serialize one viewer node.
     """
     return {
-        "node_name": node.name,
         "live_preview": bool(getattr(node, "live_preview", True)),
     }
 
 
 #-------------- helper ----------------
-def linked_nodes(node, socket_name, direction="input"):
+def multiple_linked_nodes(node, socket_name, direction="input"):
     """
-    Return nodes connected to the given input or output socket.
+    Return all nodes connected to the socket.
     """
     if direction == "input":
-        socket_collection = node.inputs
+        socket = node.inputs.get(socket_name)
         linked_node_attr = "from_node"
     elif direction == "output":
-        socket_collection = node.outputs
+        socket = node.outputs.get(socket_name)
         linked_node_attr = "to_node"
     else:
         raise ValueError("direction must be 'input' or 'output'")
 
-    socket = socket_collection.get(socket_name)
     if socket is None or not socket.is_linked:
         return []
 
-    linked_nodes = []
+    return [
+        linked_node
+        for link in socket.links
+        if (linked_node := getattr(link, linked_node_attr, None)) is not None
+    ]
+
+
+def linked_node(node, socket_name, direction="input"):
+    """
+    Return the first node connected to the socket.
+    """
+    if direction == "input":
+        socket = node.inputs.get(socket_name)
+        linked_node_attr = "from_node"
+    elif direction == "output":
+        socket = node.outputs.get(socket_name)
+        linked_node_attr = "to_node"
+    else:
+        raise ValueError("direction must be 'input' or 'output'")
+
+    if socket is None or not socket.is_linked:
+        return None
+
     for link in socket.links:
         linked_node = getattr(link, linked_node_attr, None)
         if linked_node is not None:
-            linked_nodes.append(linked_node)
+            return linked_node
 
-    return linked_nodes
+    return None
 
 
 def safe_float_vector(value):
@@ -590,7 +650,7 @@ def build_animations(node, start_frame, end_frame):
     sampled = {
         name: []
         for name in property_names
-        if sync_node_tree_animations(node, name)
+        if node_property_is_animated(node, name)
     }
 
     try:
@@ -677,7 +737,7 @@ def sample_animated_value(property_name, value):
     return float(value)
 
 
-def sync_node_tree_animations(node, property_name):
+def node_property_is_animated(node, property_name):
     try:
         data_path = node.path_from_id(property_name)
     except Exception:
