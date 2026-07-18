@@ -41,6 +41,23 @@ ANIMATABLE_PROPERTIES = {
         "axis",
         "radius",
     ),
+
+    "CONTINUUM_FLOW_FORCE_CONSTANT_NODE": (
+        "fx",
+        "fy",
+        "fz",
+    ),
+
+    "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
+        "strength",
+        "origin",
+        "axis",
+        "radius",
+    ),
+
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
+        "amplitude",
+    ),
 }
 
 PERCENTAGE_MAPPING = {
@@ -651,6 +668,7 @@ def build_animations(node, start_frame, end_frame):
     try:
         for frame in range(start_frame, end_frame):
             scene.frame_set(frame)
+            sync_node_tree_animations(scene)
 
             for name in sampled:
                 sampled[name].append(
@@ -662,6 +680,7 @@ def build_animations(node, start_frame, end_frame):
 
     finally:
         scene.frame_set(current_frame)
+        sync_node_tree_animations(scene)
 
     animations = {
         name: {"values": values}
@@ -755,12 +774,38 @@ def node_property_is_animated(node, property_name):
     return False
 
 
-def sync_node_tree_animations(scene=None):
-    """
-    Touch animated node properties so Blender evaluates them consistently before UI redraws.
-    """
-    del scene
+def _set_node_property_component(node, property_name, value, array_index):
+    current_value = getattr(node, property_name)
 
+    if array_index < 0 or isinstance(current_value, (int, float, bool, str, bytes)):
+        setattr(node, property_name, value)
+        return
+
+    values = list(current_value)
+    if array_index >= len(values):
+        return
+
+    values[array_index] = value
+    setattr(node, property_name, values)
+
+
+def _iter_keyframeable_node_properties(node_tree):
+    for node in getattr(node_tree, "nodes", ()):
+        for property_name in ANIMATABLE_PROPERTIES.get(getattr(node, "bl_idname", ""), ()):
+            try:
+                node.path_from_id(property_name)
+            except Exception:
+                continue
+            yield node, property_name
+
+
+def sync_node_tree_animations(scene=None):
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return
+
+    frame_value = float(getattr(scene, "frame_current", 0))
     node_groups = getattr(bpy.data, "node_groups", None)
     if node_groups is None:
         return
@@ -769,15 +814,27 @@ def sync_node_tree_animations(scene=None):
         if getattr(node_tree, "bl_idname", "") != NODE_TREE_ID:
             continue
 
-        for node in getattr(node_tree, "nodes", ()):
-            for property_name in ANIMATABLE_PROPERTIES.get(
-                getattr(node, "bl_idname", ""),
-                (),
-            ):
-                if not node_property_is_animated(node, property_name):
-                    continue
+        animation_data = getattr(node_tree, "animation_data", None)
+        action = getattr(animation_data, "action", None)
+        if action is None:
+            continue
 
-                try:
-                    getattr(node, property_name)
-                except Exception:
-                    continue
+        property_path_map = {}
+        for node, property_name in _iter_keyframeable_node_properties(node_tree):
+            try:
+                property_path_map[node.path_from_id(property_name)] = (node, property_name)
+            except Exception:
+                continue
+
+        for fcurve in iter_action_curves(action):
+            property_target = property_path_map.get(getattr(fcurve, "data_path", ""))
+            if property_target is None:
+                continue
+
+            node, property_name = property_target
+            _set_node_property_component(
+                node,
+                property_name,
+                fcurve.evaluate(frame_value),
+                int(getattr(fcurve, "array_index", -1)),
+            )
