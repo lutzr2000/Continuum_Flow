@@ -82,12 +82,7 @@ def _serialize_animation_payload(node, start_frame, end_frame, fps):
         return {}, {}
 
     sampled = _sample_node_property_series(node, props, start_frame, end_frame)
-    times = _animation_times(start_frame, end_frame, fps)
-
-    animations = {
-        name: {"times": times, "values": sampled[name]}
-        for name in props
-    }
+    animations = {name: {"values": sampled[name]} for name in props}
     return animations, sampled
 
 

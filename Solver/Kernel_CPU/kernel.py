@@ -161,18 +161,21 @@ def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
 
 def get_source_values(simulations, var_name, t, index=None):
     source_entries = simulations[0].get("sources") or []
+    animation_times = (
+        (simulations[0].get("animation_timeline") or {}).get("times") or ()
+    )
     values = np.zeros(len(source_entries), dtype=CPU_FIELD_DTYPE)
 
     for source_idx, source_entry in enumerate(source_entries):
         value = source_entry.get(var_name, 0.0)
 
         animation_entry = (source_entry.get("animations") or {}).get(var_name) or {}
-        animation_times = animation_entry.get("times") or ()
         animation_values = animation_entry.get("values") or ()
+        sample_count = min(len(animation_times), len(animation_values))
 
-        if animation_times and animation_values:
+        if sample_count > 0:
             nearest_time_idx = min(
-                range(len(animation_times)),
+                range(sample_count),
                 key=lambda idx: abs(float(animation_times[idx]) - float(t)),
             )
             value = animation_values[nearest_time_idx]
