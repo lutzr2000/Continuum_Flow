@@ -180,9 +180,10 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
     def modal(self, context, event):
         if event.type == 'ESC':
-            print("Bake cancelled by user")
-            self.cancel_bake()
-            return {'CANCELLED'}
+            if not self.cancel_requested:
+                print("Bake cancellation requested by user")
+                self.cancel_bake()
+            return {'RUNNING_MODAL'}
 
         if event.type == 'TIMER' and self.job_id is not None:
             job_result = solver_worker.get_job_result(self.job_id)
@@ -225,7 +226,10 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 self.writer_server.stop()
 
             if self.cancel_flag_path:
-                self.cancel_flag_path.unlink(missing_ok=True)
+                try:
+                    self.cancel_flag_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
             if bake_completed_successfully:
                 VDBWatcher.finish_bake()
@@ -244,16 +248,11 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     def cancel_bake(self):
         self.cancel_requested = True
 
-        solver_worker.shutdown_worker()
-        self.job_result = {
-            "type": "job_finished",
-            "job_id": self.job_id,
-            "success": False,
-            "message": "Bake cancelled",
-        }
-        solver_worker.start_worker_in_background()
-
-        self.cleanup()
+        if self.cancel_flag_path:
+            try:
+                self.cancel_flag_path.write_text("1", encoding="utf-8")
+            except OSError:
+                pass
 
 
     def launch_writer_manager(self, config_dict):
