@@ -408,7 +408,6 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
         geometry_nodes,
         start_frame,
         end_frame,
-        fps,
     )
 
     geometry_inputs = [
@@ -568,7 +567,7 @@ def safe_float_vector(value):
 
 
 def get_geometry_transforms(
-    geometry_nodes, start_frame, end_frame, fps
+    geometry_nodes, start_frame, end_frame
 ):
     """
     Sample evaluated world transforms for linked geometry objects once per Blender frame.
@@ -596,10 +595,6 @@ def get_geometry_transforms(
                 object_samples = transform_samples.setdefault(
                     object_name,
                     {
-                        "times": [
-                            float(sample_frame - int(start_frame)) / float(fps)
-                            for sample_frame in frame_numbers
-                        ],
                         "matrices_world": [],
                     },
                 )
