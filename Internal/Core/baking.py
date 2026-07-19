@@ -382,7 +382,7 @@ def clear_bake_directory(output_directory):
 
 def free_bake_output(output_node):
     output_directory = get_bake_directory(output_node, persist=False)
-    VDBWatcher.clear_loaded_sequence_for_directory(output_directory)
+    VDBWatcher.clear_vdb_data(output_directory)
     deleted_count = clear_bake_directory(output_directory)
     output_node.last_bake_directory = str(output_directory)
     return deleted_count
