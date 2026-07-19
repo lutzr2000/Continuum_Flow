@@ -174,20 +174,29 @@ def draw_force_preview():
         return
 
     if force_type == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
-        positions, colors = build_turbulence_force_plane(force_node,simulation_node,domain_node)
+        positions, colors, indices = build_turbulence_force_plane(
+            force_node,
+            simulation_node,
+            domain_node,
+        )
+
         if not positions:
             return
 
         shader = gpu.shader.from_builtin("SMOOTH_COLOR")
         gpu.state.blend_set("ALPHA")
-
         shader.bind()
-        batch_for_shader(
+        batch = batch_for_shader(
             shader,
             "TRIS",
-            {"pos": positions, "color": colors},
-        ).draw(shader)
+            {
+                "pos": positions,
+                "color": colors,
+            },
+            indices=indices,
+        )
 
+        batch.draw(shader)
         gpu.state.blend_set("NONE")
 
 
@@ -614,19 +623,16 @@ def build_turbulence_force_plane(
     force_node,
     simulation_node,
     domain_node,
-    sample_count=64,
+    sample_count=128,
 ):
-    if simulation_node is None:
-        return [], []
+    if simulation_node is None or domain_node is None:
+        return [], [], []
 
-    if domain_node is None:
-        return [], []
+    amplitude = float(force_node.amplitude)
+    scale = float(force_node.scale)
 
-    if (
-        float(force_node.scale) <= 1.0e-8
-        or abs(float(force_node.amplitude)) <= 1.0e-9
-    ):
-        return [], []
+    if scale <= 1.0e-8 or abs(amplitude) <= 1.0e-9:
+        return [], [], []
 
     plane = choose_turbulence_plane(domain_node)
 
@@ -638,6 +644,7 @@ def build_turbulence_force_plane(
     )
 
     cached = turbulence_view_cache.get(cache_key)
+
     if cached is not None:
         return cached
 
@@ -648,43 +655,67 @@ def build_turbulence_force_plane(
     else:
         render = getattr(scene, "render", None)
         fps = max(1, int(getattr(render, "fps", 24)))
+
         time_value = (
             float(getattr(scene, "frame_current", 0))
             / float(fps)
         )
 
+    resolution = float(domain_node.resolution)
+
     size_u = max(
         float(plane["size_u"]),
-        float(domain_node.resolution),
+        resolution,
     )
 
     size_v = max(
         float(plane["size_v"]),
-        float(domain_node.resolution),
+        resolution,
     )
 
-    half_u = plane["u"] * (size_u * 0.5)
-    half_v = plane["v"] * (size_v * 0.5)
+    step_u = size_u / sample_count
+    step_v = size_v / sample_count
+
+    u_vec = plane["u"]
+    v_vec = plane["v"]
+
+    half_u = u_vec * (size_u * 0.5)
+    half_v = v_vec * (size_v * 0.5)
+
     origin = plane["center"] - half_u - half_v
 
-    step_u = size_u / float(sample_count)
-    step_v = size_v / float(sample_count)
+    ox, oy, oz = origin
+    ux, uy, uz = u_vec
+    vx, vy, vz = v_vec
 
-    grid_positions = []
-    grid_colors = []
+    positions = []
+    colors = []
+    indices = []
 
-    for iy in range(sample_count + 1):
-        row_positions = []
-        row_colors = []
+    row_size = sample_count + 1
 
-        v_amount = float(iy) * step_v
-        v_offset = plane["v"] * v_amount
+    max_value = max(abs(amplitude), 1.0e-6)
+    inv_max_value = 1.0 / max_value
 
-        for ix in range(sample_count + 1):
-            u_amount = float(ix) * step_u
-            u_offset = plane["u"] * u_amount
+    # -----------------------------
+    # Unique grid vertices
+    # -----------------------------
 
-            p = origin + u_offset + v_offset
+    for iy in range(row_size):
+        v_amount = iy * step_v
+
+        base_x = ox + vx * v_amount
+        base_y = oy + vy * v_amount
+        base_z = oz + vz * v_amount
+
+        for ix in range(row_size):
+            u_amount = ix * step_u
+
+            positions.append((
+                base_x + ux * u_amount,
+                base_y + uy * u_amount,
+                base_z + uz * u_amount,
+            ))
 
             value = turbulence_value(
                 force_node,
@@ -693,51 +724,49 @@ def build_turbulence_force_plane(
                 time_value,
             )
 
-            color = turbulence_color(
-                value,
-                force_node.amplitude,
-            )
+            factor = 0.5 + 0.5 * value * inv_max_value
 
-            row_positions.append(p)
-            row_colors.append(color)
+            if factor < 0.0:
+                factor = 0.0
+            elif factor > 1.0:
+                factor = 1.0
 
-        grid_positions.append(row_positions)
-        grid_colors.append(row_colors)
+            colors.append((
+                factor,
+                factor,
+                factor,
+                1.0,
+            ))
 
-    positions = []
-    colors = []
 
     for iy in range(sample_count):
-        row0_p = grid_positions[iy]
-        row1_p = grid_positions[iy + 1]
-
-        row0_c = grid_colors[iy]
-        row1_c = grid_colors[iy + 1]
+        row0 = iy * row_size
+        row1 = row0 + row_size
 
         for ix in range(sample_count):
-            p00 = row0_p[ix]
-            p10 = row0_p[ix + 1]
-            p01 = row1_p[ix]
-            p11 = row1_p[ix + 1]
+            i00 = row0 + ix
+            i10 = i00 + 1
+            i01 = row1 + ix
+            i11 = i01 + 1
 
-            c00 = row0_c[ix]
-            c10 = row0_c[ix + 1]
-            c01 = row1_c[ix]
-            c11 = row1_c[ix + 1]
-
-            positions.extend((
-                p00, p10, p11,
-                p00, p11, p01,
+            indices.append((
+                i00,
+                i10,
+                i11,
             ))
 
-            colors.extend((
-                c00, c10, c11,
-                c00, c11, c01,
+            indices.append((
+                i00,
+                i11,
+                i01,
             ))
 
-    result = (positions, colors)
+    result = (
+        positions,
+        colors,
+        indices,
+    )
 
-    turbulence_view_cache.clear()
     turbulence_view_cache[cache_key] = result
 
     return result
