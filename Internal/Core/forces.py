@@ -392,10 +392,16 @@ def build_constant_force_segments(force_node, simulation_node, domain_node):
 
 
 #-------------- swirl force ----------------
-def build_swirl_force_segments(force_node, simulation_node, domain_node):
+def build_swirl_force_segments(
+    force_node,
+    simulation_node,
+    domain_node,
+    segment_count=128,
+):
     """
     Draw the intersected cylinder outline plus one small rotation arrow.
     """
+
     if simulation_node is None:
         return []
 
@@ -410,6 +416,7 @@ def build_swirl_force_segments(force_node, simulation_node, domain_node):
     axis.normalize()
 
     radius = float(force_node.radius)
+
     if radius <= 0.0:
         return []
 
@@ -422,21 +429,6 @@ def build_swirl_force_segments(force_node, simulation_node, domain_node):
 
     box_min, box_max = domain_bounds(domain_node)
 
-    interval = line_box_intersection(
-        origin,
-        axis,
-        box_min,
-        box_max,
-    )
-
-    if interval is None:
-        return []
-
-    t_min, t_max = interval
-
-    start_center = origin + axis * t_min
-    end_center = origin + axis * t_max
-
     start_points, end_points = sample_swirl_cylinder_rims(
         origin,
         axis,
@@ -445,39 +437,79 @@ def build_swirl_force_segments(force_node, simulation_node, domain_node):
         radius,
         box_min,
         box_max,
+        segment_count=segment_count,
     )
 
-    if not start_points or not end_points:
+    valid_start_points = [
+        point
+        for point in start_points
+        if point is not None
+    ]
+
+    valid_end_points = [
+        point
+        for point in end_points
+        if point is not None
+    ]
+
+    # cylinder does not intersect domain
+    if not valid_start_points or not valid_end_points:
         return []
 
     segments = []
 
-    segments.extend(rim_segments(start_points))
-    segments.extend(rim_segments(end_points))
+    segments.extend(
+        rim_segments(start_points)
+    )
 
-    sample_indices = (0, 8, 16, 24)
+    segments.extend(
+        rim_segments(end_points)
+    )
+
+    sample_indices = (
+        0,
+        segment_count // 4,
+        segment_count // 2,
+        (segment_count * 3) // 4,
+    )
 
     for sample_index in sample_indices:
-        if (
-            sample_index >= len(start_points) - 1
-            or sample_index >= len(end_points) - 1
-        ):
+        start = start_points[sample_index]
+        end = end_points[sample_index]
+
+        if start is None or end is None:
             continue
 
         segments.extend((
-            start_points[sample_index],
-            end_points[sample_index],
+            start,
+            end,
         ))
 
-    width, depth, height = domain_dimensions(domain_node)
+
+    width, depth, height = domain_dimensions(
+        domain_node
+    )
 
     size_scale = max(
         min(width, depth, height),
         float(domain_node.resolution),
     )
 
-    mid_center = (start_center + end_center) * 0.5
+    start_center = sum(
+        valid_start_points,
+        Vector((0.0, 0.0, 0.0)),
+    ) / len(valid_start_points)
 
+    end_center = sum(
+        valid_end_points,
+        Vector((0.0, 0.0, 0.0)),
+    ) / len(valid_end_points)
+
+    mid_center = (
+        start_center + end_center
+    ) * 0.5
+
+    # Rotationspfeil
     segments.extend(
         build_swirl_rotation_arrow(
             mid_center,
@@ -544,15 +576,18 @@ def build_swirl_rotation_arrow(
 
 
 def rim_segments(points):
-    """
-    Build one closed polyline from ordered rim points.
-    """
     segments = []
 
     for index in range(len(points) - 1):
+        p0 = points[index]
+        p1 = points[index + 1]
+
+        if p0 is None or p1 is None:
+            continue
+
         segments.extend((
-            points[index],
-            points[index + 1],
+            p0,
+            p1,
         ))
 
     return segments
@@ -566,12 +601,8 @@ def sample_swirl_cylinder_rims(
     radius,
     box_min,
     box_max,
-    segment_count=32,
+    segment_count=128,
 ):
-    """
-    Sample the clipped cylinder rims by intersecting offset axis lines
-    with the domain box.
-    """
     origin = Vector(origin)
     axis = Vector(axis)
     axis_u = Vector(axis_u)
@@ -601,7 +632,9 @@ def sample_swirl_cylinder_rims(
         )
 
         if interval is None:
-            return [], []
+            start_points.append(None)
+            end_points.append(None)
+            continue
 
         t_min, t_max = interval
 
