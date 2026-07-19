@@ -23,7 +23,7 @@ class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
-        forces.sync_force_preview_from_selection()
+        forces.sync_force_preview()
         col = layout.column(align=True)
         for property_name in self.draw_property_names:
             col.prop(self, property_name)
