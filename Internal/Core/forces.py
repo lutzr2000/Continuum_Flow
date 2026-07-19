@@ -694,12 +694,16 @@ def build_turbulence_force_plane(
 
     row_size = sample_count + 1
 
-    max_value = max(abs(amplitude), 1.0e-6)
-    inv_max_value = 1.0 / max_value
+    amplitude = float(force_node.amplitude)
+    scale = float(force_node.scale)
+    frequency = float(force_node.frequency)
+    seed = int(force_node.seed)
 
-    # -----------------------------
-    # Unique grid vertices
-    # -----------------------------
+    inv_scale = 1.0 / scale
+    time_offset = time_value * frequency
+
+    max_value = max(abs(amplitude), 1.0e-6)
+    color_scale = 0.5 / max_value
 
     for iy in range(row_size):
         v_amount = iy * step_v
@@ -707,6 +711,8 @@ def build_turbulence_force_plane(
         base_x = ox + vx * v_amount
         base_y = oy + vy * v_amount
         base_z = oz + vz * v_amount
+
+        noise_y = v_amount * inv_scale + time_offset
 
         for ix in range(row_size):
             u_amount = ix * step_u
@@ -717,14 +723,15 @@ def build_turbulence_force_plane(
                 base_z + uz * u_amount,
             ))
 
-            value = turbulence_value(
-                force_node,
-                u_amount,
-                v_amount,
-                time_value,
+            noise_x = u_amount * inv_scale
+
+            value = amplitude * value_noise_2d(
+                noise_x,
+                noise_y,
+                seed,
             )
 
-            factor = 0.5 + 0.5 * value * inv_max_value
+            factor = 0.5 + value * color_scale
 
             if factor < 0.0:
                 factor = 0.0
@@ -737,7 +744,6 @@ def build_turbulence_force_plane(
                 factor,
                 1.0,
             ))
-
 
     for iy in range(sample_count):
         row0 = iy * row_size
