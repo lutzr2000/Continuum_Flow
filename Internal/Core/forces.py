@@ -617,8 +617,6 @@ def sample_swirl_cylinder_rims(
 
 
 #-------------- turbulence force ----------------
-turbulence_view_cache = {}
-
 def build_turbulence_force_plane(
     force_node,
     simulation_node,
@@ -635,18 +633,6 @@ def build_turbulence_force_plane(
         return [], [], []
 
     plane = choose_turbulence_plane(domain_node)
-
-    cache_key = turbulence_cache_key(
-        force_node,
-        domain_node,
-        sample_count,
-        plane,
-    )
-
-    cached = turbulence_view_cache.get(cache_key)
-
-    if cached is not None:
-        return cached
 
     scene = getattr(bpy.context, "scene", None)
 
@@ -698,12 +684,23 @@ def build_turbulence_force_plane(
     scale = float(force_node.scale)
     frequency = float(force_node.frequency)
     seed = int(force_node.seed)
+    hash_cache = {}
 
     inv_scale = 1.0 / scale
     time_offset = time_value * frequency
 
     max_value = max(abs(amplitude), 1.0e-6)
     color_scale = 0.5 / max_value
+
+    u_values = [
+        ix * step_u
+        for ix in range(row_size)
+    ]
+    
+    noise_x_values = [
+        u * inv_scale
+        for u in u_values
+    ]
 
     for iy in range(row_size):
         v_amount = iy * step_v
@@ -715,7 +712,8 @@ def build_turbulence_force_plane(
         noise_y = v_amount * inv_scale + time_offset
 
         for ix in range(row_size):
-            u_amount = ix * step_u
+            u_amount = u_values[ix]
+            noise_x = noise_x_values[ix]
 
             positions.append((
                 base_x + ux * u_amount,
@@ -723,12 +721,11 @@ def build_turbulence_force_plane(
                 base_z + uz * u_amount,
             ))
 
-            noise_x = u_amount * inv_scale
-
             value = amplitude * value_noise_2d(
                 noise_x,
                 noise_y,
                 seed,
+                hash_cache,
             )
 
             factor = 0.5 + value * color_scale
@@ -767,15 +764,7 @@ def build_turbulence_force_plane(
                 i01,
             ))
 
-    result = (
-        positions,
-        colors,
-        indices,
-    )
-
-    turbulence_view_cache[cache_key] = result
-
-    return result
+    return positions, colors, indices
 
 
 def choose_turbulence_plane(domain_node):
@@ -870,33 +859,47 @@ def turbulence_value(force_node, u, v, time_value):
     return amplitude * value_noise_2d(x, y, seed)
 
 
-def value_noise_2d(x, y, seed):
+def value_noise_2d(x, y, seed, hash_cache):
     x0 = math.floor(x)
     y0 = math.floor(y)
+
+    fx = x - x0
+    fy = y - y0
+
+    tx = fx * fx * (3.0 - 2.0 * fx)
+    ty = fy * fy * (3.0 - 2.0 * fy)
 
     x1 = x0 + 1
     y1 = y0 + 1
 
-    tx = smoothstep(x - x0)
-    ty = smoothstep(y - y0)
+    key = (x0, y0)
+    c00 = hash_cache.get(key)
+    if c00 is None:
+        c00 = hash_noise_2d(x0, y0, seed)
+        hash_cache[key] = c00
 
-    c00 = hash_noise_2d(x0, y0, seed)
-    c10 = hash_noise_2d(x1, y0, seed)
-    c01 = hash_noise_2d(x0, y1, seed)
-    c11 = hash_noise_2d(x1, y1, seed)
+    key = (x1, y0)
+    c10 = hash_cache.get(key)
+    if c10 is None:
+        c10 = hash_noise_2d(x1, y0, seed)
+        hash_cache[key] = c10
 
-    x0v = lerp(c00, c10, tx)
-    x1v = lerp(c01, c11, tx)
+    key = (x0, y1)
+    c01 = hash_cache.get(key)
+    if c01 is None:
+        c01 = hash_noise_2d(x0, y1, seed)
+        hash_cache[key] = c01
 
-    return lerp(x0v, x1v, ty)
+    key = (x1, y1)
+    c11 = hash_cache.get(key)
+    if c11 is None:
+        c11 = hash_noise_2d(x1, y1, seed)
+        hash_cache[key] = c11
 
+    a = c00 + tx * (c10 - c00)
+    b = c01 + tx * (c11 - c01)
 
-def smoothstep(t):
-    return t * t * (3.0 - 2.0 * t)
-
-
-def lerp(a, b, t):
-    return a + t * (b - a)
+    return a + ty * (b - a)
 
 
 def hash_noise_2d(ix, iy, seed):
