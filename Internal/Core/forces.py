@@ -692,6 +692,11 @@ def build_turbulence_force_plane(
     max_value = max(abs(amplitude), 1.0e-6)
     color_scale = 0.5 / max_value
 
+    amplitude_factor = max(
+        0.0,
+        min(1.0, amplitude / 4.0),
+    )
+
     u_values = [
         ix * step_u
         for ix in range(row_size)
@@ -734,6 +739,8 @@ def build_turbulence_force_plane(
                 factor = 0.0
             elif factor > 1.0:
                 factor = 1.0
+
+            factor *= amplitude_factor
 
             colors.append((
                 factor,
