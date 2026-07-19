@@ -4,6 +4,8 @@ import bpy
 import json
 from datetime import datetime, timezone
 from . import export_geometry
+from .. import viewer 
+from bpy.app.handlers import persistent
 
 NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 ANIMATABLE_PROPERTIES = {
@@ -838,3 +840,13 @@ def sync_node_tree_animations(scene=None):
                 fcurve.evaluate(frame_value),
                 int(getattr(fcurve, "array_index", -1)),
             )
+
+def sync_ui_animation_state(scene=None):
+    sync_node_tree_animations(scene)
+    viewer.redraw_UI()
+
+
+@persistent
+def continuum_flow_frame_change_post(scene, _depsgraph=None):
+    sync_ui_animation_state(scene)
+

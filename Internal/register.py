@@ -1,10 +1,12 @@
-import bpy
+﻿import bpy
 from nodeitems_utils import register_node_categories, unregister_node_categories
+from bpy.app.handlers import persistent
 
 from .UI.node_tree import (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
     NODE_CATEGORIES_ID,
+    NODE_TREE_ID,
     build_node_categories,
 )
 
@@ -29,14 +31,8 @@ from .UI.node_simulation import ContinuumFlowSimulationNode
 from .UI.node_source import ContinuumFlowSourceNode
 from .UI.node_viewer import ContinuumFlowViewerNode
 from .UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
-from .Core.runtime_handlers import (
-    continuum_flow_frame_change_post,
-    ensure_fake_user,
-    initialize_fake_user_state,
-    sync_runtime_state,
-    sync_ui_animation_state,
-)
 from .Core.baking import CONTINUUM_FLOW_OT_bake, CONTINUUM_FLOW_OT_free_bake
+from .Core.export.export_config import sync_ui_animation_state, continuum_flow_frame_change_post
 from .Core import forces
 from .Core.solver import solver_worker
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
@@ -72,6 +68,36 @@ classes = (
     CONTINUUM_FLOW_OT_free_bake,
     CONTINUUM_FLOW_OT_bake,
 )
+
+
+@persistent
+def initialize_fake_user_state(_scene=None, _depsgraph=None):
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for tree in node_groups:
+        if tree.bl_idname == NODE_TREE_ID:
+            tree["continuum_flow_fake_user_initialized"] = True
+
+
+@persistent
+def ensure_fake_user(_scene=None, _depsgraph=None):
+    node_groups = getattr(bpy.data, "node_groups", None)
+    if node_groups is None:
+        return
+
+    for tree in node_groups:
+        if tree.bl_idname != NODE_TREE_ID:
+            continue
+
+        if tree.get("continuum_flow_fake_user_initialized"):
+            continue
+
+        if not tree.use_fake_user:
+            tree.use_fake_user = True
+
+        tree["continuum_flow_fake_user_initialized"] = True
 
 
 def safe_unregister_class(cls):
@@ -113,16 +139,12 @@ def register():
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
-    if sync_runtime_state not in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.append(sync_runtime_state)
-
     if initialize_fake_user_state not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(initialize_fake_user_state)
 
     if continuum_flow_frame_change_post not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(continuum_flow_frame_change_post)
 
-    sync_runtime_state()
     sync_ui_animation_state(getattr(bpy.context, "scene", None))
     solver_worker.start_worker_in_background(
         preload_backend="GPU" if solver_status.gpu_available else "CPU"
@@ -145,9 +167,6 @@ def unregister():
     if bpy.app.timers.is_registered(forces.force_preview_timer):
         bpy.app.timers.unregister(forces.force_preview_timer)
 
-    if sync_runtime_state in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(sync_runtime_state)
-
     if initialize_fake_user_state in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(initialize_fake_user_state)
 
@@ -156,10 +175,6 @@ def unregister():
     except Exception:
         pass
 
-    try:
-        sync_runtime_state()
-    except Exception:
-        pass
-
     for cls in reversed(classes):
         safe_unregister_class(cls)
+
