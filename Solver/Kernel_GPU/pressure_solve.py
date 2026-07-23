@@ -357,7 +357,7 @@ def add_artifical_divergence(
             max(1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k], 0.0),
             2.0,
         )
-        if source_extra_pressure > extra_pressure_term:
+        if abs(source_extra_pressure) > abs(extra_pressure_term):
             extra_pressure_term = source_extra_pressure
 
 
