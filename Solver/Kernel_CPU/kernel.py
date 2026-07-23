@@ -3,7 +3,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 
 import numpy as np
 import warnings
@@ -483,7 +483,9 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
 
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
+    viewer_cfg = ((simulation.get("viewers") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
+    target_realtime_preview = bool(viewer_cfg.get("target_realtime_preview", False))
 
     shared_memory_blocks, writer_slots = output.setup_output(
         simulation,
@@ -497,6 +499,7 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
     next_output_time = 0.0
     output_index = 0
     time_step_count = 0
+    last_output_wall_time = None
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
@@ -765,6 +768,12 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
             u, v, w, p, temperature, smoke, fuel, flame
         )
         while t >= next_output_time:
+            if target_realtime_preview and last_output_wall_time is not None:
+                elapsed_since_last_output = perf_counter() - last_output_wall_time
+                remaining_time = output_time_step - elapsed_since_last_output
+                if remaining_time > 0.0:
+                    sleep(remaining_time)
+
             output.enqueue_output(
                 simulation,
                 writer_slots,
@@ -772,6 +781,8 @@ def solver(config, obstacle_base_masks, obstacle_mask, source_base_masks, source
                 output_index,
                 t,
             )
+
+            last_output_wall_time = perf_counter()
 
             output_index += 1
             next_output_time += output_time_step

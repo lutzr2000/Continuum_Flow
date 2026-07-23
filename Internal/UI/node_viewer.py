@@ -1,4 +1,4 @@
-﻿from . import sockets
+from . import sockets
 from . import node_base
 from ..Core import viewer
 from bpy.props import BoolProperty
@@ -17,6 +17,7 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_width_max = 260.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
     live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
+    target_realtime_preview: BoolProperty(name="Target realtime preview", default=False, description="Slow the solver down! if it is faster than realtime to maintain realtime preview", options=set())  # type: ignore
 
     def _sync_node(self):
         self._ensure_socket(self.inputs, sockets.ContinuumFlowResultSocket.bl_idname, "Result")
@@ -35,3 +36,5 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
             icon="HIDE_ON" if is_domain_preview_active else "HIDE_OFF",
         )
         col.prop(self, "live_preview")
+        col.prop(self, "target_realtime_preview")
+

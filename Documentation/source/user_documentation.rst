@@ -138,6 +138,9 @@ This node lets you view the simulation domain in the viewport.
 **Live Preview**
     When activated, the simulation can be seen in the viewport while simulating.
 
+**Target realtime preview**
+    In some cases the solver is actually faster than realtime. For previewing it can be usefull to look at the simulation in realtime. This setting slows the solver down to maintain a realtime preview.
+
 
 Output
 ~~~~~~
