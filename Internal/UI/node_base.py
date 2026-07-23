@@ -1,4 +1,4 @@
-﻿import bpy
+import bpy
 from .node_tree import ContinuumFlowNodeTree
 from ..Core.solver import solver_status
 
@@ -57,5 +57,5 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         Ensure that this node exposes the standard multi-input geometry socket.
         """
         return self._ensure_socket(
-            self.inputs, "NodeSocketGeometry", "Geometry", multi_input=True
+            self.inputs, "CONTINUUM_FLOW_GEOMETRY_SOCKET", "Geometry", multi_input=True
         )

@@ -1,4 +1,4 @@
-﻿import bpy
+import bpy
 from nodeitems_utils import register_node_categories, unregister_node_categories
 from bpy.app.handlers import persistent
 
@@ -15,6 +15,7 @@ from .UI.sockets import (
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
+    ContinuumFlowGeometrySocket,
 )
 
 from .UI.node_domain import ContinuumFlowDomainNode
@@ -47,6 +48,7 @@ classes = (
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
+    ContinuumFlowGeometrySocket,
 
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
@@ -177,4 +179,5 @@ def unregister():
 
     for cls in reversed(classes):
         safe_unregister_class(cls)
+
 

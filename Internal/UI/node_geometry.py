@@ -19,7 +19,7 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
     source_object: PointerProperty(name="Object", type=bpy.types.Object)  # type: ignore
 
     def _sync_node(self):
-        self._ensure_named_output("NodeSocketGeometry", "Geometry")
+        self._ensure_named_output(sockets.ContinuumFlowGeometrySocket.bl_idname, "Geometry")
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)

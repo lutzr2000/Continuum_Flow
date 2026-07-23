@@ -24,7 +24,7 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
 _SOCKET_ROLE_BY_SOCKET_IDNAME = {
     "CONTINUUM_FLOW_FORCE_SOCKET": "forces",
     "CONTINUUM_FLOW_RESULT_SOCKET": "result",
-    "NodeSocketGeometry": "geometry",
+    "CONTINUUM_FLOW_GEOMETRY_SOCKET": "geometry",
 }
 
 
@@ -62,6 +62,16 @@ def _socket_has_invalid_links(socket):
     """
     try:
         return any(not _is_valid_link(link) for link in socket.links)
+    except Exception:
+        return False
+
+
+def node_tree_has_invalid_links(node_tree):
+    """
+    Return whether the given node tree contains any invalid Continuum Flow links.
+    """
+    try:
+        return any(not _is_valid_link(link) for link in getattr(node_tree, "links", ()))
     except Exception:
         return False
 
@@ -169,3 +179,28 @@ class ContinuumFlowResultSocket(bpy.types.NodeSocket):
             return _INVALID_SOCKET_COLOR
         return (0.65, 0.35, 0.85, 1.0)
     
+
+class ContinuumFlowGeometrySocket(bpy.types.NodeSocket):
+    """
+    Geometry socket used for Continuum Flow geometry links.
+    """
+
+    bl_idname = "CONTINUUM_FLOW_GEOMETRY_SOCKET"
+    bl_label = "Continuum Flow Geometry"
+
+    def draw(self, context, layout, node, text):
+        """
+        Draw the socket label in the node editor.
+        """
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        """
+        Return the display color of the socket.
+        """
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
+        return (0.0, 214.0 / 255.0, 163.0 / 255.0, 1.0)
+
+
+

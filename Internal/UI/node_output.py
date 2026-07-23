@@ -128,6 +128,10 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         return None
 
     def _bake_disable_reason(self):
+        node_tree = getattr(self, "id_data", None)
+        if sockets.node_tree_has_invalid_links(node_tree):
+            return "Bake disabled: node tree has invalid connections"
+
         simulation_node = self._linked_simulation_node()
         if simulation_node is None:
             return "Bake disabled: output is not connected to a simulation"
