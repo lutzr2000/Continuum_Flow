@@ -7,6 +7,12 @@ from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 
+def _update_simulation_start_frame(self, _context):
+    self._clamp_frame_range()
+
+def _update_simulation_end_frame(self, _context):
+    self._clamp_frame_range()
+    
 
 class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     """
@@ -42,8 +48,8 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         default="CPU",
         options=set(),
     )  # type: ignore
-    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set())  # type: ignore
-    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set())  # type: ignore
+    start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set(), update=_update_simulation_start_frame)  # type: ignore
+    end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set(), update=_update_simulation_end_frame)  # type: ignore
     cfl: FloatProperty(name="CFL", default=10.0, min=0.0, soft_min=0.0, soft_max=10.0, precision=3, description="Maximum CFL number used for adaptive timesteps", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=2, min=1, max=10, soft_min=1, soft_max=10, description="Number of solver itterations", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
@@ -70,8 +76,18 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         if scene is not None:
             self.start_frame = int(getattr(scene, "frame_start", self.start_frame))
             self.end_frame = int(getattr(scene, "frame_end", self.end_frame))
+        self._clamp_frame_range()
         self._sync_node()
-    
+
+    def _clamp_frame_range(self):
+        minimum_end_frame = max(1, int(self.start_frame) + 1)
+        if int(self.end_frame) < minimum_end_frame:
+            self.end_frame = minimum_end_frame
+
+        maximum_start_frame = max(0, int(self.end_frame) - 1)
+        if int(self.start_frame) > maximum_start_frame:
+            self.start_frame = maximum_start_frame
+
     def set_solver_status(self, cpu_available, gpu_available):
         self.cpu_available = cpu_available
         self.gpu_available = gpu_available 
