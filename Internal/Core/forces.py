@@ -222,6 +222,9 @@ def get_linked_domain_node(simulation_node):
     """
     Resolve the linked domain node connected to the simulation node.
     """
+    if simulation_node is None:
+        return None
+
     socket = simulation_node.inputs.get("Domain")
     if socket is None or not socket.is_linked:
         return None
