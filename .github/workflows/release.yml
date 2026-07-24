@@ -11,40 +11,56 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Blender 5.0 / Python 3.11
           - name: windows-blender50
             python: "3.11"
             abi: "cp311"
             platform: "win_amd64"
+            blender_platform: "windows-x64"
+            blender_min: "5.0.0"
+            blender_max: "5.1.0"
             requirements: "requirements/windows.txt"
 
           - name: linux-blender50
             python: "3.11"
             abi: "cp311"
+            blender_platform: "linux-x64"
+            blender_min: "5.0.0"
+            blender_max: "5.1.0"
             requirements: "requirements/linux.txt"
 
           - name: macos-blender50
             python: "3.11"
             abi: "cp311"
             platform: "macosx_12_0_arm64"
+            blender_platform: "macos-arm64"
+            blender_min: "5.0.0"
+            blender_max: "5.1.0"
             requirements: "requirements/macos.txt"
 
-          # Blender 5.1+ / Python 3.13
           - name: windows-blender51
             python: "3.13"
             abi: "cp313"
             platform: "win_amd64"
+            blender_platform: "windows-x64"
+            blender_min: "5.1.0"
+            blender_max: ""
             requirements: "requirements/windows.txt"
 
           - name: linux-blender51
             python: "3.13"
             abi: "cp313"
+            blender_platform: "linux-x64"
+            blender_min: "5.1.0"
+            blender_max: ""
             requirements: "requirements/linux.txt"
-            
+
           - name: macos-blender51
             python: "3.13"
             abi: "cp313"
             platform: "macosx_12_0_arm64"
+            blender_platform: "macos-arm64"
+            blender_min: "5.1.0"
+            blender_max: ""
             requirements: "requirements/macos.txt"
 
     name: ${{ matrix.name }}
@@ -89,3 +105,70 @@ jobs:
         run: |
           echo "Downloaded wheels for ${{ matrix.name }}:"
           ls -lh wheels
+
+      - name: Generate Blender manifest
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          manifest = Path("blender_manifest.toml")
+
+          wheels = sorted(Path("wheels").glob("*.whl"))
+
+          wheel_lines = ",\n".join(
+              f'    "./{wheel.as_posix()}"'
+              for wheel in wheels
+          )
+
+          blender_min = "${{ matrix.blender_min }}"
+          blender_max = "${{ matrix.blender_max }}"
+          blender_platform = "${{ matrix.blender_platform }}"
+
+          content = f'''schema_version = "1.0.0"
+
+          id = "continuum_flow"
+          version = "0.1.0"
+          name = "Continuum Flow"
+          tagline = "Smoke and fire simulator"
+          maintainer = "Lutz Rohlfing"
+          type = "add-on"
+
+          website = "https://lutzr2000.github.io/Continuum_Flow/"
+          tags = ["Physics", "Simulation"]
+
+          blender_version_min = "{blender_min}"
+          '''
+
+          if blender_max:
+              content += f'blender_version_max = "{blender_max}"\n'
+
+          content += f'''
+          platforms = ["{blender_platform}"]
+
+          license = [
+              "SPDX:GPL-3.0-or-later",
+          ]
+
+          wheels = [
+          {wheel_lines}
+          ]
+
+          [permissions]
+          files = "Read and write simulation cache files"
+          '''
+
+          # Entfernt die Einrückung des YAML-Python-Blocks.
+          import textwrap
+          manifest.write_text(
+              textwrap.dedent(content),
+              encoding="utf-8"
+          )
+
+          print(manifest.read_text(encoding="utf-8"))
+          PY
+
+      - name: Show generated manifest
+        run: |
+          echo "Generated manifest:"
+          cat blender_manifest.toml
