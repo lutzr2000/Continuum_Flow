@@ -1,0 +1,11 @@
+cuda-bindings==13.2.0
+cuda-core==0.6.0
+cuda-pathfinder==1.5.1
+llvmlite==0.47.0
+numba-cuda==0.29.0
+numba==0.65.0
+nvidia-cuda-runtime==13.2.75
+nvidia-nvvm==13.2.78
+packaging==26.0
+scipy==1.17.1
+trimesh==4.12.2
