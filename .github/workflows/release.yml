@@ -1,0 +1,83 @@
+name: Test Continuum Flow Dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-wheels:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Blender 5.0 / Python 3.11
+          - name: windows-blender50
+            python: "3.11"
+            abi: "cp311"
+            platform: "win_amd64"
+            requirements: "requirements/windows.txt"
+
+          - name: linux-blender50
+            python: "3.11"
+            abi: "cp311"
+            platform: "manylinux_2_28_x86_64"
+            requirements: "requirements/linux.txt"
+
+          - name: macos-blender50
+            python: "3.11"
+            abi: "cp311"
+            platform: "macosx_11_0_arm64"
+            requirements: "requirements/macos.txt"
+
+          # Blender 5.1+ / Python 3.13
+          - name: windows-blender51
+            python: "3.13"
+            abi: "cp313"
+            platform: "win_amd64"
+            requirements: "requirements/windows.txt"
+
+          - name: linux-blender51
+            python: "3.13"
+            abi: "cp313"
+            platform: "manylinux_2_28_x86_64"
+            requirements: "requirements/linux.txt"
+
+          - name: macos-blender51
+            python: "3.13"
+            abi: "cp313"
+            platform: "macosx_11_0_arm64"
+            requirements: "requirements/macos.txt"
+
+    name: ${{ matrix.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Create wheels directory
+        run: mkdir -p wheels
+
+      - name: Download wheels
+        run: |
+          python -m pip download \
+            -r "${{ matrix.requirements }}" \
+            --dest wheels \
+            --only-binary=:all: \
+            --python-version="${{ matrix.python }}" \
+            --implementation=cp \
+            --abi="${{ matrix.abi }}" \
+            --platform="${{ matrix.platform }}"
+
+      - name: Show downloaded wheels
+        run: |
+          echo "Downloaded wheels for ${{ matrix.name }}:"
+          ls -lh wheels
