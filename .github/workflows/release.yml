@@ -21,7 +21,6 @@ jobs:
           - name: linux-blender50
             python: "3.11"
             abi: "cp311"
-            platform: "manylinux2014_x86_64"
             requirements: "requirements/linux.txt"
 
           - name: macos-blender50
@@ -40,9 +39,8 @@ jobs:
           - name: linux-blender51
             python: "3.13"
             abi: "cp313"
-            platform: "manylinux2014_x86_64"
             requirements: "requirements/linux.txt"
-
+            
           - name: macos-blender51
             python: "3.13"
             abi: "cp313"
@@ -68,14 +66,24 @@ jobs:
 
       - name: Download wheels
         run: |
-          python -m pip download \
-            -r "${{ matrix.requirements }}" \
-            --dest wheels \
-            --only-binary=:all: \
-            --python-version="${{ matrix.python }}" \
-            --implementation=cp \
-            --abi="${{ matrix.abi }}" \
-            --platform="${{ matrix.platform }}"
+          if [[ "${{ matrix.name }}" == linux-* ]]; then
+            python -m pip download \
+              -r "${{ matrix.requirements }}" \
+              --dest wheels \
+              --only-binary=:all: \
+              --python-version="${{ matrix.python }}" \
+              --implementation=cp \
+              --abi="${{ matrix.abi }}"
+          else
+            python -m pip download \
+              -r "${{ matrix.requirements }}" \
+              --dest wheels \
+              --only-binary=:all: \
+              --python-version="${{ matrix.python }}" \
+              --implementation=cp \
+              --abi="${{ matrix.abi }}" \
+              --platform="${{ matrix.platform }}"
+          fi
 
       - name: Show downloaded wheels
         run: |
