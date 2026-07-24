@@ -6,8 +6,6 @@ The solver can run on the CPU or optionally on an NVIDIA GPU. On CPU it is rough
 
 # Downloads
 
-Download Continuum Flow from the [GitHub Releases](https://github.com/lutzr2000/Continuum_Flow/releases) page.
-
 Choose the package matching your Blender version and operating system:
 
 | Blender Version | Windows | Linux | macOS |
