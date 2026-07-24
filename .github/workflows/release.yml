@@ -197,13 +197,16 @@ jobs:
           BLENDER_VERSION="${{ matrix.blender_version }}"
           BLENDER_MAJOR_MINOR="${BLENDER_VERSION%.*}"
 
+          BLENDER_DIR="$RUNNER_TEMP/blender"
+          mkdir -p "$BLENDER_DIR"
+
           wget -q \
             "https://download.blender.org/release/Blender${BLENDER_MAJOR_MINOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
-            -O blender.tar.xz
+            -O "$BLENDER_DIR/blender.tar.xz"
 
-          tar -xf blender.tar.xz
+          tar -xf "$BLENDER_DIR/blender.tar.xz" -C "$BLENDER_DIR"
 
-          echo "BLENDER_PATH=$PWD/blender-${BLENDER_VERSION}-linux-x64/blender" >> "$GITHUB_ENV"
+          echo "BLENDER_PATH=$BLENDER_DIR/blender-${BLENDER_VERSION}-linux-x64/blender" >> "$GITHUB_ENV"
 
       - name: Check Blender version
         run: |
