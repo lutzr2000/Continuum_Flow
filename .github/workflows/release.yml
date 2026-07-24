@@ -1,4 +1,4 @@
-name: Test Continuum Flow Dependencies
+name: Build releases
 
 on:
   workflow_dispatch:
@@ -19,6 +19,7 @@ jobs:
             blender_min: "5.0.0"
             blender_max: "5.1.0"
             requirements: "requirements/windows.txt"
+            blender_version: "5.0.1"
 
           - name: linux-blender50
             python: "3.11"
@@ -27,6 +28,7 @@ jobs:
             blender_min: "5.0.0"
             blender_max: "5.1.0"
             requirements: "requirements/linux.txt"
+            blender_version: "5.0.1"
 
           - name: macos-blender50
             python: "3.11"
@@ -36,6 +38,7 @@ jobs:
             blender_min: "5.0.0"
             blender_max: "5.1.0"
             requirements: "requirements/macos.txt"
+            blender_version: "5.0.1"
 
           - name: windows-blender51
             python: "3.13"
@@ -45,6 +48,7 @@ jobs:
             blender_min: "5.1.0"
             blender_max: ""
             requirements: "requirements/windows.txt"
+            blender_version: "5.1.0"
 
           - name: linux-blender51
             python: "3.13"
@@ -53,6 +57,7 @@ jobs:
             blender_min: "5.1.0"
             blender_max: ""
             requirements: "requirements/linux.txt"
+            blender_version: "5.1.0"
 
           - name: macos-blender51
             python: "3.13"
@@ -62,6 +67,7 @@ jobs:
             blender_min: "5.1.0"
             blender_max: ""
             requirements: "requirements/macos.txt"
+            blender_version: "5.1.0"
 
     name: ${{ matrix.name }}
 
@@ -172,3 +178,40 @@ jobs:
         run: |
           echo "Generated manifest:"
           cat blender_manifest.toml
+
+      - name: Download Blender
+        run: |
+          BLENDER_VERSION="${{ matrix.blender_version }}"
+          BLENDER_MAJOR_MINOR="${BLENDER_VERSION%.*}"
+
+          wget -q \
+            "https://download.blender.org/release/Blender${BLENDER_MAJOR_MINOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            -O blender.tar.xz
+
+          tar -xf blender.tar.xz
+
+          echo "BLENDER_PATH=$PWD/blender-${BLENDER_VERSION}-linux-x64/blender" >> "$GITHUB_ENV"
+
+      - name: Check Blender version
+        run: |
+          "$BLENDER_PATH" --version
+
+      - name: Build Blender extension
+        run: |
+          mkdir -p dist
+
+          "$BLENDER_PATH" --command extension build \
+            --source-dir . \
+            --output-dir dist
+
+      - name: Show build result
+        run: |
+          echo "Built files:"
+          ls -lh dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuum-flow-${{ matrix.name }}
+          path: dist/*.zip
+          if-no-files-found: error
