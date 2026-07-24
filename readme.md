@@ -1,25 +1,48 @@
 # Continuum Flow
-This is Continuum Flow, a free open source addon for Blender for simulating smoke, fire and gas flows in general. The solver can run on CPU and optionally on Nvidia GPU. On CPU it is roughly 2x faster than Blender's native solver and on GPU it is roughly 20 x faster.
+
+Continuum Flow is a free and open-source Blender add-on for simulating smoke, fire, and gas flows.
+
+The solver can run on the CPU or optionally on an NVIDIA GPU. On CPU it is roughly 2x faster than Blender's native solver, while GPU acceleration can provide significantly higher performance.
+
+# Downloads
+
+Download Continuum Flow from the [GitHub Releases](https://github.com/lutzr2000/Continuum_Flow/releases) page.
+
+Choose the package matching your Blender version and operating system:
+
+| Blender Version | Windows | Linux | macOS |
+|---|---|---|---|
+| **Blender 5.0.x** | `blender5.0-windows-x64` | `blender5.0-linux-x64` | `blender5.0-macos-arm64` |
+| **Blender 5.1+** | `blender5.1plus-windows-x64` | `blender5.1plus-linux-x64` | `blender5.1plus-macos-arm64` |
+
+**GPU support:** NVIDIA CUDA acceleration is available on Windows and Linux. macOS currently uses the CPU solver.
 
 # Requirements
+
 - Blender 5.0.0 or higher
-- Optional for GPU: CUDA Toolkit  
-  Download: [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
+- Optional for GPU acceleration: NVIDIA GPU with the required CUDA environment
+
+CUDA Toolkit: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
 
 # Installation
-1. Install the required dependencies listed above
-2. Download the code from this page as a .zip
-3. Open Blender
-4. Go to Edit > Preference > Add-ons
-5. In the top right corner, click on the downwards arrow and select install from disk
-6. Navigate to the downloaded .zip and click Install from Disk
-7. When you start a bake for the first time the start may take a moment since the code needs to be compiled. 
+
+1. Go to the [GitHub Releases](https://github.com/lutzr2000/Continuum_Flow/releases) page.
+2. Download the `.zip` matching your Blender version and operating system.
+3. **Do not extract the downloaded `.zip`.**
+4. Open Blender.
+5. Go to **Edit > Preferences > Add-ons**.
+6. Click the downwards arrow in the top-right corner and select **Install from Disk**.
+7. Select the downloaded Continuum Flow `.zip`.
+8. Click **Install from Disk**.
+
+When you start a simulation for the first time, initialization may take a moment because parts of the solver need to be compiled.
 
 You're done!
 
-# How to start
-The code comes with example files you can open and start playing around with.
+# How to Start
+
+Continuum Flow comes with example files that you can use to get started.
 
 # Documentation
-https://lutzr2000.github.io/Continuum_Flow/
 
+[Continuum Flow Documentation](https://lutzr2000.github.io/Continuum_Flow/)
