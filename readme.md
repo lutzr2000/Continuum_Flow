@@ -12,8 +12,8 @@ Choose the package matching your Blender version and operating system:
 
 | Blender Version | Windows | Linux | macOS |
 |---|---|---|---|
-| **Blender 5.0.x** | `blender5.0-windows-x64` | `blender5.0-linux-x64` | `blender5.0-macos-arm64` |
-| **Blender 5.1+** | `blender5.1plus-windows-x64` | `blender5.1plus-linux-x64` | `blender5.1plus-macos-arm64` |
+| **Blender 5.0.x** | [Download Windows x64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.0-windows-x64.zip) | [Download Linux x64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.0-linux-x64.zip) | [Download macOS ARM64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.0-macos-arm64.zip) |
+| **Blender 5.1+** | [Download Windows x64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.1plus-windows-x64.zip) | [Download Linux x64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.1plus-linux-x64.zip) | [Download macOS ARM64](https://github.com/lutzr2000/Continuum_Flow/releases/download/v0.1.0/continuum_flow-0.1.0-blender5.1plus-macos-arm64.zip) |
 
 **GPU support:** NVIDIA CUDA acceleration is available on Windows and Linux. macOS currently uses the CPU solver.
 
