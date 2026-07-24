@@ -2,72 +2,86 @@ name: Build releases
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.0"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
 
 jobs:
-  test-wheels:
+  build-releases:
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: windows-blender50
-            python: "3.11"
-            abi: "cp311"
-            platform: "win_amd64"
-            blender_platform: "windows-x64"
-            blender_min: "5.0.0"
-            blender_max: "5.1.0"
-            requirements: "requirements/windows.txt"
-            blender_version: "5.0.1"
+        - name: windows-blender50
+          output_name: "blender5.0-windows-x64"
+          python: "3.11"
+          abi: "cp311"
+          platform: "win_amd64"
+          blender_platform: "windows-x64"
+          blender_min: "5.0.0"
+          blender_max: "5.1.0"
+          requirements: "requirements/windows.txt"
+          blender_version: "5.0.1"
 
-          - name: linux-blender50
-            python: "3.11"
-            abi: "cp311"
-            blender_platform: "linux-x64"
-            blender_min: "5.0.0"
-            blender_max: "5.1.0"
-            requirements: "requirements/linux.txt"
-            blender_version: "5.0.1"
+        - name: linux-blender50
+          output_name: "blender5.0-linux-x64"
+          python: "3.11"
+          abi: "cp311"
+          blender_platform: "linux-x64"
+          blender_min: "5.0.0"
+          blender_max: "5.1.0"
+          requirements: "requirements/linux.txt"
+          blender_version: "5.0.1"
 
-          - name: macos-blender50
-            python: "3.11"
-            abi: "cp311"
-            platform: "macosx_12_0_arm64"
-            blender_platform: "macos-arm64"
-            blender_min: "5.0.0"
-            blender_max: "5.1.0"
-            requirements: "requirements/macos.txt"
-            blender_version: "5.0.1"
+        - name: macos-blender50
+          output_name: "blender5.0-macos-arm64"
+          python: "3.11"
+          abi: "cp311"
+          platform: "macosx_12_0_arm64"
+          blender_platform: "macos-arm64"
+          blender_min: "5.0.0"
+          blender_max: "5.1.0"
+          requirements: "requirements/macos.txt"
+          blender_version: "5.0.1"
 
-          - name: windows-blender51
-            python: "3.13"
-            abi: "cp313"
-            platform: "win_amd64"
-            blender_platform: "windows-x64"
-            blender_min: "5.1.0"
-            blender_max: ""
-            requirements: "requirements/windows.txt"
-            blender_version: "5.1.0"
+        - name: windows-blender51
+          output_name: "blender5.1plus-windows-x64"
+          python: "3.13"
+          abi: "cp313"
+          platform: "win_amd64"
+          blender_platform: "windows-x64"
+          blender_min: "5.1.0"
+          blender_max: ""
+          requirements: "requirements/windows.txt"
+          blender_version: "5.1.0"
 
-          - name: linux-blender51
-            python: "3.13"
-            abi: "cp313"
-            blender_platform: "linux-x64"
-            blender_min: "5.1.0"
-            blender_max: ""
-            requirements: "requirements/linux.txt"
-            blender_version: "5.1.0"
+        - name: linux-blender51
+          output_name: "blender5.1plus-linux-x64"
+          python: "3.13"
+          abi: "cp313"
+          blender_platform: "linux-x64"
+          blender_min: "5.1.0"
+          blender_max: ""
+          requirements: "requirements/linux.txt"
+          blender_version: "5.1.0"
 
-          - name: macos-blender51
-            python: "3.13"
-            abi: "cp313"
-            platform: "macosx_12_0_arm64"
-            blender_platform: "macos-arm64"
-            blender_min: "5.1.0"
-            blender_max: ""
-            requirements: "requirements/macos.txt"
-            blender_version: "5.1.0"
+        - name: macos-blender51
+          output_name: "blender5.1plus-macos-arm64"
+          python: "3.13"
+          abi: "cp313"
+          platform: "macosx_12_0_arm64"
+          blender_platform: "macos-arm64"
+          blender_min: "5.1.0"
+          blender_max: ""
+          requirements: "requirements/macos.txt"
+          blender_version: "5.1.0"
 
     name: ${{ matrix.name }}
 
@@ -116,7 +130,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import os
 
           manifest = Path("blender_manifest.toml")
 
@@ -134,7 +147,7 @@ jobs:
           content = f'''schema_version = "1.0.0"
 
           id = "continuum_flow"
-          version = "0.1.0"
+          version = "${{ inputs.version }}"
           name = "Continuum Flow"
           tagline = "Smoke and fire simulator"
           maintainer = "Lutz Rohlfing"
@@ -204,6 +217,16 @@ jobs:
             --source-dir . \
             --output-dir dist
 
+      - name: Rename build
+        run: |
+          BUILT_ZIP=$(find dist -maxdepth 1 -name "*.zip" | head -n 1)
+          TARGET_NAME="continuum_flow-${{ inputs.version }}-${{ matrix.output_name }}.zip"
+
+          mv "$BUILT_ZIP" "dist/$TARGET_NAME"
+
+          echo "Renamed build to:"
+          echo "$TARGET_NAME"
+
       - name: Show build result
         run: |
           echo "Built files:"
@@ -215,3 +238,31 @@ jobs:
           name: continuum-flow-${{ matrix.name }}
           path: dist/*.zip
           if-no-files-found: error
+
+  create-release:
+    needs: build-releases
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: continuum-flow-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Show release files
+        run: |
+          echo "Release files:"
+          ls -lh release-files
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            release-files/*.zip \
+            --target "${{ github.sha }}" \
+            --title "Continuum Flow ${{ inputs.version }} Alpha" \
+            --generate-notes \
+            --prerelease
