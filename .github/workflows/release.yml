@@ -141,7 +141,7 @@ jobs:
           type = "add-on"
 
           website = "https://lutzr2000.github.io/Continuum_Flow/"
-          tags = ["Physics", "Simulation"]
+          tags = ["Physics"]
 
           blender_version_min = "{blender_min}"
           '''
