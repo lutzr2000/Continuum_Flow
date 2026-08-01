@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 from numba import cuda
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
@@ -59,9 +60,7 @@ def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
 
 def get_source_values(simulation, var_name, t, index=None):
     source_entries = simulation.get("sources") or []
-    animation_times = (
-        (simulation.get("animation_timeline") or {}).get("times") or ()
-    )
+    animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
     values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
 
     for source_idx, source_entry in enumerate(source_entries):
@@ -94,18 +93,24 @@ def build_source_noise_fields(source_entries, source_base_masks):
 
     for source_idx, source_entry in enumerate(source_entries or []):
         noise_amplitude = float(source_entry.get("noise_amplitude", 0.0)) / 100.0
-        use_noise = bool(source_entry.get("source_noise", False)) and noise_amplitude > 0.0
+        use_noise = (
+            bool(source_entry.get("source_noise", False)) and noise_amplitude > 0.0
+        )
         scale_voxels = max(float(source_entry.get("noise_scale", 1.0)), 1.0)
         seed_base = int(source_entry.get("noise_seed", 0))
         source_object_fields = []
 
         if use_noise and source_idx < len(source_base_masks):
             for object_idx, mask_entry in enumerate(source_base_masks[source_idx]):
-                base_mask = np.ascontiguousarray(mask_entry["voxels"]["mask"], dtype=np.bool_)
+                base_mask = np.ascontiguousarray(
+                    mask_entry["voxels"]["mask"], dtype=np.bool_
+                )
                 base_shape = np.asarray(base_mask.shape, dtype=np.int32)
                 coarse_shape = np.maximum(
                     1,
-                    np.ceil(base_shape.astype(np.float32) / np.float32(scale_voxels)).astype(np.int32),
+                    np.ceil(
+                        base_shape.astype(np.float32) / np.float32(scale_voxels)
+                    ).astype(np.int32),
                 )
 
                 rng = np.random.default_rng(seed_base + object_idx * 1009)
@@ -115,11 +120,19 @@ def build_source_noise_fields(source_entries, source_base_masks):
                     size=tuple(int(v) for v in coarse_shape),
                 ).astype(np.float32)
 
-                repeat_x = int(max(1, math.ceil(float(base_shape[0]) / float(coarse_shape[0]))))
-                repeat_y = int(max(1, math.ceil(float(base_shape[1]) / float(coarse_shape[1]))))
-                repeat_z = int(max(1, math.ceil(float(base_shape[2]) / float(coarse_shape[2]))))
+                repeat_x = int(
+                    max(1, math.ceil(float(base_shape[0]) / float(coarse_shape[0])))
+                )
+                repeat_y = int(
+                    max(1, math.ceil(float(base_shape[1]) / float(coarse_shape[1])))
+                )
+                repeat_z = int(
+                    max(1, math.ceil(float(base_shape[2]) / float(coarse_shape[2])))
+                )
                 expanded_noise = np.repeat(
-                    np.repeat(np.repeat(coarse_noise, repeat_x, axis=0), repeat_y, axis=1),
+                    np.repeat(
+                        np.repeat(coarse_noise, repeat_x, axis=0), repeat_y, axis=1
+                    ),
                     repeat_z,
                     axis=2,
                 )
@@ -166,7 +179,7 @@ def apply_all_BC(
     obstacle_velocity_y,
     obstacle_velocity_z,
     source_masks,
-    source_noise
+    source_noise,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -198,13 +211,15 @@ def apply_all_BC(
 
     source_count = int(source_masks.shape[0])
     if source_count > 0:
-        source_temperature_values = get_source_values(simulation,"temperature",t)
-        source_smoke_values = get_source_values(simulation,"smoke",t)
-        source_fuel_values = get_source_values(simulation,"fuel",t)
+        source_temperature_values = get_source_values(simulation, "temperature", t)
+        source_smoke_values = get_source_values(simulation, "smoke", t)
+        source_fuel_values = get_source_values(simulation, "fuel", t)
         source_velocity_x_values = get_source_values(simulation, "velocity", t, 0)
         source_velocity_y_values = get_source_values(simulation, "velocity", t, 1)
         source_velocity_z_values = get_source_values(simulation, "velocity", t, 2)
-        source_noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        source_noise_amplitudes = get_source_values(
+            simulation, "noise_amplitude", t
+        ) / np.float32(100.0)
 
         for source_idx in range(source_count):
             source_mask_entry = source_masks[source_idx]
@@ -213,7 +228,9 @@ def apply_all_BC(
                 source_mask_entry.shape,
                 kernel_config.THREADS_PER_BLOCK_3D,
             )
-            source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
+            source_bc.source_bc_kernel[
+                blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
+            ](
                 u,
                 v,
                 w,
@@ -229,9 +246,10 @@ def apply_all_BC(
                 source_velocity_y_values[source_idx],
                 source_velocity_z_values[source_idx],
                 source_noise_amplitudes[source_idx],
-                dt
+                dt,
             )
     return u, v, w, p, T, smoke, fuel, flame
+
 
 def compute_inital_velocity(simulation_cfg):
     total_u = 0.0
@@ -239,7 +257,9 @@ def compute_inital_velocity(simulation_cfg):
     total_w = 0.0
     inlet_count = 0
 
-    for face_cfg in (simulation_cfg.get("domain") or {}).get("boundary_conditions", {}).values():
+    for face_cfg in (
+        (simulation_cfg.get("domain") or {}).get("boundary_conditions", {}).values()
+    ):
         bc_type = face_cfg.get("type", 0)
         if isinstance(bc_type, str):
             if bc_type.strip().upper() != "INFLOW":
@@ -275,7 +295,7 @@ def create_multigrid_levels(shape, delta, min_size=8):
         p_levels.append(cuda.device_array(level_shape, dtype=np.float32))
         b_levels.append(cuda.device_array(level_shape, dtype=np.float32))
         zero_levels.append(cuda.to_device(np.zeros(level_shape, dtype=np.float32)))
-        delta_levels.append(delta * (2 ** level))
+        delta_levels.append(delta * (2**level))
 
         nx = (nx + 1) // 2
         ny = (ny + 1) // 2
@@ -285,12 +305,22 @@ def create_multigrid_levels(shape, delta, min_size=8):
     return p_levels, b_levels, delta_levels, zero_levels
 
 
-def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
+def solver(
+    config,
+    obstacle_base_masks,
+    obstacle_mask,
+    source_base_masks,
+    source_masks,
+    animated_obstacles,
+    animated_sources,
+):
     total_start_time = perf_counter()
     simulation = config.get("simulation") or {}
     if not simulation:
         raise ValueError("Solver config must contain a non-empty 'simulation' object.")
-    cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
+    cancel_flag_path = (
+        (config.get("meta") or {}).get("cancel_flag_path") or ""
+    ).strip()
     cancel_requested = False
 
     # ------------time-------------------
@@ -303,23 +333,28 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     nx = simulation["domain"]["grid"]["nx"]
     ny = simulation["domain"]["grid"]["ny"]
     nz = simulation["domain"]["grid"]["nz"]
-    shape = (nx,ny,nz)
+    shape = (nx, ny, nz)
 
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
     # ------------tiles------------------
-    tile_i, tile_j, tile_k = nx//kernel_config.TILE_SIZE, ny//kernel_config.TILE_SIZE, nz//kernel_config.TILE_SIZE
+    tile_i, tile_j, tile_k = (
+        nx // kernel_config.TILE_SIZE,
+        ny // kernel_config.TILE_SIZE,
+        nz // kernel_config.TILE_SIZE,
+    )
     tile_shape = (tile_i, tile_j, tile_k)
     tile_map_values = np.arange(np.prod(tile_shape), dtype=np.int32).reshape(tile_shape)
     tile_map = cuda.to_device(tile_map_values)
+    base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
 
     print("################################################################")
     print("Initialise")
-    print("Cell count: ",int(nx * ny * nz))
-    print("Tile shape: ",tile_shape)
-    print("Total tiles: ",int((tile_i//kernel_config.TILE_SIZE) * (tile_j//kernel_config.TILE_SIZE) * (tile_k//kernel_config.TILE_SIZE)))
+    print("Cell count: ", int(nx * ny * nz))
+    print("Tile shape: ", tile_shape)
+    print("Total tiles: ",int(tile_i * tile_j * tile_k))
 
     # ------------fields------------------
     # velocity
@@ -357,13 +392,28 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
     # masks
     obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
-    source_mask_host = np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_)
+    source_mask_host = (
+        np.any(np.stack(source_masks, axis=0), axis=0)
+        if source_masks
+        else np.zeros(shape, dtype=np.bool_)
+    )
     source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
-    source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
+    source_mask_stack = (
+        np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
+        if source_masks
+        else np.zeros((0,) + shape, dtype=np.bool_)
+    )
     source_masks = cuda.to_device(source_mask_stack)
-    source_noise_base_fields = build_source_noise_fields(simulation.get("sources") or [],source_base_masks,)
-    source_noise_host = np.zeros((len(source_noise_base_fields),) + shape, dtype=np.float32)
-    source_noise = cuda.to_device(np.ascontiguousarray(source_noise_host, dtype=np.float32))
+    source_noise_base_fields = build_source_noise_fields(
+        simulation.get("sources") or [],
+        source_base_masks,
+    )
+    source_noise_host = np.zeros(
+        (len(source_noise_base_fields),) + shape, dtype=np.float32
+    )
+    source_noise = cuda.to_device(
+        np.ascontiguousarray(source_noise_host, dtype=np.float32)
+    )
 
     # multigrid levels
     p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
@@ -373,7 +423,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     )
 
     # ------------intitialise------------------
-    u_initial,v_initial,w_initial = compute_inital_velocity(simulation)
+    u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
     u.copy_to_device(np.full(shape, u_initial, dtype=GPU_FIELD_DTYPE))
     v.copy_to_device(np.full(shape, v_initial, dtype=GPU_FIELD_DTYPE))
@@ -435,6 +485,27 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
+
+        # ------------Start Active tiles-------------------
+        if simulation.get("settings").get("simulate_sparsely"):
+            sparse_managment.build_base_tile_map[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                smoke,
+                fuel,
+                flame,
+                base_tile_map,
+                simulation.get("settings").get("adaptive_domain_threshold"),
+            )
+
+            sparse_managment.dilate_tile_map[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                base_tile_map,
+                tile_map,
+                kernel_config.TILE_DILATE,
+            )
+
 
         time_step.reset_velocity_maxima(
             velocity_maxima,
@@ -513,16 +584,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             source_noise,
         )
 
-        # ------------Start Active tiles-------------------
-        if simulation.get("settings").get("simulate_sparsely"):
-            sparse_managment.update_tile_map(smoke,fuel,flame,tile_map)
-
-
         # ------------Vorticity-------------------
         if simulation.get("physics").get("extras").get("vorticity") > 0.0:
-            vorticity.compute_vorticity[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
+            vorticity.compute_vorticity[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
                 u,
                 v,
                 w,
@@ -589,7 +653,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_z,
             has_turbulence_nodes,
             turbulence_config_device,
-            t
+            t,
         )
 
         # ------------Velocity swap-------------------
@@ -599,10 +663,14 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Pressure solve-------------------
         extra_pressure = get_source_values(simulation, "extra_pressure", t)
-        noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        noise_amplitudes = get_source_values(
+            simulation, "noise_amplitude", t
+        ) / np.float32(100.0)
 
         p = pressure_solve.pressure_poisson_multigrid(
-            u, v, w,
+            u,
+            v,
+            w,
             p,
             temperature,
             scratch_A_x,
@@ -702,7 +770,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         time_step_count += 1
 
         # ------------Output-------------------
-        device_fields = _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame)
+        device_fields = _current_device_fields(
+            u, v, w, p, temperature, smoke, fuel, flame
+        )
         while t >= next_output_time:
             if target_realtime_preview and last_output_wall_time is not None:
                 elapsed_since_last_output = perf_counter() - last_output_wall_time
@@ -729,6 +799,11 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             free, total = ctx.get_memory_info()
             used = total - free
             print(f"VRAM used: {used / 1024**2:.1f} MB")
+
+        if time_step_count % 32 == 0:
+            active_tiles_host = tile_map.copy_to_host()
+            active_tile_count = np.count_nonzero(active_tiles_host != -1)
+            print(f"Active tiles: {active_tile_count} / ",int(tile_i * tile_j * tile_k))
 
     # ------------Shutdown output-------------------
     output.shutdown_output(shared_memory_blocks, writer_slots)
