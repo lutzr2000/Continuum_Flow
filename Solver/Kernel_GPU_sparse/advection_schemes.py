@@ -1,8 +1,7 @@
 from numba import cuda
 
-import Solver.Kernel_GPU.kernel_config as kernel_config
-from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
-from Solver.Kernel_GPU.vorticity import apply_vorticity_confinement
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
+from Solver.Kernel_GPU_sparse.vorticity import apply_vorticity_confinement
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -377,21 +376,20 @@ def advect_velocity_semi_lagrangian(
     advected_w,
     dt,
     delta,
-    active_tile_mask,
+    tile_map,
 ):
     """
     Backtrace the velocity field once and store the purely advected values.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
 
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
         return
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
+    
     if i >= nx or j >= ny or k >= nz:
         return
 
@@ -448,7 +446,7 @@ def update_velocity_maccormack(
     temperature,
     buoyancy_factor,
     t_reference,
-    active_tile_mask,
+    tile_map,
     fx_const,
     fy_const,
     fz_const,
@@ -470,22 +468,21 @@ def update_velocity_maccormack(
     compensation term, clamps the result to the departure cell range, and then
     adds pressure, diffusion and external forces explicitly.
     """
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
+    
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+        return
+
     Fx = 0.0
     Fy = 0.0
     Fz = 0.0
-
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
-
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
-        return
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
-    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        return
 
     # constants
     dt_over_delta = dt / delta
@@ -597,11 +594,9 @@ def update_velocity_maccormack(
             i,
             j,
             k,
-            nx,
-            ny,
-            nz,
             delta,
             vorticity_strength,
+            tile_map
         )
 
     if has_swirl_nodes:

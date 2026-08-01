@@ -1,8 +1,7 @@
 from numba import cuda
 import math
 
-from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
-
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
 @cuda.jit(cache=True)
 def compute_vorticity(
@@ -12,30 +11,25 @@ def compute_vorticity(
     obstacle_mask,
     omega_magnitude,
     delta,
-    active_tile_mask,
+    tile_map,
 ):
     """
     Compute vorticity components and scalar magnitude from the velocity field.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
         omega_magnitude.shape
     )
 
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        omega_magnitude[i, j, k] = 0.0
         return
 
     if i >= nx or j >= ny or k >= nz:
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        omega_magnitude[i, j, k] = 0.0
-        return
-
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
         omega_magnitude[i, j, k] = 0.0
         return
 
@@ -71,15 +65,23 @@ def apply_vorticity_confinement(
     i,
     j,
     k,
-    nx,
-    ny,
-    nz,
     delta,
     vorticity_strength,
+    tile_map
 ):
     """
     Compute the local vorticity confinement force in one GPU cell.
     """
+
+    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return 0.0, 0.0, 0.0
+    
     if (
         i < 2
         or j < 2

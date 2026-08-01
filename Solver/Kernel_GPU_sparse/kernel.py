@@ -8,18 +8,19 @@ from numba import cuda
 import warnings
 warnings.filterwarnings("ignore")
 
-import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.Kernel_GPU.advection_schemes as advection_schemes
-import Solver.Kernel_GPU.scalar_update as scalar_update
-import Solver.Kernel_GPU.pressure_solve as pressure_solve
-import Solver.Kernel_GPU.vorticity as vorticity
-import Solver.Kernel_GPU.kernel_config as kernel_config
-import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
-import Solver.Kernel_GPU.time_step as time_step
-import Solver.Kernel_GPU.update_masks as update_masks
-import Solver.Kernel_GPU.output as output
+import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
+import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
+# import Solver.Kernel_GPU_sparse.scalar_update as scalar_update
+# import Solver.Kernel_GPU_sparse.pressure_solve as pressure_solve
+import Solver.Kernel_GPU_sparse.vorticity as vorticity
+import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
+import Solver.Kernel_GPU_sparse.Boundary_Conditions.obstacle_bc as obstacle_bc
+import Solver.Kernel_GPU_sparse.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU_sparse.time_step as time_step
+import Solver.Kernel_GPU_sparse.update_masks as update_masks
+import Solver.Kernel_GPU_sparse.output as output
 import Solver.General.forces as forces
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
 GPU_FIELD_DTYPE = np.float32
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
@@ -308,21 +309,17 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
+    # ------------tiles------------------
+    tile_i, tile_j, tile_k = nx//kernel_config.TILE_SIZE, ny//kernel_config.TILE_SIZE, nz//kernel_config.TILE_SIZE
+    tile_shape = (tile_i, tile_j, tile_k)
+    tile_map_values = np.arange(np.prod(tile_shape), dtype=np.int32).reshape(tile_shape)
+    tile_map = cuda.to_device(tile_map_values)
+
     print("################################################################")
     print("Initialise")
     print("Cell count: ",int(nx * ny * nz))
-
-    # ------------tiles------------------
-    active_tile_shape = kernel_config.active_tile_shape(shape)
-
-    scalar_active_tiles = cuda.device_array(active_tile_shape, dtype=np.bool_)
-    scalar_active_tiles_dilated = cuda.device_array(active_tile_shape, dtype=np.bool_)
-    scalar_tile_padding = kernel_config.active_tile_padding_tiles()
-
-    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
-        scalar_active_tiles.shape,
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
-    )
+    print("Tile shape: ",tile_shape)
+    print("Total tiles: ",int((tile_i//kernel_config.TILE_SIZE) * (tile_j//kernel_config.TILE_SIZE) * (tile_k//kernel_config.TILE_SIZE)))
 
     # ------------fields------------------
     # velocity
@@ -364,10 +361,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
     source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
     source_masks = cuda.to_device(source_mask_stack)
-    source_noise_base_fields = build_source_noise_fields(
-        simulation.get("sources") or [],
-        source_base_masks,
-    )
+    source_noise_base_fields = build_source_noise_fields(simulation.get("sources") or [],source_base_masks,)
     source_noise_host = np.zeros((len(source_noise_base_fields),) + shape, dtype=np.float32)
     source_noise = cuda.to_device(np.ascontiguousarray(source_noise_host, dtype=np.float32))
 
@@ -521,42 +515,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Start Active tiles-------------------
         if simulation.get("settings").get("simulate_sparsely"):
-            scalar_update.build_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                temperature,
-                smoke,
-                fuel,
-                flame,
-                scalar_active_tiles,
-                ref_temp,
-                simulation.get("settings").get("adaptive_domain_threshold"),
-            )
-            scalar_update.dilate_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles,
-                scalar_active_tiles_dilated,
-                scalar_tile_padding,
-            )
-        else:
-            scalar_update.fill_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles,
-                np.bool_(True),
-            )
-            scalar_update.fill_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles_dilated,
-                np.bool_(True),
-            )
+            sparse_managment.update_tile_map(smoke,fuel,flame,tile_map)
+
 
         # ------------Vorticity-------------------
         if simulation.get("physics").get("extras").get("vorticity") > 0.0:
             vorticity.compute_vorticity[
-                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
                 u,
                 v,
@@ -564,7 +529,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 obstacle_mask,
                 vorticity_magnitude,
                 delta,
-                scalar_active_tiles_dilated,
+                tile_map,
             )
 
         # ------------force params-------------------
@@ -579,7 +544,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         v_work.copy_to_device(v)
         w_work.copy_to_device(w)
         advection_schemes.advect_velocity_semi_lagrangian[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
@@ -589,10 +554,10 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             scratch_A_z,
             dt,
             delta,
-            scalar_active_tiles_dilated,
+            tile_map,
         )
         advection_schemes.update_velocity_maccormack[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
@@ -613,7 +578,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             temperature,
             simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
             ref_temp,
-            scalar_active_tiles_dilated,
+            tile_map,
             fx_const,
             fy_const,
             fz_const,
@@ -627,109 +592,109 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             t
         )
 
-        # ------------Velocity swap-------------------
-        u, u_work = u_work, u
-        v, v_work = v_work, v
-        w, w_work = w_work, w
+        # # ------------Velocity swap-------------------
+        # u, u_work = u_work, u
+        # v, v_work = v_work, v
+        # w, w_work = w_work, w
 
-        # ------------Pressure solve-------------------
-        extra_pressure = get_source_values(simulation, "extra_pressure", t)
-        noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        # # ------------Pressure solve-------------------
+        # extra_pressure = get_source_values(simulation, "extra_pressure", t)
+        # noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
 
-        p = pressure_solve.pressure_poisson_multigrid(
-            u, v, w,
-            p,
-            temperature,
-            scratch_A_x,
-            dt,
-            source_masks,
-            extra_pressure,
-            source_noise,
-            noise_amplitudes,
-            delta,
-            simulation.get("physics").get("fluid").get("density"),
-            simulation.get("physics").get("temperature").get("expansion_rate"),
-            ref_temp,
-            scalar_active_tiles_dilated,
-            p_levels,
-            b_levels,
-            delta_levels,
-            simulation.get("settings").get("iterations"),
-            pressure_rhs_partial_sums,
-            pressure_rhs_sum,
-            zero_levels,
-        )
+        # p = pressure_solve.pressure_poisson_multigrid(
+        #     u, v, w,
+        #     p,
+        #     temperature,
+        #     scratch_A_x,
+        #     dt,
+        #     source_masks,
+        #     extra_pressure,
+        #     source_noise,
+        #     noise_amplitudes,
+        #     delta,
+        #     simulation.get("physics").get("fluid").get("density"),
+        #     simulation.get("physics").get("temperature").get("expansion_rate"),
+        #     ref_temp,
+        #     scalar_active_tiles_dilated,
+        #     p_levels,
+        #     b_levels,
+        #     delta_levels,
+        #     simulation.get("settings").get("iterations"),
+        #     pressure_rhs_partial_sums,
+        #     pressure_rhs_sum,
+        #     zero_levels,
+        # )
 
-        # ------------Velocity projection-------------------
-        pressure_solve.project_velocity_kernel[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            u,
-            v,
-            w,
-            p,
-            obstacle_mask,
-            dt,
-            delta,
-            simulation.get("physics").get("fluid").get("density"),
-            scalar_active_tiles_dilated,
-        )
+        # # ------------Velocity projection-------------------
+        # pressure_solve.project_velocity_kernel[
+        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        # ](
+        #     u,
+        #     v,
+        #     w,
+        #     p,
+        #     obstacle_mask,
+        #     dt,
+        #     delta,
+        #     simulation.get("physics").get("fluid").get("density"),
+        #     scalar_active_tiles_dilated,
+        # )
 
-        # ------------Scalar update-------------------
-        temperature_work.copy_to_device(temperature)
-        smoke_work.copy_to_device(smoke)
-        fuel_work.copy_to_device(fuel)
-        scalar_update.predict_scalar_fields_semi_lagrangian[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            temperature,
-            smoke,
-            fuel,
-            u,
-            v,
-            w,
-            dt,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
-            delta,
-            scalar_active_tiles_dilated,
-        )
-        scalar_update.update_scalar_fields_maccormack[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        ](
-            temperature,
-            smoke,
-            fuel,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
-            u,
-            v,
-            w,
-            dt,
-            temperature_work,
-            smoke_work,
-            fuel_work,
-            flame,
-            delta,
-            simulation.get("physics").get("temperature").get("dissipation"),
-            simulation.get("physics").get("temperature").get("production_rate"),
-            simulation.get("physics").get("smoke").get("dissipation"),
-            simulation.get("physics").get("smoke").get("production_rate"),
-            simulation.get("physics").get("fuel").get("dissipation"),
-            simulation.get("physics").get("fuel").get("burn_rate"),
-            simulation.get("physics").get("fuel").get("ignition_temperature"),
-            simulation.get("physics").get("burning").get("scale"),
-            simulation.get("physics").get("burning").get("amplitude"),
-            ref_temp,
-            scalar_active_tiles_dilated,
-        )
+        # # ------------Scalar update-------------------
+        # temperature_work.copy_to_device(temperature)
+        # smoke_work.copy_to_device(smoke)
+        # fuel_work.copy_to_device(fuel)
+        # scalar_update.predict_scalar_fields_semi_lagrangian[
+        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        # ](
+        #     temperature,
+        #     smoke,
+        #     fuel,
+        #     u,
+        #     v,
+        #     w,
+        #     dt,
+        #     scratch_A_x,
+        #     scratch_A_y,
+        #     scratch_A_z,
+        #     delta,
+        #     scalar_active_tiles_dilated,
+        # )
+        # scalar_update.update_scalar_fields_maccormack[
+        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        # ](
+        #     temperature,
+        #     smoke,
+        #     fuel,
+        #     scratch_A_x,
+        #     scratch_A_y,
+        #     scratch_A_z,
+        #     u,
+        #     v,
+        #     w,
+        #     dt,
+        #     temperature_work,
+        #     smoke_work,
+        #     fuel_work,
+        #     flame,
+        #     delta,
+        #     simulation.get("physics").get("temperature").get("dissipation"),
+        #     simulation.get("physics").get("temperature").get("production_rate"),
+        #     simulation.get("physics").get("smoke").get("dissipation"),
+        #     simulation.get("physics").get("smoke").get("production_rate"),
+        #     simulation.get("physics").get("fuel").get("dissipation"),
+        #     simulation.get("physics").get("fuel").get("burn_rate"),
+        #     simulation.get("physics").get("fuel").get("ignition_temperature"),
+        #     simulation.get("physics").get("burning").get("scale"),
+        #     simulation.get("physics").get("burning").get("amplitude"),
+        #     ref_temp,
+        #     scalar_active_tiles_dilated,
+        # )
 
-        # ------------Swap-------------------
-        temperature, temperature_work = temperature_work, temperature
-        smoke, smoke_work = smoke_work, smoke
-        fuel, fuel_work = fuel_work, fuel
+        # # ------------Swap-------------------
+        # temperature, temperature_work = temperature_work, temperature
+        # smoke, smoke_work = smoke_work, smoke
+        # fuel, fuel_work = fuel_work, fuel
 
         # ------------time updated-------------------
         t = t + dt

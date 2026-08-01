@@ -1,6 +1,6 @@
 from numba import cuda
 
-from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D
+from Solver.Kernel_GPU_sparse.kernel_config import THREADS_PER_BLOCK_2D
 
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall

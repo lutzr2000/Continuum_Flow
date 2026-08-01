@@ -1,9 +1,9 @@
 import numpy as np
 from numba import cuda
 
-import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.Kernel_GPU.kernel_config as kernel_config
-from Solver.Kernel_GPU.scalar_update import _active_tile_cell_indices
+import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
+import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
+from Solver.Kernel_GPU_sparse.scalar_update import _active_tile_cell_indices
 
 REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
 

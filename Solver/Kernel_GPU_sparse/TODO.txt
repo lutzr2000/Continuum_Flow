@@ -1,0 +1,8 @@
+1. Replace active cells with a tile map, just -1 for inactive and some index for active, index points to nothing
+2. Replace one field with tile pool
+
+
+
+
+# compute time step sparse
+# compute forces sparse
