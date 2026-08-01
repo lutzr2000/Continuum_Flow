@@ -3,16 +3,9 @@ from numba import cuda
 
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
-from Solver.Kernel_GPU_sparse.scalar_update import _active_tile_cell_indices
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
-REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _is_active_pressure_cell(active_tile_mask, i, j, k):
-    tile_size = kernel_config.ACTIVE_TILE_SIZE
-    return active_tile_mask[i // tile_size, j // tile_size, k // tile_size] != 0
-
+REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK #this is needed because if this is added directly inline, cuda crashes i do not know why
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
@@ -23,15 +16,22 @@ def pressure_equation_right_side(
     dt,
     delta,
     rho,
-    active_tile_mask,
+    tile_map,
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
     Only the divergence of the velociy field is used, we neglect non linear terms.
 
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        b[i, j, k] = 0.0
+        return
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -43,7 +43,6 @@ def pressure_equation_right_side(
         or i >= nx - 1
         or j >= ny - 1
         or k >= nz - 1
-        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
     ):
         b[i, j, k] = 0.0
         return
@@ -63,12 +62,13 @@ def pressure_equation_right_side(
 
 
 @cuda.jit(cache=True)
-def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
+def sum_rhs_partial_kernel(b, tile_map, partial_sums):
     """
-    Reduce the interior RHS into one partial sum per CUDA block. This is needed
-    for computing RHS mean.
+    Reduce the interior RHS into one partial sum per CUDA block.
     """
-    nx, ny, nz = b.shape
+    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
+        b.shape
+    )
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -81,6 +81,7 @@ def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
     block_size = cuda.blockDim.x
     global_idx = cuda.grid(1)
     stride = cuda.gridsize(1)
+
     shared_sums = cuda.shared.array(
         shape=REDUCTION_THREADS_PER_BLOCK,
         dtype=np.float32,
@@ -95,8 +96,10 @@ def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
         remainder = flat_idx % plane_size
         j = remainder // interior_nz + 1
         k = remainder % interior_nz + 1
-        if _is_active_pressure_cell(active_tile_mask, i, j, k):
+
+        if tile_map[tile_i, tile_j, tile_k] != -1:
             local_sum += b[i, j, k]
+
         flat_idx += stride
 
     shared_sums[tid] = local_sum
@@ -114,11 +117,13 @@ def _sum_rhs_partial_kernel(b, active_tile_mask, partial_sums):
 
 
 @cuda.jit(cache=True)
-def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
+def count_rhs_active_partial_kernel(b, tile_map, partial_counts):
     """
     Reduce the number of active RHS cells into one partial count per CUDA block.
     """
-    nx, ny, nz = b.shape
+    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
+        b.shape
+    )
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -131,6 +136,7 @@ def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
     block_size = cuda.blockDim.x
     global_idx = cuda.grid(1)
     stride = cuda.gridsize(1)
+
     shared_counts = cuda.shared.array(
         shape=REDUCTION_THREADS_PER_BLOCK,
         dtype=np.float32,
@@ -145,8 +151,10 @@ def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
         remainder = flat_idx % plane_size
         j = remainder // interior_nz + 1
         k = remainder % interior_nz + 1
-        if _is_active_pressure_cell(active_tile_mask, i, j, k):
+
+        if tile_map[tile_i, tile_j, tile_k] != -1:
             local_count += np.float32(1.0)
+
         flat_idx += stride
 
     shared_counts[tid] = local_count
@@ -164,7 +172,7 @@ def _count_rhs_active_partial_kernel(b, active_tile_mask, partial_counts):
 
 
 @cuda.jit(cache=True)
-def _sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
+def sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
     """
     Reduce the block partial sums into one scalar sum on the GPU. This is needed
     for computing RHS mean.
@@ -197,12 +205,19 @@ def _sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
 
 
 @cuda.jit(cache=True)
-def _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask):
+def subtract_rhs_mean_kernel(b, rhs_mean, tile_map):
     """
     Subtract the interior RHS mean from interior cells only.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = b.shape
+
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        b.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
 
     if (
         i < 1
@@ -211,7 +226,6 @@ def _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask):
         or i >= nx - 1
         or j >= ny - 1
         or k >= nz - 1
-        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
     ):
         return
 
@@ -219,9 +233,15 @@ def _subtract_rhs_mean_kernel(b, rhs_mean, active_tile_mask):
 
 
 @cuda.jit(cache=True)
-def _reset_inactive_pressure_kernel(p, active_tile_mask):
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = p.shape
+def reset_inactive_pressure(p, tile_map):
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        p.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -233,15 +253,13 @@ def _reset_inactive_pressure_kernel(p, active_tile_mask):
         or i >= nx - 1
         or j >= ny - 1
         or k >= nz - 1
-        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
     ):
         p[i, j, k] = 0.0
 
 
-def _remove_rhs_mean(
+def remove_rhs_mean(
     b,
-    active_tile_mask,
-    threadsperblock_3d,
+    tile_map,
     rhs_partial_sums,
     rhs_sum_buffer,
 ):
@@ -252,20 +270,20 @@ def _remove_rhs_mean(
     nx, ny, nz = b.shape
     interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
     reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
-    reduction_threads = REDUCTION_THREADS_PER_BLOCK
-
-    _sum_rhs_partial_kernel[reduction_blocks, reduction_threads](
-        b, active_tile_mask, rhs_partial_sums
+    reduction_threads = kernel_config.REDUCTION_THREADS_PER_BLOCK
+    cuda.synchronize()
+    sum_rhs_partial_kernel[reduction_blocks, reduction_threads](
+        b, tile_map, rhs_partial_sums
     )
-    _sum_partial_sums_kernel[1, reduction_threads](
+    sum_partial_sums_kernel[1, reduction_threads](
         rhs_partial_sums, reduction_blocks, rhs_sum_buffer
     )
     rhs_sum = float(rhs_sum_buffer.copy_to_host()[0])
 
-    _count_rhs_active_partial_kernel[reduction_blocks, reduction_threads](
-        b, active_tile_mask, rhs_partial_sums
+    count_rhs_active_partial_kernel[reduction_blocks, reduction_threads](
+        b, tile_map, rhs_partial_sums
     )
-    _sum_partial_sums_kernel[1, reduction_threads](
+    sum_partial_sums_kernel[1, reduction_threads](
         rhs_partial_sums, reduction_blocks, rhs_sum_buffer
     )
     active_cell_count = int(rhs_sum_buffer.copy_to_host()[0])
@@ -276,15 +294,15 @@ def _remove_rhs_mean(
     if abs(rhs_mean) <= 1.0e-12:
         return
 
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, threadsperblock_3d)
-    _subtract_rhs_mean_kernel[blockspergrid_3d, threadsperblock_3d](
-        b, rhs_mean, active_tile_mask
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, kernel_config.THREADS_PER_BLOCK_3D)
+    subtract_rhs_mean_kernel[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
+        b, rhs_mean, tile_map
     )
 
 
 @cuda.jit(cache=True)
 def project_velocity_kernel(
-    u, v, w, p, obstacle_mask, dt, delta, rho, active_tile_mask
+    u, v, w, p, obstacle_mask, dt, delta, rho, tile_map
 ):
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
@@ -292,18 +310,19 @@ def project_velocity_kernel(
     Obstacle cells are skipped because their wall velocities are restored by the
     obstacle boundary conditions after the projection pass.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        p.shape
+    )
 
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
         return
+
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0 or obstacle_mask[i, j, k]:
+    if obstacle_mask[i, j, k]:
         return
 
     pressure_coeff = dt / (2.0 * rho * delta)
@@ -323,12 +342,18 @@ def add_artifical_divergence(
     expansion_rate,
     t_reference,
     b,
-    active_tile_mask,
+    tile_map,
     rho,
     dt
 ):
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = b.shape
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        T.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -340,7 +365,6 @@ def add_artifical_divergence(
         or i >= nx - 1
         or j >= ny - 1
         or k >= nz - 1
-        or not _is_active_pressure_cell(active_tile_mask, i, j, k)
     ):
         return
     
@@ -414,7 +438,7 @@ def mg_restrict_residual_8cell(p, b, coarse_b, delta):
 
 
 @cuda.jit(cache=True)
-def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, active_tile_mask):
+def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_shape):
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = fine_p.shape
@@ -435,9 +459,15 @@ def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, active_tile_mask):
                 j = j0 + dj
                 k = k0 + dk
 
+                tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
+                    field_shape
+                )
+
+                tile_index = tile_map[tile_i, tile_j, tile_k]
+
                 if (
                     i < fnx and j < fny and k < fnz and
-                    _is_active_pressure_cell(active_tile_mask, i, j, k)
+                    tile_index != -1
                 ):
                     fine_p[i, j, k] += e        
 
@@ -476,7 +506,7 @@ def mg_restrict_8cell(fine_r, coarse_b):
 
 
 @cuda.jit(cache=True)
-def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, active_tile_mask):
+def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
@@ -501,10 +531,16 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, active_tile_
                 j = j0 + dj
                 k = k0 + dk
 
+                tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
+                    p.shape
+                )
+
+                tile_index = tile_map[tile_i, tile_j, tile_k]
+
                 if (
                     i >= 1 and j >= 1 and k >= 1 and
                     i < nx - 1 and j < ny - 1 and k < nz - 1 and
-                    _is_active_pressure_cell(active_tile_mask, i, j, k)
+                    tile_index != -1
                 ):
                     lap = (
                         p[i + 1, j, k] + p[i - 1, j, k] +
@@ -570,9 +606,15 @@ def mg_rbgs_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def mg_rbgs_step_sparse_level0(p, b, delta, parity, active_tile_mask):
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = p.shape
+def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        p.shape
+    )
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -580,8 +622,7 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, active_tile_mask):
     if (
         i < 1 or j < 1 or k < 1 or
         i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
-        ((i + j + k) & 1) != parity or
-        not _is_active_pressure_cell(active_tile_mask, i, j, k)
+        ((i + j + k) & 1) != parity
     ):
         return
 
@@ -595,23 +636,23 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, active_tile_mask):
     ) / 6.0
     
 
-def _mg_smooth(p, b, delta, iterations, level=0, active_tile_mask=None):
+def multigrid_smooth(p, b, delta, iterations, level=0, tile_map=None):
     blocks = kernel_config.volume_blocks_per_grid(
         p.shape,
         kernel_config.THREADS_PER_BLOCK_3D,
     )
 
-    use_sparse = level == 0 and active_tile_mask is not None
+    use_sparse = level == 0 
 
     for _ in range(iterations):
         if use_sparse:
             mg_rbgs_step_sparse_level0[
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 0, active_tile_mask)
+            ](p, b, delta, 0, tile_map)
 
             mg_rbgs_step_sparse_level0[
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 1, active_tile_mask)
+            ](p, b, delta, 1, tile_map)
         else:
             mg_rbgs_step[
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
@@ -621,12 +662,12 @@ def _mg_smooth(p, b, delta, iterations, level=0, active_tile_mask=None):
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
             ](p, b, delta, 1)
 
-    BC._pressure_poisson_apply_neumann_bcs[
+    BC.pressure_poisson_apply_neumann_bcs[
         blocks, kernel_config.THREADS_PER_BLOCK_3D
     ](p)
 
 
-def _mg_vcycle(
+def multigrid_vcycle(
     level,
     p_levels,
     b_levels,
@@ -635,31 +676,31 @@ def _mg_vcycle(
     pre_smooth,
     post_smooth,
     coarse_smooth,
-    active_tile_mask=None,
+    tile_map=None,
 ):
     p = p_levels[level]
     b = b_levels[level]
     delta = delta_levels[level]
 
-    _mg_smooth(
+    multigrid_smooth(
         p,
         b,
         delta,
         pre_smooth,
         level=level,
-        active_tile_mask=active_tile_mask,
+        tile_map=tile_map,
     )
 
     last_level = len(p_levels) - 1
 
     if level == last_level:
-        _mg_smooth(
+        multigrid_smooth(
             p,
             b,
             delta,
             coarse_smooth,
             level=level,
-            active_tile_mask=active_tile_mask,
+            tile_map=tile_map,
         )
         return
 
@@ -673,7 +714,7 @@ def _mg_vcycle(
 
     coarse_p.copy_to_device(zero_levels[level + 1])
 
-    if level == 0 and active_tile_mask is not None:
+    if level == 0 and tile_map is not None:
         mg_restrict_residual_8cell_sparse_level0[
             coarse_blocks,
             kernel_config.THREADS_PER_BLOCK_3D,
@@ -682,7 +723,7 @@ def _mg_vcycle(
             b,
             coarse_b,
             delta,
-            active_tile_mask,
+            tile_map,
         )
     else:
         mg_restrict_residual_8cell[
@@ -695,7 +736,7 @@ def _mg_vcycle(
             delta,
         )
 
-    _mg_vcycle(
+    multigrid_vcycle(
         level + 1,
         p_levels,
         b_levels,
@@ -704,17 +745,18 @@ def _mg_vcycle(
         pre_smooth,
         post_smooth,
         coarse_smooth,
-        active_tile_mask=None,  # ab Level 1 dense
+        tile_map=None,  # ab Level 1 dense
     )
 
-    if level == 0 and active_tile_mask is not None:
+    if level == 0 and tile_map is not None:
         mg_prolongate_add_nearest_sparse_level0[
             coarse_blocks,
             kernel_config.THREADS_PER_BLOCK_3D,
         ](
             coarse_p,
             p,
-            active_tile_mask,
+            tile_map,
+            p.shape
         )
     else:
         mg_prolongate_add_nearest[
@@ -725,13 +767,13 @@ def _mg_vcycle(
             p,
         )
 
-    _mg_smooth(
+    multigrid_smooth(
         p,
         b,
         delta,
         post_smooth,
         level=level,
-        active_tile_mask=active_tile_mask,
+        tile_map=tile_map,
     )
 
 
@@ -751,7 +793,8 @@ def pressure_poisson_multigrid(
     rho,
     expansion_rate,
     t_reference,
-    active_tile_mask,
+    tile_map,
+    tile_shape,
     p_levels,
     b_levels,
     delta_levels,
@@ -760,16 +803,10 @@ def pressure_poisson_multigrid(
     rhs_sum_buffer,
     zero_levels,
 ):
-    threadsperblock_3d = kernel_config.THREADS_PER_BLOCK_3D
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-        u.shape,
-        threadsperblock_3d,
-    )
-
     p_levels[0] = p
     b_levels[0] = b
 
-    pressure_equation_right_side[blockspergrid_3d, threadsperblock_3d](
+    pressure_equation_right_side[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
         u,
         v,
         w,
@@ -777,23 +814,22 @@ def pressure_poisson_multigrid(
         dt,
         delta,
         rho,
-        active_tile_mask,
+        tile_map,
     )
 
-    _remove_rhs_mean(
+    remove_rhs_mean(
         b_levels[0],
-        active_tile_mask,
-        threadsperblock_3d,
+        tile_map,
         rhs_partial_sums,
         rhs_sum_buffer,
     )
 
-    _reset_inactive_pressure_kernel[blockspergrid_3d, threadsperblock_3d](
+    reset_inactive_pressure[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
         p_levels[0],
-        active_tile_mask,
+        tile_map,
     )
 
-    add_artifical_divergence[blockspergrid_3d, threadsperblock_3d](
+    add_artifical_divergence[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
         T,
         source_masks,
         extra_pressure,
@@ -802,13 +838,13 @@ def pressure_poisson_multigrid(
         expansion_rate,
         t_reference,
         b_levels[0],
-        active_tile_mask,
+        tile_map,
         rho,
         dt,
     )
 
     for _ in range(num_vcycles):
-        _mg_vcycle(
+        multigrid_vcycle(
             0,
             p_levels,
             b_levels,
@@ -817,7 +853,7 @@ def pressure_poisson_multigrid(
             pre_smooth=2,
             post_smooth=4,
             coarse_smooth=20,
-            active_tile_mask=active_tile_mask,
+            tile_map=tile_map
         )
 
     return p_levels[0]

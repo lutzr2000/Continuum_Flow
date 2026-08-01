@@ -50,7 +50,7 @@ def convert_bc_config_format(bc_config):
 
 
 @cuda.jit(cache=True)
-def _pressure_poisson_apply_neumann_bcs(p):
+def pressure_poisson_apply_neumann_bcs(p):
     """
     applies the hard-coded zero-gradient pressure boundary conditions on all
     six domain faces on the GPU.

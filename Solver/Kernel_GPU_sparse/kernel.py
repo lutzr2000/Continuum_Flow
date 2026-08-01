@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
 # import Solver.Kernel_GPU_sparse.scalar_update as scalar_update
-# import Solver.Kernel_GPU_sparse.pressure_solve as pressure_solve
+import Solver.Kernel_GPU_sparse.pressure_solve as pressure_solve
 import Solver.Kernel_GPU_sparse.vorticity as vorticity
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.obstacle_bc as obstacle_bc
@@ -592,53 +592,54 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             t
         )
 
-        # # ------------Velocity swap-------------------
-        # u, u_work = u_work, u
-        # v, v_work = v_work, v
-        # w, w_work = w_work, w
+        # ------------Velocity swap-------------------
+        u, u_work = u_work, u
+        v, v_work = v_work, v
+        w, w_work = w_work, w
 
-        # # ------------Pressure solve-------------------
-        # extra_pressure = get_source_values(simulation, "extra_pressure", t)
-        # noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        # ------------Pressure solve-------------------
+        extra_pressure = get_source_values(simulation, "extra_pressure", t)
+        noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
 
-        # p = pressure_solve.pressure_poisson_multigrid(
-        #     u, v, w,
-        #     p,
-        #     temperature,
-        #     scratch_A_x,
-        #     dt,
-        #     source_masks,
-        #     extra_pressure,
-        #     source_noise,
-        #     noise_amplitudes,
-        #     delta,
-        #     simulation.get("physics").get("fluid").get("density"),
-        #     simulation.get("physics").get("temperature").get("expansion_rate"),
-        #     ref_temp,
-        #     scalar_active_tiles_dilated,
-        #     p_levels,
-        #     b_levels,
-        #     delta_levels,
-        #     simulation.get("settings").get("iterations"),
-        #     pressure_rhs_partial_sums,
-        #     pressure_rhs_sum,
-        #     zero_levels,
-        # )
+        p = pressure_solve.pressure_poisson_multigrid(
+            u, v, w,
+            p,
+            temperature,
+            scratch_A_x,
+            dt,
+            source_masks,
+            extra_pressure,
+            source_noise,
+            noise_amplitudes,
+            delta,
+            simulation.get("physics").get("fluid").get("density"),
+            simulation.get("physics").get("temperature").get("expansion_rate"),
+            ref_temp,
+            tile_map,
+            tile_shape,
+            p_levels,
+            b_levels,
+            delta_levels,
+            simulation.get("settings").get("iterations"),
+            pressure_rhs_partial_sums,
+            pressure_rhs_sum,
+            zero_levels,
+        )
 
-        # # ------------Velocity projection-------------------
-        # pressure_solve.project_velocity_kernel[
-        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        # ](
-        #     u,
-        #     v,
-        #     w,
-        #     p,
-        #     obstacle_mask,
-        #     dt,
-        #     delta,
-        #     simulation.get("physics").get("fluid").get("density"),
-        #     scalar_active_tiles_dilated,
-        # )
+        # ------------Velocity projection-------------------
+        pressure_solve.project_velocity_kernel[
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        ](
+            u,
+            v,
+            w,
+            p,
+            obstacle_mask,
+            dt,
+            delta,
+            simulation.get("physics").get("fluid").get("density"),
+            tile_map,
+        )
 
         # # ------------Scalar update-------------------
         # temperature_work.copy_to_device(temperature)
