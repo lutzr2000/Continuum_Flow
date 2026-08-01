@@ -1,6 +1,7 @@
 from numba import cuda
 
 import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment  
 
 
 @cuda.jit(cache=True)
@@ -16,21 +17,20 @@ def predict_scalar_fields_semi_lagrangian(
     predictor_smoke,
     predictor_fuel,
     delta,
-    active_tile_mask,
+    tile_map,
 ):
     """
     Build the semi-Lagrangian predictor state for the scalar update.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
 
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
         return
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
+    
     if i >= nx or j >= ny or k >= nz:
         return
 
@@ -89,7 +89,7 @@ def update_scalar_fields_maccormack(
     burn_noise_scale,
     burn_noise_amplitude,
     t_reference,
-    active_tile_mask,
+    tile_map,
 ):
     """
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
@@ -99,16 +99,15 @@ def update_scalar_fields_maccormack(
     to the local departure-cell extrema and then evaluates combustion and
     dissipation source terms from the corrected state.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = _active_tile_cell_indices(u.shape)
+    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
+        u.shape
+    )
 
-    if (
-        tile_i >= active_tile_mask.shape[0]
-        or tile_j >= active_tile_mask.shape[1]
-        or tile_k >= active_tile_mask.shape[2]
-    ):
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
         return
-    if active_tile_mask[tile_i, tile_j, tile_k] == 0:
-        return
+    
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 

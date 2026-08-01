@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore")
 
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
-# import Solver.Kernel_GPU_sparse.scalar_update as scalar_update
+import Solver.Kernel_GPU_sparse.scalar_update as scalar_update
 import Solver.Kernel_GPU_sparse.pressure_solve as pressure_solve
 import Solver.Kernel_GPU_sparse.vorticity as vorticity
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
@@ -641,61 +641,61 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             tile_map,
         )
 
-        # # ------------Scalar update-------------------
-        # temperature_work.copy_to_device(temperature)
-        # smoke_work.copy_to_device(smoke)
-        # fuel_work.copy_to_device(fuel)
-        # scalar_update.predict_scalar_fields_semi_lagrangian[
-        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        # ](
-        #     temperature,
-        #     smoke,
-        #     fuel,
-        #     u,
-        #     v,
-        #     w,
-        #     dt,
-        #     scratch_A_x,
-        #     scratch_A_y,
-        #     scratch_A_z,
-        #     delta,
-        #     scalar_active_tiles_dilated,
-        # )
-        # scalar_update.update_scalar_fields_maccormack[
-        #     active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-        # ](
-        #     temperature,
-        #     smoke,
-        #     fuel,
-        #     scratch_A_x,
-        #     scratch_A_y,
-        #     scratch_A_z,
-        #     u,
-        #     v,
-        #     w,
-        #     dt,
-        #     temperature_work,
-        #     smoke_work,
-        #     fuel_work,
-        #     flame,
-        #     delta,
-        #     simulation.get("physics").get("temperature").get("dissipation"),
-        #     simulation.get("physics").get("temperature").get("production_rate"),
-        #     simulation.get("physics").get("smoke").get("dissipation"),
-        #     simulation.get("physics").get("smoke").get("production_rate"),
-        #     simulation.get("physics").get("fuel").get("dissipation"),
-        #     simulation.get("physics").get("fuel").get("burn_rate"),
-        #     simulation.get("physics").get("fuel").get("ignition_temperature"),
-        #     simulation.get("physics").get("burning").get("scale"),
-        #     simulation.get("physics").get("burning").get("amplitude"),
-        #     ref_temp,
-        #     scalar_active_tiles_dilated,
-        # )
+        # ------------Scalar update-------------------
+        temperature_work.copy_to_device(temperature)
+        smoke_work.copy_to_device(smoke)
+        fuel_work.copy_to_device(fuel)
+        scalar_update.predict_scalar_fields_semi_lagrangian[
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        ](
+            temperature,
+            smoke,
+            fuel,
+            u,
+            v,
+            w,
+            dt,
+            scratch_A_x,
+            scratch_A_y,
+            scratch_A_z,
+            delta,
+            tile_map,
+        )
+        scalar_update.update_scalar_fields_maccormack[
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        ](
+            temperature,
+            smoke,
+            fuel,
+            scratch_A_x,
+            scratch_A_y,
+            scratch_A_z,
+            u,
+            v,
+            w,
+            dt,
+            temperature_work,
+            smoke_work,
+            fuel_work,
+            flame,
+            delta,
+            simulation.get("physics").get("temperature").get("dissipation"),
+            simulation.get("physics").get("temperature").get("production_rate"),
+            simulation.get("physics").get("smoke").get("dissipation"),
+            simulation.get("physics").get("smoke").get("production_rate"),
+            simulation.get("physics").get("fuel").get("dissipation"),
+            simulation.get("physics").get("fuel").get("burn_rate"),
+            simulation.get("physics").get("fuel").get("ignition_temperature"),
+            simulation.get("physics").get("burning").get("scale"),
+            simulation.get("physics").get("burning").get("amplitude"),
+            ref_temp,
+            tile_map,
+        )
 
-        # # ------------Swap-------------------
-        # temperature, temperature_work = temperature_work, temperature
-        # smoke, smoke_work = smoke_work, smoke
-        # fuel, fuel_work = fuel_work, fuel
+        # ------------Swap-------------------
+        temperature, temperature_work = temperature_work, temperature
+        smoke, smoke_work = smoke_work, smoke
+        fuel, fuel_work = fuel_work, fuel
 
         # ------------time updated-------------------
         t = t + dt
