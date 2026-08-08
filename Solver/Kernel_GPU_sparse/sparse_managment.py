@@ -63,14 +63,20 @@ def build_base_tile_map(smoke, fuel, flame, base_tile_map, threshold):
 
 
 @cuda.jit(cache=True)
-def dilate_tile_map(base_tile_map, tile_map, margin):
+def dilate_tile_map_persistent(
+    base_tile_map,
+    tile_map,
+    margin,
+    next_tile_index_counter,
+    active_tile_counter,
+):
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_map.shape
 
     if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
         return
 
-    tile_map[tile_i, tile_j, tile_k] = -1
+    is_active = False
 
     for di in range(-margin, margin + 1):
         ni = tile_i + di
@@ -88,5 +94,20 @@ def dilate_tile_map(base_tile_map, tile_map, margin):
                     continue
 
                 if base_tile_map[ni, nj, nk] != -1:
-                    tile_map[tile_i, tile_j, tile_k] = 1
-                    return
+                    is_active = True
+                    break
+            if is_active:
+                break
+        if is_active:
+            break
+
+    if not is_active:
+        tile_map[tile_i, tile_j, tile_k] = -1
+        return
+
+    cuda.atomic.add(active_tile_counter, 0, 1)
+
+    if tile_map[tile_i, tile_j, tile_k] != -1:
+        return
+
+    tile_map[tile_i, tile_j, tile_k] = cuda.atomic.add(next_tile_index_counter, 0, 1)

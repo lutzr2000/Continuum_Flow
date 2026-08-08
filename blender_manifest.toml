@@ -8,26 +8,29 @@ maintainer = "Lutz Rohlfing"
 type = "add-on"
 
 website = "https://lutzr2000.github.io/Continuum_Flow/"
-tags = ["Physics", "Simulation"]
-blender_version_min = "5.0.0"
-blender_version_max = "5.0.999"
+tags = ["Physics"]
+
+blender_version_min = "5.1.0"
+
+platforms = ["windows-x64"]
 
 license = [
-  "SPDX:GPL-3.0-or-later",
+    "SPDX:GPL-3.0-or-later",
 ]
 
 wheels = [
-    "./wheels/cuda_bindings-13.2.0-cp311-cp311-win_amd64.whl",
-    "./wheels/cuda_core-0.6.0-cp311-cp311-win_amd64.whl",
+    "./wheels/cuda_bindings-13.2.0-cp313-cp313-win_amd64.whl",
+    "./wheels/cuda_core-0.6.0-cp313-cp313-win_amd64.whl",
     "./wheels/cuda_pathfinder-1.5.1-py3-none-any.whl",
-    "./wheels/llvmlite-0.47.0-cp311-cp311-win_amd64.whl",
-    "./wheels/numba_cuda-0.29.0-cp311-cp311-win_amd64.whl",
-    "./wheels/numba-0.65.0-cp311-cp311-win_amd64.whl",
+    "./wheels/llvmlite-0.47.0-cp313-cp313-win_amd64.whl",
+    "./wheels/numba-0.65.0-cp313-cp313-win_amd64.whl",
+    "./wheels/numba_cuda-0.29.0-cp313-cp313-win_amd64.whl",
+    "./wheels/numpy-2.4.6-cp313-cp313-win_amd64.whl",
     "./wheels/nvidia_cuda_runtime-13.2.75-py3-none-win_amd64.whl",
     "./wheels/nvidia_nvvm-13.2.78-py3-none-win_amd64.whl",
     "./wheels/packaging-26.0-py3-none-any.whl",
-    "./wheels/scipy-1.17.1-cp311-cp311-win_amd64.whl",
-    "./wheels/trimesh-4.12.2-py3-none-any.whl",
+    "./wheels/scipy-1.17.1-cp313-cp313-win_amd64.whl",
+    "./wheels/trimesh-4.12.2-py3-none-any.whl"
 ]
 
 [permissions]

@@ -1,0 +1,3 @@
+1. allocate a random array not used anywhere just for testing
+2. sparse allocaiton of scalar fields, find way to properly access data
+3. allocate every time pool runs out, but allocate in batches 10% of max or whatever

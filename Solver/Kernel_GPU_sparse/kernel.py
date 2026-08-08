@@ -349,6 +349,12 @@ def solver(
     tile_map_values = np.arange(np.prod(tile_shape), dtype=np.int32).reshape(tile_shape)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+    next_tile_index_counter = cuda.to_device(
+        np.asarray([np.prod(tile_shape)], dtype=np.int32)
+    )
+    active_tile_counter = cuda.to_device(
+        np.asarray([np.prod(tile_shape)], dtype=np.int32)
+    )
 
     print("################################################################")
     print("Initialise")
@@ -498,12 +504,14 @@ def solver(
                 simulation.get("settings").get("adaptive_domain_threshold"),
             )
 
-            sparse_managment.dilate_tile_map[
+            sparse_managment.dilate_tile_map_persistent[
                 tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
                 base_tile_map,
                 tile_map,
                 kernel_config.TILE_DILATE,
+                next_tile_index_counter,
+                active_tile_counter,
             )
 
 
@@ -801,8 +809,7 @@ def solver(
             print(f"VRAM used: {used / 1024**2:.1f} MB")
 
         if time_step_count % 32 == 0:
-            active_tiles_host = tile_map.copy_to_host()
-            active_tile_count = np.count_nonzero(active_tiles_host != -1)
+            active_tile_count = int(active_tile_counter.copy_to_host()[0])
             print(f"Active tiles: {active_tile_count} / ",int(tile_i * tile_j * tile_k))
 
     # ------------Shutdown output-------------------
