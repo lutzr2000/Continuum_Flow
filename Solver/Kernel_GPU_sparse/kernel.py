@@ -387,7 +387,11 @@ def solver(
         np.asarray([total_tile_count], dtype=np.int32)
     )
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
-    dummy_tile_chunk = max(1, math.ceil(total_tile_count * 0.05))
+    dummy_tile_growth_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
+    dummy_tile_chunk = max(
+        1,
+        math.ceil(total_tile_count * (dummy_tile_growth_percent / 100.0)),
+    )
     dummy_tile_capacity = 0
     dummy_tile_buffer = None
 
