@@ -27,7 +27,7 @@ GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
+def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map):
     """
     Return the currently active device buffers for output export.
     """
@@ -39,7 +39,11 @@ def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
         "temperature": temperature,
         "smoke": smoke,
         "fuel": fuel,
-        "flame": flame,
+        "flame": {
+            "data": flame,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
     }
 
 
@@ -495,6 +499,7 @@ def solver(
         smoke,
         fuel,
         flame,
+        tile_map,
     )
 
     # ------------time loop------------------
@@ -835,7 +840,7 @@ def solver(
 
         # ------------Output-------------------
         device_fields = _current_device_fields(
-            u, v, w, p, temperature, smoke, fuel, flame
+            u, v, w, p, temperature, smoke, fuel, flame, tile_map
         )
         while t >= next_output_time:
             if target_realtime_preview and last_output_wall_time is not None:

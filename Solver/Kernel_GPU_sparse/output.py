@@ -5,6 +5,62 @@ from multiprocessing import shared_memory
 import numpy as np
 
 
+def _reconstruct_sparse_flame_to_dense_host(flame_field, output_array):
+    """
+    Expand the sparse flame tile pool into the dense host output buffer.
+
+    This uses no extra VRAM. The dense output buffer already exists in shared
+    memory; only temporary host copies of the sparse pool and tile map are made.
+    """
+    tile_map_device = flame_field["tile_map"]
+    sparse_flame_device = flame_field["data"]
+    tile_size = int(flame_field["tile_size"])
+
+    output_array.fill(0.0)
+
+    tile_map_host = tile_map_device.copy_to_host()
+    sparse_flame_host = sparse_flame_device.copy_to_host()
+
+    nx, ny, nz = output_array.shape
+    tiles_x, tiles_y, tiles_z = tile_map_host.shape
+
+    for tile_i in range(tiles_x):
+        cell_i_start = tile_i * tile_size
+        if cell_i_start >= nx:
+            break
+
+        cell_i_end = min(cell_i_start + tile_size, nx)
+
+        for tile_j in range(tiles_y):
+            cell_j_start = tile_j * tile_size
+            if cell_j_start >= ny:
+                break
+
+            cell_j_end = min(cell_j_start + tile_size, ny)
+
+            for tile_k in range(tiles_z):
+                tile_index = int(tile_map_host[tile_i, tile_j, tile_k])
+                if tile_index == -1:
+                    continue
+
+                cell_k_start = tile_k * tile_size
+                if cell_k_start >= nz:
+                    break
+
+                cell_k_end = min(cell_k_start + tile_size, nz)
+
+                output_array[
+                    cell_i_start:cell_i_end,
+                    cell_j_start:cell_j_end,
+                    cell_k_start:cell_k_end,
+                ] = sparse_flame_host[
+                    tile_index,
+                    : cell_i_end - cell_i_start,
+                    : cell_j_end - cell_j_start,
+                    : cell_k_end - cell_k_start,
+                ]
+
+
 def _enabled_output_field_names(output_fields):
     """
     Return only output field names that are explicitly enabled in the config.
@@ -110,7 +166,13 @@ def enqueue_device_output(
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
-        source_field.copy_to_host(fields[variable_name]["array"])
+        if variable_name == "flame" and isinstance(source_field, dict):
+            _reconstruct_sparse_flame_to_dense_host(
+                source_field,
+                fields[variable_name]["array"],
+            )
+        else:
+            source_field.copy_to_host(fields[variable_name]["array"])
 
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
