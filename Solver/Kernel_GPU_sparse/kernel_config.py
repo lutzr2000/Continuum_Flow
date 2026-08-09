@@ -1,3 +1,5 @@
+import numpy as np
+
 THREADS_PER_BLOCK_3D = (4, 4, 4)
 THREADS_PER_BLOCK_2D = (4, 4)
 TILE_SIZE = 4
@@ -5,7 +7,7 @@ TILE_DILATE = 2 # number of tiles
 SPARSE_TILE_GROWTH_PERCENT = 5.0
 REDUCTION_THREADS_PER_BLOCK = 256
 MAX_REDUCTION_BLOCKS = 1024
-
+GPU_FIELD_DTYPE = np.float32
 
 def volume_blocks_per_grid(shape, threadsperblock=THREADS_PER_BLOCK_3D):
     """

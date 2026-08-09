@@ -111,3 +111,35 @@ def dilate_tile_map_persistent(
         return
 
     tile_map[tile_i, tile_j, tile_k] = cuda.atomic.add(next_tile_index_counter, 0, 1)
+
+
+def ensure_pool_capacity(
+    pool_tile_buffer,
+    current_capacity_tiles,
+    required_capacity_tiles,
+    tile_growth_size,
+):
+    """
+    Grow a pool tile buffer in fixed-size chunkgs until it can hold all requiered tiles.
+    """
+    required_capacity_tiles = int(required_capacity_tiles)
+    current_capacity_tiles = int(current_capacity_tiles)
+    tile_growth_size = max(int(tile_growth_size), 1)
+
+    if required_capacity_tiles <= current_capacity_tiles:
+        return pool_tile_buffer, current_capacity_tiles
+
+    new_capacity_tiles = max(current_capacity_tiles, tile_growth_size)
+    while required_capacity_tiles > new_capacity_tiles:
+        new_capacity_tiles += tile_growth_size
+
+    pool_tile_buffer = cuda.device_array(
+        (
+            new_capacity_tiles,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+        ),
+        dtype=kernel_config.GPU_FIELD_DTYPE,
+    )
+    return pool_tile_buffer, new_capacity_tiles

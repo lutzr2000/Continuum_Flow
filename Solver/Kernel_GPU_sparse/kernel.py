@@ -23,7 +23,7 @@ import Solver.Kernel_GPU_sparse.output as output
 import Solver.General.forces as forces
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
-GPU_FIELD_DTYPE = np.float32
+GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
@@ -305,39 +305,6 @@ def create_multigrid_levels(shape, delta, min_size=8):
     return p_levels, b_levels, delta_levels, zero_levels
 
 
-def ensure_dummy_tile_capacity(
-    dummy_tile_buffer,
-    current_capacity_tiles,
-    required_active_tiles,
-    tile_capacity_chunk,
-):
-    """
-    Grow the dummy tile buffer in fixed-size tile chunks until it can hold all
-    currently active tiles.
-    """
-    required_active_tiles = int(required_active_tiles)
-    current_capacity_tiles = int(current_capacity_tiles)
-    tile_capacity_chunk = max(int(tile_capacity_chunk), 1)
-
-    if dummy_tile_buffer is not None and required_active_tiles <= current_capacity_tiles:
-        return dummy_tile_buffer, current_capacity_tiles
-
-    new_capacity_tiles = max(current_capacity_tiles, tile_capacity_chunk)
-    while required_active_tiles > new_capacity_tiles:
-        new_capacity_tiles += tile_capacity_chunk
-
-    dummy_tile_buffer = cuda.device_array(
-        (
-            new_capacity_tiles,
-            kernel_config.TILE_SIZE,
-            kernel_config.TILE_SIZE,
-            kernel_config.TILE_SIZE,
-        ),
-        dtype=GPU_FIELD_DTYPE,
-    )
-    return dummy_tile_buffer, new_capacity_tiles
-
-
 def solver(
     config,
     obstacle_base_masks,
@@ -387,13 +354,11 @@ def solver(
         np.asarray([total_tile_count], dtype=np.int32)
     )
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
-    dummy_tile_growth_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
-    dummy_tile_chunk = max(
+    spare_tile_growth_size_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
+    tile_growth_size = max(
         1,
-        math.ceil(total_tile_count * (dummy_tile_growth_percent / 100.0)),
+        math.ceil(total_tile_count * (spare_tile_growth_size_percent / 100.0)),
     )
-    dummy_tile_capacity = 0
-    dummy_tile_buffer = None
 
     print("################################################################")
     print("Initialise")
@@ -467,6 +432,10 @@ def solver(
         min_size=8,
     )
 
+    # sparse allocation dummy
+    dummy_tile_capacity = 0
+    dummy_tile_buffer = None
+
     # ------------intitialise------------------
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
@@ -494,14 +463,6 @@ def solver(
             origin_x,
             origin_y,
             origin_z,
-        )
-
-    if simulation.get("settings").get("simulate_sparsely"):
-        dummy_tile_buffer, dummy_tile_capacity = ensure_dummy_tile_capacity(
-            dummy_tile_buffer,
-            dummy_tile_capacity,
-            dummy_tile_chunk,
-            dummy_tile_chunk,
         )
 
     # ------------output------------------
@@ -564,11 +525,11 @@ def solver(
 
             active_tile_count = int(active_tile_counter.copy_to_host()[0])
             previous_dummy_tile_capacity = dummy_tile_capacity
-            dummy_tile_buffer, dummy_tile_capacity = ensure_dummy_tile_capacity(
+            dummy_tile_buffer, dummy_tile_capacity = sparse_managment.ensure_pool_capacity(
                 dummy_tile_buffer,
                 dummy_tile_capacity,
                 active_tile_count,
-                dummy_tile_chunk,
+                tile_growth_size,
             )
             if dummy_tile_capacity != previous_dummy_tile_capacity:
                 print(
