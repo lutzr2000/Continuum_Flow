@@ -121,6 +121,7 @@ def ensure_pool_capacity(
 ):
     """
     Grow a pool tile buffer in fixed-size chunkgs until it can hold all requiered tiles.
+    Copies the original data into the new pool.
     """
     required_capacity_tiles = int(required_capacity_tiles)
     current_capacity_tiles = int(current_capacity_tiles)
@@ -133,7 +134,7 @@ def ensure_pool_capacity(
     while required_capacity_tiles > new_capacity_tiles:
         new_capacity_tiles += tile_growth_size
 
-    pool_tile_buffer = cuda.device_array(
+    new_pool_tile_buffer = cuda.device_array(
         (
             new_capacity_tiles,
             kernel_config.TILE_SIZE,
@@ -142,4 +143,14 @@ def ensure_pool_capacity(
         ),
         dtype=kernel_config.GPU_FIELD_DTYPE,
     )
+
+    # Copy existing tile data into the newly allocated larger pool.
+    if current_capacity_tiles > 0:
+        new_pool_tile_buffer[:current_capacity_tiles].copy_to_device(
+            pool_tile_buffer[:current_capacity_tiles]
+        )
+
+    pool_tile_buffer = new_pool_tile_buffer
+
     return pool_tile_buffer, new_capacity_tiles
+

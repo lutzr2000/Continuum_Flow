@@ -539,6 +539,7 @@ def solver(
                 )
 
 
+        # ------------time step-------------------
         time_step.reset_velocity_maxima(
             velocity_maxima,
             velocity_maxima_host_zeros,

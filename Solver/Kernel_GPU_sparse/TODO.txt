@@ -1,2 +1,0 @@
-1. sparse allocaiton of scalar fields, find way to properly access data
-2. allocate every time pool runs out, but allocate in batches 10% of max or whatever
