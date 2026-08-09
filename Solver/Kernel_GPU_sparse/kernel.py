@@ -343,17 +343,19 @@ def solver(
 
     # ------------tiles------------------
     tile_i, tile_j, tile_k = (
-        nx // kernel_config.TILE_SIZE,
-        ny // kernel_config.TILE_SIZE,
-        nz // kernel_config.TILE_SIZE,
+        (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
+        (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
+        (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
     )
     tile_shape = (tile_i, tile_j, tile_k)
     total_tile_count = int(np.prod(tile_shape))
-    tile_map_values = np.arange(np.prod(tile_shape), dtype=np.int32).reshape(tile_shape)
+    tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+    dense_activity_mask = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+    flame_activity_mask = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
     next_tile_index_counter = cuda.to_device(
-        np.asarray([total_tile_count], dtype=np.int32)
+        np.asarray([0], dtype=np.int32)
     )
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
     spare_tile_growth_size_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
@@ -393,7 +395,7 @@ def solver(
     fuel = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     fuel_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
 
-    flame_tile_capacity = tile_growth_size # allocate the first share
+    flame_tile_capacity = max(1, tile_growth_size)
     flame = cuda.to_device(
         np.zeros(
             (
@@ -508,17 +510,33 @@ def solver(
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
-
+        
         # ------------Start Active tiles-------------------
         if simulation.get("settings").get("simulate_sparsely"):
-            sparse_managment.build_base_tile_map[
+            sparse_managment.build_dense_activity_mask[
                 tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
                 smoke,
                 fuel,
-                flame,
-                base_tile_map,
+                dense_activity_mask,
                 simulation.get("settings").get("adaptive_domain_threshold"),
+            )
+
+            sparse_managment.build_sparse_flame_activity_mask[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                tile_map,
+                flame,
+                flame_activity_mask,
+                simulation.get("settings").get("adaptive_domain_threshold"),
+            )
+
+            sparse_managment.combine_activity_masks[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                dense_activity_mask,
+                flame_activity_mask,
+                base_tile_map,
             )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
@@ -538,6 +556,7 @@ def solver(
             )
 
             if required_tile_capacity > flame_tile_capacity:
+
                 flame, flame_tile_capacity = sparse_managment.ensure_pool_capacity(
                     flame,
                     flame_tile_capacity,
@@ -550,7 +569,6 @@ def solver(
                     flame_tile_capacity,
                     "tiles",
                 )
-
 
         # ------------time step-------------------
         time_step.reset_velocity_maxima(
@@ -667,6 +685,7 @@ def solver(
             delta,
             tile_map,
         )
+
         advection_schemes.update_velocity_maccormack[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](

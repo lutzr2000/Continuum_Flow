@@ -16,9 +16,20 @@ def compute_vorticity(
     """
     Compute vorticity components and scalar magnitude from the velocity field.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        omega_magnitude.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(omega_magnitude.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -72,10 +83,20 @@ def apply_vorticity_confinement(
     """
     Compute the local vorticity confinement force in one GPU cell.
     """
-
-    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 

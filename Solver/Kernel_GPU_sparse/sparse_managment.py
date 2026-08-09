@@ -38,9 +38,9 @@ def tile_to_index(field_shape):
 
 
 @cuda.jit(cache=True)
-def build_base_tile_map(smoke, fuel, flame, base_tile_map, threshold):
+def build_dense_activity_mask(smoke, fuel, activity_mask, threshold):
     tile_i, tile_j, tile_k = cuda.grid(3)
-    tiles_x, tiles_y, tiles_z = base_tile_map.shape
+    tiles_x, tiles_y, tiles_z = activity_mask.shape
 
     if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
         return
@@ -52,7 +52,7 @@ def build_base_tile_map(smoke, fuel, flame, base_tile_map, threshold):
     cell_j_start = tile_j * tile_size
     cell_k_start = tile_k * tile_size
 
-    base_tile_map[tile_i, tile_j, tile_k] = -1
+    activity_mask[tile_i, tile_j, tile_k] = -1
 
     for local_i in range(tile_size):
         i = cell_i_start + local_i
@@ -72,10 +72,104 @@ def build_base_tile_map(smoke, fuel, flame, base_tile_map, threshold):
                 if (
                     smoke[i, j, k] >= threshold
                     or fuel[i, j, k] >= threshold
-                    or flame[i, j, k] >= threshold
                 ):
-                    base_tile_map[tile_i, tile_j, tile_k] = 1
+                    activity_mask[tile_i, tile_j, tile_k] = 1
                     return
+
+
+@cuda.jit(cache=True)
+def build_sparse_flame_activity_mask(tile_map, flame, activity_mask, threshold):
+    tile_i, tile_j, tile_k = cuda.grid(3)
+    tiles_x, tiles_y, tiles_z = activity_mask.shape
+
+    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+        return
+
+    activity_mask[tile_i, tile_j, tile_k] = -1
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
+
+    tile_size = kernel_config.TILE_SIZE
+    for local_i in range(tile_size):
+        for local_j in range(tile_size):
+            for local_k in range(tile_size):
+                if flame[tile_index, local_i, local_j, local_k] >= threshold:
+                    activity_mask[tile_i, tile_j, tile_k] = 1
+                    return
+
+
+@cuda.jit(cache=True)
+def combine_activity_masks(dense_activity_mask, sparse_activity_mask, base_tile_map):
+    tile_i, tile_j, tile_k = cuda.grid(3)
+    tiles_x, tiles_y, tiles_z = base_tile_map.shape
+
+    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+        return
+
+    is_dense_active = dense_activity_mask[tile_i, tile_j, tile_k] != -1
+    is_sparse_active = sparse_activity_mask[tile_i, tile_j, tile_k] != -1
+
+    if is_dense_active or is_sparse_active:
+        base_tile_map[tile_i, tile_j, tile_k] = 1
+    else:
+        base_tile_map[tile_i, tile_j, tile_k] = -1
+
+
+@cuda.jit(cache=True)
+def compact_active_tile_map(
+    current_tile_map,
+    previous_tile_map,
+    compacted_tile_map,
+    previous_index_lookup,
+    next_tile_index_counter,
+):
+    tile_i, tile_j, tile_k = cuda.grid(3)
+    tiles_x, tiles_y, tiles_z = current_tile_map.shape
+
+    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+        return
+
+    current_index = current_tile_map[tile_i, tile_j, tile_k]
+    if current_index == -1:
+        compacted_tile_map[tile_i, tile_j, tile_k] = -1
+        return
+
+    compacted_index = cuda.atomic.add(next_tile_index_counter, 0, 1)
+    compacted_tile_map[tile_i, tile_j, tile_k] = compacted_index
+    previous_index_lookup[compacted_index] = previous_tile_map[tile_i, tile_j, tile_k]
+
+
+@cuda.jit(cache=True)
+def remap_sparse_pool(old_pool, new_pool, previous_index_lookup, active_tile_count):
+    flat_index = cuda.grid(1)
+    tile_size = kernel_config.TILE_SIZE
+    cells_per_tile = tile_size * tile_size * tile_size
+    total_cell_count = active_tile_count * cells_per_tile
+
+    if flat_index >= total_cell_count:
+        return
+
+    compacted_index = flat_index // cells_per_tile
+    local_flat_index = flat_index % cells_per_tile
+
+    local_i = local_flat_index // (tile_size * tile_size)
+    remainder = local_flat_index % (tile_size * tile_size)
+    local_j = remainder // tile_size
+    local_k = remainder % tile_size
+
+    previous_index = previous_index_lookup[compacted_index]
+    if previous_index == -1:
+        new_pool[compacted_index, local_i, local_j, local_k] = 0.0
+        return
+
+    new_pool[compacted_index, local_i, local_j, local_k] = old_pool[
+        previous_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
 
 
 @cuda.jit(cache=True)
