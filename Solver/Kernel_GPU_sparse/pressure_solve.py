@@ -77,21 +77,7 @@ def sum_rhs_partial_kernel(b, tile_map, partial_sums):
     """
     Reduce the interior RHS into one partial sum per CUDA block.
     """
-    (
-        tile_i,
-        tile_j,
-        tile_k,
-        local_i,
-        local_j,
-        local_k,
-        i,
-        j,
-        k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(b.shape)
-
+    nx, ny, nz = b.shape
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -120,6 +106,9 @@ def sum_rhs_partial_kernel(b, tile_map, partial_sums):
         j = remainder // interior_nz + 1
         k = remainder % interior_nz + 1
 
+        tile_i = i // kernel_config.TILE_SIZE
+        tile_j = j // kernel_config.TILE_SIZE
+        tile_k = k // kernel_config.TILE_SIZE
         if tile_map[tile_i, tile_j, tile_k] != -1:
             local_sum += b[i, j, k]
 
@@ -144,21 +133,7 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts):
     """
     Reduce the number of active RHS cells into one partial count per CUDA block.
     """
-    (
-        tile_i,
-        tile_j,
-        tile_k,
-        local_i,
-        local_j,
-        local_k,
-        i,
-        j,
-        k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(b.shape)
-
+    nx, ny, nz = b.shape
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -187,6 +162,9 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts):
         j = remainder // interior_nz + 1
         k = remainder % interior_nz + 1
 
+        tile_i = i // kernel_config.TILE_SIZE
+        tile_j = j // kernel_config.TILE_SIZE
+        tile_k = k // kernel_config.TILE_SIZE
         if tile_map[tile_i, tile_j, tile_k] != -1:
             local_count += np.float32(1.0)
 
@@ -538,28 +516,13 @@ def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_sh
                 j = j0 + dj
                 k = k0 + dk
 
-                (
-                    tile_i,
-                    tile_j,
-                    tile_k,
-                    local_i,
-                    local_j,
-                    local_k,
-                    i,
-                    j,
-                    k,
-                    nx,
-                    ny,
-                    nz,
-                ) = sparse_managment.tile_to_index(field_shape)
-
-                tile_index = tile_map[tile_i, tile_j, tile_k]
-
-                if (
-                    i < fnx and j < fny and k < fnz and
-                    tile_index != -1
-                ):
-                    fine_p[i, j, k] += e        
+                if i < fnx and j < fny and k < fnz:
+                    tile_i = i // kernel_config.TILE_SIZE
+                    tile_j = j // kernel_config.TILE_SIZE
+                    tile_k = k // kernel_config.TILE_SIZE
+                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    if tile_index != -1:
+                        fine_p[i, j, k] += e
 
 
 @cuda.jit(cache=True)
@@ -621,28 +584,17 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                 j = j0 + dj
                 k = k0 + dk
 
-                (
-                    tile_i,
-                    tile_j,
-                    tile_k,
-                    local_i,
-                    local_j,
-                    local_k,
-                    i,
-                    j,
-                    k,
-                    nx,
-                    ny,
-                    nz,
-                ) = sparse_managment.tile_to_index(p.shape)
-
-                tile_index = tile_map[tile_i, tile_j, tile_k]
-
                 if (
                     i >= 1 and j >= 1 and k >= 1 and
-                    i < nx - 1 and j < ny - 1 and k < nz - 1 and
-                    tile_index != -1
+                    i < nx - 1 and j < ny - 1 and k < nz - 1
                 ):
+                    tile_i = i // kernel_config.TILE_SIZE
+                    tile_j = j // kernel_config.TILE_SIZE
+                    tile_k = k // kernel_config.TILE_SIZE
+                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    if tile_index == -1:
+                        continue
+
                     lap = (
                         p[i + 1, j, k] + p[i - 1, j, k] +
                         p[i, j + 1, k] + p[i, j - 1, k] +

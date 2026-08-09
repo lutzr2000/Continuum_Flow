@@ -342,7 +342,9 @@ def solver(
     origin_z = 0.0
 
     # ------------tiles------------------
-    tile_i, tile_j, tile_k = nx//kernel_config.TILE_SIZE, ny//kernel_config.TILE_SIZE, nz//kernel_config.TILE_SIZE
+    tile_i = (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_j = (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
     tile_shape = (tile_i, tile_j, tile_k)
     total_tile_count = int(np.prod(tile_shape))
     tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
@@ -856,7 +858,7 @@ def solver(
             next_output_time += output_time_step
 
         # ------------Memory track-------------------
-        if time_step_count % 1 == 0:
+        if time_step_count % 30 == 0:
             active_tile_count = int(active_tile_counter.copy_to_host()[0])
             print(f"Active tiles: {active_tile_count} / ", total_tile_count)
 
