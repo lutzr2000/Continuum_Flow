@@ -180,6 +180,7 @@ def apply_all_BC(
     obstacle_velocity_z,
     source_masks,
     source_noise,
+    tile_map
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -207,6 +208,7 @@ def apply_all_BC(
             obstacle_velocity_x,
             obstacle_velocity_y,
             obstacle_velocity_z,
+            tile_map,
         )
 
     source_count = int(source_masks.shape[0])
@@ -390,7 +392,19 @@ def solver(
     smoke_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     fuel = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     fuel_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    flame = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+
+    flame_tile_capacity = tile_growth_size # allocate the first share
+    flame = cuda.to_device(
+        np.zeros(
+            (
+                flame_tile_capacity,
+                kernel_config.TILE_SIZE,
+                kernel_config.TILE_SIZE,
+                kernel_config.TILE_SIZE,
+            ),
+            dtype=GPU_FIELD_DTYPE,
+        )
+    )
 
     # scratch
     scratch_A_x = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
@@ -432,10 +446,6 @@ def solver(
         min_size=8,
     )
 
-    # sparse allocation dummy
-    dummy_tile_capacity = 0
-    dummy_tile_buffer = None
-
     # ------------intitialise------------------
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
@@ -449,7 +459,6 @@ def solver(
     temperature.copy_to_device(np.full(shape, ref_temp, dtype=GPU_FIELD_DTYPE))
     smoke.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
     fuel.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-    flame.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
 
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
@@ -513,6 +522,7 @@ def solver(
             )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
+
             sparse_managment.dilate_tile_map_persistent[
                 tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
@@ -523,18 +533,21 @@ def solver(
                 active_tile_counter,
             )
 
-            active_tile_count = int(active_tile_counter.copy_to_host()[0])
-            previous_dummy_tile_capacity = dummy_tile_capacity
-            dummy_tile_buffer, dummy_tile_capacity = sparse_managment.ensure_pool_capacity(
-                dummy_tile_buffer,
-                dummy_tile_capacity,
-                active_tile_count,
-                tile_growth_size,
+            required_tile_capacity = int(
+                next_tile_index_counter.copy_to_host()[0]
             )
-            if dummy_tile_capacity != previous_dummy_tile_capacity:
+
+            if required_tile_capacity > flame_tile_capacity:
+                flame, flame_tile_capacity = sparse_managment.ensure_pool_capacity(
+                    flame,
+                    flame_tile_capacity,
+                    required_tile_capacity,
+                    tile_growth_size,
+                )
+
                 print(
-                    "Dummy tile buffer grown to:",
-                    dummy_tile_capacity,
+                    "Flame tile buffer grown to:",
+                    flame_tile_capacity,
                     "tiles",
                 )
 
@@ -615,6 +628,7 @@ def solver(
             scratch_A_z,
             source_masks,
             source_noise,
+            tile_map
         )
 
         # ------------Vorticity-------------------

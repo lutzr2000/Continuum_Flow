@@ -10,6 +10,7 @@ def tile_to_index(field_shape):
     tile_i = cuda.blockIdx.x
     tile_j = cuda.blockIdx.y
     tile_k = cuda.blockIdx.z
+
     local_i = cuda.threadIdx.x
     local_j = cuda.threadIdx.y
     local_k = cuda.threadIdx.z
@@ -17,8 +18,23 @@ def tile_to_index(field_shape):
     i = tile_i * kernel_config.TILE_SIZE + local_i
     j = tile_j * kernel_config.TILE_SIZE + local_j
     k = tile_k * kernel_config.TILE_SIZE + local_k
+
     nx, ny, nz = field_shape
-    return tile_i, tile_j, tile_k, i, j, k, nx, ny, nz
+
+    return (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    )
 
 
 @cuda.jit(cache=True)

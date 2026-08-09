@@ -1,4 +1,5 @@
 import math
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 from numba import cuda
 from numba import njit, prange
 
@@ -14,25 +15,41 @@ def obstacle_bc_kernel(
     obstacle_velocity_x,
     obstacle_velocity_y,
     obstacle_velocity_z,
+    tile_map,
 ):
     """
-    applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
-
-    Each thread checks one obstacle cell and clears velocity and the supported
-    scalar values when the mask marks that cell as solid.
-
+    Apply obstacle boundary conditions.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(mask.shape)
 
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if mask[i, j, k]:
-        u[i, j, k] = obstacle_velocity_x[i, j, k]
-        v[i, j, k] = obstacle_velocity_y[i, j, k]
-        w[i, j, k] = obstacle_velocity_z[i, j, k]
+    if not mask[i, j, k]:
+        return
 
-        smoke[i, j, k] = 0.0
-        fuel[i, j, k] = 0.0
-        flame[i, j, k] = 0.0
+    u[i, j, k] = obstacle_velocity_x[i, j, k]
+    v[i, j, k] = obstacle_velocity_y[i, j, k]
+    w[i, j, k] = obstacle_velocity_z[i, j, k]
+
+    smoke[i, j, k] = 0.0
+    fuel[i, j, k] = 0.0
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
+
+    flame[tile_index, local_i, local_j, local_k] = 0.0

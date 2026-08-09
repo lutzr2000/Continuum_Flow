@@ -1,0 +1,13 @@
+flame wird mit zwei verschiedenen Speicherlayouts benutzt.
+Ein Teil des Codes behandelt flame als sparse Tile-Pool mit Zugriffen wie:
+flame[tile_index, local_i, local_j, local_k]
+Ein anderer Teil behandelt flame wie ein dichtes 3D-Volumen mit:
+flame[i, j, k]
+Beides gleichzeitig ist falsch.
+
+build_base_tile_map() benutzt flame ebenfalls fälschlich als dichtes Feld.
+Auch dort wird mit flame[i, j, k] geprüft, ob ein Tile aktiv ist. Für ein sparse Feld wäre das kein gültiger Zugriff.
+
+build_base_tile_map() ist konzeptionell ein schlechter Ort für sparse-flame.
+Die Funktion baut gerade erst die neue Tile-Aktivität auf. Um auf ein sparse Feld zuzugreifen, braucht man aber bereits ein gültiges tile_map und einen tile_index. Das passt logisch nicht sauber zusammen.
+

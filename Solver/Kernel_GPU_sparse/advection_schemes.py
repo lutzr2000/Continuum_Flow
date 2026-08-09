@@ -381,9 +381,20 @@ def advect_velocity_semi_lagrangian(
     """
     Backtrace the velocity field once and store the purely advected values.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -468,9 +479,20 @@ def update_velocity_maccormack(
     compensation term, clamps the result to the departure cell range, and then
     adds pressure, diffusion and external forces explicitly.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 

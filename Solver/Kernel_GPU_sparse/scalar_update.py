@@ -22,9 +22,20 @@ def predict_scalar_fields_semi_lagrangian(
     """
     Build the semi-Lagrangian predictor state for the scalar update.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -99,9 +110,20 @@ def update_scalar_fields_maccormack(
     to the local departure-cell extrema and then evaluates combustion and
     dissipation source terms from the corrected state.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -234,4 +256,9 @@ def update_scalar_fields_maccormack(
     T_out[i, j, k] = max(T_updated, 0.0)
     smoke_out[i, j, k] = min(max(smoke_updated, 0.0), 100.0)
     fuel_out[i, j, k] = min(max(fuel_updated, 0.0), 100.0)
-    flame_out[i, j, k] = max(-fuel_burn_source, 0.0)
+    flame_out[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = max(-fuel_burn_source, 0.0)

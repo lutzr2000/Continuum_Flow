@@ -23,9 +23,20 @@ def pressure_equation_right_side(
     Only the divergence of the velociy field is used, we neglect non linear terms.
 
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        u.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(u.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -66,9 +77,21 @@ def sum_rhs_partial_kernel(b, tile_map, partial_sums):
     """
     Reduce the interior RHS into one partial sum per CUDA block.
     """
-    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
-        b.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(b.shape)
+
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -121,9 +144,21 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts):
     """
     Reduce the number of active RHS cells into one partial count per CUDA block.
     """
-    tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
-        b.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(b.shape)
+
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -210,9 +245,20 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map):
     Subtract the interior RHS mean from interior cells only.
     """
 
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        b.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(b.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -234,9 +280,20 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map):
 
 @cuda.jit(cache=True)
 def reset_inactive_pressure(p, tile_map):
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        p.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(p.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -310,9 +367,20 @@ def project_velocity_kernel(
     Obstacle cells are skipped because their wall velocities are restored by the
     obstacle boundary conditions after the projection pass.
     """
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        p.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(p.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -346,9 +414,20 @@ def add_artifical_divergence(
     rho,
     dt
 ):
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        T.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(T.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -459,9 +538,20 @@ def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_sh
                 j = j0 + dj
                 k = k0 + dk
 
-                tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
-                    field_shape
-                )
+                (
+                    tile_i,
+                    tile_j,
+                    tile_k,
+                    local_i,
+                    local_j,
+                    local_k,
+                    i,
+                    j,
+                    k,
+                    nx,
+                    ny,
+                    nz,
+                ) = sparse_managment.tile_to_index(field_shape)
 
                 tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -531,9 +621,20 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                 j = j0 + dj
                 k = k0 + dk
 
-                tile_i, tile_j, tile_k, _, _, _, nx, ny, nz = sparse_managment.tile_to_index(
-                    p.shape
-                )
+                (
+                    tile_i,
+                    tile_j,
+                    tile_k,
+                    local_i,
+                    local_j,
+                    local_k,
+                    i,
+                    j,
+                    k,
+                    nx,
+                    ny,
+                    nz,
+                ) = sparse_managment.tile_to_index(p.shape)
 
                 tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -607,9 +708,20 @@ def mg_rbgs_step(p, b, delta, parity):
 
 @cuda.jit(cache=True)
 def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
-    tile_i, tile_j, tile_k, i, j, k, nx, ny, nz = sparse_managment.tile_to_index(
-        p.shape
-    )
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(p.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
