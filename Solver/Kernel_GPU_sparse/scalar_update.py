@@ -19,6 +19,9 @@ def predict_scalar_fields_semi_lagrangian(
     delta,
     t_reference,
     tile_map,
+    nx,
+    ny,
+    nz,
 ):
     """
     Build the semi-Lagrangian predictor state for the scalar update.
@@ -33,23 +36,24 @@ def predict_scalar_fields_semi_lagrangian(
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(u.shape)
+        _,
+        _,
+        _,
+    ) = sparse_managment.tile_to_index((nx, ny, nz))
+
+    if i >= nx or j >= ny or k >= nz:
+        return
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
     if tile_index == -1:
         return
 
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
+    x_depart, y_depart, z_depart = advection_schemes._backtrace_position_sparse(
         u,
         v,
         w,
+        tile_map,
         float(i),
         float(j),
         float(k),
@@ -110,14 +114,12 @@ def update_scalar_fields_maccormack(
     burn_noise_amplitude,
     t_reference,
     tile_map,
+    nx,
+    ny,
+    nz,
 ):
     """
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
-
-    The forward predictor arrays contain the first semi-Lagrangian pass. The
-    corrector reverses the predictor, applies the MacCormack correction, clamps
-    to the local departure-cell extrema and then evaluates combustion and
-    dissipation source terms from the corrected state.
     """
     (
         tile_i,
@@ -129,10 +131,13 @@ def update_scalar_fields_maccormack(
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(u.shape)
+        _,
+        _,
+        _,
+    ) = sparse_managment.tile_to_index((nx, ny, nz))
+
+    if i >= nx or j >= ny or k >= nz:
+        return
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -144,26 +149,25 @@ def update_scalar_fields_maccormack(
 
     dt_over_delta = dt / delta
 
-    x_depart, y_depart, z_depart = advection_schemes._backtrace_position(
+    x_depart, y_depart, z_depart = advection_schemes._backtrace_position_sparse(
         u,
         v,
         w,
+        tile_map,
         float(i),
         float(j),
         float(k),
-        dt / delta,
+        dt_over_delta,
         nx,
         ny,
         nz,
     )
 
-    # Forward trace from the departure point:
-    # approximately:
-    # x_forward = x_depart + dt * u(x_depart)
-    x_forward, y_forward, z_forward = advection_schemes._forward_trace_position(
+    x_forward, y_forward, z_forward = advection_schemes._forward_trace_position_sparse(
         u,
         v,
         w,
+        tile_map,
         x_depart,
         y_depart,
         z_depart,
@@ -177,7 +181,6 @@ def update_scalar_fields_maccormack(
     smoke_advected = predictor_smoke[tile_index, local_i, local_j, local_k]
     fuel_advected = predictor_fuel[tile_index, local_i, local_j, local_k]
 
-    # find depart scalar values
     T_reverse, smoke_reverse, fuel_reverse = (
         advection_schemes._sample_trilinear_vec3_sparse(
             predictor_T,
@@ -210,7 +213,6 @@ def update_scalar_fields_maccormack(
         x_depart, y_depart, z_depart, nx, ny, nz
     )
 
-    # find the scalars upper and lower bounds of neighbour cells at backtrace positions
     T_lower, T_upper = advection_schemes._sample_cell_extrema_inner_sparse(
         T, tile_map, x0, y0, z0, x1, y1, z1, t_reference
     )
@@ -221,17 +223,14 @@ def update_scalar_fields_maccormack(
         fuel, tile_map, x0, y0, z0, x1, y1, z1, 0.0
     )
 
-    # clamping to bounds
     T_corrected = advection_schemes._clamp(T_corrected, T_lower, T_upper)
     smoke_corrected = advection_schemes._clamp(
         smoke_corrected, smoke_lower, smoke_upper
     )
     fuel_corrected = advection_schemes._clamp(fuel_corrected, fuel_lower, fuel_upper)
 
-    # oxygen
     oxygen_center = max(0.0, min(1.0, (100.0 - smoke_corrected) / 100.0))
 
-    # burn logic
     if T_corrected > fuel_ignition_temperature and fuel_corrected > 0.0:
         n = advection_schemes._value_noise_3d(
             float(i) * burn_noise_scale,
@@ -251,9 +250,7 @@ def update_scalar_fields_maccormack(
         smoke_burn_source = 0.0
         fuel_burn_source = 0.0
 
-    # dissipation
     dT = T_corrected - t_reference
-
     cool_factor = abs(dT) / (abs(dT) + 200)
 
     temperature_dissipation = -temperature_dissipation_rate * dT * cool_factor
@@ -266,15 +263,11 @@ def update_scalar_fields_maccormack(
     smoke_updated = smoke_corrected + dt * smoke_burn_source + dt * smoke_dissipation
     fuel_updated = fuel_corrected + dt * fuel_burn_source + dt * fuel_dissipation
 
-    # ensure physically reasonable bounds
     T_out[tile_index, local_i, local_j, local_k] = max(T_updated, 0.0)
     smoke_out[tile_index, local_i, local_j, local_k] = min(
         max(smoke_updated, 0.0), 100.0
     )
-    fuel_out[tile_index, local_i, local_j, local_k] = min(max(fuel_updated, 0.0), 100.0)
-    flame_out[
-        tile_index,
-        local_i,
-        local_j,
-        local_k,
-    ] = max(-fuel_burn_source, 0.0)
+    fuel_out[tile_index, local_i, local_j, local_k] = min(
+        max(fuel_updated, 0.0), 100.0
+    )
+    flame_out[tile_index, local_i, local_j, local_k] = max(-fuel_burn_source, 0.0)

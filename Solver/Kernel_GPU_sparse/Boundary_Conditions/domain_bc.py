@@ -120,16 +120,15 @@ def _apply_face_state(
     It is called by the domain boundary kernel once per matching face, so edge
     and corner cells are processed sequentially in a fixed order.
     """
-    neighbor_u = u[src_i, src_j, src_k]
-    neighbor_v = v[src_i, src_j, src_k]
-    neighbor_w = w[src_i, src_j, src_k]
-
     src_tile_i = src_i // tile_size
     src_tile_j = src_j // tile_size
     src_tile_k = src_k // tile_size
     src_tile_index = tile_map[src_tile_i, src_tile_j, src_tile_k]
 
     if src_tile_index == -1:
+        neighbor_u = 0.0
+        neighbor_v = 0.0
+        neighbor_w = 0.0
         neighbor_T = temp_value if use_temp else ref_temp
         neighbor_smoke = 0.0
         neighbor_fuel = 0.0
@@ -138,40 +137,14 @@ def _apply_face_state(
         src_local_j = src_j - src_tile_j * tile_size
         src_local_k = src_k - src_tile_k * tile_size
 
+        neighbor_u = u[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_v = v[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_w = w[src_tile_index, src_local_i, src_local_j, src_local_k]
+
         neighbor_T = T[src_tile_index, src_local_i, src_local_j, src_local_k]
         neighbor_smoke = smoke[src_tile_index, src_local_i, src_local_j, src_local_k]
         neighbor_fuel = fuel[src_tile_index, src_local_i, src_local_j, src_local_k]
 
-    if bc_mode == 0:
-        u[i, j, k] = neighbor_u
-        v[i, j, k] = neighbor_v
-        w[i, j, k] = neighbor_w
-        if axis == 0:
-            u[i, j, k] = (
-                min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
-            )
-        elif axis == 1:
-            v[i, j, k] = (
-                min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
-            )
-        else:
-            w[i, j, k] = (
-                min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
-            )
-    elif bc_mode == 1:
-        u[i, j, k] = u_value
-        v[i, j, k] = v_value
-        w[i, j, k] = w_value
-    elif bc_mode == 2:
-        u[i, j, k] = 0.0
-        v[i, j, k] = 0.0
-        w[i, j, k] = 0.0
-    else:
-        u[i, j, k] = 0.0 if axis == 0 else neighbor_u
-        v[i, j, k] = 0.0 if axis == 1 else neighbor_v
-        w[i, j, k] = 0.0 if axis == 2 else neighbor_w
-
-    p[i, j, k] = p[src_i, src_j, src_k]
     dst_tile_i = i // tile_size
     dst_tile_j = j // tile_size
     dst_tile_k = k // tile_size
@@ -183,6 +156,44 @@ def _apply_face_state(
     dst_local_i = i - dst_tile_i * tile_size
     dst_local_j = j - dst_tile_j * tile_size
     dst_local_k = k - dst_tile_k * tile_size
+
+    if bc_mode == 0:
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_u
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_v
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_w
+
+        if axis == 0:
+            u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+                min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+            )
+        elif axis == 1:
+            v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+                min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+            )
+        else:
+            w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+                min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            )
+    elif bc_mode == 1:
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = u_value
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = v_value
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = w_value
+    elif bc_mode == 2:
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
+    else:
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 0 else neighbor_u
+        )
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 1 else neighbor_v
+        )
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 2 else neighbor_w
+        )
+
+    p[i, j, k] = p[src_i, src_j, src_k]
 
     T[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
         temp_value if use_temp else neighbor_T
@@ -246,7 +257,7 @@ def _domain_bc_kernel(
     face condition for corners and edges in the same fixed side order.
     """
     i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
+    nx, ny, nz = p.shape
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -443,9 +454,9 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config, tile_map, ref_temp):
         kernel_config.THREADS_PER_BLOCK_2D[1],
     )
     blockspergrid = (
-        (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (u.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (u.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+        (p.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
+        (p.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
+        (p.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
     )
 
     _domain_bc_kernel[blockspergrid, threadsperblock](

@@ -2,6 +2,7 @@ from numba import cuda
 import math
 
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
+from Solver.Kernel_GPU_sparse.advection_schemes import _sample_sparse_cell
 
 @cuda.jit(cache=True)
 def compute_vorticity(
@@ -50,14 +51,32 @@ def compute_vorticity(
 
     half_inv_delta = 0.5 / delta
 
-    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
-    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
+    du_dy = (
+        _sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0)
+        - _sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0)
+    ) * half_inv_delta
+    du_dz = (
+        _sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0)
+        - _sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0)
+    ) * half_inv_delta
 
-    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
-    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
+    dv_dx = (
+        _sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0)
+        - _sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0)
+    ) * half_inv_delta
+    dv_dz = (
+        _sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0)
+        - _sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0)
+    ) * half_inv_delta
 
-    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
-    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
+    dw_dx = (
+        _sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0)
+        - _sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0)
+    ) * half_inv_delta
+    dw_dy = (
+        _sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0)
+        - _sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0)
+    ) * half_inv_delta
 
     wx = dw_dy - dv_dz
     wy = du_dz - dw_dx
@@ -96,13 +115,13 @@ def apply_vorticity_confinement(
         nx,
         ny,
         nz,
-    ) = sparse_managment.tile_to_index(u.shape)
+    ) = sparse_managment.tile_to_index(omega_magnitude.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
     if tile_index == -1:
         return 0.0, 0.0, 0.0
-    
+
     if (
         i < 2
         or j < 2
@@ -119,11 +138,9 @@ def apply_vorticity_confinement(
     grad_x = (
         omega_magnitude[i + 1, j, k] - omega_magnitude[i - 1, j, k]
     ) * half_inv_delta
-
     grad_y = (
         omega_magnitude[i, j + 1, k] - omega_magnitude[i, j - 1, k]
     ) * half_inv_delta
-
     grad_z = (
         omega_magnitude[i, j, k + 1] - omega_magnitude[i, j, k - 1]
     ) * half_inv_delta
@@ -137,14 +154,32 @@ def apply_vorticity_confinement(
     ny_dir = grad_y / grad_length
     nz_dir = grad_z / grad_length
 
-    du_dy = (u[i, j + 1, k] - u[i, j - 1, k]) * half_inv_delta
-    du_dz = (u[i, j, k + 1] - u[i, j, k - 1]) * half_inv_delta
+    du_dy = (
+        _sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0)
+        - _sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0)
+    ) * half_inv_delta
+    du_dz = (
+        _sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0)
+        - _sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0)
+    ) * half_inv_delta
 
-    dv_dx = (v[i + 1, j, k] - v[i - 1, j, k]) * half_inv_delta
-    dv_dz = (v[i, j, k + 1] - v[i, j, k - 1]) * half_inv_delta
+    dv_dx = (
+        _sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0)
+        - _sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0)
+    ) * half_inv_delta
+    dv_dz = (
+        _sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0)
+        - _sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0)
+    ) * half_inv_delta
 
-    dw_dx = (w[i + 1, j, k] - w[i - 1, j, k]) * half_inv_delta
-    dw_dy = (w[i, j + 1, k] - w[i, j - 1, k]) * half_inv_delta
+    dw_dx = (
+        _sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0)
+        - _sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0)
+    ) * half_inv_delta
+    dw_dy = (
+        _sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0)
+        - _sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0)
+    ) * half_inv_delta
 
     wx = dw_dy - dv_dz
     wy = du_dz - dw_dx

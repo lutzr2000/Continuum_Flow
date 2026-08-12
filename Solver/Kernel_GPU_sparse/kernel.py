@@ -32,9 +32,21 @@ def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map
     Return the currently active device buffers for output export.
     """
     return {
-        "u": u,
-        "v": v,
-        "w": w,
+        "u": {
+            "data": u,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "v": {
+            "data": v,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "w": {
+            "data": w,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
         "pressure": p,
         "temperature": {
             "data": temperature,
@@ -394,23 +406,7 @@ def solver(
     print("Total tiles: ", total_tile_count)
 
     # ------------fields------------------
-    # velocity
-    u = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    u_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    v = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    v_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    w = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    w_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    # pressure
-    p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    pressure_rhs_partial_sums = cuda.device_array(
-        kernel_config.MAX_REDUCTION_BLOCKS,
-        dtype=np.float32,
-    )
-    pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
-
-    # scalars
+    # scalars + sparse velocity
     ref_temp = simulation.get("physics").get("temperature").get("reference_temperature")
 
     sparse_tile_capacity = max(1, tile_growth_size)
@@ -421,6 +417,30 @@ def solver(
         kernel_config.TILE_SIZE,
     )
 
+    zero_pool = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    # velocity
+    u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
+    u = cuda.to_device(
+        np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    u_work = cuda.to_device(
+        np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    v = cuda.to_device(
+        np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    v_work = cuda.to_device(
+        np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    w = cuda.to_device(
+        np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    w_work = cuda.to_device(
+        np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
+    )
+
+    # scalars
     temperature = cuda.to_device(
         np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
     )
@@ -434,15 +454,25 @@ def solver(
     flame = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
     # scratch
+    scratch_A = cuda.to_device(
+        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+    )
+    scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    #--------------- dense -------------------#
+    # pressure
+    p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    pressure_rhs_partial_sums = cuda.device_array(
+        kernel_config.MAX_REDUCTION_BLOCKS,
+        dtype=np.float32,
+    )
+    pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
+
+    # scratch
     scratch_A_x = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     scratch_A_y = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     scratch_A_z = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    scalar_scratch_A = cuda.to_device(
-        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
-    )
-    scalar_scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
-    scalar_scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
     # vortictiy
     vorticity_magnitude = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
@@ -480,12 +510,6 @@ def solver(
     )
 
     # ------------intitialise------------------
-    u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
-
-    u.copy_to_device(np.full(shape, u_initial, dtype=GPU_FIELD_DTYPE))
-    v.copy_to_device(np.full(shape, v_initial, dtype=GPU_FIELD_DTYPE))
-    w.copy_to_device(np.full(shape, w_initial, dtype=GPU_FIELD_DTYPE))
-
     p.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
 
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
@@ -603,20 +627,64 @@ def solver(
                     flame, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
                 )
 
-                scalar_scratch_A = sparse_managment.ensure_pool_capacity(
-                    scalar_scratch_A,
+                scratch_A = sparse_managment.ensure_pool_capacity(
+                    scratch_A,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
                     ref_temp,
                 )
-                scalar_scratch_B = sparse_managment.ensure_pool_capacity(
-                    scalar_scratch_B,
+                scratch_B = sparse_managment.ensure_pool_capacity(
+                    scratch_B,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
                     0.0,
                 )
-                scalar_scratch_C = sparse_managment.ensure_pool_capacity(
-                    scalar_scratch_C,
+                scratch_C = sparse_managment.ensure_pool_capacity(
+                    scratch_C,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
+                )
+
+                u = sparse_managment.ensure_pool_capacity(
+                    u,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    u_initial,
+                )
+                u_work = sparse_managment.ensure_pool_capacity(
+                    u_work,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    u_initial,
+                )
+                v = sparse_managment.ensure_pool_capacity(
+                    v,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    v_initial,
+                )
+                v_work = sparse_managment.ensure_pool_capacity(
+                    v_work,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    v_initial,
+                )
+                w = sparse_managment.ensure_pool_capacity(
+                    w,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    w_initial,
+                )
+                w_work = sparse_managment.ensure_pool_capacity(
+                    w_work,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    w_initial,
+                )
+
+                zero_pool = sparse_managment.ensure_pool_capacity(
+                    zero_pool,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
                     0.0,
@@ -631,14 +699,16 @@ def solver(
                 )
 
         # ------------time step-------------------
-        time_step.reset_velocity_maxima(
-            velocity_maxima,
-            velocity_maxima_host_zeros,
-        )
+        active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
+
+        velocity_maxima.copy_to_device(velocity_maxima_host_zeros)
+        
         dt = time_step.compute_new_timestep_gpu(
             u,
             v,
             w,
+            tile_map,
+            active_sparse_tile_count,
             velocity_maxima,
             delta,
             cfl,
@@ -649,6 +719,22 @@ def solver(
         scratch_A_x.copy_to_device(zero_levels[0])
         scratch_A_y.copy_to_device(zero_levels[0])
         scratch_A_z.copy_to_device(zero_levels[0])
+
+        sparse_managment.reset_pool(
+            scratch_A,
+            zero_pool,
+            active_sparse_tile_count,
+        )
+        sparse_managment.reset_pool(
+            scratch_B,
+            zero_pool,
+            active_sparse_tile_count,
+        )
+        sparse_managment.reset_pool(
+            scratch_C,
+            zero_pool,
+            active_sparse_tile_count,
+        )
 
         # ------------Update masks-------------------
         if animated_sources:
@@ -729,21 +815,37 @@ def solver(
         turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
 
         # ------------Velocity update-------------------
-        u_work.copy_to_device(u)
-        v_work.copy_to_device(v)
-        w_work.copy_to_device(w)
+        sparse_managment.copy_pool(
+            u_work,
+            u,
+            active_sparse_tile_count,
+        )
+        sparse_managment.copy_pool(
+            v_work,
+            v,
+            active_sparse_tile_count,
+        )
+        sparse_managment.copy_pool(
+            w_work,
+            w,
+            active_sparse_tile_count,
+        )
+
         advection_schemes.advect_velocity_semi_lagrangian[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
             w,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             dt,
             delta,
             tile_map,
+            nx,
+            ny,
+            nz,
         )
 
         advection_schemes.update_velocity_maccormack[
@@ -753,9 +855,9 @@ def solver(
             v,
             w,
             obstacle_mask,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             dt,
             u_work,
             v_work,
@@ -780,6 +882,9 @@ def solver(
             has_turbulence_nodes,
             turbulence_config_device,
             t,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Velocity swap-------------------
@@ -836,8 +941,6 @@ def solver(
         )
 
         # ------------Scalar update-------------------
-        active_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
-
         sparse_managment.copy_pool(
             temperature_work,
             temperature,
@@ -864,12 +967,15 @@ def solver(
             v,
             w,
             dt,
-            scalar_scratch_A,
-            scalar_scratch_B,
-            scalar_scratch_C,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             delta,
             ref_temp,
             tile_map,
+            nx,
+            ny,
+            nz,
         )
         scalar_update.update_scalar_fields_maccormack[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
@@ -877,9 +983,9 @@ def solver(
             temperature,
             smoke,
             fuel,
-            scalar_scratch_A,
-            scalar_scratch_B,
-            scalar_scratch_C,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             u,
             v,
             w,
@@ -900,6 +1006,9 @@ def solver(
             simulation.get("physics").get("burning").get("amplitude"),
             ref_temp,
             tile_map,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Swap-------------------

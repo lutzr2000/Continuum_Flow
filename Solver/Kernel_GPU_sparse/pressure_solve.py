@@ -4,8 +4,12 @@ from numba import cuda
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
+from Solver.Kernel_GPU_sparse.advection_schemes import _sample_sparse_cell
 
-REDUCTION_THREADS_PER_BLOCK = kernel_config.REDUCTION_THREADS_PER_BLOCK #this is needed because if this is added directly inline, cuda crashes i do not know why
+REDUCTION_THREADS_PER_BLOCK = (
+    kernel_config.REDUCTION_THREADS_PER_BLOCK
+)  # this is needed because if this is added directly inline, cuda crashes i do not know why
+
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
@@ -20,8 +24,7 @@ def pressure_equation_right_side(
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
-    Only the divergence of the velociy field is used, we neglect non linear terms.
-
+    Only the divergence of the velocity field is used, we neglect non linear terms.
     """
     (
         tile_i,
@@ -36,7 +39,7 @@ def pressure_equation_right_side(
         nx,
         ny,
         nz,
-    ) = sparse_managment.tile_to_index(u.shape)
+    ) = sparse_managment.tile_to_index(b.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -47,28 +50,29 @@ def pressure_equation_right_side(
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if (
-        i < 1
-        or j < 1
-        or k < 1
-        or i >= nx - 1
-        or j >= ny - 1
-        or k >= nz - 1
-    ):
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         b[i, j, k] = 0.0
         return
 
     half_inv_delta = 0.5 / delta
     rho_over_dt = rho / dt
 
-    # ------------Derivatives on main diagonal-------------------
-    du_dx = (u[i + 1, j, k] - u[i - 1, j, k]) * half_inv_delta
-    dv_dy = (v[i, j + 1, k] - v[i, j - 1, k]) * half_inv_delta
-    dw_dz = (w[i, j, k + 1] - w[i, j, k - 1]) * half_inv_delta
+    du_dx = (
+        _sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0)
+        - _sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0)
+    ) * half_inv_delta
+
+    dv_dy = (
+        _sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0)
+        - _sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0)
+    ) * half_inv_delta
+
+    dw_dz = (
+        _sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0)
+        - _sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0)
+    ) * half_inv_delta
 
     divergence = du_dx + dv_dy + dw_dz
-
-    # ------------Right hand side-------------------
     b[i, j, k] = rho_over_dt * divergence
 
 
@@ -243,14 +247,7 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map):
     if tile_index == -1:
         return
 
-    if (
-        i < 1
-        or j < 1
-        or k < 1
-        or i >= nx - 1
-        or j >= ny - 1
-        or k >= nz - 1
-    ):
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
     b[i, j, k] -= rhs_mean
@@ -281,14 +278,7 @@ def reset_inactive_pressure(p, tile_map):
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if (
-        i < 1
-        or j < 1
-        or k < 1
-        or i >= nx - 1
-        or j >= ny - 1
-        or k >= nz - 1
-    ):
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         p[i, j, k] = 0.0
 
 
@@ -329,16 +319,16 @@ def remove_rhs_mean(
     if abs(rhs_mean) <= 1.0e-12:
         return
 
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(b.shape, kernel_config.THREADS_PER_BLOCK_3D)
+    blockspergrid_3d = kernel_config.volume_blocks_per_grid(
+        b.shape, kernel_config.THREADS_PER_BLOCK_3D
+    )
     subtract_rhs_mean_kernel[blockspergrid_3d, kernel_config.THREADS_PER_BLOCK_3D](
         b, rhs_mean, tile_map
     )
 
 
 @cuda.jit(cache=True)
-def project_velocity_kernel(
-    u, v, w, p, obstacle_mask, dt, delta, rho, tile_map
-):
+def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho, tile_map):
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
 
@@ -372,10 +362,16 @@ def project_velocity_kernel(
         return
 
     pressure_coeff = dt / (2.0 * rho * delta)
-    # u <= u - dp/delta * dt/(2*rho)
-    u[i, j, k] -= pressure_coeff * (p[i + 1, j, k] - p[i - 1, j, k])
-    v[i, j, k] -= pressure_coeff * (p[i, j + 1, k] - p[i, j - 1, k])
-    w[i, j, k] -= pressure_coeff * (p[i, j, k + 1] - p[i, j, k - 1])
+
+    u[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
+        p[i + 1, j, k] - p[i - 1, j, k]
+    )
+    v[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
+        p[i, j + 1, k] - p[i, j - 1, k]
+    )
+    w[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
+        p[i, j, k + 1] - p[i, j, k - 1]
+    )
 
 
 @cuda.jit(cache=True)
@@ -390,7 +386,7 @@ def add_artifical_divergence(
     b,
     tile_map,
     rho,
-    dt
+    dt,
 ):
     (
         tile_i,
@@ -405,7 +401,7 @@ def add_artifical_divergence(
         nx,
         ny,
         nz,
-    ) = sparse_managment.tile_to_index(b.shape) 
+    ) = sparse_managment.tile_to_index(b.shape)
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -415,14 +411,7 @@ def add_artifical_divergence(
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if (
-        i < 1
-        or j < 1
-        or k < 1
-        or i >= nx - 1
-        or j >= ny - 1
-        or k >= nz - 1
-    ):
+    if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
     rho_over_dt = rho / dt
@@ -438,14 +427,16 @@ def add_artifical_divergence(
             continue
         source_extra_pressure = extra_pressure[source_idx]
         source_extra_pressure *= min(
-            max(1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k], 0.0),
+            max(
+                1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k],
+                0.0,
+            ),
             2.0,
         )
         if abs(source_extra_pressure) > abs(extra_pressure_term):
             extra_pressure_term = source_extra_pressure
 
     b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
-
 
 
 @cuda.jit(cache=True)
@@ -475,14 +466,21 @@ def mg_restrict_residual_8cell(p, b, coarse_b, delta):
                 k = k0 + dk
 
                 if (
-                    i >= 1 and j >= 1 and k >= 1 and
-                    i < nx - 1 and j < ny - 1 and k < nz - 1
+                    i >= 1
+                    and j >= 1
+                    and k >= 1
+                    and i < nx - 1
+                    and j < ny - 1
+                    and k < nz - 1
                 ):
                     lap = (
-                        p[i + 1, j, k] + p[i - 1, j, k] +
-                        p[i, j + 1, k] + p[i, j - 1, k] +
-                        p[i, j, k + 1] + p[i, j, k - 1] -
-                        6.0 * p[i, j, k]
+                        p[i + 1, j, k]
+                        + p[i - 1, j, k]
+                        + p[i, j + 1, k]
+                        + p[i, j - 1, k]
+                        + p[i, j, k + 1]
+                        + p[i, j, k - 1]
+                        - 6.0 * p[i, j, k]
                     ) * inv_delta2
 
                     residual = b[i, j, k] - lap
@@ -587,8 +585,12 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                 k = k0 + dk
 
                 if (
-                    i >= 1 and j >= 1 and k >= 1 and
-                    i < nx - 1 and j < ny - 1 and k < nz - 1
+                    i >= 1
+                    and j >= 1
+                    and k >= 1
+                    and i < nx - 1
+                    and j < ny - 1
+                    and k < nz - 1
                 ):
                     tile_i = i // kernel_config.TILE_SIZE
                     tile_j = j // kernel_config.TILE_SIZE
@@ -598,10 +600,13 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                         continue
 
                     lap = (
-                        p[i + 1, j, k] + p[i - 1, j, k] +
-                        p[i, j + 1, k] + p[i, j - 1, k] +
-                        p[i, j, k + 1] + p[i, j, k - 1] -
-                        6.0 * p[i, j, k]
+                        p[i + 1, j, k]
+                        + p[i - 1, j, k]
+                        + p[i, j + 1, k]
+                        + p[i, j - 1, k]
+                        + p[i, j, k + 1]
+                        + p[i, j, k - 1]
+                        - 6.0 * p[i, j, k]
                     ) * inv_delta2
 
                     s += b[i, j, k] - lap
@@ -653,10 +658,13 @@ def mg_rbgs_step(p, b, delta, parity):
     delta2 = delta * delta
 
     p[i, j, k] = (
-        p[i + 1, j, k] + p[i - 1, j, k] +
-        p[i, j + 1, k] + p[i, j - 1, k] +
-        p[i, j, k + 1] + p[i, j, k - 1] -
-        delta2 * b[i, j, k]
+        p[i + 1, j, k]
+        + p[i - 1, j, k]
+        + p[i, j + 1, k]
+        + p[i, j - 1, k]
+        + p[i, j, k + 1]
+        + p[i, j, k - 1]
+        - delta2 * b[i, j, k]
     ) / 6.0
 
 
@@ -686,21 +694,28 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
         return
 
     if (
-        i < 1 or j < 1 or k < 1 or
-        i >= nx - 1 or j >= ny - 1 or k >= nz - 1 or
-        ((i + j + k) & 1) != parity
+        i < 1
+        or j < 1
+        or k < 1
+        or i >= nx - 1
+        or j >= ny - 1
+        or k >= nz - 1
+        or ((i + j + k) & 1) != parity
     ):
         return
 
     delta2 = delta * delta
 
     p[i, j, k] = (
-        p[i + 1, j, k] + p[i - 1, j, k] +
-        p[i, j + 1, k] + p[i, j - 1, k] +
-        p[i, j, k + 1] + p[i, j, k - 1] -
-        delta2 * b[i, j, k]
+        p[i + 1, j, k]
+        + p[i - 1, j, k]
+        + p[i, j + 1, k]
+        + p[i, j - 1, k]
+        + p[i, j, k + 1]
+        + p[i, j, k - 1]
+        - delta2 * b[i, j, k]
     ) / 6.0
-    
+
 
 def multigrid_smooth(p, b, delta, iterations, level=0, tile_map=None):
     blocks = kernel_config.volume_blocks_per_grid(
@@ -708,29 +723,23 @@ def multigrid_smooth(p, b, delta, iterations, level=0, tile_map=None):
         kernel_config.THREADS_PER_BLOCK_3D,
     )
 
-    use_sparse = level == 0 
+    use_sparse = level == 0
 
     for _ in range(iterations):
         if use_sparse:
-            mg_rbgs_step_sparse_level0[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 0, tile_map)
+            mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 0, tile_map
+            )
 
-            mg_rbgs_step_sparse_level0[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 1, tile_map)
+            mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 1, tile_map
+            )
         else:
-            mg_rbgs_step[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 0)
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
 
-            mg_rbgs_step[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 1)
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
 
-    BC.pressure_poisson_apply_neumann_bcs[
-        blocks, kernel_config.THREADS_PER_BLOCK_3D
-    ](p)
+    BC.pressure_poisson_apply_neumann_bcs[blocks, kernel_config.THREADS_PER_BLOCK_3D](p)
 
 
 def multigrid_vcycle(
@@ -818,12 +827,7 @@ def multigrid_vcycle(
         mg_prolongate_add_nearest_sparse_level0[
             coarse_blocks,
             kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            coarse_p,
-            p,
-            tile_map,
-            p.shape
-        )
+        ](coarse_p, p, tile_map, p.shape)
     else:
         mg_prolongate_add_nearest[
             coarse_blocks,
@@ -872,7 +876,7 @@ def pressure_poisson_multigrid(
     p_levels[0] = p
     b_levels[0] = b
 
-    pressure_equation_right_side[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
+    pressure_equation_right_side[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         u,
         v,
         w,
@@ -890,12 +894,12 @@ def pressure_poisson_multigrid(
         rhs_sum_buffer,
     )
 
-    reset_inactive_pressure[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
+    reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         p_levels[0],
         tile_map,
     )
 
-    add_artifical_divergence[tile_shape,  kernel_config.THREADS_PER_BLOCK_3D](
+    add_artifical_divergence[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         T,
         source_masks,
         extra_pressure,
@@ -919,11 +923,7 @@ def pressure_poisson_multigrid(
             pre_smooth=2,
             post_smooth=4,
             coarse_smooth=20,
-            tile_map=tile_map
+            tile_map=tile_map,
         )
 
     return p_levels[0]
-
-
-
-

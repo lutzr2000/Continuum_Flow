@@ -44,9 +44,6 @@ def source_bc_kernel(
     if i >= nx or j >= ny or k >= nz:
         return
 
-    if i == 0 or i == nx - 1 or j == 0 or j == ny - 1 or k == 0 or k == nz - 1:
-        return
-
     if not source_mask[i, j, k]:
         return
 
@@ -54,42 +51,28 @@ def source_bc_kernel(
     if tile_index == -1:
         return
 
-    scalar_multiplier = 1.0 + noise_amplitude * source_noise[i, j, k]
-    if scalar_multiplier < 0.0:
-        scalar_multiplier = 0.0
-    elif scalar_multiplier > 2.0:
-        scalar_multiplier = 2.0
+    scalar_multiplier = min(
+        max(1.0 + noise_amplitude * source_noise[i, j, k], 0.0),
+        2.0,
+    )
 
     if velocity_x_value != 0:
-        u[i, j, k] = velocity_x_value
+        u[tile_index, local_i, local_j, local_k] = velocity_x_value
     if velocity_y_value != 0:
-        v[i, j, k] = velocity_y_value
+        v[tile_index, local_i, local_j, local_k] = velocity_y_value
     if velocity_z_value != 0:
-        w[i, j, k] = velocity_z_value
+        w[tile_index, local_i, local_j, local_k] = velocity_z_value
 
     temperature = temperature_value * scalar_multiplier
     if temperature < 0.0:
         temperature = 0.0
     T[tile_index, local_i, local_j, local_k] = temperature
 
-    if smoke_value != 0:
-        smoke_updated = (
-            smoke[tile_index, local_i, local_j, local_k]
-            + dt * 10.0 * smoke_value * scalar_multiplier
-        )
-        if smoke_updated < 0.0:
-            smoke_updated = 0.0
-        elif smoke_updated > 100.0:
-            smoke_updated = 100.0
-        smoke[tile_index, local_i, local_j, local_k] = smoke_updated
-
-    if fuel_value != 0:
-        fuel_updated = (
-            fuel[tile_index, local_i, local_j, local_k]
-            + dt * 10.0 * fuel_value * scalar_multiplier
-        )
-        if fuel_updated < 0.0:
-            fuel_updated = 0.0
-        elif fuel_updated > 100.0:
-            fuel_updated = 100.0
-        fuel[tile_index, local_i, local_j, local_k] = fuel_updated
+    smoke[tile_index, local_i, local_j, local_k] = min(
+        smoke[tile_index, local_i, local_j, local_k] + smoke_value * dt * scalar_multiplier,
+        100.0,
+    )
+    fuel[tile_index, local_i, local_j, local_k] = min(
+        fuel[tile_index, local_i, local_j, local_k] + fuel_value * dt * scalar_multiplier,
+        100.0,
+    )

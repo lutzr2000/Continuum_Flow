@@ -259,3 +259,10 @@ def copy_pool(dst_pool, src_pool, active_tile_count):
         return
 
     dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])
+
+
+def reset_pool(dst_pool, fill_pool, active_tile_count):
+    if active_tile_count <= 0:
+        return
+
+    dst_pool[:active_tile_count].copy_to_device(fill_pool[:active_tile_count])
