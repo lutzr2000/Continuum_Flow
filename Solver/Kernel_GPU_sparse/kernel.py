@@ -772,7 +772,7 @@ def solver(
                 scratch_A,
                 scratch_B,
                 scratch_C,
-                tile_map,
+                tile_map=tile_map,
             )
 
         # ------------BC-------------------
