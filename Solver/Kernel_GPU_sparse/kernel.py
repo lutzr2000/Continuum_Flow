@@ -184,7 +184,7 @@ def apply_all_BC(
     obstacle_velocity_z,
     source_masks,
     source_noise,
-    tile_map
+    tile_map,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -354,11 +354,8 @@ def solver(
     tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
-    dense_activity_mask = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
-    flame_activity_mask = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
-    next_tile_index_counter = cuda.to_device(
-        np.asarray([0], dtype=np.int32)
-    )
+
+    next_tile_index_counter = cuda.to_device(np.asarray([0], dtype=np.int32))
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
     spare_tile_growth_size_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
     tile_growth_size = max(
@@ -390,25 +387,27 @@ def solver(
     pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
 
     # scalars
-    temperature = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    temperature_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    smoke = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    smoke_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    fuel = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    fuel_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    ref_temp = simulation.get("physics").get("temperature").get("reference_temperature")
 
-    flame_tile_capacity = max(1, tile_growth_size)
-    flame = cuda.to_device(
-        np.zeros(
-            (
-                flame_tile_capacity,
-                kernel_config.TILE_SIZE,
-                kernel_config.TILE_SIZE,
-                kernel_config.TILE_SIZE,
-            ),
-            dtype=GPU_FIELD_DTYPE,
-        )
+    sparse_tile_capacity = max(1, tile_growth_size)
+    sparse_pool_shape = (
+        sparse_tile_capacity,
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
     )
+
+    temperature = cuda.to_device(
+        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+    )
+    temperature_work = cuda.to_device(
+        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+    )
+    smoke = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    smoke_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    fuel = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    fuel_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    flame = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
     # scratch
     scratch_A_x = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
@@ -459,11 +458,6 @@ def solver(
 
     p.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
 
-    ref_temp = simulation.get("physics").get("temperature").get("reference_temperature")
-    temperature.copy_to_device(np.full(shape, ref_temp, dtype=GPU_FIELD_DTYPE))
-    smoke.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-    fuel.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
     velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
@@ -513,34 +507,23 @@ def solver(
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
-        
+
         # ------------Start Active tiles-------------------
         if simulation.get("settings").get("simulate_sparsely"):
-            sparse_managment.build_dense_activity_mask[
+            sparse_managment.build_activity_mask[
                 tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
+                temperature,
                 smoke,
                 fuel,
-                dense_activity_mask,
-                simulation.get("settings").get("adaptive_domain_threshold"),
-            )
-
-            sparse_managment.build_sparse_flame_activity_mask[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                tile_map,
                 flame,
-                flame_activity_mask,
+                tile_map,
+                source_mask,
+                base_tile_map,
                 simulation.get("settings").get("adaptive_domain_threshold"),
+                ref_temp,
             )
 
-            sparse_managment.combine_activity_masks[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                dense_activity_mask,
-                flame_activity_mask,
-                base_tile_map,
-            )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
 
@@ -554,22 +537,42 @@ def solver(
                 active_tile_counter,
             )
 
-            required_tile_capacity = int(
-                next_tile_index_counter.copy_to_host()[0]
-            )
+            required_tile_capacity = int(next_tile_index_counter.copy_to_host()[0])
 
-            if required_tile_capacity > flame_tile_capacity:
-
-                flame, flame_tile_capacity = sparse_managment.ensure_pool_capacity(
-                    flame,
-                    flame_tile_capacity,
+            if required_tile_capacity > sparse_tile_capacity:
+                next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
+                    sparse_tile_capacity,
                     required_tile_capacity,
                     tile_growth_size,
                 )
 
+                temperature = sparse_managment.ensure_pool_capacity(
+                    temperature, sparse_tile_capacity, next_sparse_tile_capacity, ref_temp
+                )
+                temperature_work = sparse_managment.ensure_pool_capacity(
+                    temperature_work, sparse_tile_capacity, next_sparse_tile_capacity, ref_temp
+                )
+                smoke = sparse_managment.ensure_pool_capacity(
+                    smoke, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+                smoke_work = sparse_managment.ensure_pool_capacity(
+                    smoke_work, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+                fuel = sparse_managment.ensure_pool_capacity(
+                    fuel, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+                fuel_work = sparse_managment.ensure_pool_capacity(
+                    fuel_work, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+                flame = sparse_managment.ensure_pool_capacity(
+                    flame, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+
+                sparse_tile_capacity = next_sparse_tile_capacity
+
                 print(
-                    "Flame tile buffer grown to:",
-                    flame_tile_capacity,
+                    "Tile buffer grown to:",
+                    sparse_tile_capacity,
                     "tiles",
                 )
 
@@ -649,7 +652,7 @@ def solver(
             scratch_A_z,
             source_masks,
             source_noise,
-            tile_map
+            tile_map,
         )
 
         # ------------Vorticity-------------------

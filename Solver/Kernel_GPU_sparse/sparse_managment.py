@@ -1,6 +1,7 @@
 from numba import cuda
-
+import numpy as np
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
+
 
 @cuda.jit(device=True, inline=True, cache=True)
 def tile_to_index(field_shape):
@@ -38,21 +39,33 @@ def tile_to_index(field_shape):
 
 
 @cuda.jit(cache=True)
-def build_dense_activity_mask(smoke, fuel, activity_mask, threshold):
+def build_activity_mask(
+    temperature,
+    smoke,
+    fuel,
+    flame,
+    tile_map,
+    source_mask,
+    base_tile_map,
+    threshold,
+    ref_temp,
+):
     tile_i, tile_j, tile_k = cuda.grid(3)
-    tiles_x, tiles_y, tiles_z = activity_mask.shape
+    tiles_x, tiles_y, tiles_z = base_tile_map.shape
 
     if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
         return
 
-    nx, ny, nz = smoke.shape
-    tile_size = kernel_config.TILE_SIZE
+    base_tile_map[tile_i, tile_j, tile_k] = -1
 
+    tile_size = kernel_config.TILE_SIZE
     cell_i_start = tile_i * tile_size
     cell_j_start = tile_j * tile_size
     cell_k_start = tile_k * tile_size
 
-    activity_mask[tile_i, tile_j, tile_k] = -1
+    nx, ny, nz = source_mask.shape
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
 
     for local_i in range(tile_size):
         i = cell_i_start + local_i
@@ -69,52 +82,21 @@ def build_dense_activity_mask(smoke, fuel, activity_mask, threshold):
                 if k >= nz:
                     break
 
+                if source_mask[i, j, k]:
+                    base_tile_map[tile_i, tile_j, tile_k] = 1
+                    return
+
+                if tile_index == -1:
+                    continue
+
                 if (
-                    smoke[i, j, k] >= threshold
-                    or fuel[i, j, k] >= threshold
+                    abs(temperature[tile_index, local_i, local_j, local_k] - ref_temp) >= threshold
+                    or smoke[tile_index, local_i, local_j, local_k] >= threshold
+                    or fuel[tile_index, local_i, local_j, local_k] >= threshold
+                    or flame[tile_index, local_i, local_j, local_k] >= threshold
                 ):
-                    activity_mask[tile_i, tile_j, tile_k] = 1
+                    base_tile_map[tile_i, tile_j, tile_k] = 1
                     return
-
-
-@cuda.jit(cache=True)
-def build_sparse_flame_activity_mask(tile_map, flame, activity_mask, threshold):
-    tile_i, tile_j, tile_k = cuda.grid(3)
-    tiles_x, tiles_y, tiles_z = activity_mask.shape
-
-    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
-        return
-
-    activity_mask[tile_i, tile_j, tile_k] = -1
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
-    if tile_index == -1:
-        return
-
-    tile_size = kernel_config.TILE_SIZE
-    for local_i in range(tile_size):
-        for local_j in range(tile_size):
-            for local_k in range(tile_size):
-                if flame[tile_index, local_i, local_j, local_k] >= threshold:
-                    activity_mask[tile_i, tile_j, tile_k] = 1
-                    return
-
-
-@cuda.jit(cache=True)
-def combine_activity_masks(dense_activity_mask, sparse_activity_mask, base_tile_map):
-    tile_i, tile_j, tile_k = cuda.grid(3)
-    tiles_x, tiles_y, tiles_z = base_tile_map.shape
-
-    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
-        return
-
-    is_dense_active = dense_activity_mask[tile_i, tile_j, tile_k] != -1
-    is_sparse_active = sparse_activity_mask[tile_i, tile_j, tile_k] != -1
-
-    if is_dense_active or is_sparse_active:
-        base_tile_map[tile_i, tile_j, tile_k] = 1
-    else:
-        base_tile_map[tile_i, tile_j, tile_k] = -1
 
 
 @cuda.jit(cache=True)
@@ -223,44 +205,50 @@ def dilate_tile_map_persistent(
     tile_map[tile_i, tile_j, tile_k] = cuda.atomic.add(next_tile_index_counter, 0, 1)
 
 
-def ensure_pool_capacity(
-    pool_tile_buffer,
+def required_pool_capacity(
     current_capacity_tiles,
     required_capacity_tiles,
     tile_growth_size,
 ):
-    """
-    Grow a pool tile buffer in fixed-size chunkgs until it can hold all requiered tiles.
-    Copies the original data into the new pool.
-    """
     required_capacity_tiles = int(required_capacity_tiles)
     current_capacity_tiles = int(current_capacity_tiles)
     tile_growth_size = max(int(tile_growth_size), 1)
 
     if required_capacity_tiles <= current_capacity_tiles:
-        return pool_tile_buffer, current_capacity_tiles
+        return current_capacity_tiles
 
     new_capacity_tiles = max(current_capacity_tiles, tile_growth_size)
     while required_capacity_tiles > new_capacity_tiles:
         new_capacity_tiles += tile_growth_size
 
-    new_pool_tile_buffer = cuda.device_array(
-        (
-            new_capacity_tiles,
-            kernel_config.TILE_SIZE,
-            kernel_config.TILE_SIZE,
-            kernel_config.TILE_SIZE,
-        ),
-        dtype=kernel_config.GPU_FIELD_DTYPE,
+    return new_capacity_tiles
+
+
+def ensure_pool_capacity(
+    pool_tile_buffer,
+    current_capacity_tiles,
+    target_capacity_tiles,
+    fill_value,
+):
+    if target_capacity_tiles == current_capacity_tiles:
+        return pool_tile_buffer
+
+    new_pool_tile_buffer = cuda.to_device(
+        np.full(
+            (
+                target_capacity_tiles,
+                kernel_config.TILE_SIZE,
+                kernel_config.TILE_SIZE,
+                kernel_config.TILE_SIZE,
+            ),
+            fill_value,
+            dtype=kernel_config.GPU_FIELD_DTYPE,
+        )
     )
 
-    # Copy existing tile data into the newly allocated larger pool.
     if current_capacity_tiles > 0:
         new_pool_tile_buffer[:current_capacity_tiles].copy_to_device(
             pool_tile_buffer[:current_capacity_tiles]
         )
 
-    pool_tile_buffer = new_pool_tile_buffer
-
-    return pool_tile_buffer, new_capacity_tiles
-
+    return new_pool_tile_buffer
