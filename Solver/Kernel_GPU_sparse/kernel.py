@@ -192,7 +192,18 @@ def apply_all_BC(
     user config.
     """
     bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
-    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
+    u, v, w, p, T, smoke, fuel = BC.domain_bc(
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
+        bc_config,
+        tile_map,
+        simulation.get("physics").get("temperature").get("reference_temperature"),
+    )
 
     if obstacle_mask is not None:
         blockspergrid = kernel_config.volume_blocks_per_grid(
@@ -243,6 +254,7 @@ def apply_all_BC(
                 T,
                 smoke,
                 fuel,
+                tile_map,
                 source_mask_entry,
                 source_noise_entry,
                 source_temperature_values[source_idx],
@@ -524,7 +536,6 @@ def solver(
                 ref_temp,
             )
 
-
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
 
             sparse_managment.dilate_tile_map_persistent[
@@ -547,10 +558,16 @@ def solver(
                 )
 
                 temperature = sparse_managment.ensure_pool_capacity(
-                    temperature, sparse_tile_capacity, next_sparse_tile_capacity, ref_temp
+                    temperature,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    ref_temp,
                 )
                 temperature_work = sparse_managment.ensure_pool_capacity(
-                    temperature_work, sparse_tile_capacity, next_sparse_tile_capacity, ref_temp
+                    temperature_work,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    ref_temp,
                 )
                 smoke = sparse_managment.ensure_pool_capacity(
                     smoke, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
@@ -782,9 +799,24 @@ def solver(
         )
 
         # ------------Scalar update-------------------
-        temperature_work.copy_to_device(temperature)
-        smoke_work.copy_to_device(smoke)
-        fuel_work.copy_to_device(fuel)
+        active_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
+
+        sparse_managment.copy_pool(
+            temperature_work,
+            temperature,
+            active_sparse_tile_count,
+        )
+        sparse_managment.copy_pool(
+            smoke_work,
+            smoke,
+            active_sparse_tile_count,
+        )
+        sparse_managment.copy_pool(
+            fuel_work,
+            fuel,
+            active_sparse_tile_count,
+        )
+        
         scalar_update.predict_scalar_fields_semi_lagrangian[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](

@@ -1,6 +1,6 @@
 from numba import cuda
 
-from Solver.Kernel_GPU_sparse.kernel_config import THREADS_PER_BLOCK_2D
+import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
@@ -92,6 +92,8 @@ def _apply_face_state(
     T,
     smoke,
     fuel,
+    tile_map,
+    ref_temp,
     i,
     j,
     k,
@@ -119,8 +121,25 @@ def _apply_face_state(
     neighbor_u = u[src_i, src_j, src_k]
     neighbor_v = v[src_i, src_j, src_k]
     neighbor_w = w[src_i, src_j, src_k]
-    neighbor_smoke = smoke[src_i, src_j, src_k]
-    neighbor_fuel = fuel[src_i, src_j, src_k]
+    tile_size = kernel_config.TILE_SIZE
+
+    src_tile_i = src_i // tile_size
+    src_tile_j = src_j // tile_size
+    src_tile_k = src_k // tile_size
+    src_tile_index = tile_map[src_tile_i, src_tile_j, src_tile_k]
+
+    if src_tile_index == -1:
+        neighbor_T = temp_value if use_temp else ref_temp
+        neighbor_smoke = 0.0
+        neighbor_fuel = 0.0
+    else:
+        src_local_i = src_i - src_tile_i * tile_size
+        src_local_j = src_j - src_tile_j * tile_size
+        src_local_k = src_k - src_tile_k * tile_size
+
+        neighbor_T = T[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_smoke = smoke[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_fuel = fuel[src_tile_index, src_local_i, src_local_j, src_local_k]
 
     if bc_mode == 0:
         u[i, j, k] = neighbor_u
@@ -152,9 +171,23 @@ def _apply_face_state(
         w[i, j, k] = 0.0 if axis == 2 else neighbor_w
 
     p[i, j, k] = p[src_i, src_j, src_k]
-    T[i, j, k] = temp_value if use_temp else T[src_i, src_j, src_k]
-    smoke[i, j, k] = neighbor_smoke
-    fuel[i, j, k] = neighbor_fuel
+    dst_tile_i = i // tile_size
+    dst_tile_j = j // tile_size
+    dst_tile_k = k // tile_size
+    dst_tile_index = tile_map[dst_tile_i, dst_tile_j, dst_tile_k]
+
+    if dst_tile_index == -1:
+        return
+
+    dst_local_i = i - dst_tile_i * tile_size
+    dst_local_j = j - dst_tile_j * tile_size
+    dst_local_k = k - dst_tile_k * tile_size
+
+    T[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+        temp_value if use_temp else neighbor_T
+    )
+    smoke[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_smoke
+    fuel[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_fuel
 
 
 @cuda.jit(cache=True)
@@ -166,6 +199,8 @@ def _domain_bc_kernel(
     T,
     smoke,
     fuel,
+    tile_map,
+    ref_temp,
     x_low_mode,
     x_low_u,
     x_low_v,
@@ -227,6 +262,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -251,6 +288,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -276,6 +315,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -300,6 +341,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -325,6 +368,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -349,6 +394,8 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
             i,
             j,
             k,
@@ -366,7 +413,7 @@ def _domain_bc_kernel(
         )
 
 
-def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
+def domain_bc(u, v, w, p, T, smoke, fuel, bc_config, tile_map, ref_temp):
     """
     Apply all configured domain boundary conditions to the GPU field state.
 
@@ -390,9 +437,9 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
         )
 
     threadsperblock = (
-        THREADS_PER_BLOCK_2D[0],
-        THREADS_PER_BLOCK_2D[0],
-        THREADS_PER_BLOCK_2D[1],
+        kernel_config.THREADS_PER_BLOCK_2D[0],
+        kernel_config.THREADS_PER_BLOCK_2D[0],
+        kernel_config.THREADS_PER_BLOCK_2D[1],
     )
     blockspergrid = (
         (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
@@ -408,6 +455,8 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
         T,
         smoke,
         fuel,
+        tile_map,
+        ref_temp,
         *face_args["x_low"],
         *face_args["x_high"],
         *face_args["y_low"],

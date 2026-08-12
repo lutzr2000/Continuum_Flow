@@ -252,3 +252,10 @@ def ensure_pool_capacity(
         )
 
     return new_pool_tile_buffer
+
+
+def copy_pool(dst_pool, src_pool, active_tile_count):
+    if active_tile_count <= 0:
+        return
+
+    dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])

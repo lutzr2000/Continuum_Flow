@@ -1,16 +1,6 @@
-import math
-import numpy as np
 from numba import cuda
 
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _clamp(value, lower, upper):
-    return min(max(value, lower), upper)
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _noise_multiplier(noise_value, noise_amplitude):
-    return _clamp(1.0 + noise_amplitude * noise_value, 0.0, 2.0)
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
 
 @cuda.jit(cache=True)
@@ -21,6 +11,7 @@ def source_bc_kernel(
     T,
     smoke,
     fuel,
+    tile_map,
     source_mask,
     source_noise,
     temperature_value,
@@ -35,8 +26,20 @@ def source_bc_kernel(
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = source_mask.shape
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+        nx,
+        ny,
+        nz,
+    ) = sparse_managment.tile_to_index(source_mask.shape)
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -47,7 +50,15 @@ def source_bc_kernel(
     if not source_mask[i, j, k]:
         return
 
-    scalar_multiplier = _noise_multiplier(source_noise[i, j, k], noise_amplitude)
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
+
+    scalar_multiplier = 1.0 + noise_amplitude * source_noise[i, j, k]
+    if scalar_multiplier < 0.0:
+        scalar_multiplier = 0.0
+    elif scalar_multiplier > 2.0:
+        scalar_multiplier = 2.0
 
     if velocity_x_value != 0:
         u[i, j, k] = velocity_x_value
@@ -56,15 +67,29 @@ def source_bc_kernel(
     if velocity_z_value != 0:
         w[i, j, k] = velocity_z_value
 
-    T[i, j, k] = max(temperature_value * scalar_multiplier, 0.0)
+    temperature = temperature_value * scalar_multiplier
+    if temperature < 0.0:
+        temperature = 0.0
+    T[tile_index, local_i, local_j, local_k] = temperature
 
     if smoke_value != 0:
-        smoke[i, j, k] = min(
-            max(smoke[i, j, k] + dt * 10.0 * smoke_value * scalar_multiplier, 0.0),
-            100.0,
+        smoke_updated = (
+            smoke[tile_index, local_i, local_j, local_k]
+            + dt * 10.0 * smoke_value * scalar_multiplier
         )
+        if smoke_updated < 0.0:
+            smoke_updated = 0.0
+        elif smoke_updated > 100.0:
+            smoke_updated = 100.0
+        smoke[tile_index, local_i, local_j, local_k] = smoke_updated
+
     if fuel_value != 0:
-        fuel[i, j, k] = min(
-            max(fuel[i, j, k] + dt * 10.0 * fuel_value * scalar_multiplier, 0.0),
-            100.0,
+        fuel_updated = (
+            fuel[tile_index, local_i, local_j, local_k]
+            + dt * 10.0 * fuel_value * scalar_multiplier
         )
+        if fuel_updated < 0.0:
+            fuel_updated = 0.0
+        elif fuel_updated > 100.0:
+            fuel_updated = 100.0
+        fuel[tile_index, local_i, local_j, local_k] = fuel_updated
