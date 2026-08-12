@@ -19,6 +19,9 @@ def predict_scalar_fields_semi_lagrangian(
     delta,
     t_reference,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
     nx,
     ny,
     nz,
@@ -61,6 +64,9 @@ def predict_scalar_fields_semi_lagrangian(
         nx,
         ny,
         nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     sampled_T, sampled_smoke, sampled_fuel = (
@@ -114,6 +120,9 @@ def update_scalar_fields_maccormack(
     burn_noise_amplitude,
     t_reference,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
     nx,
     ny,
     nz,
@@ -161,6 +170,9 @@ def update_scalar_fields_maccormack(
         nx,
         ny,
         nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     x_forward, y_forward, z_forward = advection_schemes._forward_trace_position_sparse(
@@ -175,6 +187,9 @@ def update_scalar_fields_maccormack(
         nx,
         ny,
         nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     T_advected = predictor_T[tile_index, local_i, local_j, local_k]

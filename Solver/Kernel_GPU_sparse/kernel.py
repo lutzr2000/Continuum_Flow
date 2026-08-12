@@ -209,6 +209,9 @@ def apply_all_BC(
     source_masks,
     source_noise,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -227,6 +230,9 @@ def apply_all_BC(
         bc_config,
         tile_map,
         simulation.get("physics").get("temperature").get("reference_temperature"),
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     if obstacle_mask is not None:
@@ -793,6 +799,9 @@ def solver(
             source_masks,
             source_noise,
             tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
         )
 
         # ------------Vorticity-------------------
@@ -802,10 +811,13 @@ def solver(
                 v,
                 w,
                 obstacle_mask,
-                vorticity_magnitude,
-                delta,
-                tile_map,
-            )
+            vorticity_magnitude,
+            delta,
+            tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
+        )
 
         # ------------force params-------------------
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
@@ -843,6 +855,9 @@ def solver(
             dt,
             delta,
             tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
             nx,
             ny,
             nz,
@@ -882,6 +897,9 @@ def solver(
             has_turbulence_nodes,
             turbulence_config_device,
             t,
+            u_initial,
+            v_initial,
+            w_initial,
             nx,
             ny,
             nz,
@@ -916,6 +934,9 @@ def solver(
             ref_temp,
             tile_map,
             tile_shape,
+            u_initial,
+            v_initial,
+            w_initial,
             p_levels,
             b_levels,
             delta_levels,
@@ -973,6 +994,9 @@ def solver(
             delta,
             ref_temp,
             tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
             nx,
             ny,
             nz,
@@ -1006,6 +1030,9 @@ def solver(
             simulation.get("physics").get("burning").get("amplitude"),
             ref_temp,
             tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
             nx,
             ny,
             nz,

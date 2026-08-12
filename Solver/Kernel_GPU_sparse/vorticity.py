@@ -12,6 +12,9 @@ def compute_vorticity(
     omega_magnitude,
     delta,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     """
     Compute vorticity components and scalar magnitude from the velocity field.
@@ -51,30 +54,30 @@ def compute_vorticity(
     half_inv_delta = 0.5 / delta
 
     du_dy = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial)
     ) * half_inv_delta
     du_dz = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial)
     ) * half_inv_delta
 
     dv_dx = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial)
     ) * half_inv_delta
     dv_dz = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial)
     ) * half_inv_delta
 
     dw_dx = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial)
     ) * half_inv_delta
     dw_dy = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial)
     ) * half_inv_delta
 
     wx = dw_dy - dv_dz
@@ -96,7 +99,10 @@ def apply_vorticity_confinement(
     k,
     delta,
     vorticity_strength,
-    tile_map
+    tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     """
     Compute the local vorticity confinement force in one GPU cell.
@@ -154,30 +160,30 @@ def apply_vorticity_confinement(
     nz_dir = grad_z / grad_length
 
     du_dy = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial)
     ) * half_inv_delta
     du_dz = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial)
     ) * half_inv_delta
 
     dv_dx = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial)
     ) * half_inv_delta
     dv_dz = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial)
     ) * half_inv_delta
 
     dw_dx = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial)
     ) * half_inv_delta
     dw_dy = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial)
     ) * half_inv_delta
 
     wx = dw_dy - dv_dz

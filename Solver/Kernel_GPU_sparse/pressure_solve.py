@@ -20,6 +20,9 @@ def pressure_equation_right_side(
     delta,
     rho,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     """
     CUDA kernel that computes the right hand side of the pressure Poisson equation.
@@ -57,18 +60,18 @@ def pressure_equation_right_side(
     rho_over_dt = rho / dt
 
     du_dx = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, u_initial)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, u_initial)
     ) * half_inv_delta
 
     dv_dy = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, v_initial)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, v_initial)
     ) * half_inv_delta
 
     dw_dz = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, w_initial)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, w_initial)
     ) * half_inv_delta
 
     divergence = du_dx + dv_dy + dw_dz
@@ -864,6 +867,9 @@ def pressure_poisson_multigrid(
     t_reference,
     tile_map,
     tile_shape,
+    u_initial,
+    v_initial,
+    w_initial,
     p_levels,
     b_levels,
     delta_levels,
@@ -884,6 +890,9 @@ def pressure_poisson_multigrid(
         delta,
         rho,
         tile_map,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     remove_rhs_mean(

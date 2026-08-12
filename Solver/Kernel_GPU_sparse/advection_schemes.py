@@ -350,7 +350,20 @@ def _prepare_trilinear_coords(x, y, z, nx, ny, nz):
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _backtrace_position_sparse(
-    u, v, w, tile_map, x_start, y_start, z_start, dt_over_delta, nx, ny, nz
+    u,
+    v,
+    w,
+    tile_map,
+    x_start,
+    y_start,
+    z_start,
+    dt_over_delta,
+    nx,
+    ny,
+    nz,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     n_substeps = 1
     substep_dt = dt_over_delta / n_substeps
@@ -360,7 +373,19 @@ def _backtrace_position_sparse(
 
     for _ in range(n_substeps):
         u_sample, v_sample, w_sample = _sample_trilinear_vec3_sparse(
-            u, v, w, tile_map, x_pos, y_pos, z_pos, nx, ny, nz, 0.0, 0.0, 0.0
+            u,
+            v,
+            w,
+            tile_map,
+            x_pos,
+            y_pos,
+            z_pos,
+            nx,
+            ny,
+            nz,
+            u_initial,
+            v_initial,
+            w_initial,
         )
         x_pos -= substep_dt * u_sample
         y_pos -= substep_dt * v_sample
@@ -371,10 +396,36 @@ def _backtrace_position_sparse(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _forward_trace_position_sparse(
-    u, v, w, tile_map, x_start, y_start, z_start, dt_over_delta, nx, ny, nz
+    u,
+    v,
+    w,
+    tile_map,
+    x_start,
+    y_start,
+    z_start,
+    dt_over_delta,
+    nx,
+    ny,
+    nz,
+    u_initial,
+    v_initial,
+    w_initial,
 ):
     return _backtrace_position_sparse(
-        u, v, w, tile_map, x_start, y_start, z_start, -dt_over_delta, nx, ny, nz
+        u,
+        v,
+        w,
+        tile_map,
+        x_start,
+        y_start,
+        z_start,
+        -dt_over_delta,
+        nx,
+        ny,
+        nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
 
@@ -389,6 +440,9 @@ def advect_velocity_semi_lagrangian(
     dt,
     delta,
     tile_map,
+    u_initial,
+    v_initial,
+    w_initial,
     nx,
     ny,
     nz,
@@ -416,11 +470,36 @@ def advect_velocity_semi_lagrangian(
         return
 
     x_depart, y_depart, z_depart = _backtrace_position_sparse(
-        u, v, w, tile_map, float(i), float(j), float(k), dt / delta, nx, ny, nz
+        u,
+        v,
+        w,
+        tile_map,
+        float(i),
+        float(j),
+        float(k),
+        dt / delta,
+        nx,
+        ny,
+        nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     sampled_u, sampled_v, sampled_w = _sample_trilinear_vec3_sparse(
-        u, v, w, tile_map, x_depart, y_depart, z_depart, nx, ny, nz, 0.0, 0.0, 0.0
+        u,
+        v,
+        w,
+        tile_map,
+        x_depart,
+        y_depart,
+        z_depart,
+        nx,
+        ny,
+        nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     advected_u[tile_index, local_i, local_j, local_k] = sampled_u
@@ -461,6 +540,9 @@ def update_velocity_maccormack(
     has_turbulence_nodes,
     turbulence_config,
     t,
+    u_initial,
+    v_initial,
+    w_initial,
     nx,
     ny,
     nz,
@@ -518,6 +600,9 @@ def update_velocity_maccormack(
         nx,
         ny,
         nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     x_forward, y_forward, z_forward = _forward_trace_position_sparse(
@@ -532,6 +617,9 @@ def update_velocity_maccormack(
         nx,
         ny,
         nz,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     advected_u = predictor_u[tile_index, local_i, local_j, local_k]
@@ -549,9 +637,9 @@ def update_velocity_maccormack(
         nx,
         ny,
         nz,
-        0.0,
-        0.0,
-        0.0,
+        u_initial,
+        v_initial,
+        w_initial,
     )
 
     corrected_u = advected_u + 0.5 * (u_center - reverse_u)
@@ -563,13 +651,13 @@ def update_velocity_maccormack(
     )
 
     u_lower, u_upper = _sample_cell_extrema_inner_sparse(
-        u, tile_map, x0, y0, z0, x1, y1, z1, 0.0
+        u, tile_map, x0, y0, z0, x1, y1, z1, u_initial
     )
     v_lower, v_upper = _sample_cell_extrema_inner_sparse(
-        v, tile_map, x0, y0, z0, x1, y1, z1, 0.0
+        v, tile_map, x0, y0, z0, x1, y1, z1, v_initial
     )
     w_lower, w_upper = _sample_cell_extrema_inner_sparse(
-        w, tile_map, x0, y0, z0, x1, y1, z1, 0.0
+        w, tile_map, x0, y0, z0, x1, y1, z1, w_initial
     )
 
     corrected_u = _clamp(corrected_u, u_lower, u_upper)
@@ -577,19 +665,19 @@ def update_velocity_maccormack(
     corrected_w = _clamp(corrected_w, w_lower, w_upper)
 
     diffusion_x = diffusion_coeff * (
-        (sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, u_initial) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, u_initial))
+        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial))
+        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial))
     )
     diffusion_y = diffusion_coeff * (
-        (sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial))
+        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, v_initial) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, v_initial))
+        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial))
     )
     diffusion_z = diffusion_coeff * (
-        (sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0))
-        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial))
+        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial))
+        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, w_initial) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, w_initial))
     )
 
     if vorticity_strength > 0.0:
@@ -605,6 +693,9 @@ def update_velocity_maccormack(
             delta,
             vorticity_strength,
             tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
         )
 
     if has_swirl_nodes:

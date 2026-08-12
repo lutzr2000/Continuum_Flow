@@ -96,6 +96,9 @@ def _apply_face_state(
     fuel,
     tile_map,
     ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
     i,
     j,
     k,
@@ -126,9 +129,9 @@ def _apply_face_state(
     src_tile_index = tile_map[src_tile_i, src_tile_j, src_tile_k]
 
     if src_tile_index == -1:
-        neighbor_u = 0.0
-        neighbor_v = 0.0
-        neighbor_w = 0.0
+        neighbor_u = u_initial
+        neighbor_v = v_initial
+        neighbor_w = w_initial
         neighbor_T = temp_value if use_temp else ref_temp
         neighbor_smoke = 0.0
         neighbor_fuel = 0.0
@@ -213,6 +216,9 @@ def _domain_bc_kernel(
     fuel,
     tile_map,
     ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
     x_low_mode,
     x_low_u,
     x_low_v,
@@ -276,6 +282,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -302,6 +311,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -329,6 +341,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -355,6 +370,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -382,6 +400,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -408,6 +429,9 @@ def _domain_bc_kernel(
             fuel,
             tile_map,
             ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -425,7 +449,21 @@ def _domain_bc_kernel(
         )
 
 
-def domain_bc(u, v, w, p, T, smoke, fuel, bc_config, tile_map, ref_temp):
+def domain_bc(
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    bc_config,
+    tile_map,
+    ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
+):
     """
     Apply all configured domain boundary conditions to the GPU field state.
 
@@ -469,6 +507,9 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config, tile_map, ref_temp):
         fuel,
         tile_map,
         ref_temp,
+        u_initial,
+        v_initial,
+        w_initial,
         *face_args["x_low"],
         *face_args["x_high"],
         *face_args["y_low"],
