@@ -2,6 +2,8 @@ from numba import cuda
 
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
+tile_size = kernel_config.TILE_SIZE
+
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
 
@@ -121,7 +123,6 @@ def _apply_face_state(
     neighbor_u = u[src_i, src_j, src_k]
     neighbor_v = v[src_i, src_j, src_k]
     neighbor_w = w[src_i, src_j, src_k]
-    tile_size = kernel_config.TILE_SIZE
 
     src_tile_i = src_i // tile_size
     src_tile_j = src_j // tile_size

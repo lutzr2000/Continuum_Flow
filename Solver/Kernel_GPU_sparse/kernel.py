@@ -36,9 +36,21 @@ def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map
         "v": v,
         "w": w,
         "pressure": p,
-        "temperature": temperature,
-        "smoke": smoke,
-        "fuel": fuel,
+        "temperature": {
+            "data": temperature,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "smoke": {
+            "data": smoke,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "fuel": {
+            "data": fuel,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
         "flame": {
             "data": flame,
             "tile_map": tile_map,
@@ -426,6 +438,12 @@ def solver(
     scratch_A_y = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     scratch_A_z = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
 
+    scalar_scratch_A = cuda.to_device(
+        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+    )
+    scalar_scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    scalar_scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
     # vortictiy
     vorticity_magnitude = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
 
@@ -583,6 +601,25 @@ def solver(
                 )
                 flame = sparse_managment.ensure_pool_capacity(
                     flame, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
+                )
+
+                scalar_scratch_A = sparse_managment.ensure_pool_capacity(
+                    scalar_scratch_A,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    ref_temp,
+                )
+                scalar_scratch_B = sparse_managment.ensure_pool_capacity(
+                    scalar_scratch_B,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
+                )
+                scalar_scratch_C = sparse_managment.ensure_pool_capacity(
+                    scalar_scratch_C,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
                 )
 
                 sparse_tile_capacity = next_sparse_tile_capacity
@@ -827,10 +864,11 @@ def solver(
             v,
             w,
             dt,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scalar_scratch_A,
+            scalar_scratch_B,
+            scalar_scratch_C,
             delta,
+            ref_temp,
             tile_map,
         )
         scalar_update.update_scalar_fields_maccormack[
@@ -839,9 +877,9 @@ def solver(
             temperature,
             smoke,
             fuel,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scalar_scratch_A,
+            scalar_scratch_B,
+            scalar_scratch_C,
             u,
             v,
             w,

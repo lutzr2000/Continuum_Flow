@@ -2,11 +2,14 @@ from numba import cuda
 
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 from Solver.Kernel_GPU_sparse.vorticity import apply_vorticity_confinement
+import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
+tile_size = kernel_config.TILE_SIZE
 
 @cuda.jit(device=True, inline=True, cache=True)
 def buoyancy_approximation(
     T,
+    tile_map,
     i,
     j,
     k,
@@ -17,7 +20,10 @@ def buoyancy_approximation(
     computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
     """
     g = 9.81
-    return g * buoyancy_factor * (T[i, j, k] - t_reference)
+
+    temperature = _sample_sparse_cell(T, tile_map, i, j, k, t_reference)
+
+    return g * buoyancy_factor * (temperature - t_reference)
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -210,6 +216,96 @@ def apply_turbulence_forces(
         Fz += amplitude * noise
 
     return Fx, Fy, Fz
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return default_value
+
+    local_i = i - tile_i * tile_size
+    local_j = j - tile_j * tile_size
+    local_k = k - tile_k * tile_size
+
+    return field[tile_index, local_i, local_j, local_k]
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_trilinear_inner_sparse(field, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_value):
+    c000 = _sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
+    c100 = _sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
+    c010 = _sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
+    c110 = _sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
+    c001 = _sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
+    c101 = _sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
+    c011 = _sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
+    c111 = _sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+
+    c00 = c000 + tx * (c100 - c000)
+    c10 = c010 + tx * (c110 - c010)
+    c01 = c001 + tx * (c101 - c001)
+    c11 = c011 + tx * (c111 - c011)
+
+    c0 = c00 + ty * (c10 - c00)
+    c1 = c01 + ty * (c11 - c01)
+    return c0 + tz * (c1 - c0)
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_cell_extrema_inner_sparse(field, tile_map, x0, y0, z0, x1, y1, z1, default_value):
+    c000 = _sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
+    c100 = _sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
+    c010 = _sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
+    c110 = _sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
+    c001 = _sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
+    c101 = _sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
+    c011 = _sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
+    c111 = _sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+
+    lower = min(
+        min(min(c000, c100), min(c010, c110)),
+        min(min(c001, c101), min(c011, c111)),
+    )
+    upper = max(
+        max(max(c000, c100), max(c010, c110)),
+        max(max(c001, c101), max(c011, c111)),
+    )
+    return lower, upper
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_trilinear_vec3_sparse(
+    field_x,
+    field_y,
+    field_z,
+    tile_map,
+    x,
+    y,
+    z,
+    nx,
+    ny,
+    nz,
+    default_x,
+    default_y,
+    default_z,
+):
+    x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
+
+    sample_x = _sample_trilinear_inner_sparse(
+        field_x, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_x
+    )
+    sample_y = _sample_trilinear_inner_sparse(
+        field_y, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_y
+    )
+    sample_z = _sample_trilinear_inner_sparse(
+        field_z, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_z
+    )
+    return sample_x, sample_y, sample_z
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -664,7 +760,10 @@ def update_velocity_maccormack(
     # Buoyancy
     Fz += buoyancy_approximation(
         temperature,
-        i, j, k,
+        tile_map,
+        i,
+        j,
+        k,
         buoyancy_factor,
         t_reference,
     )

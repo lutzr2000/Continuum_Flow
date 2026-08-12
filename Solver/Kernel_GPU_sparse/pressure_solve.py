@@ -427,7 +427,8 @@ def add_artifical_divergence(
     
     rho_over_dt = rho / dt
 
-    thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
+    #thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
+    thermal_divergence = 0 #temporary !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     extra_pressure_term = 0.0
     source_count = source_masks.shape[0]
     for source_idx in range(source_count):

@@ -5,21 +5,15 @@ from multiprocessing import shared_memory
 import numpy as np
 
 
-def _reconstruct_sparse_flame_to_dense_host(flame_field, output_array):
-    """
-    Expand the sparse flame tile pool into the dense host output buffer.
-
-    This uses no extra VRAM. The dense output buffer already exists in shared
-    memory; only temporary host copies of the sparse pool and tile map are made.
-    """
-    tile_map_device = flame_field["tile_map"]
-    sparse_flame_device = flame_field["data"]
-    tile_size = int(flame_field["tile_size"])
+def _reconstruct_sparse_field_to_dense_host(field_info, output_array):
+    tile_map_device = field_info["tile_map"]
+    sparse_field_device = field_info["data"]
+    tile_size = int(field_info["tile_size"])
 
     output_array.fill(0.0)
 
     tile_map_host = tile_map_device.copy_to_host()
-    sparse_flame_host = sparse_flame_device.copy_to_host()
+    sparse_field_host = sparse_field_device.copy_to_host()
 
     nx, ny, nz = output_array.shape
     tiles_x, tiles_y, tiles_z = tile_map_host.shape
@@ -53,7 +47,7 @@ def _reconstruct_sparse_flame_to_dense_host(flame_field, output_array):
                     cell_i_start:cell_i_end,
                     cell_j_start:cell_j_end,
                     cell_k_start:cell_k_end,
-                ] = sparse_flame_host[
+                ] = sparse_field_host[
                     tile_index,
                     : cell_i_end - cell_i_start,
                     : cell_j_end - cell_j_start,
@@ -166,8 +160,8 @@ def enqueue_device_output(
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
-        if variable_name == "flame" and isinstance(source_field, dict):
-            _reconstruct_sparse_flame_to_dense_host(
+        if isinstance(source_field, dict):
+            _reconstruct_sparse_field_to_dense_host(
                 source_field,
                 fields[variable_name]["array"],
             )
