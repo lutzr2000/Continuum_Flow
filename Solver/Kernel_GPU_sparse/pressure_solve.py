@@ -4,7 +4,6 @@ from numba import cuda
 import Solver.Kernel_GPU_sparse.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
-from Solver.Kernel_GPU_sparse.advection_schemes import _sample_sparse_cell
 
 REDUCTION_THREADS_PER_BLOCK = (
     kernel_config.REDUCTION_THREADS_PER_BLOCK
@@ -58,18 +57,18 @@ def pressure_equation_right_side(
     rho_over_dt = rho / dt
 
     du_dx = (
-        _sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0)
-        - _sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0)
+        sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0)
+        - sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0)
     ) * half_inv_delta
 
     dv_dy = (
-        _sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0)
-        - _sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0)
+        sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0)
+        - sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0)
     ) * half_inv_delta
 
     dw_dz = (
-        _sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0)
-        - _sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0)
+        sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0)
+        - sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0)
     ) * half_inv_delta
 
     divergence = du_dx + dv_dy + dw_dz

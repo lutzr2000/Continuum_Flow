@@ -2,9 +2,6 @@ from numba import cuda
 
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 from Solver.Kernel_GPU_sparse.vorticity import apply_vorticity_confinement
-import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
-
-tile_size = kernel_config.TILE_SIZE
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -22,7 +19,7 @@ def buoyancy_approximation(
     """
     g = 9.81
 
-    temperature = _sample_sparse_cell(T, tile_map, i, j, k, t_reference)
+    temperature = sparse_managment._sample_sparse_cell(T, tile_map, i, j, k, t_reference)
 
     return g * buoyancy_factor * (temperature - t_reference)
 
@@ -220,34 +217,17 @@ def apply_turbulence_forces(
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
-    tile_i = i // tile_size
-    tile_j = j // tile_size
-    tile_k = k // tile_size
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
-    if tile_index == -1:
-        return default_value
-
-    local_i = i - tile_i * tile_size
-    local_j = j - tile_j * tile_size
-    local_k = k - tile_k * tile_size
-
-    return field[tile_index, local_i, local_j, local_k]
-
-
-@cuda.jit(device=True, inline=True, cache=True)
 def _sample_trilinear_inner_sparse(
     field, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_value
 ):
-    c000 = _sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
-    c100 = _sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
-    c010 = _sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
-    c110 = _sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
-    c001 = _sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
-    c101 = _sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
-    c011 = _sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
-    c111 = _sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+    c000 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
+    c100 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
+    c010 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
+    c110 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
+    c001 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
+    c101 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
+    c011 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
+    c111 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
 
     c00 = c000 + tx * (c100 - c000)
     c10 = c010 + tx * (c110 - c010)
@@ -263,14 +243,14 @@ def _sample_trilinear_inner_sparse(
 def _sample_cell_extrema_inner_sparse(
     field, tile_map, x0, y0, z0, x1, y1, z1, default_value
 ):
-    c000 = _sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
-    c100 = _sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
-    c010 = _sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
-    c110 = _sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
-    c001 = _sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
-    c101 = _sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
-    c011 = _sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
-    c111 = _sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+    c000 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
+    c100 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
+    c010 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
+    c110 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
+    c001 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
+    c101 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
+    c011 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
+    c111 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
 
     lower = min(
         min(min(c000, c100), min(c010, c110)),
@@ -597,19 +577,19 @@ def update_velocity_maccormack(
     corrected_w = _clamp(corrected_w, w_lower, w_upper)
 
     diffusion_x = diffusion_coeff * (
-        (_sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0) - 2.0 * u_center + _sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0))
-        + (_sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0) - 2.0 * u_center + _sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0))
-        + (_sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0) - 2.0 * u_center + _sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, 0.0) - 2.0 * u_center + sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, 0.0))
     )
     diffusion_y = diffusion_coeff * (
-        (_sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0) - 2.0 * v_center + _sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0))
-        + (_sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0) - 2.0 * v_center + _sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0))
-        + (_sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0) - 2.0 * v_center + _sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, 0.0) - 2.0 * v_center + sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, 0.0))
     )
     diffusion_z = diffusion_coeff * (
-        (_sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0) - 2.0 * w_center + _sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0))
-        + (_sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0) - 2.0 * w_center + _sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0))
-        + (_sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0) - 2.0 * w_center + _sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0))
+        (sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, 0.0))
+        + (sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, 0.0) - 2.0 * w_center + sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, 0.0))
     )
 
     if vorticity_strength > 0.0:

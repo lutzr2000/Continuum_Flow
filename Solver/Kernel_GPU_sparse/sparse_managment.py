@@ -38,6 +38,25 @@ def tile_to_index(field_shape):
     )
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
+    tile_size = kernel_config.TILE_SIZE
+
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return default_value
+
+    local_i = i - tile_i * tile_size
+    local_j = j - tile_j * tile_size
+    local_k = k - tile_k * tile_size
+
+    return field[tile_index, local_i, local_j, local_k]
+
+
 @cuda.jit(cache=True)
 def build_activity_mask(
     temperature,
