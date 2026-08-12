@@ -15,6 +15,7 @@ def obstacle_bc_kernel(
     obstacle_velocity_y,
     obstacle_velocity_z,
     tile_map,
+    use_obstacle_velocity,
 ):
     """
     Apply obstacle boundary conditions.
@@ -44,15 +45,20 @@ def obstacle_bc_kernel(
     if tile_index == -1:
         return
 
-    u[tile_index, local_i, local_j, local_k] = obstacle_velocity_x[
-        tile_index, local_i, local_j, local_k
-    ]
-    v[tile_index, local_i, local_j, local_k] = obstacle_velocity_y[
-        tile_index, local_i, local_j, local_k
-    ]
-    w[tile_index, local_i, local_j, local_k] = obstacle_velocity_z[
-        tile_index, local_i, local_j, local_k
-    ]
+    if use_obstacle_velocity:
+        u[tile_index, local_i, local_j, local_k] = obstacle_velocity_x[
+            tile_index, local_i, local_j, local_k
+        ]
+        v[tile_index, local_i, local_j, local_k] = obstacle_velocity_y[
+            tile_index, local_i, local_j, local_k
+        ]
+        w[tile_index, local_i, local_j, local_k] = obstacle_velocity_z[
+            tile_index, local_i, local_j, local_k
+        ]
+    else:
+        u[tile_index, local_i, local_j, local_k] = 0.0
+        v[tile_index, local_i, local_j, local_k] = 0.0
+        w[tile_index, local_i, local_j, local_k] = 0.0
 
     smoke[tile_index, local_i, local_j, local_k] = 0.0
     fuel[tile_index, local_i, local_j, local_k] = 0.0

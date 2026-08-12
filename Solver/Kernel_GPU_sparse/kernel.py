@@ -212,6 +212,7 @@ def apply_all_BC(
     u_initial,
     v_initial,
     w_initial,
+    use_obstacle_velocity,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -254,6 +255,7 @@ def apply_all_BC(
             obstacle_velocity_y,
             obstacle_velocity_z,
             tile_map,
+            use_obstacle_velocity,
         )
 
     source_count = int(source_masks.shape[0])
@@ -798,6 +800,7 @@ def solver(
             u_initial,
             v_initial,
             w_initial,
+            animated_obstacles
         )
 
         # ------------Clear scratch-------------------
