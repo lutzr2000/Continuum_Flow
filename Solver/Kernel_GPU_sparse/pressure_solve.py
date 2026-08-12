@@ -405,7 +405,7 @@ def add_artifical_divergence(
         nx,
         ny,
         nz,
-    ) = sparse_managment.tile_to_index(T.shape)
+    ) = sparse_managment.tile_to_index(b.shape) 
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -424,11 +424,13 @@ def add_artifical_divergence(
         or k >= nz - 1
     ):
         return
-    
+
     rho_over_dt = rho / dt
 
-    #thermal_divergence = expansion_rate * (T[i, j, k] - t_reference)
-    thermal_divergence = 0 #temporary !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    thermal_divergence = expansion_rate * (
+        T[tile_index, local_i, local_j, local_k] - t_reference
+    )
+
     extra_pressure_term = 0.0
     source_count = source_masks.shape[0]
     for source_idx in range(source_count):
@@ -441,7 +443,6 @@ def add_artifical_divergence(
         )
         if abs(source_extra_pressure) > abs(extra_pressure_term):
             extra_pressure_term = source_extra_pressure
-
 
     b[i, j, k] -= rho_over_dt * (thermal_divergence + extra_pressure_term)
 
