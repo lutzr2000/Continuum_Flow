@@ -696,6 +696,9 @@ def update_velocity_maccormack(
             u_initial,
             v_initial,
             w_initial,
+            nx,
+            ny,
+            nz,
         )
 
     if has_swirl_nodes:

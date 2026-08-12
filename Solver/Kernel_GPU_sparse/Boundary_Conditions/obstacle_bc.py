@@ -44,9 +44,15 @@ def obstacle_bc_kernel(
     if tile_index == -1:
         return
 
-    u[tile_index, local_i, local_j, local_k] = obstacle_velocity_x[i, j, k]
-    v[tile_index, local_i, local_j, local_k] = obstacle_velocity_y[i, j, k]
-    w[tile_index, local_i, local_j, local_k] = obstacle_velocity_z[i, j, k]
+    u[tile_index, local_i, local_j, local_k] = obstacle_velocity_x[
+        tile_index, local_i, local_j, local_k
+    ]
+    v[tile_index, local_i, local_j, local_k] = obstacle_velocity_y[
+        tile_index, local_i, local_j, local_k
+    ]
+    w[tile_index, local_i, local_j, local_k] = obstacle_velocity_z[
+        tile_index, local_i, local_j, local_k
+    ]
 
     smoke[tile_index, local_i, local_j, local_k] = 0.0
     fuel[tile_index, local_i, local_j, local_k] = 0.0

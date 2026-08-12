@@ -427,21 +427,15 @@ def solver(
 
     # velocity
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
-    u = cuda.to_device(
-        np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
-    )
+    u = cuda.to_device(np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE))
     u_work = cuda.to_device(
         np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
     )
-    v = cuda.to_device(
-        np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
-    )
+    v = cuda.to_device(np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE))
     v_work = cuda.to_device(
         np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
     )
-    w = cuda.to_device(
-        np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
-    )
+    w = cuda.to_device(np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE))
     w_work = cuda.to_device(
         np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
     )
@@ -459,6 +453,11 @@ def solver(
     fuel_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     flame = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
+    # vorticity
+    vorticity_magnitude = cuda.to_device(
+        np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE)
+    )
+
     # scratch
     scratch_A = cuda.to_device(
         np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
@@ -466,22 +465,22 @@ def solver(
     scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
-    #--------------- dense -------------------#
+    # --------------- dense -------------------#
     # pressure
     p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    pressure_rhs = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
     pressure_rhs_partial_sums = cuda.device_array(
         kernel_config.MAX_REDUCTION_BLOCKS,
         dtype=np.float32,
     )
     pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
 
-    # scratch
-    scratch_A_x = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    scratch_A_y = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    scratch_A_z = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    # vortictiy
-    vorticity_magnitude = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    # multigrid levels
+    p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
+        shape,
+        delta,
+        min_size=8,
+    )
 
     # masks
     obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
@@ -506,13 +505,6 @@ def solver(
     )
     source_noise = cuda.to_device(
         np.ascontiguousarray(source_noise_host, dtype=np.float32)
-    )
-
-    # multigrid levels
-    p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
-        shape,
-        delta,
-        min_size=8,
     )
 
     # ------------intitialise------------------
@@ -696,6 +688,13 @@ def solver(
                     0.0,
                 )
 
+                vorticity_magnitude = sparse_managment.ensure_pool_capacity(
+                    vorticity_magnitude,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
+                )
+
                 sparse_tile_capacity = next_sparse_tile_capacity
 
                 print(
@@ -708,7 +707,7 @@ def solver(
         active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
 
         velocity_maxima.copy_to_device(velocity_maxima_host_zeros)
-        
+
         dt = time_step.compute_new_timestep_gpu(
             u,
             v,
@@ -722,10 +721,6 @@ def solver(
         )
 
         # ------------Clear scratch-------------------
-        scratch_A_x.copy_to_device(zero_levels[0])
-        scratch_A_y.copy_to_device(zero_levels[0])
-        scratch_A_z.copy_to_device(zero_levels[0])
-
         sparse_managment.reset_pool(
             scratch_A,
             zero_pool,
@@ -774,9 +769,10 @@ def solver(
                 origin_x,
                 origin_y,
                 origin_z,
-                scratch_A_x,
-                scratch_A_y,
-                scratch_A_z,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                tile_map,
             )
 
         # ------------BC-------------------
@@ -793,15 +789,32 @@ def solver(
             flame,
             dt,
             obstacle_mask,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             source_masks,
             source_noise,
             tile_map,
             u_initial,
             v_initial,
             w_initial,
+        )
+
+        # ------------Clear scratch-------------------
+        sparse_managment.reset_pool(
+            scratch_A,
+            zero_pool,
+            active_sparse_tile_count,
+        )
+        sparse_managment.reset_pool(
+            scratch_B,
+            zero_pool,
+            active_sparse_tile_count,
+        )
+        sparse_managment.reset_pool(
+            scratch_C,
+            zero_pool,
+            active_sparse_tile_count,
         )
 
         # ------------Vorticity-------------------
@@ -811,13 +824,16 @@ def solver(
                 v,
                 w,
                 obstacle_mask,
-            vorticity_magnitude,
-            delta,
-            tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
-        )
+                vorticity_magnitude,
+                delta,
+                tile_map,
+                u_initial,
+                v_initial,
+                w_initial,
+                nx,
+                ny,
+                nz,
+            )
 
         # ------------force params-------------------
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
@@ -922,7 +938,7 @@ def solver(
             w,
             p,
             temperature,
-            scratch_A_x,
+            pressure_rhs,
             dt,
             source_masks,
             extra_pressure,
@@ -977,7 +993,7 @@ def solver(
             fuel,
             active_sparse_tile_count,
         )
-        
+
         scalar_update.predict_scalar_fields_semi_lagrangian[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
