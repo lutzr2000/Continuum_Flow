@@ -470,7 +470,7 @@ def solver(
     # --------------- dense -------------------#
     # pressure
     p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    pressure_rhs = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    pressure_rhs = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs_partial_sums = cuda.device_array(
         kernel_config.MAX_REDUCTION_BLOCKS,
         dtype=np.float32,
@@ -692,6 +692,13 @@ def solver(
 
                 vorticity_magnitude = sparse_managment.ensure_pool_capacity(
                     vorticity_magnitude,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
+                )
+
+                pressure_rhs = sparse_managment.ensure_pool_capacity(
+                    pressure_rhs,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
                     0.0,
@@ -963,6 +970,9 @@ def solver(
             pressure_rhs_partial_sums,
             pressure_rhs_sum,
             zero_levels,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Velocity projection-------------------
