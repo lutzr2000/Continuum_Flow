@@ -1,6 +1,7 @@
 from numba import cuda
 
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
+import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 
 tile_size = kernel_config.TILE_SIZE
 
@@ -52,18 +53,55 @@ def convert_bc_config_format(bc_config):
 
 
 @cuda.jit(cache=True)
-def pressure_poisson_apply_neumann_bcs(p):
-    """
-    applies the hard-coded zero-gradient pressure boundary conditions on all
-    six domain faces on the GPU.
-
-    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
-    meaning the pressure at the boundary is copied from the adjacent interior
-    cell. This kernel writes the boundary values after each iteration so
-    the next iteration starts from a pressure field with valid boundary values.
-
-    """
+def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
     i, j, k = cuda.grid(3)
+
+    if i >= nx or j >= ny or k >= nz:
+        return
+
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
+
+    local_i = i - tile_i * tile_size
+    local_j = j - tile_j * tile_size
+    local_k = k - tile_k * tile_size
+
+    if i == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, 1, j, k, 0.0
+        )
+    elif i == nx - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, nx - 2, j, k, 0.0
+        )
+
+    if j == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, 1, k, 0.0
+        )
+    elif j == ny - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, ny - 2, k, 0.0
+        )
+
+    if k == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, j, 1, 0.0
+        )
+    elif k == nz - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, j, nz - 2, 0.0
+        )
+
+@cuda.jit(cache=True)
+def pressure_poisson_apply_neumann_bcs_dense(p):
+    i, j, k = cuda.grid(3)
+
     nx, ny, nz = p.shape
 
     if i >= nx or j >= ny or k >= nz:
@@ -83,7 +121,6 @@ def pressure_poisson_apply_neumann_bcs(p):
         p[i, j, k] = p[i, j, 1]
     elif k == nz - 1:
         p[i, j, k] = p[i, j, nz - 2]
-
 
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(
@@ -196,7 +233,9 @@ def _apply_face_state(
             0.0 if axis == 2 else neighbor_w
         )
 
-    p[i, j, k] = p[src_i, src_j, src_k]
+    p[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+        sparse_managment._sample_sparse_cell(p, tile_map, src_i, src_j, src_k, 0.0)
+    )
 
     T[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
         temp_value if use_temp else neighbor_T
@@ -255,6 +294,9 @@ def _domain_bc_kernel(
     z_high_w,
     z_high_temp,
     z_high_use_temp,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply all configured domain face boundary conditions in one 3D launch.
@@ -263,7 +305,6 @@ def _domain_bc_kernel(
     face condition for corners and edges in the same fixed side order.
     """
     i, j, k = cuda.grid(3)
-    nx, ny, nz = p.shape
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -463,6 +504,9 @@ def domain_bc(
     u_initial,
     v_initial,
     w_initial,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply all configured domain boundary conditions to the GPU field state.
@@ -492,9 +536,9 @@ def domain_bc(
         kernel_config.THREADS_PER_BLOCK_2D[1],
     )
     blockspergrid = (
-        (p.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (p.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (p.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+        (nx + threadsperblock[0] - 1) // threadsperblock[0],
+        (ny + threadsperblock[1] - 1) // threadsperblock[1],
+        (nz + threadsperblock[2] - 1) // threadsperblock[2],
     )
 
     _domain_bc_kernel[blockspergrid, threadsperblock](
@@ -516,6 +560,9 @@ def domain_bc(
         *face_args["y_high"],
         *face_args["z_low"],
         *face_args["z_high"],
+        nx,
+        ny,
+        nz,
     )
 
     return u, v, w, p, T, smoke, fuel

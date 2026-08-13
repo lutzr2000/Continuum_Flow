@@ -253,7 +253,7 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map, nx, ny, nz):
 
 
 @cuda.jit(cache=True)
-def reset_inactive_pressure(p, tile_map):
+def reset_inactive_pressure(p, tile_map, nx, ny, nz):
     (
         tile_i,
         tile_j,
@@ -264,21 +264,20 @@ def reset_inactive_pressure(p, tile_map):
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(p.shape)
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
-
-    if tile_index == -1:
-        return
+        _,
+        _,
+        _,
+    ) = sparse_managment.tile_to_index((nx, ny, nz))
 
     if i >= nx or j >= ny or k >= nz:
         return
 
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
+
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        p[i, j, k] = 0.0
+        p[tile_index, local_i, local_j, local_k] = 0.0
 
 
 def remove_rhs_mean(
@@ -362,7 +361,20 @@ def remove_rhs_mean(
 
 
 @cuda.jit(cache=True)
-def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho, tile_map):
+def project_velocity_kernel(
+    u,
+    v,
+    w,
+    p,
+    obstacle_mask,
+    dt,
+    delta,
+    rho,
+    tile_map,
+    nx,
+    ny,
+    nz,
+):
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
 
@@ -379,13 +391,15 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho, tile_map)
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(p.shape)
+        _,
+        _,
+        _,
+    ) = sparse_managment.tile_to_index((nx, ny, nz))
+
+    if i >= nx or j >= ny or k >= nz:
+        return
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
-
     if tile_index == -1:
         return
 
@@ -397,15 +411,16 @@ def project_velocity_kernel(u, v, w, p, obstacle_mask, dt, delta, rho, tile_map)
 
     pressure_coeff = dt / (2.0 * rho * delta)
 
-    u[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
-        p[i + 1, j, k] - p[i - 1, j, k]
-    )
-    v[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
-        p[i, j + 1, k] - p[i, j - 1, k]
-    )
-    w[tile_index, local_i, local_j, local_k] -= pressure_coeff * (
-        p[i, j, k + 1] - p[i, j, k - 1]
-    )
+    px1 = sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
+    px0 = sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
+    py1 = sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
+    py0 = sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
+    pz1 = sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
+    pz0 = sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
+
+    u[tile_index, local_i, local_j, local_k] -= pressure_coeff * (px1 - px0)
+    v[tile_index, local_i, local_j, local_k] -= pressure_coeff * (py1 - py0)
+    w[tile_index, local_i, local_j, local_k] -= pressure_coeff * (pz1 - pz0)
 
 
 @cuda.jit(cache=True)
@@ -478,11 +493,10 @@ def add_artifical_divergence(
 
 
 @cuda.jit(cache=True)
-def mg_restrict_residual_8cell(p, b, coarse_b, delta):
+def mg_restrict_residual_8cell(p, b, coarse_b, delta, nx, ny, nz):
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
-    nx, ny, nz = p.shape
 
     if I >= cnx or J >= cny or K >= cnz:
         return
@@ -536,7 +550,7 @@ def mg_restrict_residual_8cell(p, b, coarse_b, delta):
 def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_shape):
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_e.shape
-    fnx, fny, fnz = fine_p.shape
+    fnx, fny, fnz = field_shape
 
     if I >= cnx or J >= cny or K >= cnz:
         return
@@ -559,8 +573,12 @@ def mg_prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_sh
                     tile_j = j // kernel_config.TILE_SIZE
                     tile_k = k // kernel_config.TILE_SIZE
                     tile_index = tile_map[tile_i, tile_j, tile_k]
-                    if tile_index != -1:
-                        fine_p[i, j, k] += e
+                    if tile_index == -1:
+                        continue
+                    local_i = i - tile_i * kernel_config.TILE_SIZE
+                    local_j = j - tile_j * kernel_config.TILE_SIZE
+                    local_k = k - tile_k * kernel_config.TILE_SIZE
+                    fine_p[tile_index, local_i, local_j, local_k] += e
 
 
 @cuda.jit(cache=True)
@@ -597,11 +615,10 @@ def mg_restrict_8cell(fine_r, coarse_b):
 
 
 @cuda.jit(cache=True)
-def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
+def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map, nx, ny, nz):
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
-    nx, ny, nz = p.shape
 
     if I >= cnx or J >= cny or K >= cnz:
         return
@@ -634,6 +651,7 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                     tile_j = j // kernel_config.TILE_SIZE
                     tile_k = k // kernel_config.TILE_SIZE
                     tile_index = tile_map[tile_i, tile_j, tile_k]
+
                     if tile_index == -1:
                         continue
 
@@ -641,17 +659,21 @@ def mg_restrict_residual_8cell_sparse_level0(p, b, coarse_b, delta, tile_map):
                     local_j = j - tile_j * kernel_config.TILE_SIZE
                     local_k = k - tile_k * kernel_config.TILE_SIZE
 
+                    p_center = p[tile_index, local_i, local_j, local_k]
+
                     lap = (
-                        p[i + 1, j, k]
-                        + p[i - 1, j, k]
-                        + p[i, j + 1, k]
-                        + p[i, j - 1, k]
-                        + p[i, j, k + 1]
-                        + p[i, j, k - 1]
-                        - 6.0 * p[i, j, k]
+                        sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
+                        + sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
+                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
+                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
+                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
+                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
+                        - 6.0 * p_center
                     ) * inv_delta2
 
-                    s += b[tile_index, local_i, local_j, local_k] - lap
+                    rhs = b[tile_index, local_i, local_j, local_k]
+
+                    s += rhs - lap
                     count += 1.0
 
     coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
@@ -686,6 +708,7 @@ def mg_prolongate_add_nearest(coarse_e, fine_p):
 @cuda.jit(cache=True)
 def mg_rbgs_step(p, b, delta, parity):
     i, j, k = cuda.grid(3)
+
     nx, ny, nz = p.shape
 
     if i >= nx or j >= ny or k >= nz:
@@ -711,7 +734,7 @@ def mg_rbgs_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
+def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map, nx, ny, nz):
     (
         tile_i,
         tile_j,
@@ -722,10 +745,10 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(p.shape)
+        _,
+        _,
+        _,
+    ) = sparse_managment.tile_to_index((nx, ny, nz))
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -748,55 +771,72 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map):
 
     delta2 = delta * delta
 
-    p[i, j, k] = (
-        p[i + 1, j, k]
-        + p[i - 1, j, k]
-        + p[i, j + 1, k]
-        + p[i, j - 1, k]
-        + p[i, j, k + 1]
-        + p[i, j, k - 1]
+    center = (
+        sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
         - delta2 * b[tile_index, local_i, local_j, local_k]
     ) / 6.0
 
+    p[tile_index, local_i, local_j, local_k] = center
 
-def multigrid_smooth(p, b, delta, iterations, level=0, tile_map=None):
-    blocks = kernel_config.volume_blocks_per_grid(
-        p.shape,
-        kernel_config.THREADS_PER_BLOCK_3D,
-    )
 
+def multigrid_smooth(p, b, delta, iterations, level=0, tile_map=None, nx=None, ny=None, nz=None):
     use_sparse = level == 0
+
+    if use_sparse:
+        blocks = kernel_config.volume_blocks_per_grid(
+            (nx, ny, nz),
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+    else:
+        blocks = kernel_config.volume_blocks_per_grid(
+            p.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
 
     for _ in range(iterations):
         if use_sparse:
             mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 0, tile_map
+                p, b, delta, 0, tile_map, nx, ny, nz
             )
-
             mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 1, tile_map
+                p, b, delta, 1, tile_map, nx, ny, nz
             )
         else:
             mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-
             mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
 
-    BC.pressure_poisson_apply_neumann_bcs[blocks, kernel_config.THREADS_PER_BLOCK_3D](p)
+    if use_sparse:
+        BC.pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p, tile_map, nx, ny, nz)
+    else:
+        BC.pressure_poisson_apply_neumann_bcs_dense[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
 
 
 def multigrid_vcycle(
     level,
     p_levels,
     b_levels,
+    p_level0,
     b_level0,
     zero_levels,
     delta_levels,
     pre_smooth,
     post_smooth,
     coarse_smooth,
+    nx,
+    ny,
+    nz,
     tile_map=None,
 ):
-    p = p_levels[level]
+    p = p_level0 if level == 0 else p_levels[level]
     b = b_level0 if level == 0 else b_levels[level]
     delta = delta_levels[level]
 
@@ -807,6 +847,9 @@ def multigrid_vcycle(
         pre_smooth,
         level=level,
         tile_map=tile_map,
+        nx=nx,
+        ny=ny,
+        nz=nz,
     )
 
     last_level = len(p_levels) - 1
@@ -819,6 +862,9 @@ def multigrid_vcycle(
             coarse_smooth,
             level=level,
             tile_map=tile_map,
+            nx=nx,
+            ny=ny,
+            nz=nz,
         )
         return
 
@@ -842,6 +888,9 @@ def multigrid_vcycle(
             coarse_b,
             delta,
             tile_map,
+            nx,
+            ny,
+            nz,
         )
     else:
         mg_restrict_residual_8cell[
@@ -852,18 +901,25 @@ def multigrid_vcycle(
             b,
             coarse_b,
             delta,
+            nx,
+            ny,
+            nz,
         )
 
     multigrid_vcycle(
         level + 1,
         p_levels,
         b_levels,
+        p_level0,
         b_level0,
         zero_levels,
         delta_levels,
         pre_smooth,
         post_smooth,
         coarse_smooth,
+        nx,
+        ny,
+        nz,
         tile_map=None,
     )
 
@@ -871,7 +927,7 @@ def multigrid_vcycle(
         mg_prolongate_add_nearest_sparse_level0[
             coarse_blocks,
             kernel_config.THREADS_PER_BLOCK_3D,
-        ](coarse_p, p, tile_map, p.shape)
+        ](coarse_p, p, tile_map, (nx,ny,nz))
     else:
         mg_prolongate_add_nearest[
             coarse_blocks,
@@ -888,6 +944,9 @@ def multigrid_vcycle(
         post_smooth,
         level=level,
         tile_map=tile_map,
+        nx=nx,
+        ny=ny,
+        nz=nz,
     )
 
 
@@ -923,8 +982,6 @@ def pressure_poisson_multigrid(
     ny,
     nz,
 ):
-    p_levels[0] = p
-
     pressure_equation_right_side[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         u,
         v,
@@ -953,8 +1010,11 @@ def pressure_poisson_multigrid(
     )
 
     reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
-        p_levels[0],
+        p,
         tile_map,
+        nx,
+        ny,
+        nz,
     )
 
     add_artifical_divergence[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
@@ -974,18 +1034,23 @@ def pressure_poisson_multigrid(
         nz,
     )
 
+
     for _ in range(num_vcycles):
         multigrid_vcycle(
             0,
             p_levels,
             b_levels,
+            p,
             b,
             zero_levels,
             delta_levels,
             pre_smooth=2,
             post_smooth=4,
             coarse_smooth=20,
+            nx=nx,
+            ny=ny,
+            nz=nz,
             tile_map=tile_map,
         )
 
-    return p_levels[0]
+    return p

@@ -47,7 +47,11 @@ def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map
             "tile_map": tile_map,
             "tile_size": kernel_config.TILE_SIZE,
         },
-        "pressure": p,
+        "pressure": {
+            "data": p,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
         "temperature": {
             "data": temperature,
             "tile_map": tile_map,
@@ -213,6 +217,9 @@ def apply_all_BC(
     v_initial,
     w_initial,
     use_obstacle_velocity,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -234,6 +241,9 @@ def apply_all_BC(
         u_initial,
         v_initial,
         w_initial,
+        nx,
+        ny,
+        nz,
     )
 
     if obstacle_mask is not None:
@@ -442,6 +452,9 @@ def solver(
         np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
     )
 
+    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
+    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
+
     # scalars
     temperature = cuda.to_device(
         np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
@@ -469,7 +482,7 @@ def solver(
 
     # --------------- dense -------------------#
     # pressure
-    p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    p = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs_partial_sums = cuda.device_array(
         kernel_config.MAX_REDUCTION_BLOCKS,
@@ -510,10 +523,6 @@ def solver(
     )
 
     # ------------intitialise------------------
-    p.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-
-    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
-    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
     if source_noise_base_fields:
         update_masks.update_source_values(
@@ -704,6 +713,13 @@ def solver(
                     0.0,
                 )
 
+                p = sparse_managment.ensure_pool_capacity(
+                    p,
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                    0.0,
+                )
+
                 sparse_tile_capacity = next_sparse_tile_capacity
 
                 print(
@@ -807,7 +823,10 @@ def solver(
             u_initial,
             v_initial,
             w_initial,
-            animated_obstacles
+            animated_obstacles,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Clear scratch-------------------
@@ -988,6 +1007,9 @@ def solver(
             delta,
             simulation.get("physics").get("fluid").get("density"),
             tile_map,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Scalar update-------------------
@@ -1030,6 +1052,7 @@ def solver(
             ny,
             nz,
         )
+
         scalar_update.update_scalar_fields_maccormack[
             tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
