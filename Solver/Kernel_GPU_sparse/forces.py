@@ -1,20 +1,45 @@
 from numba import cuda
-
+from typing import Any
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
 import Solver.Kernel_GPU_sparse.noise as noise
 
 @cuda.jit(device=True, inline=True, cache=True)
 def buoyancy_approximation(
-    T,
-    tile_map,
-    i,
-    j,
-    k,
-    buoyancy_factor,
-    t_reference,
-):
-    """
-    computes the buoyancy force in z-direction with the Boussinesq approximation on the GPU.
+    T: Any,
+    tile_map: Any,
+    i: int,
+    j: int,
+    k: int,
+    buoyancy_factor: float,
+    t_reference: float,
+) -> float:
+    r"""
+    Compute the buoyancy acceleration contribution from temperature deviation.
+    Assumes that g is aligned with the global z-axis.
+
+    The implemented relation is
+
+    .. math::
+
+        b = g \, \beta \, (T - T_{\mathrm{ref}}).
+
+    Parameters
+    ----------
+    T
+        temperature field.
+    tile_map
+        Mapping used to access tiles in ``T``.
+    i, j, k
+        Cell indices.
+    buoyancy_factor
+        Thermal buoyancy coefficient.
+    t_reference
+        Reference temperature.
+
+    Returns
+    -------
+    float
+        Buoyancy acceleration contribution for the cell ``(i, j, k)``.
     """
     g = 9.81
 

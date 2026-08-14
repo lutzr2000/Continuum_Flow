@@ -366,14 +366,14 @@ def create_multigrid_levels(shape, delta, min_size=8):
 
 
 def solver(
-    config,
-    obstacle_base_masks,
-    obstacle_mask,
-    source_base_masks,
-    source_masks,
-    animated_obstacles,
-    animated_sources,
-):
+    config: dict,
+    obstacle_base_masks: list,
+    obstacle_mask: np.ndarray,
+    source_base_masks: list,
+    source_masks: list,
+    animated_obstacles: bool,
+    animated_sources: bool,
+) -> None:
     r"""
     Run one simulation.
 
@@ -398,36 +398,36 @@ def solver(
     9. Build force parameters for constant, swirl, and turbulence forces.
     10. Copy the current velocity pools into work buffers.
     11. Advect and update velocity using MacCormack.
-    12. Solve the pressure poisson equation using multigrid. 
+    12. Solve the pressure Poisson equation using multigrid.
     13. Project the velocity using the computed pressure.
     14. Advect and update scalar fields using MacCormack. Compute burn behavior.
-    14. Advance simulation time and emit output frames whenever an output time
+    15. Advance simulation time and emit output frames whenever an output time
         step is reached.
-    15. Periodically report active tile count and GPU memory usage.
+    16. Periodically report active tile count and GPU memory usage.
 
     After the loop finishes, the writer pipeline is flushed and shut down
     cleanly.
 
     Parameters
     ----------
-    config : dict
+    config
         Full solver configuration containing simulation settings, domain
         dimensions, physics parameters, source definitions, output settings,
         and optional meta information such as the cancellation flag path.
-    obstacle_base_masks : list
+    obstacle_base_masks
         Packed obstacle voxel/mask descriptions used to rebuild animated
         obstacle masks and obstacle velocity fields over time.
-    obstacle_mask : ndarray
+    obstacle_mask
         Initial dense obstacle mask on the simulation domain.
-    source_base_masks : list
+    source_base_masks
         Packed source voxel/mask descriptions used for animated source-mask
         updates and optional source noise field generation.
-    source_masks : list
+    source_masks
         Initial dense source masks on the simulation domain.
-    animated_obstacles : bool
+    animated_obstacles
         Whether obstacle masks and obstacle velocities must be updated during
         the simulation loop.
-    animated_sources : bool
+    animated_sources
         Whether source masks and source noise values must be updated during the
         simulation loop.
 
@@ -436,7 +436,6 @@ def solver(
     None
         The simulation is executed in-place on the GPU and output frames are
         written to the configured VDB output directory.
-
     """
     total_start_time = perf_counter()
     simulation = config.get("simulation") or {}
@@ -647,7 +646,6 @@ def solver(
             sparse_managment.build_activity_mask[
                 tile_shape, kernel_config.THREADS_PER_BLOCK_3D
             ](
-                temperature,
                 smoke,
                 fuel,
                 flame,
@@ -655,7 +653,9 @@ def solver(
                 source_mask,
                 base_tile_map,
                 sparse_threshold,
-                reference_temperature,
+                nx,
+                ny,
+                nz,
             )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))

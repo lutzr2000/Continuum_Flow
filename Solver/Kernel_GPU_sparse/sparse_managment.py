@@ -1,7 +1,9 @@
 from numba import cuda
+from typing import Any
 import numpy as np
 import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
+tile_size = kernel_config.TILE_SIZE
 
 @cuda.jit(device=True, inline=True, cache=True)
 def tile_to_index():
@@ -35,8 +37,6 @@ def tile_to_index():
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
-    tile_size = kernel_config.TILE_SIZE
-
     tile_i = i // tile_size
     tile_j = j // tile_size
     tile_k = k // tile_size
@@ -54,16 +54,58 @@ def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
 
 @cuda.jit(cache=True)
 def build_activity_mask(
-    temperature,
-    smoke,
-    fuel,
-    flame,
-    tile_map,
-    source_mask,
-    base_tile_map,
-    threshold,
-    ref_temp,
-):
+    smoke: Any,
+    fuel: Any,
+    flame: Any,
+    tile_map: Any,
+    source_mask: Any,
+    base_tile_map: Any,
+    threshold: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Mark coarse tiles as active when they contain sources or significant fluid data.
+
+    Each CUDA thread processes one tile of ``base_tile_map``. A tile is marked
+    active if at least one cell inside the tile satisfies one of the following
+    conditions:
+
+    - the cell is flagged in ``source_mask``
+    - the smoke value is greater than or equal to ``threshold``
+    - the fuel value is greater than or equal to ``threshold``
+    - the flame value is greater than or equal to ``threshold``
+
+    Tiles without activity remain marked as inactive. Tiles outside the sparse
+    field, indicated by ``tile_map == -1``, are only activated if they contain
+    a source cell.
+
+    Parameters
+    ----------
+    smoke
+        smoke field.
+    fuel
+        fuel field.
+    flame
+        flame field.
+    tile_map
+        tile lookup map for the simulation fields.
+    source_mask
+        Boolean mask indicating source cells that must always activate a tile.
+    base_tile_map
+        Output tile activity map written in coarse-tile resolution. Inactive
+        tiles are set to ``-1`` and active tiles to ``1``.
+    threshold
+        Minimum field value required to mark a tile as active.
+    nx, ny, nz
+        Domain resolution in cells along the x-, y-, and z-axis.
+
+    Returns
+    -------
+    None
+        The result is written in-place to ``base_tile_map``.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = base_tile_map.shape
 
@@ -72,12 +114,9 @@ def build_activity_mask(
 
     base_tile_map[tile_i, tile_j, tile_k] = -1
 
-    tile_size = kernel_config.TILE_SIZE
     cell_i_start = tile_i * tile_size
     cell_j_start = tile_j * tile_size
     cell_k_start = tile_k * tile_size
-
-    nx, ny, nz = source_mask.shape
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -96,6 +135,7 @@ def build_activity_mask(
                 if k >= nz:
                     break
 
+                # tiles that contain a source are always active
                 if source_mask[i, j, k]:
                     base_tile_map[tile_i, tile_j, tile_k] = 1
                     return
@@ -104,8 +144,7 @@ def build_activity_mask(
                     continue
 
                 if (
-                    abs(temperature[tile_index, local_i, local_j, local_k] - ref_temp) >= threshold
-                    or smoke[tile_index, local_i, local_j, local_k] >= threshold
+                    smoke[tile_index, local_i, local_j, local_k] >= threshold
                     or fuel[tile_index, local_i, local_j, local_k] >= threshold
                     or flame[tile_index, local_i, local_j, local_k] >= threshold
                 ):
@@ -140,7 +179,6 @@ def compact_active_tile_map(
 @cuda.jit(cache=True)
 def remap_sparse_pool(old_pool, new_pool, previous_index_lookup, active_tile_count):
     flat_index = cuda.grid(1)
-    tile_size = kernel_config.TILE_SIZE
     cells_per_tile = tile_size * tile_size * tile_size
     total_cell_count = active_tile_count * cells_per_tile
 
@@ -252,9 +290,9 @@ def ensure_pool_capacities(
             np.full(
                 (
                     target_capacity_tiles,
-                    kernel_config.TILE_SIZE,
-                    kernel_config.TILE_SIZE,
-                    kernel_config.TILE_SIZE,
+                    tile_size,
+                    tile_size,
+                    tile_size,
                 ),
                 fill_value,
                 dtype=kernel_config.GPU_FIELD_DTYPE,
