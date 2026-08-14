@@ -56,9 +56,6 @@ def convert_bc_config_format(bc_config):
 def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
     i, j, k = cuda.grid(3)
 
-    if i >= nx or j >= ny or k >= nz:
-        return
-
     tile_i = i // tile_size
     tile_j = j // tile_size
     tile_k = k // tile_size
@@ -305,9 +302,6 @@ def _domain_bc_kernel(
     face condition for corners and edges in the same fixed side order.
     """
     i, j, k = cuda.grid(3)
-
-    if i >= nx or j >= ny or k >= nz:
-        return
 
     if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
         return

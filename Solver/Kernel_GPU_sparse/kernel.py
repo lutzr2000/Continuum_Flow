@@ -266,9 +266,6 @@ def apply_all_BC(
             obstacle_velocity_z,
             tile_map,
             animated_obstacles,
-            nx,
-            ny,
-            nz,
         )
 
     source_count = int(source_masks.shape[0])
@@ -310,9 +307,6 @@ def apply_all_BC(
                 source_velocity_z_values[source_idx],
                 source_noise_amplitudes[source_idx],
                 dt,
-                nx,
-                ny,
-                nz,
             )
     return u, v, w, p, temperature, smoke, fuel, flame
 

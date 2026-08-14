@@ -32,9 +32,6 @@ def compute_vorticity(
         k,
     ) = sparse_managment.tile_to_index()
 
-    if i >= nx or j >= ny or k >= nz:
-        return
-
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
     if tile_index == -1:

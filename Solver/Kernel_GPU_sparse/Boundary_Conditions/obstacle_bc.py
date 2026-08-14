@@ -16,9 +16,6 @@ def obstacle_bc_kernel(
     obstacle_velocity_z,
     tile_map,
     use_obstacle_velocity,
-    nx,
-    ny,
-    nz,
 ):
     """
     Apply obstacle boundary conditions.
@@ -34,9 +31,6 @@ def obstacle_bc_kernel(
         j,
         k,
     ) = sparse_managment.tile_to_index()
-
-    if i >= nx or j >= ny or k >= nz:
-        return
 
     if not mask[i, j, k]:
         return
