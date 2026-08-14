@@ -4,7 +4,7 @@ import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def tile_to_index(field_shape):
+def tile_to_index():
     """
     Map tiles to cell indices.
     """
@@ -20,8 +20,6 @@ def tile_to_index(field_shape):
     j = tile_j * kernel_config.TILE_SIZE + local_j
     k = tile_k * kernel_config.TILE_SIZE + local_k
 
-    nx, ny, nz = field_shape
-
     return (
         tile_i,
         tile_j,
@@ -32,9 +30,6 @@ def tile_to_index(field_shape):
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
     )
 
 

@@ -457,10 +457,7 @@ def advect_velocity_semi_lagrangian(
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -561,10 +558,7 @@ def update_velocity_maccormack(
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return

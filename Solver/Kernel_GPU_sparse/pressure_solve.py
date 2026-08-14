@@ -37,10 +37,7 @@ def pressure_equation_right_side(
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -234,10 +231,7 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map, nx, ny, nz):
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -264,10 +258,7 @@ def reset_inactive_pressure(p, tile_map, nx, ny, nz):
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -391,10 +382,7 @@ def project_velocity_kernel(
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -450,10 +438,7 @@ def add_artifical_divergence(
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
@@ -745,10 +730,7 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map, nx, ny, nz):
         i,
         j,
         k,
-        _,
-        _,
-        _,
-    ) = sparse_managment.tile_to_index((nx, ny, nz))
+    ) = sparse_managment.tile_to_index()
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 

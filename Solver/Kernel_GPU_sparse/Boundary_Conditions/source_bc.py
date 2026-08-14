@@ -22,6 +22,9 @@ def source_bc_kernel(
     velocity_z_value,
     noise_amplitude,
     dt,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
@@ -36,10 +39,7 @@ def source_bc_kernel(
         i,
         j,
         k,
-        nx,
-        ny,
-        nz,
-    ) = sparse_managment.tile_to_index(source_mask.shape)
+    ) = sparse_managment.tile_to_index()
 
     if i >= nx or j >= ny or k >= nz:
         return
