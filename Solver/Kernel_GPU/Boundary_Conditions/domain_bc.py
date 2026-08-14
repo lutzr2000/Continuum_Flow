@@ -1,6 +1,9 @@
 from numba import cuda
 
-from Solver.Kernel_GPU.kernel_config import THREADS_PER_BLOCK_2D
+import Solver.Kernel_GPU.kernel_config as kernel_config
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
+
+tile_size = kernel_config.TILE_SIZE
 
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
@@ -50,18 +53,52 @@ def convert_bc_config_format(bc_config):
 
 
 @cuda.jit(cache=True)
-def _pressure_poisson_apply_neumann_bcs(p):
-    """
-    applies the hard-coded zero-gradient pressure boundary conditions on all
-    six domain faces on the GPU.
-
-    The pressure Poisson solve uses homogeneous Neumann boundary conditions,
-    meaning the pressure at the boundary is copied from the adjacent interior
-    cell. This kernel writes the boundary values after each iteration so
-    the next iteration starts from a pressure field with valid boundary values.
-
-    """
+def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
     i, j, k = cuda.grid(3)
+
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
+
+    local_i = i - tile_i * tile_size
+    local_j = j - tile_j * tile_size
+    local_k = k - tile_k * tile_size
+
+    if i == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, 1, j, k, 0.0
+        )
+    elif i == nx - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, nx - 2, j, k, 0.0
+        )
+
+    if j == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, 1, k, 0.0
+        )
+    elif j == ny - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, ny - 2, k, 0.0
+        )
+
+    if k == 0:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, j, 1, 0.0
+        )
+    elif k == nz - 1:
+        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+            p, tile_map, i, j, nz - 2, 0.0
+        )
+
+@cuda.jit(cache=True)
+def pressure_poisson_apply_neumann_bcs_dense(p):
+    i, j, k = cuda.grid(3)
+
     nx, ny, nz = p.shape
 
     if i >= nx or j >= ny or k >= nz:
@@ -82,7 +119,6 @@ def _pressure_poisson_apply_neumann_bcs(p):
     elif k == nz - 1:
         p[i, j, k] = p[i, j, nz - 2]
 
-
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(
     u,
@@ -92,6 +128,11 @@ def _apply_face_state(
     T,
     smoke,
     fuel,
+    tile_map,
+    ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
     i,
     j,
     k,
@@ -116,45 +157,88 @@ def _apply_face_state(
     It is called by the domain boundary kernel once per matching face, so edge
     and corner cells are processed sequentially in a fixed order.
     """
-    neighbor_u = u[src_i, src_j, src_k]
-    neighbor_v = v[src_i, src_j, src_k]
-    neighbor_w = w[src_i, src_j, src_k]
-    neighbor_smoke = smoke[src_i, src_j, src_k]
-    neighbor_fuel = fuel[src_i, src_j, src_k]
+    src_tile_i = src_i // tile_size
+    src_tile_j = src_j // tile_size
+    src_tile_k = src_k // tile_size
+    src_tile_index = tile_map[src_tile_i, src_tile_j, src_tile_k]
+
+    if src_tile_index == -1:
+        neighbor_u = u_initial
+        neighbor_v = v_initial
+        neighbor_w = w_initial
+        neighbor_T = temp_value if use_temp else ref_temp
+        neighbor_smoke = 0.0
+        neighbor_fuel = 0.0
+    else:
+        src_local_i = src_i - src_tile_i * tile_size
+        src_local_j = src_j - src_tile_j * tile_size
+        src_local_k = src_k - src_tile_k * tile_size
+
+        neighbor_u = u[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_v = v[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_w = w[src_tile_index, src_local_i, src_local_j, src_local_k]
+
+        neighbor_T = T[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_smoke = smoke[src_tile_index, src_local_i, src_local_j, src_local_k]
+        neighbor_fuel = fuel[src_tile_index, src_local_i, src_local_j, src_local_k]
+
+    dst_tile_i = i // tile_size
+    dst_tile_j = j // tile_size
+    dst_tile_k = k // tile_size
+    dst_tile_index = tile_map[dst_tile_i, dst_tile_j, dst_tile_k]
+
+    if dst_tile_index == -1:
+        return
+
+    dst_local_i = i - dst_tile_i * tile_size
+    dst_local_j = j - dst_tile_j * tile_size
+    dst_local_k = k - dst_tile_k * tile_size
 
     if bc_mode == 0:
-        u[i, j, k] = neighbor_u
-        v[i, j, k] = neighbor_v
-        w[i, j, k] = neighbor_w
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_u
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_v
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_w
+
         if axis == 0:
-            u[i, j, k] = (
+            u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
                 min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
             )
         elif axis == 1:
-            v[i, j, k] = (
+            v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
                 min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
             )
         else:
-            w[i, j, k] = (
+            w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
                 min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
             )
     elif bc_mode == 1:
-        u[i, j, k] = u_value
-        v[i, j, k] = v_value
-        w[i, j, k] = w_value
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = u_value
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = v_value
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = w_value
     elif bc_mode == 2:
-        u[i, j, k] = 0.0
-        v[i, j, k] = 0.0
-        w[i, j, k] = 0.0
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = 0.0
     else:
-        u[i, j, k] = 0.0 if axis == 0 else neighbor_u
-        v[i, j, k] = 0.0 if axis == 1 else neighbor_v
-        w[i, j, k] = 0.0 if axis == 2 else neighbor_w
+        u[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 0 else neighbor_u
+        )
+        v[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 1 else neighbor_v
+        )
+        w[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+            0.0 if axis == 2 else neighbor_w
+        )
 
-    p[i, j, k] = p[src_i, src_j, src_k]
-    T[i, j, k] = temp_value if use_temp else T[src_i, src_j, src_k]
-    smoke[i, j, k] = neighbor_smoke
-    fuel[i, j, k] = neighbor_fuel
+    p[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+        sparse_managment._sample_sparse_cell(p, tile_map, src_i, src_j, src_k, 0.0)
+    )
+
+    T[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
+        temp_value if use_temp else neighbor_T
+    )
+    smoke[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_smoke
+    fuel[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = neighbor_fuel
 
 
 @cuda.jit(cache=True)
@@ -166,6 +250,11 @@ def _domain_bc_kernel(
     T,
     smoke,
     fuel,
+    tile_map,
+    ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
     x_low_mode,
     x_low_u,
     x_low_v,
@@ -202,6 +291,9 @@ def _domain_bc_kernel(
     z_high_w,
     z_high_temp,
     z_high_use_temp,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply all configured domain face boundary conditions in one 3D launch.
@@ -210,10 +302,6 @@ def _domain_bc_kernel(
     face condition for corners and edges in the same fixed side order.
     """
     i, j, k = cuda.grid(3)
-    nx, ny, nz = u.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
 
     if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
         return
@@ -227,6 +315,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -251,6 +344,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -276,6 +374,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -300,6 +403,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -325,6 +433,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -349,6 +462,11 @@ def _domain_bc_kernel(
             T,
             smoke,
             fuel,
+            tile_map,
+            ref_temp,
+            u_initial,
+            v_initial,
+            w_initial,
             i,
             j,
             k,
@@ -366,7 +484,24 @@ def _domain_bc_kernel(
         )
 
 
-def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
+def domain_bc(
+    u,
+    v,
+    w,
+    p,
+    T,
+    smoke,
+    fuel,
+    bc_config,
+    tile_map,
+    ref_temp,
+    u_initial,
+    v_initial,
+    w_initial,
+    nx,
+    ny,
+    nz,
+):
     """
     Apply all configured domain boundary conditions to the GPU field state.
 
@@ -390,14 +525,14 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
         )
 
     threadsperblock = (
-        THREADS_PER_BLOCK_2D[0],
-        THREADS_PER_BLOCK_2D[0],
-        THREADS_PER_BLOCK_2D[1],
+        kernel_config.THREADS_PER_BLOCK_2D[0],
+        kernel_config.THREADS_PER_BLOCK_2D[0],
+        kernel_config.THREADS_PER_BLOCK_2D[1],
     )
     blockspergrid = (
-        (u.shape[0] + threadsperblock[0] - 1) // threadsperblock[0],
-        (u.shape[1] + threadsperblock[1] - 1) // threadsperblock[1],
-        (u.shape[2] + threadsperblock[2] - 1) // threadsperblock[2],
+        (nx + threadsperblock[0] - 1) // threadsperblock[0],
+        (ny + threadsperblock[1] - 1) // threadsperblock[1],
+        (nz + threadsperblock[2] - 1) // threadsperblock[2],
     )
 
     _domain_bc_kernel[blockspergrid, threadsperblock](
@@ -408,12 +543,20 @@ def domain_bc(u, v, w, p, T, smoke, fuel, bc_config):
         T,
         smoke,
         fuel,
+        tile_map,
+        ref_temp,
+        u_initial,
+        v_initial,
+        w_initial,
         *face_args["x_low"],
         *face_args["x_high"],
         *face_args["y_low"],
         *face_args["y_high"],
         *face_args["z_low"],
         *face_args["z_high"],
+        nx,
+        ny,
+        nz,
     )
 
     return u, v, w, p, T, smoke, fuel

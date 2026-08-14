@@ -6,10 +6,11 @@ from pathlib import Path
 import numpy as np
 from numba import cuda
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.Kernel_GPU.advection_schemes as advection_schemes
+import Solver.Kernel_GPU.velocity_update as velocity_update
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
 import Solver.Kernel_GPU.vorticity as vorticity
@@ -20,24 +21,57 @@ import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 import Solver.Kernel_GPU.output as output
 import Solver.General.forces as forces
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
 
-GPU_FIELD_DTYPE = np.float32
+GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
-def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame):
+def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map):
     """
     Return the currently active device buffers for output export.
     """
     return {
-        "u": u,
-        "v": v,
-        "w": w,
-        "pressure": p,
-        "temperature": temperature,
-        "smoke": smoke,
-        "fuel": fuel,
-        "flame": flame,
+        "u": {
+            "data": u,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "v": {
+            "data": v,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "w": {
+            "data": w,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "pressure": {
+            "data": p,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "temperature": {
+            "data": temperature,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "smoke": {
+            "data": smoke,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "fuel": {
+            "data": fuel,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
+        "flame": {
+            "data": flame,
+            "tile_map": tile_map,
+            "tile_size": kernel_config.TILE_SIZE,
+        },
     }
 
 
@@ -58,9 +92,7 @@ def expand_active_tiles_to_mask(active_tiles, output_mask, tile_size):
 
 def get_source_values(simulation, var_name, t, index=None):
     source_entries = simulation.get("sources") or []
-    animation_times = (
-        (simulation.get("animation_timeline") or {}).get("times") or ()
-    )
+    animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
     values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
 
     for source_idx, source_entry in enumerate(source_entries):
@@ -93,18 +125,24 @@ def build_source_noise_fields(source_entries, source_base_masks):
 
     for source_idx, source_entry in enumerate(source_entries or []):
         noise_amplitude = float(source_entry.get("noise_amplitude", 0.0)) / 100.0
-        use_noise = bool(source_entry.get("source_noise", False)) and noise_amplitude > 0.0
+        use_noise = (
+            bool(source_entry.get("source_noise", False)) and noise_amplitude > 0.0
+        )
         scale_voxels = max(float(source_entry.get("noise_scale", 1.0)), 1.0)
         seed_base = int(source_entry.get("noise_seed", 0))
         source_object_fields = []
 
         if use_noise and source_idx < len(source_base_masks):
             for object_idx, mask_entry in enumerate(source_base_masks[source_idx]):
-                base_mask = np.ascontiguousarray(mask_entry["voxels"]["mask"], dtype=np.bool_)
+                base_mask = np.ascontiguousarray(
+                    mask_entry["voxels"]["mask"], dtype=np.bool_
+                )
                 base_shape = np.asarray(base_mask.shape, dtype=np.int32)
                 coarse_shape = np.maximum(
                     1,
-                    np.ceil(base_shape.astype(np.float32) / np.float32(scale_voxels)).astype(np.int32),
+                    np.ceil(
+                        base_shape.astype(np.float32) / np.float32(scale_voxels)
+                    ).astype(np.int32),
                 )
 
                 rng = np.random.default_rng(seed_base + object_idx * 1009)
@@ -114,11 +152,19 @@ def build_source_noise_fields(source_entries, source_base_masks):
                     size=tuple(int(v) for v in coarse_shape),
                 ).astype(np.float32)
 
-                repeat_x = int(max(1, math.ceil(float(base_shape[0]) / float(coarse_shape[0]))))
-                repeat_y = int(max(1, math.ceil(float(base_shape[1]) / float(coarse_shape[1]))))
-                repeat_z = int(max(1, math.ceil(float(base_shape[2]) / float(coarse_shape[2]))))
+                repeat_x = int(
+                    max(1, math.ceil(float(base_shape[0]) / float(coarse_shape[0])))
+                )
+                repeat_y = int(
+                    max(1, math.ceil(float(base_shape[1]) / float(coarse_shape[1])))
+                )
+                repeat_z = int(
+                    max(1, math.ceil(float(base_shape[2]) / float(coarse_shape[2])))
+                )
                 expanded_noise = np.repeat(
-                    np.repeat(np.repeat(coarse_noise, repeat_x, axis=0), repeat_y, axis=1),
+                    np.repeat(
+                        np.repeat(coarse_noise, repeat_x, axis=0), repeat_y, axis=1
+                    ),
                     repeat_z,
                     axis=2,
                 )
@@ -154,18 +200,26 @@ def apply_all_BC(
     u,
     v,
     w,
+    u_initial,
+    v_initial,
+    w_initial,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
     p,
-    T,
+    temperature,
     smoke,
     fuel,
     flame,
     dt,
     obstacle_mask,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
     source_masks,
-    source_noise
+    source_noise,
+    tile_map,
+    animated_obstacles,
+    nx,
+    ny,
+    nz,
 ):
     """
     Apply domain, obstacle and source constraints in the fixed overwrite order.
@@ -173,7 +227,24 @@ def apply_all_BC(
     user config.
     """
     bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
-    u, v, w, p, T, smoke, fuel = BC.domain_bc(u, v, w, p, T, smoke, fuel, bc_config)
+    u, v, w, p, temperature, smoke, fuel = BC.domain_bc(
+        u,
+        v,
+        w,
+        p,
+        temperature,
+        smoke,
+        fuel,
+        bc_config,
+        tile_map,
+        simulation.get("physics").get("temperature").get("reference_temperature"),
+        u_initial,
+        v_initial,
+        w_initial,
+        nx,
+        ny,
+        nz,
+    )
 
     if obstacle_mask is not None:
         blockspergrid = kernel_config.volume_blocks_per_grid(
@@ -193,17 +264,21 @@ def apply_all_BC(
             obstacle_velocity_x,
             obstacle_velocity_y,
             obstacle_velocity_z,
+            tile_map,
+            animated_obstacles,
         )
 
     source_count = int(source_masks.shape[0])
     if source_count > 0:
-        source_temperature_values = get_source_values(simulation,"temperature",t)
-        source_smoke_values = get_source_values(simulation,"smoke",t)
-        source_fuel_values = get_source_values(simulation,"fuel",t)
+        source_temperature_values = get_source_values(simulation, "temperature", t)
+        source_smoke_values = get_source_values(simulation, "smoke", t)
+        source_fuel_values = get_source_values(simulation, "fuel", t)
         source_velocity_x_values = get_source_values(simulation, "velocity", t, 0)
         source_velocity_y_values = get_source_values(simulation, "velocity", t, 1)
         source_velocity_z_values = get_source_values(simulation, "velocity", t, 2)
-        source_noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        source_noise_amplitudes = get_source_values(
+            simulation, "noise_amplitude", t
+        ) / np.float32(100.0)
 
         for source_idx in range(source_count):
             source_mask_entry = source_masks[source_idx]
@@ -212,13 +287,16 @@ def apply_all_BC(
                 source_mask_entry.shape,
                 kernel_config.THREADS_PER_BLOCK_3D,
             )
-            source_bc.source_bc_kernel[blockspergrid, kernel_config.THREADS_PER_BLOCK_3D](
+            source_bc.source_bc_kernel[
+                blockspergrid, kernel_config.THREADS_PER_BLOCK_3D
+            ](
                 u,
                 v,
                 w,
-                T,
+                temperature,
                 smoke,
                 fuel,
+                tile_map,
                 source_mask_entry,
                 source_noise_entry,
                 source_temperature_values[source_idx],
@@ -228,9 +306,10 @@ def apply_all_BC(
                 source_velocity_y_values[source_idx],
                 source_velocity_z_values[source_idx],
                 source_noise_amplitudes[source_idx],
-                dt
+                dt,
             )
-    return u, v, w, p, T, smoke, fuel, flame
+    return u, v, w, p, temperature, smoke, fuel, flame
+
 
 def compute_inital_velocity(simulation_cfg):
     total_u = 0.0
@@ -238,7 +317,9 @@ def compute_inital_velocity(simulation_cfg):
     total_w = 0.0
     inlet_count = 0
 
-    for face_cfg in (simulation_cfg.get("domain") or {}).get("boundary_conditions", {}).values():
+    for face_cfg in (
+        (simulation_cfg.get("domain") or {}).get("boundary_conditions", {}).values()
+    ):
         bc_type = face_cfg.get("type", 0)
         if isinstance(bc_type, str):
             if bc_type.strip().upper() != "INFLOW":
@@ -274,7 +355,7 @@ def create_multigrid_levels(shape, delta, min_size=8):
         p_levels.append(cuda.device_array(level_shape, dtype=np.float32))
         b_levels.append(cuda.device_array(level_shape, dtype=np.float32))
         zero_levels.append(cuda.to_device(np.zeros(level_shape, dtype=np.float32)))
-        delta_levels.append(delta * (2 ** level))
+        delta_levels.append(delta * (2**level))
 
         nx = (nx + 1) // 2
         ny = (ny + 1) // 2
@@ -284,12 +365,83 @@ def create_multigrid_levels(shape, delta, min_size=8):
     return p_levels, b_levels, delta_levels, zero_levels
 
 
-def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_masks,animated_obstacles,animated_sources):
+def solver(
+    config: dict,
+    obstacle_base_masks: list,
+    obstacle_mask: np.ndarray,
+    source_base_masks: list,
+    source_masks: list,
+    animated_obstacles: bool,
+    animated_sources: bool,
+) -> None:
+    r"""
+    Run one simulation.
+
+    The solver initializes the tile pools, uploads static and animated
+    masks to the GPU, advances the simulation in time, and writes output frames
+    through the host-side VDB writer pipeline.
+
+    The general time loop does the following steps:
+
+    1. Update the active tile map from the current scalar fields and
+       source activity.
+    2. Grow pool capacity if the persistent tile map requires more tile
+       slots.
+    3. Compute the new timestep from the current velocity field using the user
+       described CFL-number.
+    4. Reset scratch pools for the upcoming operations.
+    5. Refresh animated source masks, source noise fields, and obstacle masks
+       if needed.
+    6. Apply domain, obstacle, and source boundary conditions.
+    7. Reset scratch pools again before physics updates.
+    8. Compute vorticity magnitude when vorticity confinement is enabled.
+    9. Build force parameters for constant, swirl, and turbulence forces.
+    10. Copy the current velocity pools into work buffers.
+    11. Advect and update velocity using MacCormack.
+    12. Solve the pressure Poisson equation using multigrid.
+    13. Project the velocity using the computed pressure.
+    14. Advect and update scalar fields using MacCormack. Compute burn behavior.
+    15. Advance simulation time and emit output frames whenever an output time
+        step is reached.
+    16. Periodically report active tile count and GPU memory usage.
+
+    After the loop finishes, the writer pipeline is flushed and shut down
+    cleanly.
+
+    Parameters
+    ----------
+    config
+        Full solver configuration containing simulation settings, domain
+        dimensions, physics parameters, source definitions, output settings,
+        and optional meta information such as the cancellation flag path.
+    obstacle_base_masks
+        Packed obstacle voxel/mask descriptions used to rebuild animated
+        obstacle masks and obstacle velocity fields over time.
+    obstacle_mask
+        Initial dense obstacle mask on the simulation domain.
+    source_base_masks
+        Packed source voxel/mask descriptions used for animated source-mask
+        updates and optional source noise field generation.
+    source_masks
+        Initial dense source masks on the simulation domain.
+    animated_obstacles
+        Whether obstacle masks and obstacle velocities must be updated during
+        the simulation loop.
+    animated_sources
+        Whether source masks and source noise values must be updated during the
+        simulation loop.
+
+    Returns
+    -------
+    None
+        The simulation is executed in-place on the GPU and output frames are
+        written to the configured VDB output directory.
+    """
     total_start_time = perf_counter()
     simulation = config.get("simulation") or {}
-    if not simulation:
-        raise ValueError("Solver config must contain a non-empty 'simulation' object.")
-    cancel_flag_path = ((config.get("meta") or {}).get("cancel_flag_path") or "").strip()
+    cancel_flag_path = (
+        (config.get("meta") or {}).get("cancel_flag_path") or ""
+    ).strip()
     cancel_requested = False
 
     # ------------time-------------------
@@ -302,74 +454,111 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     nx = simulation["domain"]["grid"]["nx"]
     ny = simulation["domain"]["grid"]["ny"]
     nz = simulation["domain"]["grid"]["nz"]
-    shape = (nx,ny,nz)
+    shape = (nx, ny, nz)
 
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
-    print("################################################################")
-    print("Initialise")
-    print("Cell count: ",int(nx * ny * nz))
+    sparse_threshold = simulation.get("settings").get("adaptive_domain_threshold")
 
-    # ------------tiles------------------
-    active_tile_shape = kernel_config.active_tile_shape(shape)
-
-    scalar_active_tiles = cuda.device_array(active_tile_shape, dtype=np.bool_)
-    scalar_active_tiles_dilated = cuda.device_array(active_tile_shape, dtype=np.bool_)
-    scalar_tile_padding = kernel_config.active_tile_padding_tiles()
-
-    active_tile_mask_blocks = kernel_config.volume_blocks_per_grid(
-        scalar_active_tiles.shape,
-        kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK,
+    # ------------physics------------------
+    reference_temperature = (
+        simulation.get("physics").get("temperature").get("reference_temperature")
     )
 
+    # ------------tiles------------------
+    tile_size_i = (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_size_j = (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_size_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_shape = (tile_size_i, tile_size_j, tile_size_k)
+    total_tile_count = int(tile_size_i * tile_size_j * tile_size_k)
+    tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
+    tile_map = cuda.to_device(tile_map_values)
+    base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+
+    next_tile_index_counter = cuda.to_device(np.asarray([0], dtype=np.int32))
+    active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    tile_growth_size = max(
+        1,
+        math.ceil(
+            total_tile_count * (float(kernel_config.SPARSE_TILE_GROWTH_PERCENT) / 100.0)
+        ),
+    )
+
+    print("################################################################")
+    print("Initialise")
+    print("Cell count: ", int(nx * ny * nz))
+    print("Tile shape: ", tile_shape)
+    print("Total tiles: ", total_tile_count)
+
     # ------------fields------------------
+    # --------------- sparse -------------------#
+    sparse_tile_capacity = max(1, tile_growth_size)
+    sparse_pool_shape = (
+        sparse_tile_capacity,
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
+    )
+
+    zero_pool = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
     # velocity
-    u = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    u_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    v = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    v_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    w = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    w_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
+
+    u = cuda.to_device(np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE))
+    v = cuda.to_device(np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE))
+    w = cuda.to_device(np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE))
+
+    u_work = cuda.to_device(
+        np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    v_work = cuda.to_device(
+        np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
+    )
+    w_work = cuda.to_device(
+        np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
+    )
+
+    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
+
+    # scalars
+    temperature = cuda.to_device(
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
+    )
+    smoke = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    fuel = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    temperature_work = cuda.to_device(
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
+    )
+    smoke_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    fuel_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    # flame
+    flame = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    # vorticity
+    vorticity_magnitude = cuda.to_device(
+        np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE)
+    )
+
+    # scratch
+    scratch_A = cuda.to_device(
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
+    )
+    scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
     # pressure
-    p = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
+    p = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+    pressure_rhs = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs_partial_sums = cuda.device_array(
         kernel_config.MAX_REDUCTION_BLOCKS,
         dtype=np.float32,
     )
     pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
-
-    # scalars
-    temperature = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    temperature_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    smoke = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    smoke_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    fuel = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    fuel_work = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    flame = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    # scratch
-    scratch_A_x = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    scratch_A_y = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-    scratch_A_z = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    # vortictiy
-    vorticity_magnitude = cuda.device_array(shape, dtype=GPU_FIELD_DTYPE)
-
-    # masks
-    obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
-    source_mask_host = np.any(np.stack(source_masks, axis=0), axis=0) if source_masks else np.zeros(shape, dtype=np.bool_)
-    source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
-    source_mask_stack = np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_)) if source_masks else np.zeros((0,) + shape, dtype=np.bool_)
-    source_masks = cuda.to_device(source_mask_stack)
-    source_noise_base_fields = build_source_noise_fields(
-        simulation.get("sources") or [],
-        source_base_masks,
-    )
-    source_noise_host = np.zeros((len(source_noise_base_fields),) + shape, dtype=np.float32)
-    source_noise = cuda.to_device(np.ascontiguousarray(source_noise_host, dtype=np.float32))
 
     # multigrid levels
     p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
@@ -378,23 +567,31 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         min_size=8,
     )
 
-    # ------------intitialise------------------
-    u_initial,v_initial,w_initial = compute_inital_velocity(simulation)
-
-    u.copy_to_device(np.full(shape, u_initial, dtype=GPU_FIELD_DTYPE))
-    v.copy_to_device(np.full(shape, v_initial, dtype=GPU_FIELD_DTYPE))
-    w.copy_to_device(np.full(shape, w_initial, dtype=GPU_FIELD_DTYPE))
-
-    p.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-
-    ref_temp = simulation.get("physics").get("temperature").get("reference_temperature")
-    temperature.copy_to_device(np.full(shape, ref_temp, dtype=GPU_FIELD_DTYPE))
-    smoke.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-    fuel.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-    flame.copy_to_device(np.full(shape, 0, dtype=GPU_FIELD_DTYPE))
-
-    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
-    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
+    # --------------- dense -------------------#
+    # masks
+    obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
+    source_mask_host = (
+        np.any(np.stack(source_masks, axis=0), axis=0)
+        if source_masks
+        else np.zeros(shape, dtype=np.bool_)
+    )
+    source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
+    source_mask_stack = (
+        np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
+        if source_masks
+        else np.zeros((0,) + shape, dtype=np.bool_)
+    )
+    source_masks = cuda.to_device(source_mask_stack)
+    source_noise_base_fields = build_source_noise_fields(
+        simulation.get("sources") or [],
+        source_base_masks,
+    )
+    source_noise_host = np.zeros(
+        (len(source_noise_base_fields),) + shape, dtype=np.float32
+    )
+    source_noise = cuda.to_device(
+        np.ascontiguousarray(source_noise_host, dtype=np.float32)
+    )
 
     if source_noise_base_fields:
         update_masks.update_source_values(
@@ -428,6 +625,7 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         smoke,
         fuel,
         flame,
+        tile_map,
     )
 
     # ------------time loop------------------
@@ -436,20 +634,118 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
     output_index = 0
     time_step_count = 0
     last_output_wall_time = None
+
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        time_step.reset_velocity_maxima(
-            velocity_maxima,
-            velocity_maxima_host_zeros,
-        )
+        # ------------Start Active tiles-------------------
+        if simulation.get("settings").get("simulate_sparsely"):
+            sparse_managment.build_activity_mask[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                smoke,
+                fuel,
+                flame,
+                tile_map,
+                source_mask,
+                base_tile_map,
+                sparse_threshold,
+                nx,
+                ny,
+                nz,
+            )
+
+            active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
+
+            sparse_managment.dilate_tile_map_persistent[
+                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+            ](
+                base_tile_map,
+                tile_map,
+                kernel_config.TILE_DILATE,
+                next_tile_index_counter,
+                active_tile_counter,
+            )
+
+            required_tile_capacity = int(next_tile_index_counter.copy_to_host()[0])
+
+            if required_tile_capacity > sparse_tile_capacity:
+                next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
+                    sparse_tile_capacity,
+                    required_tile_capacity,
+                    tile_growth_size,
+                )
+
+                (
+                    u,
+                    v,
+                    w,
+                    u_work,
+                    v_work,
+                    w_work,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                    p,
+                    pressure_rhs,
+                    temperature,
+                    smoke,
+                    fuel,
+                    temperature_work,
+                    smoke_work,
+                    fuel_work,
+                    flame,
+                    zero_pool,
+                    vorticity_magnitude,
+                ) = sparse_managment.ensure_pool_capacities(
+                    [
+                        (u, u_initial),
+                        (v, v_initial),
+                        (w, w_initial),
+                        (u_work, u_initial),
+                        (v_work, v_initial),
+                        (w_work, w_initial),
+                        (scratch_A, reference_temperature),
+                        (scratch_B, 0.0),
+                        (scratch_C, 0.0),
+                        (p, 0.0),
+                        (pressure_rhs, 0.0),
+                        (temperature, reference_temperature),
+                        (smoke, 0.0),
+                        (fuel, 0.0),
+                        (temperature_work, reference_temperature),
+                        (smoke_work, 0.0),
+                        (fuel_work, 0.0),
+                        (flame, 0.0),
+                        (zero_pool, 0.0),
+                        (vorticity_magnitude, 0.0),
+                    ],
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                )
+
+                sparse_tile_capacity = next_sparse_tile_capacity
+
+                print(
+                    "Tile buffer grown to:",
+                    sparse_tile_capacity,
+                    "tiles",
+                )
+
+        # ------------time step-------------------
+        active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
+
+        velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
+
         dt = time_step.compute_new_timestep_gpu(
             u,
             v,
             w,
+            tile_map,
+            active_sparse_tile_count,
             velocity_maxima,
             delta,
             cfl,
@@ -457,9 +753,11 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         )
 
         # ------------Clear scratch-------------------
-        scratch_A_x.copy_to_device(zero_levels[0])
-        scratch_A_y.copy_to_device(zero_levels[0])
-        scratch_A_z.copy_to_device(zero_levels[0])
+        sparse_managment.reset_pools(
+            (scratch_A, scratch_B, scratch_C),
+            zero_pool,
+            active_sparse_tile_count,
+        )
 
         # ------------Update masks-------------------
         if animated_sources:
@@ -493,9 +791,10 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
                 origin_x,
                 origin_y,
                 origin_z,
-                scratch_A_x,
-                scratch_A_y,
-                scratch_A_z,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                tile_map=tile_map,
             )
 
         # ------------BC-------------------
@@ -505,6 +804,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             u,
             v,
             w,
+            u_initial,
+            v_initial,
+            w_initial,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             p,
             temperature,
             smoke,
@@ -512,59 +817,38 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             flame,
             dt,
             obstacle_mask,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
             source_masks,
             source_noise,
+            tile_map,
+            animated_obstacles,
+            nx,
+            ny,
+            nz,
         )
 
-        # ------------Start Active tiles-------------------
-        if simulation.get("settings").get("simulate_sparsely"):
-            scalar_update.build_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                temperature,
-                smoke,
-                fuel,
-                flame,
-                scalar_active_tiles,
-                ref_temp,
-                simulation.get("settings").get("adaptive_domain_threshold"),
-            )
-            scalar_update.dilate_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles,
-                scalar_active_tiles_dilated,
-                scalar_tile_padding,
-            )
-        else:
-            scalar_update.fill_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles,
-                np.bool_(True),
-            )
-            scalar_update.fill_active_scalar_tile_mask[
-                active_tile_mask_blocks, kernel_config.ACTIVE_TILE_MASK_THREADS_PER_BLOCK
-            ](
-                scalar_active_tiles_dilated,
-                np.bool_(True),
-            )
+        # ------------Clear scratch-------------------
+        sparse_managment.reset_pools(
+            (scratch_A, scratch_B, scratch_C),
+            zero_pool,
+            active_sparse_tile_count,
+        )
 
         # ------------Vorticity-------------------
         if simulation.get("physics").get("extras").get("vorticity") > 0.0:
-            vorticity.compute_vorticity[
-                active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
-            ](
+            vorticity.compute_vorticity[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
                 u,
                 v,
                 w,
+                u_initial,
+                v_initial,
+                w_initial,
                 obstacle_mask,
                 vorticity_magnitude,
                 delta,
-                scalar_active_tiles_dilated,
+                tile_map,
+                nx,
+                ny,
+                nz,
             )
 
         # ------------force params-------------------
@@ -575,32 +859,45 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         turbulence_config_device = _prepare_force_config_device(turbulence_config, 4)
 
         # ------------Velocity update-------------------
-        u_work.copy_to_device(u)
-        v_work.copy_to_device(v)
-        w_work.copy_to_device(w)
-        advection_schemes.advect_velocity_semi_lagrangian[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+        sparse_managment.copy_pools(
+            (
+                (u_work, u),
+                (v_work, v),
+                (w_work, w),
+            ),
+            active_sparse_tile_count,
+        )
+
+        velocity_update.advect_velocity_semi_lagrangian[
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
             w,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             dt,
             delta,
-            scalar_active_tiles_dilated,
+            tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
+            nx,
+            ny,
+            nz,
         )
-        advection_schemes.update_velocity_maccormack[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+
+        velocity_update.update_velocity_maccormack[
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
             w,
             obstacle_mask,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             dt,
             u_work,
             v_work,
@@ -612,8 +909,8 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             simulation.get("physics").get("extras").get("vorticity"),
             temperature,
             simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
-            ref_temp,
-            scalar_active_tiles_dilated,
+            reference_temperature,
+            tile_map,
             fx_const,
             fy_const,
             fz_const,
@@ -624,7 +921,13 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             origin_z,
             has_turbulence_nodes,
             turbulence_config_device,
-            t
+            t,
+            u_initial,
+            v_initial,
+            w_initial,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Velocity swap-------------------
@@ -634,13 +937,17 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
 
         # ------------Pressure solve-------------------
         extra_pressure = get_source_values(simulation, "extra_pressure", t)
-        noise_amplitudes = get_source_values(simulation, "noise_amplitude", t) / np.float32(100.0)
+        noise_amplitudes = get_source_values(
+            simulation, "noise_amplitude", t
+        ) / np.float32(100.0)
 
         p = pressure_solve.pressure_poisson_multigrid(
-            u, v, w,
+            u,
+            v,
+            w,
             p,
             temperature,
-            scratch_A_x,
+            pressure_rhs,
             dt,
             source_masks,
             extra_pressure,
@@ -649,8 +956,12 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             delta,
             simulation.get("physics").get("fluid").get("density"),
             simulation.get("physics").get("temperature").get("expansion_rate"),
-            ref_temp,
-            scalar_active_tiles_dilated,
+            reference_temperature,
+            tile_map,
+            tile_shape,
+            u_initial,
+            v_initial,
+            w_initial,
             p_levels,
             b_levels,
             delta_levels,
@@ -658,11 +969,14 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             pressure_rhs_partial_sums,
             pressure_rhs_sum,
             zero_levels,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Velocity projection-------------------
         pressure_solve.project_velocity_kernel[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             u,
             v,
@@ -672,15 +986,24 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             dt,
             delta,
             simulation.get("physics").get("fluid").get("density"),
-            scalar_active_tiles_dilated,
+            tile_map,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Scalar update-------------------
-        temperature_work.copy_to_device(temperature)
-        smoke_work.copy_to_device(smoke)
-        fuel_work.copy_to_device(fuel)
+        sparse_managment.copy_pools(
+            (
+                (u_work, u),
+                (v_work, v),
+                (w_work, w),
+            ),
+            active_sparse_tile_count,
+        )
+
         scalar_update.predict_scalar_fields_semi_lagrangian[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             temperature,
             smoke,
@@ -689,21 +1012,29 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             v,
             w,
             dt,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             delta,
-            scalar_active_tiles_dilated,
+            reference_temperature,
+            tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
+            nx,
+            ny,
+            nz,
         )
+
         scalar_update.update_scalar_fields_maccormack[
-            active_tile_shape, kernel_config.ACTIVE_TILE_THREADS_PER_BLOCK
+            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
         ](
             temperature,
             smoke,
             fuel,
-            scratch_A_x,
-            scratch_A_y,
-            scratch_A_z,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             u,
             v,
             w,
@@ -722,8 +1053,14 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             simulation.get("physics").get("fuel").get("ignition_temperature"),
             simulation.get("physics").get("burning").get("scale"),
             simulation.get("physics").get("burning").get("amplitude"),
-            ref_temp,
-            scalar_active_tiles_dilated,
+            reference_temperature,
+            tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------Swap-------------------
@@ -736,7 +1073,9 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
         time_step_count += 1
 
         # ------------Output-------------------
-        device_fields = _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame)
+        device_fields = _current_device_fields(
+            u, v, w, p, temperature, smoke, fuel, flame, tile_map
+        )
         while t >= next_output_time:
             if target_realtime_preview and last_output_wall_time is not None:
                 elapsed_since_last_output = perf_counter() - last_output_wall_time
@@ -758,7 +1097,10 @@ def solver(config,obstacle_base_masks,obstacle_mask,source_base_masks,source_mas
             next_output_time += output_time_step
 
         # ------------Memory track-------------------
-        if time_step_count == 10:
+        if time_step_count % 30 == 0:
+            active_tile_count = int(active_tile_counter.copy_to_host()[0])
+            print(f"Active tiles: {active_tile_count} / ", total_tile_count)
+
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()
             used = total - free

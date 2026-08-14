@@ -1,7 +1,7 @@
 from numba import cuda
 from typing import Any
-import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
-import Solver.Kernel_GPU_sparse.noise as noise
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
+import Solver.Kernel_GPU.noise as noise
 
 @cuda.jit(device=True, inline=True, cache=True)
 def buoyancy_approximation(

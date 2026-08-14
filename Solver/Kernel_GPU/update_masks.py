@@ -2,6 +2,7 @@ import math
 from numba import cuda
 import numpy as np
 import Solver.General.update_masks as helper_update_masks
+import Solver.Kernel_GPU.kernel_config as kernel_config
 
 _MASK_THREADS_PER_BLOCK = (8, 8, 8)
 _PACKED_MASK_CACHE = {}
@@ -182,6 +183,7 @@ def update_obstacle_mask(
     out_vx,
     out_vy,
     out_vz,
+    tile_map,
     local_masks_flat,
     local_mask_offsets,
     local_mask_shapes,
@@ -195,7 +197,7 @@ def update_obstacle_mask(
     oy,
     oz,
 ):
-    """Rebuild the obstacle mask and obstacle velocities with last-write-wins overlap."""
+    """Rebuild the obstacle mask and sparse obstacle velocities with last-write-wins overlap."""
     i, j, k = cuda.grid(3)
     nx, ny, nz = mask.shape
 
@@ -203,15 +205,25 @@ def update_obstacle_mask(
         return
 
     mask[i, j, k] = False
-    out_vx[i, j, k] = 0.0
-    out_vy[i, j, k] = 0.0
-    out_vz[i, j, k] = 0.0
 
     cell_active = False
     x = np.float32(ox + i * delta)
     y = np.float32(oy + j * delta)
     z = np.float32(oz + k * delta)
     obj_count = active_flags.shape[0]
+
+    tile_size = kernel_config.TILE_SIZE
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    has_sparse_target = tile_index != -1
+
+    if has_sparse_target:
+        local_i = i - tile_i * tile_size
+        local_j = j - tile_j * tile_size
+        local_k = k - tile_k * tile_size
 
     for obj_idx in range(obj_count):
         if not active_flags[obj_idx]:
@@ -260,24 +272,26 @@ def update_obstacle_mask(
             flat_index = local_mask_offsets[obj_idx] + (bi * bn_y + bj) * bn_z + bk
             if local_masks_flat[flat_index]:
                 cell_active = True
-                out_vx[i, j, k] = (
-                    rates[obj_idx, 0] * bx
-                    + rates[obj_idx, 1] * by
-                    + rates[obj_idx, 2] * bz
-                    + rates[obj_idx, 3]
-                )
-                out_vy[i, j, k] = (
-                    rates[obj_idx, 4] * bx
-                    + rates[obj_idx, 5] * by
-                    + rates[obj_idx, 6] * bz
-                    + rates[obj_idx, 7]
-                )
-                out_vz[i, j, k] = (
-                    rates[obj_idx, 8] * bx
-                    + rates[obj_idx, 9] * by
-                    + rates[obj_idx, 10] * bz
-                    + rates[obj_idx, 11]
-                )
+
+                if has_sparse_target:
+                    out_vx[tile_index, local_i, local_j, local_k] = (
+                        rates[obj_idx, 0] * bx
+                        + rates[obj_idx, 1] * by
+                        + rates[obj_idx, 2] * bz
+                        + rates[obj_idx, 3]
+                    )
+                    out_vy[tile_index, local_i, local_j, local_k] = (
+                        rates[obj_idx, 4] * bx
+                        + rates[obj_idx, 5] * by
+                        + rates[obj_idx, 6] * bz
+                        + rates[obj_idx, 7]
+                    )
+                    out_vz[tile_index, local_i, local_j, local_k] = (
+                        rates[obj_idx, 8] * bx
+                        + rates[obj_idx, 9] * by
+                        + rates[obj_idx, 10] * bz
+                        + rates[obj_idx, 11]
+                    )
 
     mask[i, j, k] = cell_active
 
@@ -347,6 +361,7 @@ def update_masks(
     obstacle_velocity_y=None,
     obstacle_velocity_z=None,
     aggregate_mask=None,
+    tile_map=None,
 ):
     """Update either stacked source masks or one obstacle mask using cached packed object data."""
     cache_key = id(base_masks)
@@ -460,6 +475,7 @@ def update_masks(
         obstacle_velocity_x,
         obstacle_velocity_y,
         obstacle_velocity_z,
+        tile_map,
         pack["local_masks_flat"],
         pack["local_mask_offsets"],
         pack["local_mask_shapes"],

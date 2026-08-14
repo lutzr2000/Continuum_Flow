@@ -158,7 +158,7 @@ def _get_solver_kernel_module(solver_backend):
         return cpu_kernel_module
 
     if gpu_kernel_module is None:
-        import Solver.Kernel_GPU_sparse.kernel as _gpu_kernel_module
+        import Solver.Kernel_GPU.kernel as _gpu_kernel_module
         gpu_kernel_module = _gpu_kernel_module
     return gpu_kernel_module
 

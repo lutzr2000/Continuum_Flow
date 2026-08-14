@@ -1,16 +1,6 @@
-import math
-import numpy as np
 from numba import cuda
 
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _clamp(value, lower, upper):
-    return min(max(value, lower), upper)
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def _noise_multiplier(noise_value, noise_amplitude):
-    return _clamp(1.0 + noise_amplitude * noise_value, 0.0, 2.0)
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
 
 
 @cuda.jit(cache=True)
@@ -21,6 +11,7 @@ def source_bc_kernel(
     T,
     smoke,
     fuel,
+    tile_map,
     source_mask,
     source_noise,
     temperature_value,
@@ -35,36 +26,47 @@ def source_bc_kernel(
     """
     Apply source velocity/temperature and inject smoke/fuel rates on the GPU.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = source_mask.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if i == 0 or i == nx - 1 or j == 0 or j == ny - 1 or k == 0 or k == nz - 1:
-        return
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+    ) = sparse_managment.tile_to_index()
 
     if not source_mask[i, j, k]:
         return
 
-    scalar_multiplier = _noise_multiplier(source_noise[i, j, k], noise_amplitude)
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
+
+    scalar_multiplier = min(
+        max(1.0 + noise_amplitude * source_noise[i, j, k], 0.0),
+        2.0,
+    )
 
     if velocity_x_value != 0:
-        u[i, j, k] = velocity_x_value
+        u[tile_index, local_i, local_j, local_k] = velocity_x_value
     if velocity_y_value != 0:
-        v[i, j, k] = velocity_y_value
+        v[tile_index, local_i, local_j, local_k] = velocity_y_value
     if velocity_z_value != 0:
-        w[i, j, k] = velocity_z_value
+        w[tile_index, local_i, local_j, local_k] = velocity_z_value
 
-    T[i, j, k] = max(temperature_value * scalar_multiplier, 0.0)
+    temperature = temperature_value * scalar_multiplier
+    if temperature < 0.0:
+        temperature = 0.0
+    T[tile_index, local_i, local_j, local_k] = temperature
 
-    if smoke_value != 0:
-        smoke[i, j, k] = min(
-            max(smoke[i, j, k] + dt * 10.0 * smoke_value * scalar_multiplier, 0.0),
-            100.0,
-        )
-    if fuel_value != 0:
-        fuel[i, j, k] = min(
-            max(fuel[i, j, k] + dt * 10.0 * fuel_value * scalar_multiplier, 0.0),
-            100.0,
-        )
+    smoke[tile_index, local_i, local_j, local_k] = min(
+        smoke[tile_index, local_i, local_j, local_k] + smoke_value * dt * scalar_multiplier,
+        100.0,
+    )
+    fuel[tile_index, local_i, local_j, local_k] = min(
+        fuel[tile_index, local_i, local_j, local_k] + fuel_value * dt * scalar_multiplier,
+        100.0,
+    )

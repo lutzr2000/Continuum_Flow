@@ -1,6 +1,6 @@
-import math
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
 from numba import cuda
-from numba import njit, prange
+
 
 @cuda.jit(cache=True)
 def obstacle_bc_kernel(
@@ -14,25 +14,46 @@ def obstacle_bc_kernel(
     obstacle_velocity_x,
     obstacle_velocity_y,
     obstacle_velocity_z,
+    tile_map,
+    use_obstacle_velocity,
 ):
     """
-    applies all obstacle zeroing conditions inside a 3D obstacle mask on the GPU.
-
-    Each thread checks one obstacle cell and clears velocity and the supported
-    scalar values when the mask marks that cell as solid.
-
+    Apply obstacle boundary conditions.
     """
-    i, j, k = cuda.grid(3)
-    nx, ny, nz = mask.shape
+    (
+        tile_i,
+        tile_j,
+        tile_k,
+        local_i,
+        local_j,
+        local_k,
+        i,
+        j,
+        k,
+    ) = sparse_managment.tile_to_index()
 
-    if i >= nx or j >= ny or k >= nz:
+    if not mask[i, j, k]:
         return
 
-    if mask[i, j, k]:
-        u[i, j, k] = obstacle_velocity_x[i, j, k]
-        v[i, j, k] = obstacle_velocity_y[i, j, k]
-        w[i, j, k] = obstacle_velocity_z[i, j, k]
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+    if tile_index == -1:
+        return
 
-        smoke[i, j, k] = 0.0
-        fuel[i, j, k] = 0.0
-        flame[i, j, k] = 0.0
+    if use_obstacle_velocity:
+        u[tile_index, local_i, local_j, local_k] = obstacle_velocity_x[
+            tile_index, local_i, local_j, local_k
+        ]
+        v[tile_index, local_i, local_j, local_k] = obstacle_velocity_y[
+            tile_index, local_i, local_j, local_k
+        ]
+        w[tile_index, local_i, local_j, local_k] = obstacle_velocity_z[
+            tile_index, local_i, local_j, local_k
+        ]
+    else:
+        u[tile_index, local_i, local_j, local_k] = 0.0
+        v[tile_index, local_i, local_j, local_k] = 0.0
+        w[tile_index, local_i, local_j, local_k] = 0.0
+
+    smoke[tile_index, local_i, local_j, local_k] = 0.0
+    fuel[tile_index, local_i, local_j, local_k] = 0.0
+    flame[tile_index, local_i, local_j, local_k] = 0.0

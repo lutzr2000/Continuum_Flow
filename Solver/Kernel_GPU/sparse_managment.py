@@ -1,7 +1,7 @@
 from numba import cuda
 from typing import Any
 import numpy as np
-import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
+import Solver.Kernel_GPU.kernel_config as kernel_config
 
 tile_size = kernel_config.TILE_SIZE
 

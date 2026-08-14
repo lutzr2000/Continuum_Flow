@@ -1,9 +1,9 @@
 from numba import cuda
 
-import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
-import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
-import Solver.Kernel_GPU_sparse.forces as forces
-from Solver.Kernel_GPU_sparse.vorticity import apply_vorticity_confinement
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
+import Solver.Kernel_GPU.advection_schemes as advection_schemes
+import Solver.Kernel_GPU.forces as forces
+from Solver.Kernel_GPU.vorticity import apply_vorticity_confinement
 
 
 @cuda.jit(cache=True)
