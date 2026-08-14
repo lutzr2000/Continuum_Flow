@@ -200,23 +200,23 @@ def apply_all_BC(
     u,
     v,
     w,
+    u_initial,
+    v_initial,
+    w_initial,
+    obstacle_velocity_x,
+    obstacle_velocity_y,
+    obstacle_velocity_z,
     p,
-    T,
+    temperature,
     smoke,
     fuel,
     flame,
     dt,
     obstacle_mask,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
     source_masks,
     source_noise,
     tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    use_obstacle_velocity,
+    animated_obstacles,
     nx,
     ny,
     nz,
@@ -227,12 +227,12 @@ def apply_all_BC(
     user config.
     """
     bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
-    u, v, w, p, T, smoke, fuel = BC.domain_bc(
+    u, v, w, p, temperature, smoke, fuel = BC.domain_bc(
         u,
         v,
         w,
         p,
-        T,
+        temperature,
         smoke,
         fuel,
         bc_config,
@@ -265,7 +265,7 @@ def apply_all_BC(
             obstacle_velocity_y,
             obstacle_velocity_z,
             tile_map,
-            use_obstacle_velocity,
+            animated_obstacles,
         )
 
     source_count = int(source_masks.shape[0])
@@ -293,7 +293,7 @@ def apply_all_BC(
                 u,
                 v,
                 w,
-                T,
+                temperature,
                 smoke,
                 fuel,
                 tile_map,
@@ -308,7 +308,7 @@ def apply_all_BC(
                 source_noise_amplitudes[source_idx],
                 dt,
             )
-    return u, v, w, p, T, smoke, fuel, flame
+    return u, v, w, p, temperature, smoke, fuel, flame
 
 
 def compute_inital_velocity(simulation_cfg):
@@ -397,6 +397,8 @@ def solver(
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
+    sparse_threshold = simulation.get("settings").get("adaptive_domain_threshold")
+
     # ------------physics------------------
     reference_temperature = (
         simulation.get("physics").get("temperature").get("reference_temperature")
@@ -407,7 +409,7 @@ def solver(
     tile_size_j = (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
     tile_size_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
     tile_shape = (tile_size_i, tile_size_j, tile_size_k)
-    total_tile_count = int(tile_size_i, tile_size_j, tile_size_k)
+    total_tile_count = int(tile_size_i * tile_size_j * tile_size_k)
     tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
@@ -569,7 +571,7 @@ def solver(
     output_index = 0
     time_step_count = 0
     last_output_wall_time = None
-    
+
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
@@ -588,7 +590,7 @@ def solver(
                 tile_map,
                 source_mask,
                 base_tile_map,
-                simulation.get("settings").get("adaptive_domain_threshold"),
+                sparse_threshold,
                 reference_temperature,
             )
 
@@ -613,116 +615,52 @@ def solver(
                     tile_growth_size,
                 )
 
-                temperature = sparse_managment.ensure_pool_capacity(
-                    temperature,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    reference_temperature,
-                )
-                temperature_work = sparse_managment.ensure_pool_capacity(
-                    temperature_work,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    reference_temperature,
-                )
-                smoke = sparse_managment.ensure_pool_capacity(
-                    smoke, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
-                )
-                smoke_work = sparse_managment.ensure_pool_capacity(
-                    smoke_work, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
-                )
-                fuel = sparse_managment.ensure_pool_capacity(
-                    fuel, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
-                )
-                fuel_work = sparse_managment.ensure_pool_capacity(
-                    fuel_work, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
-                )
-                flame = sparse_managment.ensure_pool_capacity(
-                    flame, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
-                )
-
-                scratch_A = sparse_managment.ensure_pool_capacity(
-                    scratch_A,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    reference_temperature,
-                )
-                scratch_B = sparse_managment.ensure_pool_capacity(
-                    scratch_B,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    0.0,
-                )
-                scratch_C = sparse_managment.ensure_pool_capacity(
-                    scratch_C,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    0.0,
-                )
-
-                u = sparse_managment.ensure_pool_capacity(
+                (
                     u,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    u_initial,
-                )
-                u_work = sparse_managment.ensure_pool_capacity(
-                    u_work,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    u_initial,
-                )
-                v = sparse_managment.ensure_pool_capacity(
                     v,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    v_initial,
-                )
-                v_work = sparse_managment.ensure_pool_capacity(
-                    v_work,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    v_initial,
-                )
-                w = sparse_managment.ensure_pool_capacity(
                     w,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    w_initial,
-                )
-                w_work = sparse_managment.ensure_pool_capacity(
+                    u_work,
+                    v_work,
                     w_work,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    w_initial,
-                )
-
-                zero_pool = sparse_managment.ensure_pool_capacity(
-                    zero_pool,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    0.0,
-                )
-
-                vorticity_magnitude = sparse_managment.ensure_pool_capacity(
-                    vorticity_magnitude,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    0.0,
-                )
-
-                pressure_rhs = sparse_managment.ensure_pool_capacity(
-                    pressure_rhs,
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                    0.0,
-                )
-
-                p = sparse_managment.ensure_pool_capacity(
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
                     p,
+                    pressure_rhs,
+                    temperature,
+                    smoke,
+                    fuel,
+                    temperature_work,
+                    smoke_work,
+                    fuel_work,
+                    flame,
+                    zero_pool,
+                    vorticity_magnitude,
+                ) = sparse_managment.ensure_pool_capacities(
+                    [
+                        (u, u_initial),
+                        (v, v_initial),
+                        (w, w_initial),
+                        (u_work, u_initial),
+                        (v_work, v_initial),
+                        (w_work, w_initial),
+                        (scratch_A, reference_temperature),
+                        (scratch_B, 0.0),
+                        (scratch_C, 0.0),
+                        (p, 0.0),
+                        (pressure_rhs, 0.0),
+                        (temperature, reference_temperature),
+                        (smoke, 0.0),
+                        (fuel, 0.0),
+                        (temperature_work, reference_temperature),
+                        (smoke_work, 0.0),
+                        (fuel_work, 0.0),
+                        (flame, 0.0),
+                        (zero_pool, 0.0),
+                        (vorticity_magnitude, 0.0),
+                    ],
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
-                    0.0,
                 )
 
                 sparse_tile_capacity = next_sparse_tile_capacity
@@ -751,18 +689,8 @@ def solver(
         )
 
         # ------------Clear scratch-------------------
-        sparse_managment.reset_pool(
-            scratch_A,
-            zero_pool,
-            active_sparse_tile_count,
-        )
-        sparse_managment.reset_pool(
-            scratch_B,
-            zero_pool,
-            active_sparse_tile_count,
-        )
-        sparse_managment.reset_pool(
-            scratch_C,
+        sparse_managment.reset_pools(
+            (scratch_A, scratch_B, scratch_C),
             zero_pool,
             active_sparse_tile_count,
         )
@@ -812,6 +740,12 @@ def solver(
             u,
             v,
             w,
+            u_initial,
+            v_initial,
+            w_initial,
+            scratch_A,
+            scratch_B,
+            scratch_C,
             p,
             temperature,
             smoke,
@@ -819,15 +753,9 @@ def solver(
             flame,
             dt,
             obstacle_mask,
-            scratch_A,
-            scratch_B,
-            scratch_C,
             source_masks,
             source_noise,
             tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
             animated_obstacles,
             nx,
             ny,
@@ -835,18 +763,8 @@ def solver(
         )
 
         # ------------Clear scratch-------------------
-        sparse_managment.reset_pool(
-            scratch_A,
-            zero_pool,
-            active_sparse_tile_count,
-        )
-        sparse_managment.reset_pool(
-            scratch_B,
-            zero_pool,
-            active_sparse_tile_count,
-        )
-        sparse_managment.reset_pool(
-            scratch_C,
+        sparse_managment.reset_pools(
+            (scratch_A, scratch_B, scratch_C),
             zero_pool,
             active_sparse_tile_count,
         )
@@ -857,13 +775,13 @@ def solver(
                 u,
                 v,
                 w,
+                u_initial,
+                v_initial,
+                w_initial,
                 obstacle_mask,
                 vorticity_magnitude,
                 delta,
                 tile_map,
-                u_initial,
-                v_initial,
-                w_initial,
                 nx,
                 ny,
                 nz,

@@ -9,13 +9,13 @@ def compute_vorticity(
     u,
     v,
     w,
-    obstacle_mask,
-    omega_magnitude,
-    delta,
-    tile_map,
     u_initial,
     v_initial,
     w_initial,
+    obstacle_mask,
+    vorticity_magnitude,
+    delta,
+    tile_map,
     nx,
     ny,
     nz,
@@ -44,11 +44,11 @@ def compute_vorticity(
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
-        omega_magnitude[tile_index, local_i, local_j, local_k] = 0.0
+        vorticity_magnitude[tile_index, local_i, local_j, local_k] = 0.0
         return
 
     if obstacle_mask[i, j, k]:
-        omega_magnitude[tile_index, local_i, local_j, local_k] = 0.0
+        vorticity_magnitude[tile_index, local_i, local_j, local_k] = 0.0
         return
 
     half_inv_delta = 0.5 / delta
@@ -84,7 +84,7 @@ def compute_vorticity(
     wy = du_dz - dw_dx
     wz = dv_dx - du_dy
 
-    omega_magnitude[tile_index, local_i, local_j, local_k] = math.sqrt(
+    vorticity_magnitude[tile_index, local_i, local_j, local_k] = math.sqrt(
         wx * wx + wy * wy + wz * wz
     )
 

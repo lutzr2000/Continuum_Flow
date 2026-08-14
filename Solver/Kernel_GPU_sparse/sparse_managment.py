@@ -243,34 +243,37 @@ def required_pool_capacity(
     return new_capacity_tiles
 
 
-def ensure_pool_capacity(
-    pool_tile_buffer,
+def ensure_pool_capacities(
+    pool_specs,
     current_capacity_tiles,
     target_capacity_tiles,
-    fill_value,
 ):
     if target_capacity_tiles == current_capacity_tiles:
-        return pool_tile_buffer
+        return [pool for pool, _fill_value in pool_specs]
 
-    new_pool_tile_buffer = cuda.to_device(
-        np.full(
-            (
-                target_capacity_tiles,
-                kernel_config.TILE_SIZE,
-                kernel_config.TILE_SIZE,
-                kernel_config.TILE_SIZE,
-            ),
-            fill_value,
-            dtype=kernel_config.GPU_FIELD_DTYPE,
-        )
-    )
-
-    if current_capacity_tiles > 0:
-        new_pool_tile_buffer[:current_capacity_tiles].copy_to_device(
-            pool_tile_buffer[:current_capacity_tiles]
+    resized_pools = []
+    for pool_tile_buffer, fill_value in pool_specs:
+        new_pool_tile_buffer = cuda.to_device(
+            np.full(
+                (
+                    target_capacity_tiles,
+                    kernel_config.TILE_SIZE,
+                    kernel_config.TILE_SIZE,
+                    kernel_config.TILE_SIZE,
+                ),
+                fill_value,
+                dtype=kernel_config.GPU_FIELD_DTYPE,
+            )
         )
 
-    return new_pool_tile_buffer
+        if current_capacity_tiles > 0:
+            new_pool_tile_buffer[:current_capacity_tiles].copy_to_device(
+                pool_tile_buffer[:current_capacity_tiles]
+            )
+
+        resized_pools.append(new_pool_tile_buffer)
+
+    return resized_pools
 
 
 def copy_pool(dst_pool, src_pool, active_tile_count):
@@ -280,8 +283,9 @@ def copy_pool(dst_pool, src_pool, active_tile_count):
     dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])
 
 
-def reset_pool(dst_pool, fill_pool, active_tile_count):
+def reset_pools(dst_pools, fill_pool, active_tile_count):
     if active_tile_count <= 0:
         return
 
-    dst_pool[:active_tile_count].copy_to_device(fill_pool[:active_tile_count])
+    for dst_pool in dst_pools:
+        dst_pool[:active_tile_count].copy_to_device(fill_pool[:active_tile_count])
