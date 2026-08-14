@@ -271,11 +271,12 @@ def ensure_pool_capacities(
     return resized_pools
 
 
-def copy_pool(dst_pool, src_pool, active_tile_count):
+def copy_pools(dst_src_pairs, active_tile_count):
     if active_tile_count <= 0:
         return
 
-    dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])
+    for dst_pool, src_pool in dst_src_pairs:
+        dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])
 
 
 def reset_pools(dst_pools, fill_pool, active_tile_count):

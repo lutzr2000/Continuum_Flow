@@ -2,6 +2,7 @@ from numba import cuda
 
 import Solver.Kernel_GPU_sparse.advection_schemes as advection_schemes
 import Solver.Kernel_GPU_sparse.sparse_managment as sparse_managment
+import Solver.Kernel_GPU_sparse.noise as noise
 
 
 @cuda.jit(cache=True)
@@ -235,7 +236,7 @@ def update_scalar_fields_maccormack(
     oxygen_center = max(0.0, min(1.0, (100.0 - smoke_corrected) / 100.0))
 
     if T_corrected > fuel_ignition_temperature and fuel_corrected > 0.0:
-        n = advection_schemes._value_noise_3d(
+        n = noise._value_noise_3d(
             float(i) * burn_noise_scale,
             float(j) * burn_noise_scale,
             float(k) * burn_noise_scale,
