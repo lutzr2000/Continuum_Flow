@@ -1,5 +1,6 @@
 import json
 import os
+import select
 import socket
 from multiprocessing import shared_memory
 
@@ -62,6 +63,13 @@ def setup_output(simulations, outpath, shape):
     tile_map_dtype = np.int32
     tile_map_nbytes = int(np.prod(tile_shape)) * np.dtype(tile_map_dtype).itemsize
 
+    active_tile_meta_shape = (int(np.prod(tile_shape)), 7)
+    active_tile_meta_dtype = np.int32
+    active_tile_meta_nbytes = (
+        int(np.prod(active_tile_meta_shape))
+        * np.dtype(active_tile_meta_dtype).itemsize
+    )
+
     sparse_pool_dtype = np.float32
     sparse_pool_nbytes = (
         int(np.prod(sparse_pool_shape)) * np.dtype(sparse_pool_dtype).itemsize
@@ -81,6 +89,18 @@ def setup_output(simulations, outpath, shape):
             buffer=tile_map_shm.buf,
         )
         tile_map_array.fill(-1)
+
+        active_tile_meta_shm = shared_memory.SharedMemory(
+            create=True,
+            size=active_tile_meta_nbytes,
+        )
+        shared_memory_blocks.append(active_tile_meta_shm)
+        active_tile_meta_array = np.ndarray(
+            active_tile_meta_shape,
+            dtype=active_tile_meta_dtype,
+            buffer=active_tile_meta_shm.buf,
+        )
+        active_tile_meta_array.fill(0)
 
         for variable_name in output_list:
             shm = shared_memory.SharedMemory(
@@ -116,6 +136,11 @@ def setup_output(simulations, outpath, shape):
                     "shape": tile_shape,
                     "shm_name": tile_map_shm.name,
                 },
+                "active_tiles": {
+                    "array": active_tile_meta_array,
+                    "shape": active_tile_meta_shape,
+                    "shm_name": active_tile_meta_shm.name,
+                },
                 "socket": writer_socket,
                 "file": writer_file,
                 "busy": False,
@@ -126,6 +151,8 @@ def setup_output(simulations, outpath, shape):
 
 
 def _get_writer_slot(writer_slots, output_index):
+    _drain_ready_writer_acks(writer_slots)
+
     slot_count = len(writer_slots)
 
     start = int(output_index) % slot_count
@@ -135,10 +162,36 @@ def _get_writer_slot(writer_slots, output_index):
         if not slot["busy"]:
             return slot
 
+    print(
+        f"All VDB writer slots busy at output index {int(output_index)}. Waiting for writer ack..."
+    )
     slot = writer_slots[start]
     _wait_for_writer_ack(slot["file"])
     slot["busy"] = False
     return slot
+
+
+def _drain_ready_writer_acks(writer_slots):
+    busy_slots = [slot for slot in writer_slots if slot["busy"]]
+    if not busy_slots:
+        return
+
+    ready_sockets, _, _ = select.select(
+        [slot["socket"] for slot in busy_slots],
+        [],
+        [],
+        0.0,
+    )
+    if not ready_sockets:
+        return
+
+    ready_socket_ids = {id(sock) for sock in ready_sockets}
+    for slot in busy_slots:
+        if id(slot["socket"]) not in ready_socket_ids:
+            continue
+
+        _wait_for_writer_ack(slot["file"])
+        slot["busy"] = False
 
 
 def _copy_sparse_field_to_shared_memory(field_info, shared_array, used_tile_count):
@@ -146,6 +199,31 @@ def _copy_sparse_field_to_shared_memory(field_info, shared_array, used_tile_coun
         return
 
     field_info["data"][:used_tile_count].copy_to_host(shared_array[:used_tile_count])
+
+
+def _build_active_tile_metadata(tile_map_host, active_tile_meta_array, dense_shape):
+    active_coords = np.argwhere(tile_map_host >= 0)
+    active_tile_count = int(active_coords.shape[0])
+    if active_tile_count <= 0:
+        return 0, 0
+
+    tile_size = int(kernel_config.TILE_SIZE)
+    dense_shape_array = np.asarray(dense_shape, dtype=np.int32)
+    starts = active_coords.astype(np.int32, copy=False) * tile_size
+    ends = np.minimum(starts + tile_size, dense_shape_array)
+    sizes = ends - starts
+    tile_indices = tile_map_host[
+        active_coords[:, 0],
+        active_coords[:, 1],
+        active_coords[:, 2],
+    ].astype(np.int32, copy=False)
+
+    active_tile_meta_array[:active_tile_count, 0] = tile_indices
+    active_tile_meta_array[:active_tile_count, 1:4] = starts
+    active_tile_meta_array[:active_tile_count, 4:7] = sizes
+
+    used_tile_count = int(tile_indices.max()) + 1
+    return active_tile_count, used_tile_count
 
 
 def enqueue_device_output(
@@ -164,6 +242,7 @@ def enqueue_device_output(
     slot = _get_writer_slot(writer_slots, output_index)
     fields = slot["fields"]
     tile_map_slot = slot["tile_map"]
+    active_tiles_slot = slot["active_tiles"]
 
     sparse_field_info = next(
         (
@@ -179,8 +258,11 @@ def enqueue_device_output(
     sparse_field_info["tile_map"].copy_to_host(tile_map_slot["array"])
     tile_map_host = tile_map_slot["array"]
 
-    active_indices = tile_map_host[tile_map_host >= 0]
-    used_tile_count = int(active_indices.max()) + 1 if active_indices.size else 0
+    active_tile_count, used_tile_count = _build_active_tile_metadata(
+        tile_map_host,
+        active_tiles_slot["array"],
+        next(iter(fields.values()))["dense_shape"],
+    )
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
@@ -201,9 +283,11 @@ def enqueue_device_output(
     writer_payload = create_writer_payload(
         fields,
         tile_map_slot,
+        active_tiles_slot,
         output_list,
         output_path,
         t,
+        active_tile_count,
         used_tile_count,
     )
 
@@ -221,9 +305,11 @@ def _vdb_grid_name(field_name):
 def create_writer_payload(
     fields,
     tile_map,
+    active_tiles,
     output_list,
     output_path,
     time_value,
+    active_tile_count,
     used_tile_count,
 ):
     payload = {
@@ -232,6 +318,11 @@ def create_writer_payload(
         "tile_map": {
             "shape": tile_map["shape"],
             "shm_name": tile_map["shm_name"],
+        },
+        "active_tiles": {
+            "shape": active_tiles["shape"],
+            "shm_name": active_tiles["shm_name"],
+            "count": int(active_tile_count),
         },
         "grids": [],
     }
