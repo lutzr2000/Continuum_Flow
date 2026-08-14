@@ -376,8 +376,6 @@ def solver(
 ):
     total_start_time = perf_counter()
     simulation = config.get("simulation") or {}
-    if not simulation:
-        raise ValueError("Solver config must contain a non-empty 'simulation' object.")
     cancel_flag_path = (
         (config.get("meta") or {}).get("cancel_flag_path") or ""
     ).strip()
@@ -399,22 +397,28 @@ def solver(
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
+    # ------------physics------------------
+    reference_temperature = (
+        simulation.get("physics").get("temperature").get("reference_temperature")
+    )
+
     # ------------tiles------------------
-    tile_i = (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
-    tile_j = (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
-    tile_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
-    tile_shape = (tile_i, tile_j, tile_k)
-    total_tile_count = int(np.prod(tile_shape))
+    tile_size_i = (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_size_j = (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_size_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+    tile_shape = (tile_size_i, tile_size_j, tile_size_k)
+    total_tile_count = int(tile_size_i, tile_size_j, tile_size_k)
     tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
 
     next_tile_index_counter = cuda.to_device(np.asarray([0], dtype=np.int32))
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
-    spare_tile_growth_size_percent = float(kernel_config.SPARSE_TILE_GROWTH_PERCENT)
     tile_growth_size = max(
         1,
-        math.ceil(total_tile_count * (spare_tile_growth_size_percent / 100.0)),
+        math.ceil(
+            total_tile_count * (float(kernel_config.SPARSE_TILE_GROWTH_PERCENT) / 100.0)
+        ),
     )
 
     print("################################################################")
@@ -424,9 +428,7 @@ def solver(
     print("Total tiles: ", total_tile_count)
 
     # ------------fields------------------
-    # scalars + sparse velocity
-    ref_temp = simulation.get("physics").get("temperature").get("reference_temperature")
-
+    # --------------- sparse -------------------#
     sparse_tile_capacity = max(1, tile_growth_size)
     sparse_pool_shape = (
         sparse_tile_capacity,
@@ -439,33 +441,37 @@ def solver(
 
     # velocity
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
+
     u = cuda.to_device(np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE))
+    v = cuda.to_device(np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE))
+    w = cuda.to_device(np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE))
+
     u_work = cuda.to_device(
         np.full(sparse_pool_shape, u_initial, dtype=GPU_FIELD_DTYPE)
     )
-    v = cuda.to_device(np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE))
     v_work = cuda.to_device(
         np.full(sparse_pool_shape, v_initial, dtype=GPU_FIELD_DTYPE)
     )
-    w = cuda.to_device(np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE))
     w_work = cuda.to_device(
         np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
     )
 
     velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
-    velocity_maxima_host_zeros = np.zeros(3, dtype=np.float32)
 
     # scalars
     temperature = cuda.to_device(
-        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
-    )
-    temperature_work = cuda.to_device(
-        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
     )
     smoke = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
-    smoke_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     fuel = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    temperature_work = cuda.to_device(
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
+    )
+    smoke_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     fuel_work = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
+
+    # flame
     flame = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
     # vorticity
@@ -475,12 +481,11 @@ def solver(
 
     # scratch
     scratch_A = cuda.to_device(
-        np.full(sparse_pool_shape, ref_temp, dtype=GPU_FIELD_DTYPE)
+        np.full(sparse_pool_shape, reference_temperature, dtype=GPU_FIELD_DTYPE)
     )
     scratch_B = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     scratch_C = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
-    # --------------- dense -------------------#
     # pressure
     p = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
@@ -497,6 +502,7 @@ def solver(
         min_size=8,
     )
 
+    # --------------- dense -------------------#
     # masks
     obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
     source_mask_host = (
@@ -521,8 +527,6 @@ def solver(
     source_noise = cuda.to_device(
         np.ascontiguousarray(source_noise_host, dtype=np.float32)
     )
-
-    # ------------intitialise------------------
 
     if source_noise_base_fields:
         update_masks.update_source_values(
@@ -565,6 +569,7 @@ def solver(
     output_index = 0
     time_step_count = 0
     last_output_wall_time = None
+    
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
@@ -584,7 +589,7 @@ def solver(
                 source_mask,
                 base_tile_map,
                 simulation.get("settings").get("adaptive_domain_threshold"),
-                ref_temp,
+                reference_temperature,
             )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
@@ -612,13 +617,13 @@ def solver(
                     temperature,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
-                    ref_temp,
+                    reference_temperature,
                 )
                 temperature_work = sparse_managment.ensure_pool_capacity(
                     temperature_work,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
-                    ref_temp,
+                    reference_temperature,
                 )
                 smoke = sparse_managment.ensure_pool_capacity(
                     smoke, sparse_tile_capacity, next_sparse_tile_capacity, 0.0
@@ -640,7 +645,7 @@ def solver(
                     scratch_A,
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
-                    ref_temp,
+                    reference_temperature,
                 )
                 scratch_B = sparse_managment.ensure_pool_capacity(
                     scratch_B,
@@ -731,7 +736,7 @@ def solver(
         # ------------time step-------------------
         active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
 
-        velocity_maxima.copy_to_device(velocity_maxima_host_zeros)
+        velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
 
         dt = time_step.compute_new_timestep_gpu(
             u,
@@ -929,7 +934,7 @@ def solver(
             simulation.get("physics").get("extras").get("vorticity"),
             temperature,
             simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
-            ref_temp,
+            reference_temperature,
             tile_map,
             fx_const,
             fy_const,
@@ -976,7 +981,7 @@ def solver(
             delta,
             simulation.get("physics").get("fluid").get("density"),
             simulation.get("physics").get("temperature").get("expansion_rate"),
-            ref_temp,
+            reference_temperature,
             tile_map,
             tile_shape,
             u_initial,
@@ -1043,7 +1048,7 @@ def solver(
             scratch_B,
             scratch_C,
             delta,
-            ref_temp,
+            reference_temperature,
             tile_map,
             u_initial,
             v_initial,
@@ -1080,7 +1085,7 @@ def solver(
             simulation.get("physics").get("fuel").get("ignition_temperature"),
             simulation.get("physics").get("burning").get("scale"),
             simulation.get("physics").get("burning").get("amplitude"),
-            ref_temp,
+            reference_temperature,
             tile_map,
             u_initial,
             v_initial,

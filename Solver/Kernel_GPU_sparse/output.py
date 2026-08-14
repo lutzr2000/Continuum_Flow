@@ -163,7 +163,7 @@ def _get_writer_slot(writer_slots, output_index):
             return slot
 
     print(
-        f"All VDB writer slots busy at output index {int(output_index)}. Waiting for writer ack..."
+        f"All VDB writer slots busy. This slows down the simulation. Using more writers might improve performance"
     )
     slot = writer_slots[start]
     _wait_for_writer_ack(slot["file"])
