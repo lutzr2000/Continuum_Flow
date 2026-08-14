@@ -2,57 +2,10 @@ import json
 import os
 import socket
 from multiprocessing import shared_memory
+
 import numpy as np
 
-
-def _reconstruct_sparse_field_to_dense_host(field_info, output_array):
-    tile_map_device = field_info["tile_map"]
-    sparse_field_device = field_info["data"]
-    tile_size = int(field_info["tile_size"])
-
-    output_array.fill(0.0)
-
-    tile_map_host = tile_map_device.copy_to_host()
-    sparse_field_host = sparse_field_device.copy_to_host()
-
-    nx, ny, nz = output_array.shape
-    tiles_x, tiles_y, tiles_z = tile_map_host.shape
-
-    for tile_i in range(tiles_x):
-        cell_i_start = tile_i * tile_size
-        if cell_i_start >= nx:
-            break
-
-        cell_i_end = min(cell_i_start + tile_size, nx)
-
-        for tile_j in range(tiles_y):
-            cell_j_start = tile_j * tile_size
-            if cell_j_start >= ny:
-                break
-
-            cell_j_end = min(cell_j_start + tile_size, ny)
-
-            for tile_k in range(tiles_z):
-                tile_index = int(tile_map_host[tile_i, tile_j, tile_k])
-                if tile_index == -1:
-                    continue
-
-                cell_k_start = tile_k * tile_size
-                if cell_k_start >= nz:
-                    break
-
-                cell_k_end = min(cell_k_start + tile_size, nz)
-
-                output_array[
-                    cell_i_start:cell_i_end,
-                    cell_j_start:cell_j_end,
-                    cell_k_start:cell_k_end,
-                ] = sparse_field_host[
-                    tile_index,
-                    : cell_i_end - cell_i_start,
-                    : cell_j_end - cell_j_start,
-                    : cell_k_end - cell_k_start,
-                ]
+import Solver.Kernel_GPU_sparse.kernel_config as kernel_config
 
 
 def _enabled_output_field_names(output_fields):
@@ -68,6 +21,22 @@ def _enabled_output_field_names(output_fields):
         enabled_fields.remove("velocity")
         enabled_fields.extend(["u", "v", "w"])
     return enabled_fields
+
+
+def _tile_shape_for_dense_shape(shape):
+    tile_size = int(kernel_config.TILE_SIZE)
+    return tuple((int(axis_size) + tile_size - 1) // tile_size for axis_size in shape)
+
+
+def _sparse_pool_shape_for_dense_shape(shape):
+    tile_shape = _tile_shape_for_dense_shape(shape)
+    tile_size = int(kernel_config.TILE_SIZE)
+    return (
+        int(np.prod(tile_shape)),
+        tile_size,
+        tile_size,
+        tile_size,
+    )
 
 
 def setup_output(simulations, outpath, shape):
@@ -87,22 +56,47 @@ def setup_output(simulations, outpath, shape):
     shared_memory_blocks = []
     writer_slots = []
 
-    buffer_dtype = np.float32
-    nbytes = int(np.prod(shape)) * np.dtype(buffer_dtype).itemsize
+    tile_shape = _tile_shape_for_dense_shape(shape)
+    sparse_pool_shape = _sparse_pool_shape_for_dense_shape(shape)
+
+    tile_map_dtype = np.int32
+    tile_map_nbytes = int(np.prod(tile_shape)) * np.dtype(tile_map_dtype).itemsize
+
+    sparse_pool_dtype = np.float32
+    sparse_pool_nbytes = (
+        int(np.prod(sparse_pool_shape)) * np.dtype(sparse_pool_dtype).itemsize
+    )
 
     for _slot_index in range(writer_count):
         fields = {}
 
+        tile_map_shm = shared_memory.SharedMemory(
+            create=True,
+            size=tile_map_nbytes,
+        )
+        shared_memory_blocks.append(tile_map_shm)
+        tile_map_array = np.ndarray(
+            tile_shape,
+            dtype=tile_map_dtype,
+            buffer=tile_map_shm.buf,
+        )
+        tile_map_array.fill(-1)
+
         for variable_name in output_list:
             shm = shared_memory.SharedMemory(
                 create=True,
-                size=nbytes,
+                size=sparse_pool_nbytes,
             )
             shared_memory_blocks.append(shm)
 
             fields[variable_name] = {
-                "array": np.ndarray(shape, dtype=buffer_dtype, buffer=shm.buf),
-                "shape": tuple(shape),
+                "array": np.ndarray(
+                    sparse_pool_shape,
+                    dtype=sparse_pool_dtype,
+                    buffer=shm.buf,
+                ),
+                "dense_shape": tuple(shape),
+                "pool_shape": sparse_pool_shape,
                 "shm_name": shm.name,
             }
 
@@ -114,12 +108,19 @@ def setup_output(simulations, outpath, shape):
         )
         writer_file = writer_socket.makefile("rwb")
 
-        writer_slots.append({
-            "fields": fields,
-            "socket": writer_socket,
-            "file": writer_file,
-            "busy": False,
-        })
+        writer_slots.append(
+            {
+                "fields": fields,
+                "tile_map": {
+                    "array": tile_map_array,
+                    "shape": tile_shape,
+                    "shm_name": tile_map_shm.name,
+                },
+                "socket": writer_socket,
+                "file": writer_file,
+                "busy": False,
+            }
+        )
 
     return shared_memory_blocks, writer_slots
 
@@ -127,7 +128,6 @@ def setup_output(simulations, outpath, shape):
 def _get_writer_slot(writer_slots, output_index):
     slot_count = len(writer_slots)
 
-    # Round-robin bevorzugen
     start = int(output_index) % slot_count
 
     for offset in range(slot_count):
@@ -135,11 +135,17 @@ def _get_writer_slot(writer_slots, output_index):
         if not slot["busy"]:
             return slot
 
-    # Alle busy: auf den Round-robin-Slot warten
     slot = writer_slots[start]
     _wait_for_writer_ack(slot["file"])
     slot["busy"] = False
     return slot
+
+
+def _copy_sparse_field_to_shared_memory(field_info, shared_array, used_tile_count):
+    if used_tile_count <= 0:
+        return
+
+    field_info["data"][:used_tile_count].copy_to_host(shared_array[:used_tile_count])
 
 
 def enqueue_device_output(
@@ -157,25 +163,48 @@ def enqueue_device_output(
 
     slot = _get_writer_slot(writer_slots, output_index)
     fields = slot["fields"]
+    tile_map_slot = slot["tile_map"]
+
+    sparse_field_info = next(
+        (
+            sim_fields[variable_name]
+            for variable_name in output_list
+            if isinstance(sim_fields[variable_name], dict)
+        ),
+        None,
+    )
+    if sparse_field_info is None:
+        raise RuntimeError("Sparse GPU output expected sparse device fields.")
+
+    sparse_field_info["tile_map"].copy_to_host(tile_map_slot["array"])
+    tile_map_host = tile_map_slot["array"]
+
+    active_indices = tile_map_host[tile_map_host >= 0]
+    used_tile_count = int(active_indices.max()) + 1 if active_indices.size else 0
 
     for variable_name in output_list:
         source_field = sim_fields[variable_name]
-        if isinstance(source_field, dict):
-            _reconstruct_sparse_field_to_dense_host(
-                source_field,
-                fields[variable_name]["array"],
+        if not isinstance(source_field, dict):
+            raise RuntimeError(
+                f"Sparse GPU output received non-sparse field '{variable_name}'."
             )
-        else:
-            source_field.copy_to_host(fields[variable_name]["array"])
+
+        _copy_sparse_field_to_shared_memory(
+            source_field,
+            fields[variable_name]["array"],
+            used_tile_count,
+        )
 
     frame_idx = int(frame_start) + int(output_index)
     output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
     writer_payload = create_writer_payload(
         fields,
+        tile_map_slot,
         output_list,
         output_path,
         t,
+        used_tile_count,
     )
 
     _send_payload_without_wait(slot["file"], writer_payload)
@@ -191,27 +220,38 @@ def _vdb_grid_name(field_name):
 
 def create_writer_payload(
     fields,
+    tile_map,
     output_list,
     output_path,
     time_value,
+    used_tile_count,
 ):
     payload = {
         "output_path": output_path,
         "time": float(time_value),
+        "tile_map": {
+            "shape": tile_map["shape"],
+            "shm_name": tile_map["shm_name"],
+        },
         "grids": [],
     }
 
     for field_name in output_list:
-        payload["grids"].append({
-            "name": _vdb_grid_name(field_name),
-            "shape": fields[field_name]["shape"],
-            "fields": {
-                field_name: {
-                    "shape": fields[field_name]["shape"],
-                    "shm_name": fields[field_name]["shm_name"],
-                }   
-            },
-        })
+        payload["grids"].append(
+            {
+                "name": _vdb_grid_name(field_name),
+                "layout": "sparse_tiles",
+                "dense_shape": fields[field_name]["dense_shape"],
+                "tile_size": int(kernel_config.TILE_SIZE),
+                "used_tile_count": int(used_tile_count),
+                "fields": {
+                    field_name: {
+                        "shape": fields[field_name]["pool_shape"],
+                        "shm_name": fields[field_name]["shm_name"],
+                    }
+                },
+            }
+        )
 
     return payload
 

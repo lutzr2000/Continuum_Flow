@@ -28,6 +28,14 @@ def open_scalar_array(grid_payload):
     return arr, shm, shape
 
 
+def open_tile_map(payload):
+    tile_map_info = payload["tile_map"]
+    shape = tuple(tile_map_info["shape"])
+    shm = shared_memory.SharedMemory(name=tile_map_info["shm_name"])
+    arr = np.ndarray(shape, dtype=np.int32, buffer=shm.buf)
+    return arr, shm
+
+
 def prune_scalar_grid(grid):
     try:
         grid.prune()
@@ -38,6 +46,48 @@ def prune_scalar_grid(grid):
             pass
     except AttributeError:
         pass
+
+
+def copy_sparse_tiles_into_grid(grid, sparse_arr, tile_map, dense_shape, tile_size):
+    nx, ny, nz = (int(dense_shape[0]), int(dense_shape[1]), int(dense_shape[2]))
+    tiles_x, tiles_y, tiles_z = tile_map.shape
+
+    for tile_i in range(tiles_x):
+        cell_i_start = tile_i * tile_size
+        if cell_i_start >= nx:
+            break
+
+        cell_i_end = min(cell_i_start + tile_size, nx)
+
+        for tile_j in range(tiles_y):
+            cell_j_start = tile_j * tile_size
+            if cell_j_start >= ny:
+                break
+
+            cell_j_end = min(cell_j_start + tile_size, ny)
+
+            for tile_k in range(tiles_z):
+                tile_index = int(tile_map[tile_i, tile_j, tile_k])
+                if tile_index < 0:
+                    continue
+
+                cell_k_start = tile_k * tile_size
+                if cell_k_start >= nz:
+                    break
+
+                cell_k_end = min(cell_k_start + tile_size, nz)
+
+                tile_values = sparse_arr[
+                    tile_index,
+                    : cell_i_end - cell_i_start,
+                    : cell_j_end - cell_j_start,
+                    : cell_k_end - cell_k_start,
+                ]
+
+                grid.copyFromArray(
+                    np.ascontiguousarray(tile_values),
+                    ijk=(cell_i_start, cell_j_start, cell_k_start),
+                )
 
 
 def write_vdb(payload):
@@ -66,6 +116,11 @@ def write_vdb(payload):
 
     try:
         grid_payloads = list(payload["grids"])
+        tile_map = None
+
+        if "tile_map" in payload:
+            tile_map, tile_map_shm = open_tile_map(payload)
+            open_shared_memory.append(tile_map_shm)
 
         for grid_payload in grid_payloads:
             grid_name = grid_payload["name"]
@@ -81,7 +136,16 @@ def write_vdb(payload):
             if hasattr(grid, "saveFloatAsHalf"):
                 grid.saveFloatAsHalf = (precision == "float16")
 
-            grid.copyFromArray(arr)
+            if grid_payload.get("layout") == "sparse_tiles":
+                copy_sparse_tiles_into_grid(
+                    grid,
+                    arr,
+                    tile_map,
+                    tuple(grid_payload["dense_shape"]),
+                    int(grid_payload["tile_size"]),
+                )
+            else:
+                grid.copyFromArray(arr)
             prune_scalar_grid(grid)
 
             grids.append(grid)
