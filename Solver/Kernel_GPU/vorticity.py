@@ -48,30 +48,30 @@ def compute_vorticity(
     half_inv_delta = 0.5 / delta
 
     du_dy = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial)
+        sparse_managment.get_pool_value(u, tile_map, i, j + 1, k, u_initial)
+        - sparse_managment.get_pool_value(u, tile_map, i, j - 1, k, u_initial)
     ) * half_inv_delta
     du_dz = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial)
+        sparse_managment.get_pool_value(u, tile_map, i, j, k + 1, u_initial)
+        - sparse_managment.get_pool_value(u, tile_map, i, j, k - 1, u_initial)
     ) * half_inv_delta
 
     dv_dx = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial)
+        sparse_managment.get_pool_value(v, tile_map, i + 1, j, k, v_initial)
+        - sparse_managment.get_pool_value(v, tile_map, i - 1, j, k, v_initial)
     ) * half_inv_delta
     dv_dz = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial)
+        sparse_managment.get_pool_value(v, tile_map, i, j, k + 1, v_initial)
+        - sparse_managment.get_pool_value(v, tile_map, i, j, k - 1, v_initial)
     ) * half_inv_delta
 
     dw_dx = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial)
+        sparse_managment.get_pool_value(w, tile_map, i + 1, j, k, w_initial)
+        - sparse_managment.get_pool_value(w, tile_map, i - 1, j, k, w_initial)
     ) * half_inv_delta
     dw_dy = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial)
+        sparse_managment.get_pool_value(w, tile_map, i, j + 1, k, w_initial)
+        - sparse_managment.get_pool_value(w, tile_map, i, j - 1, k, w_initial)
     ) * half_inv_delta
 
     wx = dw_dy - dv_dz
@@ -129,18 +129,18 @@ def apply_vorticity_confinement(
     half_inv_delta = 0.5 / delta
 
     grad_x = (
-        sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i + 1, j, k, 0.0)
-        - sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i - 1, j, k, 0.0)
+        sparse_managment.get_pool_value(omega_magnitude, tile_map, i + 1, j, k, 0.0)
+        - sparse_managment.get_pool_value(omega_magnitude, tile_map, i - 1, j, k, 0.0)
     ) * half_inv_delta
 
     grad_y = (
-        sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i, j + 1, k, 0.0)
-        - sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i, j - 1, k, 0.0)
+        sparse_managment.get_pool_value(omega_magnitude, tile_map, i, j + 1, k, 0.0)
+        - sparse_managment.get_pool_value(omega_magnitude, tile_map, i, j - 1, k, 0.0)
     ) * half_inv_delta
 
     grad_z = (
-        sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i, j, k + 1, 0.0)
-        - sparse_managment._sample_sparse_cell(omega_magnitude, tile_map, i, j, k - 1, 0.0)
+        sparse_managment.get_pool_value(omega_magnitude, tile_map, i, j, k + 1, 0.0)
+        - sparse_managment.get_pool_value(omega_magnitude, tile_map, i, j, k - 1, 0.0)
     ) * half_inv_delta
 
     grad_length = math.sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z)
@@ -153,30 +153,30 @@ def apply_vorticity_confinement(
     nz_dir = grad_z / grad_length
 
     du_dy = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial)
+        sparse_managment.get_pool_value(u, tile_map, i, j + 1, k, u_initial)
+        - sparse_managment.get_pool_value(u, tile_map, i, j - 1, k, u_initial)
     ) * half_inv_delta
     du_dz = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial)
+        sparse_managment.get_pool_value(u, tile_map, i, j, k + 1, u_initial)
+        - sparse_managment.get_pool_value(u, tile_map, i, j, k - 1, u_initial)
     ) * half_inv_delta
 
     dv_dx = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial)
+        sparse_managment.get_pool_value(v, tile_map, i + 1, j, k, v_initial)
+        - sparse_managment.get_pool_value(v, tile_map, i - 1, j, k, v_initial)
     ) * half_inv_delta
     dv_dz = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial)
+        sparse_managment.get_pool_value(v, tile_map, i, j, k + 1, v_initial)
+        - sparse_managment.get_pool_value(v, tile_map, i, j, k - 1, v_initial)
     ) * half_inv_delta
 
     dw_dx = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial)
+        sparse_managment.get_pool_value(w, tile_map, i + 1, j, k, w_initial)
+        - sparse_managment.get_pool_value(w, tile_map, i - 1, j, k, w_initial)
     ) * half_inv_delta
     dw_dy = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial)
+        sparse_managment.get_pool_value(w, tile_map, i, j + 1, k, w_initial)
+        - sparse_managment.get_pool_value(w, tile_map, i, j - 1, k, w_initial)
     ) * half_inv_delta
 
     wx = dw_dy - dv_dz

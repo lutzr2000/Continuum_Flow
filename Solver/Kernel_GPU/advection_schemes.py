@@ -6,14 +6,14 @@ import Solver.Kernel_GPU.sparse_managment as sparse_managment
 def _sample_trilinear_inner_sparse(
     field, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_value
 ):
-    c000 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
-    c100 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
-    c010 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
-    c110 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
-    c001 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
-    c101 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
-    c011 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
-    c111 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+    c000 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z0, default_value)
+    c100 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z0, default_value)
+    c010 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z0, default_value)
+    c110 = sparse_managment.get_pool_value(field, tile_map, x1, y1, z0, default_value)
+    c001 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z1, default_value)
+    c101 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z1, default_value)
+    c011 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z1, default_value)
+    c111 = sparse_managment.get_pool_value(field, tile_map, x1, y1, z1, default_value)
 
     c00 = c000 + tx * (c100 - c000)
     c10 = c010 + tx * (c110 - c010)
@@ -29,14 +29,14 @@ def _sample_trilinear_inner_sparse(
 def _sample_cell_extrema_inner_sparse(
     field, tile_map, x0, y0, z0, x1, y1, z1, default_value
 ):
-    c000 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z0, default_value)
-    c100 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z0, default_value)
-    c010 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z0, default_value)
-    c110 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z0, default_value)
-    c001 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y0, z1, default_value)
-    c101 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y0, z1, default_value)
-    c011 = sparse_managment._sample_sparse_cell(field, tile_map, x0, y1, z1, default_value)
-    c111 = sparse_managment._sample_sparse_cell(field, tile_map, x1, y1, z1, default_value)
+    c000 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z0, default_value)
+    c100 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z0, default_value)
+    c010 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z0, default_value)
+    c110 = sparse_managment.get_pool_value(field, tile_map, x1, y1, z0, default_value)
+    c001 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z1, default_value)
+    c101 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z1, default_value)
+    c011 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z1, default_value)
+    c111 = sparse_managment.get_pool_value(field, tile_map, x1, y1, z1, default_value)
 
     lower = min(
         min(min(c000, c100), min(c010, c110)),

@@ -43,7 +43,7 @@ def buoyancy_approximation(
     """
     g = 9.81
 
-    temperature = sparse_managment._sample_sparse_cell(
+    temperature = sparse_managment.get_pool_value(
         T, tile_map, i, j, k, t_reference
     )
 

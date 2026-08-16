@@ -501,7 +501,7 @@ def solver(
     print("################################################################")
     print("Initialise")
     print("Total tiles: ", total_tile_count)
-    print("Maximum number of cells: ", total_tile_count * kernel_config.TILE_SIZE)
+    print("Maximum number of cells: ", total_tile_count * kernel_config.TILE_SIZE**3)
 
     # ------------fields------------------
     # --------------- sparse -------------------#
@@ -1231,7 +1231,7 @@ def solver(
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:
             active_tile_count = int(active_tile_counter.copy_to_host()[0])
-            print(f"Active cells: {active_tile_count*kernel_config.TILE_SIZE} / ", total_tile_count)
+            print(f"Active cells: {active_tile_count*kernel_config.TILE_SIZE**3} / ", total_tile_count * kernel_config.TILE_SIZE**3)
 
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()

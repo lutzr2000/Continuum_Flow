@@ -36,7 +36,7 @@ def tile_to_index():
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _sample_sparse_cell(field, tile_map, i, j, k, default_value):
+def get_pool_value(field, tile_map, i, j, k, default_value):
     tile_i = i // tile_size
     tile_j = j // tile_size
     tile_k = k // tile_size

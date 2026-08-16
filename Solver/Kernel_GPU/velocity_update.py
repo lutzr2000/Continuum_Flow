@@ -231,53 +231,53 @@ def update_velocity_maccormack(
 
     diffusion_x = diffusion_coeff * (
         (
-            sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, u_initial)
+            sparse_managment.get_pool_value(u, tile_map, i + 1, j, k, u_initial)
             - 2.0 * u_center
-            + sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, u_initial)
+            + sparse_managment.get_pool_value(u, tile_map, i - 1, j, k, u_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(u, tile_map, i, j + 1, k, u_initial)
+            sparse_managment.get_pool_value(u, tile_map, i, j + 1, k, u_initial)
             - 2.0 * u_center
-            + sparse_managment._sample_sparse_cell(u, tile_map, i, j - 1, k, u_initial)
+            + sparse_managment.get_pool_value(u, tile_map, i, j - 1, k, u_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(u, tile_map, i, j, k + 1, u_initial)
+            sparse_managment.get_pool_value(u, tile_map, i, j, k + 1, u_initial)
             - 2.0 * u_center
-            + sparse_managment._sample_sparse_cell(u, tile_map, i, j, k - 1, u_initial)
+            + sparse_managment.get_pool_value(u, tile_map, i, j, k - 1, u_initial)
         )
     )
     diffusion_y = diffusion_coeff * (
         (
-            sparse_managment._sample_sparse_cell(v, tile_map, i + 1, j, k, v_initial)
+            sparse_managment.get_pool_value(v, tile_map, i + 1, j, k, v_initial)
             - 2.0 * v_center
-            + sparse_managment._sample_sparse_cell(v, tile_map, i - 1, j, k, v_initial)
+            + sparse_managment.get_pool_value(v, tile_map, i - 1, j, k, v_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, v_initial)
+            sparse_managment.get_pool_value(v, tile_map, i, j + 1, k, v_initial)
             - 2.0 * v_center
-            + sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, v_initial)
+            + sparse_managment.get_pool_value(v, tile_map, i, j - 1, k, v_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(v, tile_map, i, j, k + 1, v_initial)
+            sparse_managment.get_pool_value(v, tile_map, i, j, k + 1, v_initial)
             - 2.0 * v_center
-            + sparse_managment._sample_sparse_cell(v, tile_map, i, j, k - 1, v_initial)
+            + sparse_managment.get_pool_value(v, tile_map, i, j, k - 1, v_initial)
         )
     )
     diffusion_z = diffusion_coeff * (
         (
-            sparse_managment._sample_sparse_cell(w, tile_map, i + 1, j, k, w_initial)
+            sparse_managment.get_pool_value(w, tile_map, i + 1, j, k, w_initial)
             - 2.0 * w_center
-            + sparse_managment._sample_sparse_cell(w, tile_map, i - 1, j, k, w_initial)
+            + sparse_managment.get_pool_value(w, tile_map, i - 1, j, k, w_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(w, tile_map, i, j + 1, k, w_initial)
+            sparse_managment.get_pool_value(w, tile_map, i, j + 1, k, w_initial)
             - 2.0 * w_center
-            + sparse_managment._sample_sparse_cell(w, tile_map, i, j - 1, k, w_initial)
+            + sparse_managment.get_pool_value(w, tile_map, i, j - 1, k, w_initial)
         )
         + (
-            sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, w_initial)
+            sparse_managment.get_pool_value(w, tile_map, i, j, k + 1, w_initial)
             - 2.0 * w_center
-            + sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, w_initial)
+            + sparse_managment.get_pool_value(w, tile_map, i, j, k - 1, w_initial)
         )
     )
 

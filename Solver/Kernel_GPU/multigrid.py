@@ -135,12 +135,12 @@ def restrict_residual_level_0(p, b, coarse_b, delta, tile_map, nx, ny, nz):
                     p_center = p[tile_index, local_i, local_j, local_k]
 
                     lap = (
-                        sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
-                        + sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
-                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
-                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
-                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
-                        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
+                        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
                         - 6.0 * p_center
                     ) * inv_delta2
 
@@ -153,7 +153,7 @@ def restrict_residual_level_0(p, b, coarse_b, delta, tile_map, nx, ny, nz):
 
 
 @cuda.jit(cache=True)
-def prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_shape):
+def prolongate_add_nearest_level_0(coarse_e, fine_p, tile_map, field_shape):
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = field_shape
@@ -185,40 +185,6 @@ def prolongate_add_nearest_sparse_level0(coarse_e, fine_p, tile_map, field_shape
                     local_j = j - tile_j * kernel_config.TILE_SIZE
                     local_k = k - tile_k * kernel_config.TILE_SIZE
                     fine_p[tile_index, local_i, local_j, local_k] += e
-
-
-@cuda.jit(cache=True)
-def restrict_8cell(fine_r, coarse_b):
-    I, J, K = cuda.grid(3)
-    cnx, cny, cnz = coarse_b.shape
-    fnx, fny, fnz = fine_r.shape
-
-    if I >= cnx or J >= cny or K >= cnz:
-        return
-
-    i0 = 2 * I
-    j0 = 2 * J
-    k0 = 2 * K
-
-    s = 0.0
-    count = 0.0
-
-    for di in range(2):
-        for dj in range(2):
-            for dk in range(2):
-                i = i0 + di
-                j = j0 + dj
-                k = k0 + dk
-
-                if i < fnx and j < fny and k < fnz:
-                    s += fine_r[i, j, k]
-                    count += 1.0
-
-    if count > 0.0:
-        coarse_b[I, J, K] = s / count
-    else:
-        coarse_b[I, J, K] = 0.0
-
 
 
 @cuda.jit(cache=True)
@@ -276,7 +242,7 @@ def rbgs_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def rbgs_step_sparse_level0(p, b, delta, parity, tile_map, nx, ny, nz):
+def rbgs_step_level_0(p, b, delta, parity, tile_map, nx, ny, nz):
     (
         tile_i,
         tile_j,
@@ -308,13 +274,13 @@ def rbgs_step_sparse_level0(p, b, delta, parity, tile_map, nx, ny, nz):
     delta2 = delta * delta
 
     center = (
-        sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
-        + sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
-        + sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
-        + sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
-        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
-        + sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
-        - delta2 * b[tile_index, local_i, local_j, local_k]
+        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+        - delta2 * sparse_managment.get_pool_value(b, tile_map, i, j, k, 0.0)
     ) / 6.0
 
     p[tile_index, local_i, local_j, local_k] = center
@@ -344,10 +310,10 @@ def smooth(
 
     for _ in range(iterations):
         if level == 0:
-            rbgs_step_sparse_level0[
+            rbgs_step_level_0[
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
             ](p, b, delta, 0, tile_map, nx, ny, nz)
-            rbgs_step_sparse_level0[
+            rbgs_step_level_0[
                 blocks, kernel_config.THREADS_PER_BLOCK_3D
             ](p, b, delta, 1, tile_map, nx, ny, nz)
         else:
@@ -479,7 +445,7 @@ def v_cycle(
     )
 
     if level == 0 and tile_map is not None:
-        prolongate_add_nearest_sparse_level0[
+        prolongate_add_nearest_level_0[
             coarse_blocks,
             kernel_config.THREADS_PER_BLOCK_3D,
         ](coarse_p, p, tile_map, (nx, ny, nz))

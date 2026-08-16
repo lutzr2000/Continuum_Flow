@@ -69,29 +69,29 @@ def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
     local_k = k - tile_k * tile_size
 
     if i == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, 1, j, k, 0.0
         )
     elif i == nx - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, nx - 2, j, k, 0.0
         )
 
     if j == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, i, 1, k, 0.0
         )
     elif j == ny - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, i, ny - 2, k, 0.0
         )
 
     if k == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, i, j, 1, 0.0
         )
     elif k == nz - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment._sample_sparse_cell(
+        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
             p, tile_map, i, j, nz - 2, 0.0
         )
 
@@ -231,7 +231,7 @@ def _apply_face_state(
         )
 
     p[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (
-        sparse_managment._sample_sparse_cell(p, tile_map, src_i, src_j, src_k, 0.0)
+        sparse_managment.get_pool_value(p, tile_map, src_i, src_j, src_k, 0.0)
     )
 
     T[dst_tile_index, dst_local_i, dst_local_j, dst_local_k] = (

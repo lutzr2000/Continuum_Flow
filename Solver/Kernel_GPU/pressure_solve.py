@@ -52,18 +52,18 @@ def pressure_equation_right_side(
     rho_over_dt = rho / dt
 
     du_dx = (
-        sparse_managment._sample_sparse_cell(u, tile_map, i + 1, j, k, u_initial)
-        - sparse_managment._sample_sparse_cell(u, tile_map, i - 1, j, k, u_initial)
+        sparse_managment.get_pool_value(u, tile_map, i + 1, j, k, u_initial)
+        - sparse_managment.get_pool_value(u, tile_map, i - 1, j, k, u_initial)
     ) * half_inv_delta
 
     dv_dy = (
-        sparse_managment._sample_sparse_cell(v, tile_map, i, j + 1, k, v_initial)
-        - sparse_managment._sample_sparse_cell(v, tile_map, i, j - 1, k, v_initial)
+        sparse_managment.get_pool_value(v, tile_map, i, j + 1, k, v_initial)
+        - sparse_managment.get_pool_value(v, tile_map, i, j - 1, k, v_initial)
     ) * half_inv_delta
 
     dw_dz = (
-        sparse_managment._sample_sparse_cell(w, tile_map, i, j, k + 1, w_initial)
-        - sparse_managment._sample_sparse_cell(w, tile_map, i, j, k - 1, w_initial)
+        sparse_managment.get_pool_value(w, tile_map, i, j, k + 1, w_initial)
+        - sparse_managment.get_pool_value(w, tile_map, i, j, k - 1, w_initial)
     ) * half_inv_delta
 
     b[tile_index, local_i, local_j, local_k] = rho_over_dt * (du_dx + dv_dy + dw_dz)
@@ -385,12 +385,12 @@ def project_velocity_kernel(
 
     pressure_coeff = dt / (2.0 * rho * delta)
 
-    px1 = sparse_managment._sample_sparse_cell(p, tile_map, i + 1, j, k, 0.0)
-    px0 = sparse_managment._sample_sparse_cell(p, tile_map, i - 1, j, k, 0.0)
-    py1 = sparse_managment._sample_sparse_cell(p, tile_map, i, j + 1, k, 0.0)
-    py0 = sparse_managment._sample_sparse_cell(p, tile_map, i, j - 1, k, 0.0)
-    pz1 = sparse_managment._sample_sparse_cell(p, tile_map, i, j, k + 1, 0.0)
-    pz0 = sparse_managment._sample_sparse_cell(p, tile_map, i, j, k - 1, 0.0)
+    px1 = sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+    px0 = sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+    py1 = sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+    py0 = sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+    pz1 = sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+    pz0 = sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
 
     u[tile_index, local_i, local_j, local_k] -= pressure_coeff * (px1 - px0)
     v[tile_index, local_i, local_j, local_k] -= pressure_coeff * (py1 - py0)
