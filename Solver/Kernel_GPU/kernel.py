@@ -1067,7 +1067,6 @@ def solver(
                 nx,
                 ny,
                 nz,
-                profile_stats=pressure_profile_stats,
             ),
             synchronize_cuda=True,
         )
@@ -1253,7 +1252,6 @@ def solver(
         print("Simulation finished!")
 
     _print_profile_summary(profile_stats)
-    pressure_solve.print_profile_summary(pressure_profile_stats)
 
     total_runtime = perf_counter() - total_start_time
     print(f"Solver runtime: {total_runtime:.3f} s")

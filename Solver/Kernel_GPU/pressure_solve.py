@@ -1,8 +1,6 @@
 import numpy as np
 from numba import cuda
-from time import perf_counter
 
-import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.multigrid as multigrid
@@ -10,76 +8,6 @@ import Solver.Kernel_GPU.multigrid as multigrid
 REDUCTION_THREADS_PER_BLOCK = (
     kernel_config.REDUCTION_THREADS_PER_BLOCK
 )  # this is needed because if this is added directly inline, cuda crashes i do not know why
-
-
-def _profile_pressure_section(profile_stats, name, callback, synchronize_cuda=False):
-    if profile_stats is None:
-        return callback()
-
-    if synchronize_cuda:
-        cuda.synchronize()
-
-    start_time = perf_counter()
-    result = callback()
-
-    if synchronize_cuda:
-        cuda.synchronize()
-
-    elapsed = perf_counter() - start_time
-    entry = profile_stats.setdefault(name, {"total_runtime": 0.0, "call_count": 0})
-    entry["total_runtime"] += elapsed
-    entry["call_count"] += 1
-
-    return result
-
-
-def print_profile_summary(profile_stats):
-    if not profile_stats:
-        return
-
-    total_profiled_runtime = sum(
-        entry["total_runtime"] for entry in profile_stats.values()
-    )
-    name_width = max(len("Section"), max(len(name) for name in profile_stats))
-    total_width = len("Total Runtime [s]")
-    calls_width = len("N Calls")
-    avg_width = len("Average Runtime [ms]")
-    share_width = len("% Total Runtime")
-
-    divider = (
-        f"+-{'-' * name_width}-+-{'-' * total_width}-+-{'-' * calls_width}"
-        f"-+-{'-' * avg_width}-+-{'-' * share_width}-+"
-    )
-
-    print("Pressure / Multigrid profiling summary")
-    print(divider)
-    print(
-        f"| {'Section':<{name_width}} | {'Total Runtime [s]':>{total_width}} "
-        f"| {'N Calls':>{calls_width}} | {'Average Runtime [ms]':>{avg_width}} "
-        f"| {'% Total Runtime':>{share_width}} |"
-    )
-    print(divider)
-
-    for name, entry in sorted(
-        profile_stats.items(),
-        key=lambda item: item[1]["total_runtime"],
-        reverse=True,
-    ):
-        total_runtime = entry["total_runtime"]
-        call_count = entry["call_count"]
-        average_runtime_ms = (total_runtime / call_count) * 1000.0 if call_count else 0.0
-        runtime_share = (
-            (total_runtime / total_profiled_runtime) * 100.0
-            if total_profiled_runtime > 0.0
-            else 0.0
-        )
-        print(
-            f"| {name:<{name_width}} | {total_runtime:>{total_width}.6f} "
-            f"| {call_count:>{calls_width}d} | {average_runtime_ms:>{avg_width}.3f} "
-            f"| {runtime_share:>{share_width}.2f} |"
-        )
-
-    print(divider)
 
 
 @cuda.jit(cache=True)
@@ -342,7 +270,6 @@ def remove_rhs_mean(
     nx,
     ny,
     nz,
-    profile_stats=None,
 ):
     """
     Enforce the Neumann compatibility condition by removing
@@ -352,63 +279,42 @@ def remove_rhs_mean(
     interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
 
     reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
-    reduction_threads = kernel_config.REDUCTION_THREADS_PER_BLOCK
 
     blockspergrid_3d = kernel_config.volume_blocks_per_grid(
         (nx, ny, nz),
         kernel_config.THREADS_PER_BLOCK_3D,
     )
 
-    _profile_pressure_section(
-        profile_stats,
-        "remove_rhs_mean.sum_rhs_partial_kernel",
-        lambda: sum_rhs_partial_kernel[reduction_blocks, reduction_threads](
-            b,
-            tile_map,
-            rhs_partial_sums,
-            nx,
-            ny,
-            nz,
-        ),
-        synchronize_cuda=True,
+    sum_rhs_partial_kernel[reduction_blocks, REDUCTION_THREADS_PER_BLOCK](
+        b,
+        tile_map,
+        rhs_partial_sums,
+        nx,
+        ny,
+        nz,
     )
 
-    _profile_pressure_section(
-        profile_stats,
-        "remove_rhs_mean.sum_partial_sums_rhs",
-        lambda: sum_partial_sums_kernel[1, reduction_threads](
-            rhs_partial_sums,
-            reduction_blocks,
-            rhs_sum_buffer,
-        ),
-        synchronize_cuda=True,
+    sum_partial_sums_kernel[1, REDUCTION_THREADS_PER_BLOCK](
+        rhs_partial_sums,
+        reduction_blocks,
+        rhs_sum_buffer,
     )
 
     rhs_sum = float(rhs_sum_buffer.copy_to_host()[0])
 
-    _profile_pressure_section(
-        profile_stats,
-        "remove_rhs_mean.count_rhs_active_partial_kernel",
-        lambda: count_rhs_active_partial_kernel[reduction_blocks, reduction_threads](
-            b,
-            tile_map,
-            rhs_partial_sums,
-            nx,
-            ny,
-            nz,
-        ),
-        synchronize_cuda=True,
+    count_rhs_active_partial_kernel[reduction_blocks, REDUCTION_THREADS_PER_BLOCK](
+        b,
+        tile_map,
+        rhs_partial_sums,
+        nx,
+        ny,
+        nz,
     )
 
-    _profile_pressure_section(
-        profile_stats,
-        "remove_rhs_mean.sum_partial_sums_count",
-        lambda: sum_partial_sums_kernel[1, reduction_threads](
-            rhs_partial_sums,
-            reduction_blocks,
-            rhs_sum_buffer,
-        ),
-        synchronize_cuda=True,
+    sum_partial_sums_kernel[1, REDUCTION_THREADS_PER_BLOCK](
+        rhs_partial_sums,
+        reduction_blocks,
+        rhs_sum_buffer,
     )
 
     active_cell_count = int(rhs_sum_buffer.copy_to_host()[0])
@@ -421,21 +327,16 @@ def remove_rhs_mean(
     if abs(rhs_mean) <= 1.0e-12:
         return
 
-    _profile_pressure_section(
-        profile_stats,
-        "remove_rhs_mean.subtract_rhs_mean_kernel",
-        lambda: subtract_rhs_mean_kernel[
-            blockspergrid_3d,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            b,
-            rhs_mean,
-            tile_map,
-            nx,
-            ny,
-            nz,
-        ),
-        synchronize_cuda=True,
+    subtract_rhs_mean_kernel[
+        blockspergrid_3d,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        b,
+        rhs_mean,
+        tile_map,
+        nx,
+        ny,
+        nz,
     )
 
 
@@ -559,233 +460,6 @@ def add_artifical_divergence(
     )
 
 
-def multigrid_smooth(
-    p,
-    b,
-    delta,
-    iterations,
-    level=0,
-    tile_map=None,
-    nx=None,
-    ny=None,
-    nz=None,
-    profile_stats=None,
-    phase="smooth",
-):
-    use_sparse = level == 0
-
-    if use_sparse:
-        blocks = kernel_config.volume_blocks_per_grid(
-            (nx, ny, nz),
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-    else:
-        blocks = kernel_config.volume_blocks_per_grid(
-            p.shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-
-    def _run_smooth():
-        for _ in range(iterations):
-            if use_sparse:
-                multigrid.mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                    p, b, delta, 0, tile_map, nx, ny, nz
-                )
-                multigrid.mg_rbgs_step_sparse_level0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                    p, b, delta, 1, tile_map, nx, ny, nz
-                )
-            else:
-                multigrid.mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-                multigrid.mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
-
-        if use_sparse:
-            BC.pressure_poisson_apply_neumann_bcs[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, tile_map, nx, ny, nz)
-        else:
-            BC.pressure_poisson_apply_neumann_bcs_dense[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p)
-
-    return _profile_pressure_section(
-        profile_stats,
-        f"multigrid_smooth.level_{level}.{phase}",
-        _run_smooth,
-        synchronize_cuda=True,
-    )
-
-
-def multigrid_vcycle(
-    level,
-    p_levels,
-    b_levels,
-    p_level0,
-    b_level0,
-    zero_levels,
-    delta_levels,
-    pre_smooth,
-    post_smooth,
-    coarse_smooth,
-    nx,
-    ny,
-    nz,
-    tile_map=None,
-    profile_stats=None,
-):
-    def _run_vcycle():
-        p = p_level0 if level == 0 else p_levels[level]
-        b = b_level0 if level == 0 else b_levels[level]
-        delta = delta_levels[level]
-
-        multigrid_smooth(
-            p,
-            b,
-            delta,
-            pre_smooth,
-            level=level,
-            tile_map=tile_map,
-            nx=nx,
-            ny=ny,
-            nz=nz,
-            profile_stats=profile_stats,
-            phase="pre",
-        )
-
-        last_level = len(p_levels) - 1
-
-        if level == last_level:
-            multigrid_smooth(
-                p,
-                b,
-                delta,
-                coarse_smooth,
-                level=level,
-                tile_map=tile_map,
-                nx=nx,
-                ny=ny,
-                nz=nz,
-                profile_stats=profile_stats,
-                phase="coarse",
-            )
-            return
-
-        coarse_p = p_levels[level + 1]
-        coarse_b = b_levels[level + 1]
-
-        coarse_blocks = kernel_config.volume_blocks_per_grid(
-            coarse_p.shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-
-        _profile_pressure_section(
-            profile_stats,
-            f"multigrid_vcycle.level_{level}.coarse_p_reset",
-            lambda: coarse_p.copy_to_device(zero_levels[level + 1]),
-            synchronize_cuda=True,
-        )
-
-        if level == 0 and tile_map is not None:
-            _profile_pressure_section(
-                profile_stats,
-                f"multigrid_vcycle.level_{level}.restrict_sparse",
-                lambda: multigrid.mg_restrict_residual_8cell_sparse_level0[
-                    coarse_blocks,
-                    kernel_config.THREADS_PER_BLOCK_3D,
-                ](
-                    p,
-                    b,
-                    coarse_b,
-                    delta,
-                    tile_map,
-                    nx,
-                    ny,
-                    nz,
-                ),
-                synchronize_cuda=True,
-            )
-        else:
-            _profile_pressure_section(
-                profile_stats,
-                f"multigrid_vcycle.level_{level}.restrict_dense",
-                lambda: multigrid.mg_restrict_residual_8cell[
-                    coarse_blocks,
-                    kernel_config.THREADS_PER_BLOCK_3D,
-                ](
-                    p,
-                    b,
-                    coarse_b,
-                    delta,
-                    nx,
-                    ny,
-                    nz,
-                ),
-                synchronize_cuda=True,
-            )
-
-        multigrid_vcycle(
-            level + 1,
-            p_levels,
-            b_levels,
-            p_level0,
-            b_level0,
-            zero_levels,
-            delta_levels,
-            pre_smooth,
-            post_smooth,
-            coarse_smooth,
-            nx,
-            ny,
-            nz,
-            tile_map=None,
-            profile_stats=profile_stats,
-        )
-
-        if level == 0 and tile_map is not None:
-            _profile_pressure_section(
-                profile_stats,
-                f"multigrid_vcycle.level_{level}.prolongate_sparse",
-                lambda: multigrid.mg_prolongate_add_nearest_sparse_level0[
-                    coarse_blocks,
-                    kernel_config.THREADS_PER_BLOCK_3D,
-                ](coarse_p, p, tile_map, (nx, ny, nz)),
-                synchronize_cuda=True,
-            )
-        else:
-            _profile_pressure_section(
-                profile_stats,
-                f"multigrid_vcycle.level_{level}.prolongate_dense",
-                lambda: multigrid.mg_prolongate_add_nearest[
-                    coarse_blocks,
-                    kernel_config.THREADS_PER_BLOCK_3D,
-                ](
-                    coarse_p,
-                    p,
-                ),
-                synchronize_cuda=True,
-            )
-
-        multigrid_smooth(
-            p,
-            b,
-            delta,
-            post_smooth,
-            level=level,
-            tile_map=tile_map,
-            nx=nx,
-            ny=ny,
-            nz=nz,
-            profile_stats=profile_stats,
-            phase="post",
-        )
-
-    return _profile_pressure_section(
-        profile_stats,
-        f"multigrid_vcycle.level_{level}.total",
-        _run_vcycle,
-        synchronize_cuda=False,
-    )
-
-
 def pressure_poisson_multigrid(
     u,
     v,
@@ -817,112 +491,75 @@ def pressure_poisson_multigrid(
     nx,
     ny,
     nz,
-    profile_stats=None,
 ):
-    def _run_pressure_poisson():
-        _profile_pressure_section(
-            profile_stats,
-            "pressure_poisson_multigrid.pressure_equation_right_side",
-            lambda: pressure_equation_right_side[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                u,
-                v,
-                w,
-                b,
-                dt,
-                delta,
-                rho,
-                tile_map,
-                u_initial,
-                v_initial,
-                w_initial,
-                nx,
-                ny,
-                nz,
-            ),
-            synchronize_cuda=True,
-        )
-
-        _profile_pressure_section(
-            profile_stats,
-            "pressure_poisson_multigrid.remove_rhs_mean",
-            lambda: remove_rhs_mean(
-                b,
-                tile_map,
-                rhs_partial_sums,
-                rhs_sum_buffer,
-                nx,
-                ny,
-                nz,
-                profile_stats=profile_stats,
-            ),
-            synchronize_cuda=False,
-        )
-
-        _profile_pressure_section(
-            profile_stats,
-            "pressure_poisson_multigrid.reset_inactive_pressure",
-            lambda: reset_inactive_pressure[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                p,
-                tile_map,
-                nx,
-                ny,
-                nz,
-            ),
-            synchronize_cuda=True,
-        )
-
-        _profile_pressure_section(
-            profile_stats,
-            "pressure_poisson_multigrid.add_artifical_divergence",
-            lambda: add_artifical_divergence[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                T,
-                source_masks,
-                extra_pressure,
-                source_noise,
-                noise_amplitudes,
-                expansion_rate,
-                t_reference,
-                b,
-                tile_map,
-                rho,
-                dt,
-                nx,
-                ny,
-                nz,
-            ),
-            synchronize_cuda=True,
-        )
-
-        for _ in range(num_vcycles):
-            multigrid_vcycle(
-                0,
-                p_levels,
-                b_levels,
-                p,
-                b,
-                zero_levels,
-                delta_levels,
-                pre_smooth=2,
-                post_smooth=4,
-                coarse_smooth=20,
-                nx=nx,
-                ny=ny,
-                nz=nz,
-                tile_map=tile_map,
-                profile_stats=profile_stats,
-            )
-
-        return p
-
-    return _profile_pressure_section(
-        profile_stats,
-        "pressure_poisson_multigrid.total",
-        _run_pressure_poisson,
-        synchronize_cuda=False,
+    pressure_equation_right_side[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+        u,
+        v,
+        w,
+        b,
+        dt,
+        delta,
+        rho,
+        tile_map,
+        u_initial,
+        v_initial,
+        w_initial,
+        nx,
+        ny,
+        nz,
     )
+
+    remove_rhs_mean(
+        b,
+        tile_map,
+        rhs_partial_sums,
+        rhs_sum_buffer,
+        nx,
+        ny,
+        nz,
+    )
+
+    reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+        p,
+        tile_map,
+        nx,
+        ny,
+        nz,
+    )
+
+    add_artifical_divergence[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+        T,
+        source_masks,
+        extra_pressure,
+        source_noise,
+        noise_amplitudes,
+        expansion_rate,
+        t_reference,
+        b,
+        tile_map,
+        rho,
+        dt,
+        nx,
+        ny,
+        nz,
+    )
+
+    for _ in range(num_vcycles):
+        multigrid.multigrid_vcycle(
+            0,
+            p_levels,
+            b_levels,
+            p,
+            b,
+            zero_levels,
+            delta_levels,
+            pre_smooth=2,
+            post_smooth=4,
+            coarse_smooth=20,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            tile_map=tile_map,
+        )
+
+    return p

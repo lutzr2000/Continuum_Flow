@@ -2,6 +2,7 @@ from numba import cuda
 import numpy as np
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
+import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
@@ -314,3 +315,180 @@ def mg_rbgs_step_sparse_level0(p, b, delta, parity, tile_map, nx, ny, nz):
     ) / 6.0
 
     p[tile_index, local_i, local_j, local_k] = center
+
+
+def multigrid_smooth(
+    p,
+    b,
+    delta,
+    iterations,
+    level=0,
+    tile_map=None,
+    nx=None,
+    ny=None,
+    nz=None,
+):
+    if level == 0:
+        blocks = kernel_config.volume_blocks_per_grid(
+            (nx, ny, nz),
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+    else:
+        blocks = kernel_config.volume_blocks_per_grid(
+            p.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+
+    for _ in range(iterations):
+        if level == 0:
+            mg_rbgs_step_sparse_level0[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 0, tile_map, nx, ny, nz)
+            mg_rbgs_step_sparse_level0[
+                blocks, kernel_config.THREADS_PER_BLOCK_3D
+            ](p, b, delta, 1, tile_map, nx, ny, nz)
+        else:
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 0
+            )
+            mg_rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 1
+            )
+
+    if level == 0:
+        BC.pressure_poisson_apply_neumann_bcs[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p, tile_map, nx, ny, nz)
+    else:
+        BC.pressure_poisson_apply_neumann_bcs_dense[
+            blocks, kernel_config.THREADS_PER_BLOCK_3D
+        ](p)
+
+
+def multigrid_vcycle(
+    level,
+    p_levels,
+    b_levels,
+    p_level0,
+    b_level0,
+    zero_levels,
+    delta_levels,
+    pre_smooth,
+    post_smooth,
+    coarse_smooth,
+    nx,
+    ny,
+    nz,
+    tile_map=None,
+):
+    p = p_level0 if level == 0 else p_levels[level]
+    b = b_level0 if level == 0 else b_levels[level]
+    delta = delta_levels[level]
+
+    multigrid_smooth(
+        p,
+        b,
+        delta,
+        pre_smooth,
+        level=level,
+        tile_map=tile_map,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+    )
+
+    last_level = len(p_levels) - 1
+
+    if level == last_level:
+        multigrid_smooth(
+            p,
+            b,
+            delta,
+            coarse_smooth,
+            level=level,
+            tile_map=tile_map,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+        )
+        return
+
+    coarse_p = p_levels[level + 1]
+    coarse_b = b_levels[level + 1]
+
+    coarse_blocks = kernel_config.volume_blocks_per_grid(
+        coarse_p.shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+    coarse_p.copy_to_device(zero_levels[level + 1])
+
+    if level == 0 and tile_map is not None:
+        mg_restrict_residual_8cell_sparse_level0[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            p,
+            b,
+            coarse_b,
+            delta,
+            tile_map,
+            nx,
+            ny,
+            nz,
+        )
+    else:
+        mg_restrict_residual_8cell[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            p,
+            b,
+            coarse_b,
+            delta,
+            nx,
+            ny,
+            nz,
+        )
+
+    multigrid_vcycle(
+        level + 1,
+        p_levels,
+        b_levels,
+        p_level0,
+        b_level0,
+        zero_levels,
+        delta_levels,
+        pre_smooth,
+        post_smooth,
+        coarse_smooth,
+        nx,
+        ny,
+        nz,
+        tile_map=None,
+    )
+
+    if level == 0 and tile_map is not None:
+        mg_prolongate_add_nearest_sparse_level0[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](coarse_p, p, tile_map, (nx, ny, nz))
+    else:
+        mg_prolongate_add_nearest[
+            coarse_blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            coarse_p,
+            p,
+        )
+
+    multigrid_smooth(
+        p,
+        b,
+        delta,
+        post_smooth,
+        level=level,
+        tile_map=tile_map,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+    )
