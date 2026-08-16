@@ -1,5 +1,6 @@
 from numba import cuda
 import numpy as np
+from typing import Any
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
@@ -33,6 +34,63 @@ def create_multigrid_levels(shape, delta, min_size=8):
     return p_levels, b_levels, delta_levels, zero_levels
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def residual(p, b, delta, i, j, k):
+    inv_delta2 = 1.0 / (delta * delta)
+
+    laplace = (
+        p[i + 1, j, k]
+        + p[i - 1, j, k]
+        + p[i, j + 1, k]
+        + p[i, j - 1, k]
+        + p[i, j, k + 1]
+        + p[i, j, k - 1]
+        - 6.0 * p[i, j, k]
+    ) * inv_delta2
+
+    return b[i, j, k] - laplace
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def residual_level_0(
+    p,
+    b,
+    inv_delta2,
+    tile_map,
+    i,
+    j,
+    k,
+):
+    tile_i = i // kernel_config.TILE_SIZE
+    tile_j = j // kernel_config.TILE_SIZE
+    tile_k = k // kernel_config.TILE_SIZE
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return 0.0, False
+
+    local_i = i - tile_i * kernel_config.TILE_SIZE
+    local_j = j - tile_j * kernel_config.TILE_SIZE
+    local_k = k - tile_k * kernel_config.TILE_SIZE
+
+    laplace = (
+        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+        - 6.0 * sparse_managment.get_pool_value(
+            p, tile_map, i, j, k, 0.0
+        )
+    ) * inv_delta2
+
+    rhs = b[tile_index, local_i, local_j, local_k]
+
+    return rhs - laplace, True
+
+
 @cuda.jit(cache=True)
 def restrict_residual(p, b, coarse_b, delta, nx, ny, nz):
     I, J, K = cuda.grid(3)
@@ -42,8 +100,6 @@ def restrict_residual(p, b, coarse_b, delta, nx, ny, nz):
     if I >= cnx or J >= cny or K >= cnz:
         return
 
-    inv_delta2 = 1.0 / (delta * delta)
-
     i0 = 2 * I
     j0 = 2 * J
     k0 = 2 * K
@@ -66,29 +122,27 @@ def restrict_residual(p, b, coarse_b, delta, nx, ny, nz):
                     and j < ny - 1
                     and k < nz - 1
                 ):
-                    lap = (
-                        p[i + 1, j, k]
-                        + p[i - 1, j, k]
-                        + p[i, j + 1, k]
-                        + p[i, j - 1, k]
-                        + p[i, j, k + 1]
-                        + p[i, j, k - 1]
-                        - 6.0 * p[i, j, k]
-                    ) * inv_delta2
+                    r = residual(
+                        p, b, delta, i, j, k
+                    )
 
-                    residual = b[i, j, k] - lap
-
-                    s += residual
+                    s += r
                     count += 1.0
 
-    if count > 0.0:
-        coarse_b[I, J, K] = s / count
-    else:
-        coarse_b[I, J, K] = 0.0
+    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @cuda.jit(cache=True)
-def restrict_residual_level_0(p, b, coarse_b, delta, tile_map, nx, ny, nz):
+def restrict_residual_level_0(
+    p,
+    b,
+    coarse_b,
+    delta,
+    tile_map,
+    nx,
+    ny,
+    nz,
+):
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
@@ -120,36 +174,25 @@ def restrict_residual_level_0(p, b, coarse_b, delta, tile_map, nx, ny, nz):
                     and j < ny - 1
                     and k < nz - 1
                 ):
-                    tile_i = i // kernel_config.TILE_SIZE
-                    tile_j = j // kernel_config.TILE_SIZE
-                    tile_k = k // kernel_config.TILE_SIZE
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    r, valid = residual_level_0(
+                        p,
+                        b,
+                        inv_delta2,
+                        tile_map,
+                        i,
+                        j,
+                        k,
+                    )
 
-                    if tile_index == -1:
+                    if not valid:
                         continue
 
-                    local_i = i - tile_i * kernel_config.TILE_SIZE
-                    local_j = j - tile_j * kernel_config.TILE_SIZE
-                    local_k = k - tile_k * kernel_config.TILE_SIZE
-
-                    p_center = p[tile_index, local_i, local_j, local_k]
-
-                    lap = (
-                        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
-                        - 6.0 * p_center
-                    ) * inv_delta2
-
-                    rhs = b[tile_index, local_i, local_j, local_k]
-
-                    s += rhs - lap
+                    s += r
                     count += 1.0
 
-    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
+    coarse_b[I, J, K] = (
+        s / count if count > 0.0 else 0.0
+    )
 
 
 @cuda.jit(cache=True)
@@ -287,16 +330,47 @@ def rbgs_step_level_0(p, b, delta, parity, tile_map, nx, ny, nz):
 
 
 def smooth(
-    p,
-    b,
-    delta,
-    iterations,
-    level=0,
-    tile_map=None,
-    nx=None,
-    ny=None,
-    nz=None,
-):
+    p: Any,
+    b: Any,
+    delta: float,
+    iterations: int,
+    level: int = 0,
+    tile_map: Any = None,
+    nx: int | None = None,
+    ny: int | None = None,
+    nz: int | None = None,
+) -> None:
+    r"""
+    Apply smoothing iterations to one multigrid pressure level.
+
+    Level ``0`` is the finest pooled level and uses ``tile_map`` to access the
+    sparse pressure storage. All higher levels are dense coarse grids. The
+    smoother uses red-black Gauss-Seidel and reapplies Neumann boundary
+    conditions after the requested number of iterations.
+
+    Parameters
+    ----------
+    p
+        Pressure buffer updated in-place for the current multigrid level.
+    b
+        Right-hand-side buffer for the current multigrid level.
+    delta
+        Cell size of the current level.
+    iterations
+        Number of smoothing iterations to perform.
+    level
+        Current multigrid level. ``0`` is the finest level.
+    tile_map
+        Sparse tile lookup map for level 0. Dense levels ignore it.
+    nx, ny, nz
+        Finest-level simulation resolution in cells. Required for level 0 and
+        ignored for dense levels.
+
+    Returns
+    -------
+    None
+        The pressure buffer ``p`` is modified in-place.
+    """
     if level == 0:
         blocks = kernel_config.volume_blocks_per_grid(
             (nx, ny, nz),
@@ -335,22 +409,98 @@ def smooth(
 
 
 def v_cycle(
-    level,
-    p_levels,
-    b_levels,
-    p_level0,
-    b_level0,
-    zero_levels,
-    base_delta,
-    delta_levels,
-    pre_smooth,
-    post_smooth,
-    coarse_smooth,
-    nx,
-    ny,
-    nz,
-    tile_map=None,
-):
+    level: int,
+    p_levels: list[Any],
+    b_levels: list[Any],
+    p_level0: Any,
+    b_level0: Any,
+    zero_levels: list[Any],
+    base_delta: float,
+    delta_levels: list[float],
+    pre_smooth: int,
+    post_smooth: int,
+    coarse_smooth: int,
+    nx: int,
+    ny: int,
+    nz: int,
+    tile_map: Any = None,
+) -> None:
+    r"""
+    Run one multigrid V-cycle for the pressure solve.
+
+    Level ``0`` is the finest level stored in ``p_level0`` and
+    ``b_level0``. All entries in ``p_levels`` and ``b_levels`` represent
+    coarser dense levels starting at half resolution. The cycle performs
+    pre-smoothing, residual restriction to the next coarser level, recursive
+    coarse-grid correction, prolongation back to the current level, and
+    post-smoothing.
+
+    Mathematically, the cycle operates on the linear system
+
+    .. math::
+
+        A p = b.
+
+    First, smoothing reduces high-frequency error on the current level. Then
+    the residual is computed and restricted to the next coarser grid:
+
+    .. math::
+
+        r = b - A p.
+
+    On the coarse grid, the error equation is solved approximately:
+
+    .. math::
+
+        A e = r.
+
+    The resulting coarse-grid error estimate is prolongated back to the finer
+    level and added to the current pressure iterate:
+
+    .. math::
+
+        p \leftarrow p + e.
+
+    A final post-smoothing step then damps the remaining high-frequency error.
+
+    Level 0 uses ``tile_map`` to access the pooled tile storage,
+    while all coarser levels operate on dense arrays.
+
+    Parameters
+    ----------
+    level
+        Current multigrid level. ``0`` is the finest level.
+    p_levels
+        Dense pressure buffers for all coarser multigrid levels above level 0.
+    b_levels
+        Dense right-hand-side buffers matching ``p_levels``.
+    p_level0
+        Sparse pressure buffer for the finest simulation level.
+    b_level0
+        Sparse pressure right-hand-side buffer for the finest simulation level.
+    zero_levels
+        Zero-filled dense arrays used to reset coarse pressure buffers before
+        each coarse solve.
+    base_delta
+        Cell size of the finest simulation level.
+    delta_levels
+        Cell sizes for the dense coarse multigrid levels in ``p_levels``.
+    pre_smooth
+        Number of smoothing iterations before restriction.
+    post_smooth
+        Number of smoothing iterations after prolongation.
+    coarse_smooth
+        Number of smoothing iterations on the coarsest level.
+    nx, ny, nz
+        Finest-level simulation resolution in cells.
+    tile_map
+        Sparse tile lookup map for level 0. Coarser dense levels ignore it.
+
+    Returns
+    -------
+    None
+        The pressure buffers are updated in-place across the current V-cycle.
+    """
     if level == 0:
         p = p_level0
         b = b_level0
