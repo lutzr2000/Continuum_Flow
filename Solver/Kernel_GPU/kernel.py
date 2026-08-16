@@ -501,6 +501,7 @@ def solver(
     print("################################################################")
     print("Initialise")
     print("Total tiles: ", total_tile_count)
+    print("Maximum number of cells: ", total_tile_count * kernel_config.TILE_SIZE)
 
     # ------------fields------------------
     # --------------- sparse -------------------#

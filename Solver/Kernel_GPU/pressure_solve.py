@@ -545,13 +545,14 @@ def pressure_poisson_multigrid(
     )
 
     for _ in range(num_vcycles):
-        multigrid.multigrid_vcycle(
+        multigrid.v_cycle(
             0,
             p_levels,
             b_levels,
             p,
             b,
             zero_levels,
+            delta,
             delta_levels,
             pre_smooth=2,
             post_smooth=4,
