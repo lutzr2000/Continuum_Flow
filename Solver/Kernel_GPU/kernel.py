@@ -20,11 +20,11 @@ import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
 import Solver.Kernel_GPU.output as output
+import Solver.Kernel_GPU.multigrid as multigrid
 import Solver.General.forces as forces
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
-PROGRESS_EVENT_PREFIX = "__CONTINUUM_FLOW_PROGRESS__ "
 
 
 def _profile_section(profile_stats, name, callback, synchronize_cuda=False):
@@ -92,54 +92,6 @@ def _print_profile_summary(profile_stats):
         )
 
     print(divider)
-
-
-def _current_device_fields(u, v, w, p, temperature, smoke, fuel, flame, tile_map):
-    """
-    Return the currently active device buffers for output export.
-    """
-    return {
-        "u": {
-            "data": u,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "v": {
-            "data": v,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "w": {
-            "data": w,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "pressure": {
-            "data": p,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "temperature": {
-            "data": temperature,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "smoke": {
-            "data": smoke,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "fuel": {
-            "data": fuel,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-        "flame": {
-            "data": flame,
-            "tile_map": tile_map,
-            "tile_size": kernel_config.TILE_SIZE,
-        },
-    }
 
 
 @cuda.jit(cache=True)
@@ -423,31 +375,6 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def create_multigrid_levels(shape, delta, min_size=8):
-    p_levels = []
-    b_levels = []
-    delta_levels = []
-    zero_levels = []
-
-    nx, ny, nz = shape
-    level = 0
-
-    while nx >= min_size and ny >= min_size and nz >= min_size:
-        level_shape = (nx, ny, nz)
-
-        p_levels.append(cuda.device_array(level_shape, dtype=np.float32))
-        b_levels.append(cuda.device_array(level_shape, dtype=np.float32))
-        zero_levels.append(cuda.to_device(np.zeros(level_shape, dtype=np.float32)))
-        delta_levels.append(delta * (2**level))
-
-        nx = (nx + 1) // 2
-        ny = (ny + 1) // 2
-        nz = (nz + 1) // 2
-        level += 1
-
-    return p_levels, b_levels, delta_levels, zero_levels
-
-
 def solver(
     config: dict,
     obstacle_base_masks: list,
@@ -573,8 +500,6 @@ def solver(
 
     print("################################################################")
     print("Initialise")
-    print("Cell count: ", int(nx * ny * nz))
-    print("Tile shape: ", tile_shape)
     print("Total tiles: ", total_tile_count)
 
     # ------------fields------------------
@@ -646,7 +571,7 @@ def solver(
     pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
 
     # multigrid levels
-    p_levels, b_levels, delta_levels, zero_levels = create_multigrid_levels(
+    p_levels, b_levels, delta_levels, zero_levels = multigrid.create_multigrid_levels(
         shape,
         delta,
         min_size=8,
@@ -698,7 +623,6 @@ def solver(
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     viewer_cfg = ((simulation.get("viewers") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    target_realtime_preview = bool(viewer_cfg.get("target_realtime_preview", False))
 
     shared_memory_blocks, writer_slots = _profile_section(
         profile_stats,
@@ -708,18 +632,6 @@ def solver(
             simulation.get("outputs")[0].get("output_path"),
             shape,
         ),
-    )
-
-    device_fields = _current_device_fields(
-        u,
-        v,
-        w,
-        p,
-        temperature,
-        smoke,
-        fuel,
-        flame,
-        tile_map,
     )
 
     # ------------time loop------------------
@@ -844,9 +756,9 @@ def solver(
                     "tiles",
                 )
 
-        # ------------time step-------------------
         active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
 
+        # ------------time step-------------------
         velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
 
         dt = _profile_section(
@@ -1279,11 +1191,18 @@ def solver(
         time_step_count += 1
 
         # ------------Output-------------------
-        device_fields = _current_device_fields(
-            u, v, w, p, temperature, smoke, fuel, flame, tile_map
-        )
+        device_fields = {
+            "u": u,
+            "v": v,
+            "w": w,
+            "pressure": p,
+            "temperature": temperature,
+            "smoke": smoke,
+            "fuel": fuel,
+            "flame": flame,
+        }
         while t >= next_output_time:
-            if target_realtime_preview and last_output_wall_time is not None:
+            if bool(viewer_cfg.get("target_realtime_preview", False)) and last_output_wall_time is not None:
                 elapsed_since_last_output = perf_counter() - last_output_wall_time
                 remaining_time = output_time_step - elapsed_since_last_output
                 if remaining_time > 0.0:
@@ -1296,6 +1215,8 @@ def solver(
                     simulation,
                     writer_slots,
                     device_fields,
+                    tile_map,
+                    kernel_config.TILE_SIZE,
                     output_index,
                     t,
                 ),
@@ -1310,7 +1231,7 @@ def solver(
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:
             active_tile_count = int(active_tile_counter.copy_to_host()[0])
-            print(f"Active tiles: {active_tile_count} / ", total_tile_count)
+            print(f"Active cells: {active_tile_count*kernel_config.TILE_SIZE} / ", total_tile_count)
 
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()

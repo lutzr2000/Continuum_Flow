@@ -194,20 +194,21 @@ def _drain_ready_writer_acks(writer_slots):
         slot["busy"] = False
 
 
-def _copy_sparse_field_to_shared_memory(field_info, shared_array, used_tile_count):
+def _copy_sparse_field_to_shared_memory(field_data, shared_array, used_tile_count):
     if used_tile_count <= 0:
         return
 
-    field_info["data"][:used_tile_count].copy_to_host(shared_array[:used_tile_count])
+    field_data[:used_tile_count].copy_to_host(shared_array[:used_tile_count])
 
 
-def _build_active_tile_metadata(tile_map_host, active_tile_meta_array, dense_shape):
+def _build_active_tile_metadata(
+    tile_map_host, active_tile_meta_array, dense_shape, tile_size
+):
     active_coords = np.argwhere(tile_map_host >= 0)
     active_tile_count = int(active_coords.shape[0])
     if active_tile_count <= 0:
         return 0, 0
 
-    tile_size = int(kernel_config.TILE_SIZE)
     dense_shape_array = np.asarray(dense_shape, dtype=np.int32)
     starts = active_coords.astype(np.int32, copy=False) * tile_size
     ends = np.minimum(starts + tile_size, dense_shape_array)
@@ -230,6 +231,8 @@ def enqueue_device_output(
     simulations,
     writer_slots,
     sim_fields,
+    tile_map,
+    tile_size,
     output_index,
     t,
 ):
@@ -244,35 +247,19 @@ def enqueue_device_output(
     tile_map_slot = slot["tile_map"]
     active_tiles_slot = slot["active_tiles"]
 
-    sparse_field_info = next(
-        (
-            sim_fields[variable_name]
-            for variable_name in output_list
-            if isinstance(sim_fields[variable_name], dict)
-        ),
-        None,
-    )
-    if sparse_field_info is None:
-        raise RuntimeError("Sparse GPU output expected sparse device fields.")
-
-    sparse_field_info["tile_map"].copy_to_host(tile_map_slot["array"])
+    tile_map.copy_to_host(tile_map_slot["array"])
     tile_map_host = tile_map_slot["array"]
 
     active_tile_count, used_tile_count = _build_active_tile_metadata(
         tile_map_host,
         active_tiles_slot["array"],
         next(iter(fields.values()))["dense_shape"],
+        int(tile_size),
     )
 
     for variable_name in output_list:
-        source_field = sim_fields[variable_name]
-        if not isinstance(source_field, dict):
-            raise RuntimeError(
-                f"Sparse GPU output received non-sparse field '{variable_name}'."
-            )
-
         _copy_sparse_field_to_shared_memory(
-            source_field,
+            sim_fields[variable_name],
             fields[variable_name]["array"],
             used_tile_count,
         )
@@ -287,6 +274,7 @@ def enqueue_device_output(
         output_list,
         output_path,
         t,
+        int(tile_size),
         active_tile_count,
         used_tile_count,
     )
@@ -309,6 +297,7 @@ def create_writer_payload(
     output_list,
     output_path,
     time_value,
+    tile_size,
     active_tile_count,
     used_tile_count,
 ):
@@ -333,7 +322,7 @@ def create_writer_payload(
                 "name": _vdb_grid_name(field_name),
                 "layout": "sparse_tiles",
                 "dense_shape": fields[field_name]["dense_shape"],
-                "tile_size": int(kernel_config.TILE_SIZE),
+                "tile_size": int(tile_size),
                 "used_tile_count": int(used_tile_count),
                 "fields": {
                     field_name: {
