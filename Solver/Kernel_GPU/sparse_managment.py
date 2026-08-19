@@ -1,6 +1,5 @@
 from numba import cuda
 from typing import Any
-import numpy as np
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 tile_size = kernel_config.TILE_SIZE
@@ -207,6 +206,53 @@ def remap_sparse_pool(old_pool, new_pool, previous_index_lookup, active_tile_cou
 
 
 @cuda.jit(cache=True)
+def fill_sparse_tile_buffer_range(pool, start_tile, fill_value):
+    flat_index = cuda.grid(1)
+    cells_per_tile = tile_size * tile_size * tile_size
+    tile_count = pool.shape[0] - start_tile
+    total_cell_count = tile_count * cells_per_tile
+
+    if flat_index >= total_cell_count:
+        return
+
+    tile_offset = flat_index // cells_per_tile
+    local_flat_index = flat_index % cells_per_tile
+    tile_index = start_tile + tile_offset
+
+    local_i = local_flat_index // (tile_size * tile_size)
+    remainder = local_flat_index % (tile_size * tile_size)
+    local_j = remainder // tile_size
+    local_k = remainder % tile_size
+
+    pool[tile_index, local_i, local_j, local_k] = fill_value
+
+
+@cuda.jit(cache=True)
+def copy_sparse_tile_buffer_range(src_pool, dst_pool, tile_count):
+    flat_index = cuda.grid(1)
+    cells_per_tile = tile_size * tile_size * tile_size
+    total_cell_count = tile_count * cells_per_tile
+
+    if flat_index >= total_cell_count:
+        return
+
+    tile_index = flat_index // cells_per_tile
+    local_flat_index = flat_index % cells_per_tile
+
+    local_i = local_flat_index // (tile_size * tile_size)
+    remainder = local_flat_index % (tile_size * tile_size)
+    local_j = remainder // tile_size
+    local_k = remainder % tile_size
+
+    dst_pool[tile_index, local_i, local_j, local_k] = src_pool[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
+
+
+@cuda.jit(cache=True)
 def dilate_tile_map_persistent(
     base_tile_map,
     tile_map,
@@ -285,23 +331,38 @@ def ensure_pool_capacities(
         return [pool for pool, _fill_value in pool_specs]
 
     resized_pools = []
+    cells_per_tile = tile_size * tile_size * tile_size
+    threads_per_block = 256
+
     for pool_tile_buffer, fill_value in pool_specs:
-        new_pool_tile_buffer = cuda.to_device(
-            np.full(
-                (
-                    target_capacity_tiles,
-                    tile_size,
-                    tile_size,
-                    tile_size,
-                ),
-                fill_value,
-                dtype=kernel_config.GPU_FIELD_DTYPE,
-            )
+        new_pool_tile_buffer = cuda.device_array(
+            (
+                target_capacity_tiles,
+                tile_size,
+                tile_size,
+                tile_size,
+            ),
+            dtype=kernel_config.GPU_FIELD_DTYPE,
         )
 
         if current_capacity_tiles > 0:
-            new_pool_tile_buffer[:current_capacity_tiles].copy_to_device(
-                pool_tile_buffer[:current_capacity_tiles]
+            copy_cell_count = current_capacity_tiles * cells_per_tile
+            copy_blocks = (copy_cell_count + threads_per_block - 1) // threads_per_block
+            copy_sparse_tile_buffer_range[copy_blocks, threads_per_block](
+                pool_tile_buffer,
+                new_pool_tile_buffer,
+                current_capacity_tiles,
+            )
+
+        if target_capacity_tiles > current_capacity_tiles:
+            fill_cell_count = (
+                target_capacity_tiles - current_capacity_tiles
+            ) * cells_per_tile
+            fill_blocks = (fill_cell_count + threads_per_block - 1) // threads_per_block
+            fill_sparse_tile_buffer_range[fill_blocks, threads_per_block](
+                new_pool_tile_buffer,
+                current_capacity_tiles,
+                fill_value,
             )
 
         resized_pools.append(new_pool_tile_buffer)
