@@ -758,6 +758,7 @@ def solver(
                 )
 
         active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
+        used_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
 
         # ------------time step-------------------
         velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
@@ -1217,6 +1218,8 @@ def solver(
                     device_fields,
                     tile_map,
                     kernel_config.TILE_SIZE,
+                    active_sparse_tile_count,
+                    used_sparse_tile_count,
                     output_index,
                     t,
                 ),

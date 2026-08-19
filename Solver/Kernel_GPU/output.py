@@ -2,6 +2,7 @@ import json
 import os
 import select
 import socket
+import numba
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -63,7 +64,7 @@ def setup_output(simulations, outpath, shape):
     tile_map_dtype = np.int32
     tile_map_nbytes = int(np.prod(tile_shape)) * np.dtype(tile_map_dtype).itemsize
 
-    active_tile_meta_shape = (int(np.prod(tile_shape)), 7)
+    active_tile_meta_shape = (int(np.prod(tile_shape)), 4)
     active_tile_meta_dtype = np.int32
     active_tile_meta_nbytes = (
         int(np.prod(active_tile_meta_shape))
@@ -201,30 +202,34 @@ def _copy_sparse_field_to_shared_memory(field_data, shared_array, used_tile_coun
     field_data[:used_tile_count].copy_to_host(shared_array[:used_tile_count])
 
 
-def _build_active_tile_metadata(
-    tile_map_host, active_tile_meta_array, dense_shape, tile_size
+@numba.njit(cache=True, nogil=True)
+def _populate_active_tile_metadata(
+    tile_map_host,
+    active_tile_meta_array,
+    tile_size,
 ):
-    active_coords = np.argwhere(tile_map_host >= 0)
-    active_tile_count = int(active_coords.shape[0])
-    if active_tile_count <= 0:
-        return 0, 0
+    dim_x = tile_map_host.shape[0]
+    dim_y = tile_map_host.shape[1]
+    dim_z = tile_map_host.shape[2]
 
-    dense_shape_array = np.asarray(dense_shape, dtype=np.int32)
-    starts = active_coords.astype(np.int32, copy=False) * tile_size
-    ends = np.minimum(starts + tile_size, dense_shape_array)
-    sizes = ends - starts
-    tile_indices = tile_map_host[
-        active_coords[:, 0],
-        active_coords[:, 1],
-        active_coords[:, 2],
-    ].astype(np.int32, copy=False)
+    active_idx = 0
 
-    active_tile_meta_array[:active_tile_count, 0] = tile_indices
-    active_tile_meta_array[:active_tile_count, 1:4] = starts
-    active_tile_meta_array[:active_tile_count, 4:7] = sizes
+    for x in range(dim_x):
+        start_x = x * tile_size
 
-    used_tile_count = int(tile_indices.max()) + 1
-    return active_tile_count, used_tile_count
+        for y in range(dim_y):
+            start_y = y * tile_size
+
+            for z in range(dim_z):
+                tile_idx = tile_map_host[x, y, z]
+
+                if tile_idx >= 0:
+                    active_tile_meta_array[active_idx, 0] = tile_idx
+                    active_tile_meta_array[active_idx, 1] = start_x
+                    active_tile_meta_array[active_idx, 2] = start_y
+                    active_tile_meta_array[active_idx, 3] = z * tile_size
+
+                    active_idx += 1
 
 
 def enqueue_device_output(
@@ -233,6 +238,8 @@ def enqueue_device_output(
     sim_fields,
     tile_map,
     tile_size,
+    active_tile_count,
+    used_tile_count,
     output_index,
     t,
 ):
@@ -250,10 +257,9 @@ def enqueue_device_output(
     tile_map.copy_to_host(tile_map_slot["array"])
     tile_map_host = tile_map_slot["array"]
 
-    active_tile_count, used_tile_count = _build_active_tile_metadata(
+    _populate_active_tile_metadata(
         tile_map_host,
         active_tiles_slot["array"],
-        next(iter(fields.values()))["dense_shape"],
         int(tile_size),
     )
 

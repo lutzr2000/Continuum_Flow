@@ -56,21 +56,20 @@ def prune_scalar_grid(grid):
         pass
 
 
-def copy_sparse_tiles_into_grid(grid, sparse_arr, active_tiles, active_tile_count):
+def copy_sparse_tiles_into_grid(
+    grid, sparse_arr, active_tiles, active_tile_count, tile_size
+):
     for tile_meta in active_tiles[:active_tile_count]:
         tile_index = int(tile_meta[0])
         cell_i_start = int(tile_meta[1])
         cell_j_start = int(tile_meta[2])
         cell_k_start = int(tile_meta[3])
-        size_i = int(tile_meta[4])
-        size_j = int(tile_meta[5])
-        size_k = int(tile_meta[6])
 
         tile_values = sparse_arr[
             tile_index,
-            :size_i,
-            :size_j,
-            :size_k,
+            :tile_size,
+            :tile_size,
+            :tile_size,
         ]
 
         grid.copyFromArray(
@@ -138,6 +137,7 @@ def write_vdb(payload):
                     arr,
                     active_tiles,
                     active_tile_count,
+                    int(grid_payload["tile_size"]),
                 )
             else:
                 grid.copyFromArray(arr)
