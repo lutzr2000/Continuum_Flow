@@ -472,6 +472,7 @@ def solver(
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
 
+    simulate_sparsely = bool(simulation.get("settings").get("simulate_sparsely"))
     sparse_threshold = simulation.get("settings").get("adaptive_domain_threshold")
 
     # ------------physics------------------
@@ -485,16 +486,31 @@ def solver(
     tile_size_k = (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
     tile_shape = (tile_size_i, tile_size_j, tile_size_k)
     total_tile_count = int(tile_size_i * tile_size_j * tile_size_k)
-    tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
+
+    if simulate_sparsely:
+        tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
+        base_tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
+        initial_next_tile_index = 0
+        initial_active_tile_count = 0
+    else:
+        tile_map_values = np.arange(total_tile_count, dtype=np.int32).reshape(tile_shape)
+        base_tile_map_values = np.ones(tile_shape, dtype=np.int32)
+        initial_next_tile_index = total_tile_count
+        initial_active_tile_count = total_tile_count
+
     tile_map = cuda.to_device(tile_map_values)
-    base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+    base_tile_map = cuda.to_device(base_tile_map_values)
     free_slot_stack = cuda.to_device(np.full(total_tile_count, -1, dtype=np.int32))
     free_slot_count = cuda.to_device(np.zeros(1, dtype=np.int32))
     reused_slot_stack = cuda.to_device(np.full(total_tile_count, -1, dtype=np.int32))
     reused_slot_count = cuda.to_device(np.zeros(1, dtype=np.int32))
 
-    next_tile_index_counter = cuda.to_device(np.asarray([0], dtype=np.int32))
-    active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    next_tile_index_counter = cuda.to_device(
+        np.asarray([initial_next_tile_index], dtype=np.int32)
+    )
+    active_tile_counter = cuda.to_device(
+        np.asarray([initial_active_tile_count], dtype=np.int32)
+    )
     tile_growth_size = max(
         1,
         math.ceil(
@@ -509,7 +525,7 @@ def solver(
 
     # ------------fields------------------
     # --------------- sparse -------------------#
-    sparse_tile_capacity = max(1, tile_growth_size)
+    sparse_tile_capacity = total_tile_count if not simulate_sparsely else max(1, tile_growth_size)
     sparse_pool_shape = (
         sparse_tile_capacity,
         kernel_config.TILE_SIZE,
@@ -653,7 +669,7 @@ def solver(
             break
 
         # ------------Start Active tiles-------------------
-        if simulation.get("settings").get("simulate_sparsely"):
+        if simulate_sparsely:
             _profile_section(
                 profile_stats,
                 "build_activity_mask",
@@ -815,8 +831,11 @@ def solver(
                     "tiles",
                 )
 
-        active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
-        used_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
+            active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
+            used_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
+        else:
+            active_sparse_tile_count = total_tile_count
+            used_sparse_tile_count = total_tile_count
 
         # ------------time step-------------------
         velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
@@ -1291,8 +1310,10 @@ def solver(
 
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:
-            active_tile_count = int(active_tile_counter.copy_to_host()[0])
-            print(f"Active cells: {active_tile_count*kernel_config.TILE_SIZE**3} / ", total_tile_count * kernel_config.TILE_SIZE**3)
+            print(
+                f"Active cells: {active_sparse_tile_count*kernel_config.TILE_SIZE**3} / ",
+                total_tile_count * kernel_config.TILE_SIZE**3,
+            )
 
             ctx = cuda.current_context()
             free, total = ctx.get_memory_info()
