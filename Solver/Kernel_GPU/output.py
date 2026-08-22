@@ -256,6 +256,8 @@ def enqueue_device_output(
 
     tile_map.copy_to_host(tile_map_slot["array"])
     tile_map_host = tile_map_slot["array"]
+    max_slot_index = int(tile_map_host.max())
+    used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
 
     _populate_active_tile_metadata(
         tile_map_host,
