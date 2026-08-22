@@ -227,6 +227,31 @@ def fill_sparse_tile_buffer_range(pool, start_tile, fill_value):
     pool[tile_index, local_i, local_j, local_k] = fill_value
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def tile_is_active_in_margin(base_tile_map, tile_i, tile_j, tile_k, margin):
+    tiles_x, tiles_y, tiles_z = base_tile_map.shape
+
+    for di in range(-margin, margin + 1):
+        ni = tile_i + di
+        if ni < 0 or ni >= tiles_x:
+            continue
+
+        for dj in range(-margin, margin + 1):
+            nj = tile_j + dj
+            if nj < 0 or nj >= tiles_y:
+                continue
+
+            for dk in range(-margin, margin + 1):
+                nk = tile_k + dk
+                if nk < 0 or nk >= tiles_z:
+                    continue
+
+                if base_tile_map[ni, nj, nk] != -1:
+                    return True
+
+    return False
+
+
 @cuda.jit(cache=True)
 def copy_sparse_tile_buffer_range(src_pool, dst_pool, tile_count):
     flat_index = cuda.grid(1)
@@ -253,10 +278,40 @@ def copy_sparse_tile_buffer_range(src_pool, dst_pool, tile_count):
 
 
 @cuda.jit(cache=True)
-def dilate_tile_map_persistent(
+def release_inactive_tile_slots(
     base_tile_map,
     tile_map,
     margin,
+    free_slot_stack,
+    free_slot_count,
+):
+    tile_i, tile_j, tile_k = cuda.grid(3)
+    tiles_x, tiles_y, tiles_z = tile_map.shape
+
+    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+        return
+
+    if tile_map[tile_i, tile_j, tile_k] == -1:
+        return
+
+    if tile_is_active_in_margin(base_tile_map, tile_i, tile_j, tile_k, margin):
+        return
+
+    released_slot = tile_map[tile_i, tile_j, tile_k]
+    tile_map[tile_i, tile_j, tile_k] = -1
+    stack_index = cuda.atomic.add(free_slot_count, 0, 1)
+    free_slot_stack[stack_index] = released_slot
+
+
+@cuda.jit(cache=True)
+def activate_tiles_with_reuse(
+    base_tile_map,
+    tile_map,
+    margin,
+    free_slot_stack,
+    free_slot_count,
+    reused_slot_stack,
+    reused_slot_count,
     next_tile_index_counter,
     active_tile_counter,
 ):
@@ -266,33 +321,7 @@ def dilate_tile_map_persistent(
     if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
         return
 
-    is_active = False
-
-    for di in range(-margin, margin + 1):
-        ni = tile_i + di
-        if ni < 0 or ni >= tiles_x:
-            continue
-
-        for dj in range(-margin, margin + 1):
-            nj = tile_j + dj
-            if nj < 0 or nj >= tiles_y:
-                continue
-
-            for dk in range(-margin, margin + 1):
-                nk = tile_k + dk
-                if nk < 0 or nk >= tiles_z:
-                    continue
-
-                if base_tile_map[ni, nj, nk] != -1:
-                    is_active = True
-                    break
-            if is_active:
-                break
-        if is_active:
-            break
-
-    if not is_active:
-        tile_map[tile_i, tile_j, tile_k] = -1
+    if not tile_is_active_in_margin(base_tile_map, tile_i, tile_j, tile_k, margin):
         return
 
     cuda.atomic.add(active_tile_counter, 0, 1)
@@ -300,7 +329,37 @@ def dilate_tile_map_persistent(
     if tile_map[tile_i, tile_j, tile_k] != -1:
         return
 
+    previous_free_count = cuda.atomic.add(free_slot_count, 0, -1)
+    if previous_free_count > 0:
+        slot_index = free_slot_stack[previous_free_count - 1]
+        tile_map[tile_i, tile_j, tile_k] = slot_index
+        reused_index = cuda.atomic.add(reused_slot_count, 0, 1)
+        reused_slot_stack[reused_index] = slot_index
+        return
+
+    cuda.atomic.add(free_slot_count, 0, 1)
     tile_map[tile_i, tile_j, tile_k] = cuda.atomic.add(next_tile_index_counter, 0, 1)
+
+
+@cuda.jit(cache=True)
+def fill_sparse_tile_slots(pool, slot_indices, slot_count, fill_value):
+    flat_index = cuda.grid(1)
+    cells_per_tile = tile_size * tile_size * tile_size
+    total_cell_count = slot_count * cells_per_tile
+
+    if flat_index >= total_cell_count:
+        return
+
+    slot_offset = flat_index // cells_per_tile
+    local_flat_index = flat_index % cells_per_tile
+    tile_index = slot_indices[slot_offset]
+
+    local_i = local_flat_index // (tile_size * tile_size)
+    remainder = local_flat_index % (tile_size * tile_size)
+    local_j = remainder // tile_size
+    local_k = remainder % tile_size
+
+    pool[tile_index, local_i, local_j, local_k] = fill_value
 
 
 def required_pool_capacity(
@@ -368,6 +427,24 @@ def ensure_pool_capacities(
         resized_pools.append(new_pool_tile_buffer)
 
     return resized_pools
+
+
+def reset_reused_pool_slots(pool_specs, reused_slot_stack, reused_slot_count):
+    if reused_slot_count <= 0:
+        return
+
+    cells_per_tile = tile_size * tile_size * tile_size
+    threads_per_block = 256
+    total_cell_count = int(reused_slot_count) * cells_per_tile
+    blocks = (total_cell_count + threads_per_block - 1) // threads_per_block
+
+    for pool_tile_buffer, fill_value in pool_specs:
+        fill_sparse_tile_slots[blocks, threads_per_block](
+            pool_tile_buffer,
+            reused_slot_stack,
+            reused_slot_count,
+            fill_value,
+        )
 
 
 def copy_pools(dst_src_pairs, active_tile_count):

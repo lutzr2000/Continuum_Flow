@@ -488,6 +488,10 @@ def solver(
     tile_map_values = np.full(tile_shape, -1, dtype=np.int32)
     tile_map = cuda.to_device(tile_map_values)
     base_tile_map = cuda.to_device(np.full(tile_shape, -1, dtype=np.int32))
+    free_slot_stack = cuda.to_device(np.full(total_tile_count, -1, dtype=np.int32))
+    free_slot_count = cuda.to_device(np.zeros(1, dtype=np.int32))
+    reused_slot_stack = cuda.to_device(np.full(total_tile_count, -1, dtype=np.int32))
+    reused_slot_count = cuda.to_device(np.zeros(1, dtype=np.int32))
 
     next_tile_index_counter = cuda.to_device(np.asarray([0], dtype=np.int32))
     active_tile_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
@@ -671,21 +675,75 @@ def solver(
             )
 
             active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
+            free_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
+            reused_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
 
             _profile_section(
                 profile_stats,
-                "dilate_tile_map_persistent",
-                lambda: sparse_managment.dilate_tile_map_persistent[
+                "release_inactive_tile_slots",
+                lambda: sparse_managment.release_inactive_tile_slots[
                     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
                 ](
                     base_tile_map,
                     tile_map,
                     kernel_config.TILE_DILATE,
+                    free_slot_stack,
+                    free_slot_count,
+                ),
+                synchronize_cuda=True,
+            )
+
+            _profile_section(
+                profile_stats,
+                "activate_tiles_with_reuse",
+                lambda: sparse_managment.activate_tiles_with_reuse[
+                    tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+                ](
+                    base_tile_map,
+                    tile_map,
+                    kernel_config.TILE_DILATE,
+                    free_slot_stack,
+                    free_slot_count,
+                    reused_slot_stack,
+                    reused_slot_count,
                     next_tile_index_counter,
                     active_tile_counter,
                 ),
                 synchronize_cuda=True,
             )
+
+            reused_tile_count = int(reused_slot_count.copy_to_host()[0])
+            if reused_tile_count > 0:
+                _profile_section(
+                    profile_stats,
+                    "reset_reused_pool_slots",
+                    lambda: sparse_managment.reset_reused_pool_slots(
+                        [
+                            (u, u_initial),
+                            (v, v_initial),
+                            (w, w_initial),
+                            (u_work, u_initial),
+                            (v_work, v_initial),
+                            (w_work, w_initial),
+                            (scratch_A, reference_temperature),
+                            (scratch_B, 0.0),
+                            (scratch_C, 0.0),
+                            (p, 0.0),
+                            (pressure_rhs, 0.0),
+                            (temperature, reference_temperature),
+                            (smoke, 0.0),
+                            (fuel, 0.0),
+                            (temperature_work, reference_temperature),
+                            (smoke_work, 0.0),
+                            (fuel_work, 0.0),
+                            (flame, 0.0),
+                            (vorticity_magnitude, 0.0),
+                        ],
+                        reused_slot_stack,
+                        reused_tile_count,
+                    ),
+                    synchronize_cuda=True,
+                )
 
             required_tile_capacity = int(next_tile_index_counter.copy_to_host()[0])
 
