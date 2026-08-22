@@ -668,6 +668,59 @@ def solver(
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
+        # ------------Update masks-------------------
+        if animated_sources:
+            _profile_section(
+                profile_stats,
+                "update_source_masks",
+                lambda: update_masks.update_masks(
+                    source_masks,
+                    source_base_masks,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    aggregate_mask=source_mask,
+                ),
+                synchronize_cuda=True,
+            )
+            if source_noise_base_fields:
+                _profile_section(
+                    profile_stats,
+                    "update_source_values",
+                    lambda: update_masks.update_source_values(
+                        source_noise,
+                        source_noise_base_fields,
+                        t,
+                        delta,
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                    ),
+                    synchronize_cuda=True,
+                )
+
+        if animated_obstacles:
+            _profile_section(
+                profile_stats,
+                "update_obstacle_masks",
+                lambda: update_masks.update_masks(
+                    obstacle_mask,
+                    obstacle_base_masks,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                    tile_map=tile_map,
+                ),
+                synchronize_cuda=True,
+            )
+
         # ------------Start Active tiles-------------------
         if simulate_sparsely:
             _profile_section(
@@ -864,63 +917,10 @@ def solver(
             lambda: sparse_managment.reset_pools(
                 (scratch_A, scratch_B, scratch_C),
                 zero_pool,
-                active_sparse_tile_count,
+                used_sparse_tile_count,
             ),
             synchronize_cuda=True,
         )
-
-        # ------------Update masks-------------------
-        if animated_sources:
-            _profile_section(
-                profile_stats,
-                "update_source_masks",
-                lambda: update_masks.update_masks(
-                    source_masks,
-                    source_base_masks,
-                    t,
-                    delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
-                    aggregate_mask=source_mask,
-                ),
-                synchronize_cuda=True,
-            )
-            if source_noise_base_fields:
-                _profile_section(
-                    profile_stats,
-                    "update_source_values",
-                    lambda: update_masks.update_source_values(
-                        source_noise,
-                        source_noise_base_fields,
-                        t,
-                        delta,
-                        origin_x,
-                        origin_y,
-                        origin_z,
-                    ),
-                    synchronize_cuda=True,
-                )
-
-        if animated_obstacles:
-            _profile_section(
-                profile_stats,
-                "update_obstacle_masks",
-                lambda: update_masks.update_masks(
-                    obstacle_mask,
-                    obstacle_base_masks,
-                    t,
-                    delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
-                    scratch_A,
-                    scratch_B,
-                    scratch_C,
-                    tile_map=tile_map,
-                ),
-                synchronize_cuda=True,
-            )
 
         # ------------BC-------------------
         u, v, w, p, temperature, smoke, fuel, flame = _profile_section(
@@ -963,7 +963,7 @@ def solver(
             lambda: sparse_managment.reset_pools(
                 (scratch_A, scratch_B, scratch_C),
                 zero_pool,
-                active_sparse_tile_count,
+                used_sparse_tile_count,
             ),
             synchronize_cuda=True,
         )
@@ -1019,7 +1019,7 @@ def solver(
                     (v_work, v),
                     (w_work, w),
                 ),
-                active_sparse_tile_count,
+                used_sparse_tile_count,
             ),
             synchronize_cuda=True,
         )
@@ -1183,7 +1183,7 @@ def solver(
                     (v_work, v),
                     (w_work, w),
                 ),
-                active_sparse_tile_count,
+                used_sparse_tile_count,
             ),
             synchronize_cuda=True,
         )
