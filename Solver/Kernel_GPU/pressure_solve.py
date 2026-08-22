@@ -5,6 +5,8 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.multigrid as multigrid
 
+GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
+
 REDUCTION_THREADS_PER_BLOCK = (
     kernel_config.REDUCTION_THREADS_PER_BLOCK
 )  # this is needed because if this is added directly inline, cuda crashes i do not know why
@@ -89,10 +91,10 @@ def sum_rhs_partial_kernel(b, tile_map, partial_sums, nx, ny, nz):
 
     shared_sums = cuda.shared.array(
         shape=REDUCTION_THREADS_PER_BLOCK,
-        dtype=np.float32,
+        dtype=GPU_FIELD_DTYPE,
     )
 
-    local_sum = np.float32(0.0)
+    local_sum = GPU_FIELD_DTYPE(0.0)
     flat_idx = global_idx
     plane_size = interior_ny * interior_nz
 
@@ -148,10 +150,10 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts, nx, ny, nz):
 
     shared_counts = cuda.shared.array(
         shape=REDUCTION_THREADS_PER_BLOCK,
-        dtype=np.float32,
+        dtype=GPU_FIELD_DTYPE,
     )
 
-    local_count = np.float32(0.0)
+    local_count = GPU_FIELD_DTYPE(0.0)
     flat_idx = global_idx
     plane_size = interior_ny * interior_nz
 
@@ -165,7 +167,7 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts, nx, ny, nz):
         tile_j = j // kernel_config.TILE_SIZE
         tile_k = k // kernel_config.TILE_SIZE
         if tile_map[tile_i, tile_j, tile_k] != -1:
-            local_count += np.float32(1.0)
+            local_count += GPU_FIELD_DTYPE(1.0)
 
         flat_idx += stride
 
@@ -193,10 +195,10 @@ def sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
     stride = cuda.blockDim.x
     shared_sums = cuda.shared.array(
         shape=REDUCTION_THREADS_PER_BLOCK,
-        dtype=np.float32,
+        dtype=GPU_FIELD_DTYPE,
     )
 
-    local_sum = np.float32(0.0)
+    local_sum = GPU_FIELD_DTYPE(0.0)
     idx = tid
     while idx < partial_count:
         local_sum += partial_sums[idx]

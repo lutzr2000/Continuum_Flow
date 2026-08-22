@@ -160,7 +160,7 @@ def build_source_noise_fields(source_entries, source_base_masks):
                 coarse_shape = np.maximum(
                     1,
                     np.ceil(
-                        base_shape.astype(np.float32) / np.float32(scale_voxels)
+                        base_shape.astype(GPU_FIELD_DTYPE) / GPU_FIELD_DTYPE(scale_voxels)
                     ).astype(np.int32),
                 )
 
@@ -169,7 +169,7 @@ def build_source_noise_fields(source_entries, source_base_masks):
                     -1.0,
                     1.0,
                     size=tuple(int(v) for v in coarse_shape),
-                ).astype(np.float32)
+                ).astype(GPU_FIELD_DTYPE)
 
                 repeat_x = int(
                     max(1, math.ceil(float(base_shape[0]) / float(coarse_shape[0])))
@@ -189,7 +189,7 @@ def build_source_noise_fields(source_entries, source_base_masks):
                 )
                 expanded_noise = np.ascontiguousarray(
                     expanded_noise[: base_shape[0], : base_shape[1], : base_shape[2]],
-                    dtype=np.float32,
+                    dtype=GPU_FIELD_DTYPE,
                 )
                 expanded_noise[~base_mask] = 0.0
 
@@ -313,7 +313,7 @@ def apply_all_BC(
         source_velocity_z_values = get_source_values(simulation, "velocity", t, 2)
         source_noise_amplitudes = get_source_values(
             simulation, "noise_amplitude", t
-        ) / np.float32(100.0)
+        ) / GPU_FIELD_DTYPE(100.0)
 
         for source_idx in range(source_count):
             source_mask_entry = source_masks[source_idx]
@@ -552,7 +552,7 @@ def solver(
         np.full(sparse_pool_shape, w_initial, dtype=GPU_FIELD_DTYPE)
     )
 
-    velocity_maxima = cuda.to_device(np.zeros(3, dtype=np.float32))
+    velocity_maxima = cuda.to_device(np.zeros(3, dtype=GPU_FIELD_DTYPE))
 
     # scalars
     temperature = cuda.to_device(
@@ -587,9 +587,9 @@ def solver(
     pressure_rhs = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
     pressure_rhs_partial_sums = cuda.device_array(
         kernel_config.MAX_REDUCTION_BLOCKS,
-        dtype=np.float32,
+        dtype=GPU_FIELD_DTYPE,
     )
-    pressure_rhs_sum = cuda.device_array(1, dtype=np.float32)
+    pressure_rhs_sum = cuda.device_array(1, dtype=GPU_FIELD_DTYPE)
 
     # multigrid levels
     p_levels, b_levels, delta_levels, zero_levels = multigrid.create_multigrid_levels(
@@ -618,10 +618,10 @@ def solver(
         source_base_masks,
     )
     source_noise_host = np.zeros(
-        (len(source_noise_base_fields),) + shape, dtype=np.float32
+        (len(source_noise_base_fields),) + shape, dtype=GPU_FIELD_DTYPE
     )
     source_noise = cuda.to_device(
-        np.ascontiguousarray(source_noise_host, dtype=np.float32)
+        np.ascontiguousarray(source_noise_host, dtype=GPU_FIELD_DTYPE)
     )
 
     if source_noise_base_fields:
@@ -659,6 +659,8 @@ def solver(
     next_output_time = 0.0
     output_index = 0
     time_step_count = 0
+    active_tile_counter_host = initial_active_tile_count
+    next_tile_index_counter_host = initial_next_tile_index
 
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -673,7 +675,7 @@ def solver(
             lambda: sparse_managment.reset_pools(
                 (scratch_A, scratch_B, scratch_C),
                 zero_pool,
-                used_sparse_tile_count,
+                next_tile_index_counter_host,
             ),
             synchronize_cuda=True,
         )
@@ -791,8 +793,8 @@ def solver(
                 synchronize_cuda=True,
             )
 
-            reused_tile_count = int(reused_slot_count.copy_to_host()[0])
-            if reused_tile_count > 0:
+            reused_slot_count_host = int(reused_slot_count.copy_to_host()[0])
+            if reused_slot_count_host > 0:
                 _profile_section(
                     profile_stats,
                     "reset_reused_pool_slots",
@@ -819,17 +821,17 @@ def solver(
                             (vorticity_magnitude, 0.0),
                         ],
                         reused_slot_stack,
-                        reused_tile_count,
+                        reused_slot_count_host,
                     ),
                     synchronize_cuda=True,
                 )
 
-            required_tile_capacity = int(next_tile_index_counter.copy_to_host()[0])
+            next_tile_index_counter_host = int(next_tile_index_counter.copy_to_host()[0])
 
-            if required_tile_capacity > sparse_tile_capacity:
+            if next_tile_index_counter_host > sparse_tile_capacity:
                 next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
                     sparse_tile_capacity,
-                    required_tile_capacity,
+                    next_tile_index_counter_host,
                     tile_growth_size,
                 )
 
@@ -894,14 +896,13 @@ def solver(
                     "tiles",
                 )
 
-            active_sparse_tile_count = int(active_tile_counter.copy_to_host()[0])
-            used_sparse_tile_count = int(next_tile_index_counter.copy_to_host()[0])
+            active_tile_counter_host = int(active_tile_counter.copy_to_host()[0])
         else:
-            active_sparse_tile_count = total_tile_count
-            used_sparse_tile_count = total_tile_count
+            active_tile_counter_host = total_tile_count
+            next_tile_index_counter_host = total_tile_count
 
         # ------------time step-------------------
-        velocity_maxima.copy_to_device(np.zeros(3, dtype=np.float32))
+        velocity_maxima.copy_to_device(np.zeros(3, dtype=GPU_FIELD_DTYPE))
 
         dt = _profile_section(
             profile_stats,
@@ -911,7 +912,7 @@ def solver(
                 v,
                 w,
                 tile_map,
-                active_sparse_tile_count,
+                active_tile_counter_host,
                 velocity_maxima,
                 delta,
                 cfl,
@@ -961,7 +962,7 @@ def solver(
             lambda: sparse_managment.reset_pools(
                 (scratch_A, scratch_B, scratch_C),
                 zero_pool,
-                used_sparse_tile_count,
+                next_tile_index_counter_host,
             ),
             synchronize_cuda=True,
         )
@@ -1017,7 +1018,7 @@ def solver(
                     (v_work, v),
                     (w_work, w),
                 ),
-                used_sparse_tile_count,
+                next_tile_index_counter_host,
             ),
             synchronize_cuda=True,
         )
@@ -1106,7 +1107,7 @@ def solver(
             lambda: (
                 get_source_values(simulation, "extra_pressure", t),
                 get_source_values(simulation, "noise_amplitude", t)
-                / np.float32(100.0),
+                / GPU_FIELD_DTYPE(100.0),
             ),
         )
 
@@ -1181,7 +1182,7 @@ def solver(
                     (v_work, v),
                     (w_work, w),
                 ),
-                used_sparse_tile_count,
+                next_tile_index_counter_host,
             ),
             synchronize_cuda=True,
         )
@@ -1287,8 +1288,8 @@ def solver(
                     device_fields,
                     tile_map,
                     kernel_config.TILE_SIZE,
-                    active_sparse_tile_count,
-                    used_sparse_tile_count,
+                    active_tile_counter_host,
+                    next_tile_index_counter_host,
                     output_index,
                     t,
                 ),
@@ -1301,7 +1302,7 @@ def solver(
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:
             print(
-                f"Active cells: {active_sparse_tile_count*kernel_config.TILE_SIZE**3} / ",
+                f"Active cells: {active_tile_counter_host*kernel_config.TILE_SIZE**3} / ",
                 total_tile_count * kernel_config.TILE_SIZE**3,
             )
 

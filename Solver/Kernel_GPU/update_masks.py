@@ -4,6 +4,8 @@ import numpy as np
 import Solver.General.update_masks as helper_update_masks
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
+GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
+
 _MASK_THREADS_PER_BLOCK = (8, 8, 8)
 _PACKED_MASK_CACHE = {}
 _PACKED_VALUE_CACHE = {}
@@ -38,9 +40,9 @@ def update_source_mask(
 
     aggregate_active = False
     obj_count = target_indices.shape[0]
-    x = np.float32(ox + i * delta)
-    y = np.float32(oy + j * delta)
-    z = np.float32(oz + k * delta)
+    x = GPU_FIELD_DTYPE(ox + i * delta)
+    y = GPU_FIELD_DTYPE(oy + j * delta)
+    z = GPU_FIELD_DTYPE(oz + k * delta)
 
     for obj_idx in range(obj_count):
         if not active_flags[obj_idx]:
@@ -123,9 +125,9 @@ def update_source_value_stack(
         value_stack[source_idx, i, j, k] = 0.0
 
     obj_count = target_indices.shape[0]
-    x = np.float32(ox + i * delta)
-    y = np.float32(oy + j * delta)
-    z = np.float32(oz + k * delta)
+    x = GPU_FIELD_DTYPE(ox + i * delta)
+    y = GPU_FIELD_DTYPE(oy + j * delta)
+    z = GPU_FIELD_DTYPE(oz + k * delta)
 
     for obj_idx in range(obj_count):
         if not active_flags[obj_idx]:
@@ -207,9 +209,9 @@ def update_obstacle_mask(
     mask[i, j, k] = False
 
     cell_active = False
-    x = np.float32(ox + i * delta)
-    y = np.float32(oy + j * delta)
-    z = np.float32(oz + k * delta)
+    x = GPU_FIELD_DTYPE(ox + i * delta)
+    y = GPU_FIELD_DTYPE(oy + j * delta)
+    z = GPU_FIELD_DTYPE(oz + k * delta)
     obj_count = active_flags.shape[0]
 
     tile_size = kernel_config.TILE_SIZE
@@ -302,10 +304,10 @@ def _update_frame_state(pack, t, delta, origin_x, origin_y, origin_z, shape):
     if object_count == 0:
         return True
 
-    origin = np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
+    origin = np.asarray((origin_x, origin_y, origin_z), dtype=GPU_FIELD_DTYPE)
     bounds = np.zeros((object_count, 6), dtype=np.int32)
-    inv_mats = np.zeros((object_count, 12), dtype=np.float32)
-    rates = np.zeros((object_count, 12), dtype=np.float32)
+    inv_mats = np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)
+    rates = np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)
     active_flags = np.zeros(object_count, dtype=np.bool_)
 
     for obj_idx, mask_entry in enumerate(pack["object_entries"]):
@@ -333,8 +335,8 @@ def _update_frame_state(pack, t, delta, origin_x, origin_y, origin_z, shape):
             shape=shape,
         )
 
-        inv_mats[obj_idx, :] = np.asarray(inv[:3, :4], dtype=np.float32).reshape(12)
-        rates[obj_idx, :] = np.asarray(rate[:3, :4], dtype=np.float32).reshape(12)
+        inv_mats[obj_idx, :] = np.asarray(inv[:3, :4], dtype=GPU_FIELD_DTYPE).reshape(12)
+        rates[obj_idx, :] = np.asarray(rate[:3, :4], dtype=GPU_FIELD_DTYPE).reshape(12)
 
         if ix0 > ix1 or iy0 > iy1 or iz0 > iz1:
             continue
@@ -391,7 +393,7 @@ def update_masks(
                 flat_masks.append(base_mask.reshape(-1))
                 offsets.append(offsets[-1] + base_mask.size)
                 shapes.append(base_mask.shape)
-                origins.append(np.asarray(base_voxels["origin"], dtype=np.float32))
+                origins.append(np.asarray(base_voxels["origin"], dtype=GPU_FIELD_DTYPE))
                 target_indices.append(target_idx)
                 object_entries.append(mask_entry)
 
@@ -407,9 +409,9 @@ def update_masks(
             else np.zeros((0, 3), dtype=np.int32)
         )
         mask_origins = (
-            np.asarray(origins, dtype=np.float32)
+            np.asarray(origins, dtype=GPU_FIELD_DTYPE)
             if origins
-            else np.zeros((0, 3), dtype=np.float32)
+            else np.zeros((0, 3), dtype=GPU_FIELD_DTYPE)
         )
         target_indices_array = np.asarray(target_indices, dtype=np.int32)
 
@@ -421,8 +423,8 @@ def update_masks(
             "local_origins": cuda.to_device(mask_origins),
             "target_indices": cuda.to_device(target_indices_array),
             "bounds": cuda.to_device(np.zeros((object_count, 6), dtype=np.int32)),
-            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
-            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)),
+            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)),
             "active_flags": cuda.to_device(np.zeros(object_count, dtype=np.bool_)),
             "count": object_count,
         }
@@ -458,10 +460,10 @@ def update_masks(
             pack["bounds"],
             pack["inv_mats"],
             pack["active_flags"],
-            np.float32(delta),
-            np.float32(origin_x),
-            np.float32(origin_y),
-            np.float32(origin_z),
+            GPU_FIELD_DTYPE(delta),
+            GPU_FIELD_DTYPE(origin_x),
+            GPU_FIELD_DTYPE(origin_y),
+            GPU_FIELD_DTYPE(origin_z),
         )
         return masks
 
@@ -484,10 +486,10 @@ def update_masks(
         pack["inv_mats"],
         pack["rates"],
         pack["active_flags"],
-        np.float32(delta),
-        np.float32(origin_x),
-        np.float32(origin_y),
-        np.float32(origin_z),
+        GPU_FIELD_DTYPE(delta),
+        GPU_FIELD_DTYPE(origin_x),
+        GPU_FIELD_DTYPE(origin_y),
+        GPU_FIELD_DTYPE(origin_z),
     )
     return masks
 
@@ -517,12 +519,12 @@ def update_source_values(
             for value_entry in value_entries:
                 base_voxels = value_entry["voxels"]
                 base_mask = np.ascontiguousarray(base_voxels["mask"], dtype=np.bool_)
-                base_values_local = np.ascontiguousarray(value_entry["values"], dtype=np.float32)
+                base_values_local = np.ascontiguousarray(value_entry["values"], dtype=GPU_FIELD_DTYPE)
                 flat_masks.append(base_mask.reshape(-1))
                 flat_values.append(base_values_local.reshape(-1))
                 offsets.append(offsets[-1] + base_mask.size)
                 shapes.append(base_mask.shape)
-                origins.append(np.asarray(base_voxels["origin"], dtype=np.float32))
+                origins.append(np.asarray(base_voxels["origin"], dtype=GPU_FIELD_DTYPE))
                 target_indices.append(target_idx)
                 object_entries.append(
                     {
@@ -534,10 +536,10 @@ def update_source_values(
         object_count = len(object_entries)
         if flat_masks:
             local_masks_flat = np.concatenate(flat_masks).astype(np.bool_, copy=False)
-            local_values_flat = np.concatenate(flat_values).astype(np.float32, copy=False)
+            local_values_flat = np.concatenate(flat_values).astype(GPU_FIELD_DTYPE, copy=False)
         else:
             local_masks_flat = np.empty(0, dtype=np.bool_)
-            local_values_flat = np.empty(0, dtype=np.float32)
+            local_values_flat = np.empty(0, dtype=GPU_FIELD_DTYPE)
 
         mask_shapes = (
             np.asarray(shapes, dtype=np.int32)
@@ -545,9 +547,9 @@ def update_source_values(
             else np.zeros((0, 3), dtype=np.int32)
         )
         mask_origins = (
-            np.asarray(origins, dtype=np.float32)
+            np.asarray(origins, dtype=GPU_FIELD_DTYPE)
             if origins
-            else np.zeros((0, 3), dtype=np.float32)
+            else np.zeros((0, 3), dtype=GPU_FIELD_DTYPE)
         )
         target_indices_array = np.asarray(target_indices, dtype=np.int32)
 
@@ -560,8 +562,8 @@ def update_source_values(
             "local_origins": cuda.to_device(mask_origins),
             "target_indices": cuda.to_device(target_indices_array),
             "bounds": cuda.to_device(np.zeros((object_count, 6), dtype=np.int32)),
-            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
-            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=np.float32)),
+            "inv_mats": cuda.to_device(np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)),
+            "rates": cuda.to_device(np.zeros((object_count, 12), dtype=GPU_FIELD_DTYPE)),
             "active_flags": cuda.to_device(np.zeros(object_count, dtype=np.bool_)),
             "count": object_count,
         }
@@ -595,10 +597,10 @@ def update_source_values(
         pack["bounds"],
         pack["inv_mats"],
         pack["active_flags"],
-        np.float32(delta),
-        np.float32(origin_x),
-        np.float32(origin_y),
-        np.float32(origin_z),
+        GPU_FIELD_DTYPE(delta),
+        GPU_FIELD_DTYPE(origin_x),
+        GPU_FIELD_DTYPE(origin_y),
+        GPU_FIELD_DTYPE(origin_z),
     )
     return value_stack
 

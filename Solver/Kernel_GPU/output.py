@@ -9,6 +9,8 @@ import numpy as np
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
+GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
+
 
 def _enabled_output_field_names(output_fields):
     """
@@ -71,7 +73,7 @@ def setup_output(simulations, outpath, shape):
         * np.dtype(active_tile_meta_dtype).itemsize
     )
 
-    sparse_pool_dtype = np.float32
+    sparse_pool_dtype = GPU_FIELD_DTYPE
     sparse_pool_nbytes = (
         int(np.prod(sparse_pool_shape)) * np.dtype(sparse_pool_dtype).itemsize
     )

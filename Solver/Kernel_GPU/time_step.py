@@ -2,6 +2,7 @@ import numpy as np
 from numba import cuda
 
 from Solver.Kernel_GPU.kernel_config import (
+    GPU_FIELD_DTYPE,
     REDUCTION_THREADS_PER_BLOCK,
     reduction_blocks_per_grid,
     TILE_SIZE,
@@ -9,9 +10,9 @@ from Solver.Kernel_GPU.kernel_config import (
 
 @cuda.jit
 def velocity_maxima_timestep(u, v, w, tile_map, maxima, total_tile_count):
-    s_u = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=np.float32)
-    s_v = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=np.float32)
-    s_w = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=np.float32)
+    s_u = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
+    s_v = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
+    s_w = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
 
     tid = cuda.threadIdx.x
     stride = cuda.blockDim.x * cuda.gridDim.x
@@ -23,9 +24,9 @@ def velocity_maxima_timestep(u, v, w, tile_map, maxima, total_tile_count):
     tiles_x, tiles_y, tiles_z = tile_map.shape
     tiles_per_yz = tiles_y * tiles_z
 
-    max_u = np.float32(0.0)
-    max_v = np.float32(0.0)
-    max_w = np.float32(0.0)
+    max_u = GPU_FIELD_DTYPE(0.0)
+    max_v = GPU_FIELD_DTYPE(0.0)
+    max_w = GPU_FIELD_DTYPE(0.0)
 
     while idx < total_tile_count:
         tile_i = idx // tiles_per_yz
