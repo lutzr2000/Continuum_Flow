@@ -1,7 +1,7 @@
 import json
 import math
 import sys
-from time import perf_counter, sleep
+from time import perf_counter
 from pathlib import Path
 import numpy as np
 from numba import cuda
@@ -642,7 +642,6 @@ def solver(
 
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
-    viewer_cfg = ((simulation.get("viewers") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
     shared_memory_blocks, writer_slots = _profile_section(
@@ -660,7 +659,6 @@ def solver(
     next_output_time = 0.0
     output_index = 0
     time_step_count = 0
-    last_output_wall_time = None
 
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -1280,12 +1278,6 @@ def solver(
             "flame": flame,
         }
         while t >= next_output_time:
-            if bool(viewer_cfg.get("target_realtime_preview", False)) and last_output_wall_time is not None:
-                elapsed_since_last_output = perf_counter() - last_output_wall_time
-                remaining_time = output_time_step - elapsed_since_last_output
-                if remaining_time > 0.0:
-                    sleep(remaining_time)
-
             _profile_section(
                 profile_stats,
                 "enqueue_device_output",
@@ -1302,8 +1294,6 @@ def solver(
                 ),
                 synchronize_cuda=True,
             )
-
-            last_output_wall_time = perf_counter()
 
             output_index += 1
             next_output_time += output_time_step

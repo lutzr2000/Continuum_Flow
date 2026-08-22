@@ -527,7 +527,6 @@ def build_viewer_node_entries(node):
     """
     return {
         "live_preview": bool(getattr(node, "live_preview", True)),
-        "target_realtime_preview": bool(getattr(node, "target_realtime_preview", False)),
     }
 
 
