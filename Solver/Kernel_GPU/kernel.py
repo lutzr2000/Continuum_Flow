@@ -668,6 +668,18 @@ def solver(
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
+        # ------------Clear scratch-------------------
+        _profile_section(
+            profile_stats,
+            "reset_pools_pre_masks",
+            lambda: sparse_managment.reset_pools(
+                (scratch_A, scratch_B, scratch_C),
+                zero_pool,
+                used_sparse_tile_count,
+            ),
+            synchronize_cuda=True,
+        )
+
         # ------------Update masks-------------------
         if animated_sources:
             _profile_section(
@@ -906,18 +918,6 @@ def solver(
                 delta,
                 cfl,
                 output_time_step,
-            ),
-            synchronize_cuda=True,
-        )
-
-        # ------------Clear scratch-------------------
-        _profile_section(
-            profile_stats,
-            "reset_pools_pre_masks",
-            lambda: sparse_managment.reset_pools(
-                (scratch_A, scratch_B, scratch_C),
-                zero_pool,
-                used_sparse_tile_count,
             ),
             synchronize_cuda=True,
         )
