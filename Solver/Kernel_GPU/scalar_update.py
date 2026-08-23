@@ -236,6 +236,34 @@ def update_scalar_fields_maccormack(
     oxygen_center = max(0.0, min(1.0, (100.0 - smoke_corrected) / 100.0))
 
     if T_corrected > fuel_ignition_temperature and fuel_corrected > 0.0:
+        fuel_xp = sparse_managment.get_pool_value(fuel, tile_map, i + 1, j, k, 0.0)
+        fuel_xm = sparse_managment.get_pool_value(fuel, tile_map, i - 1, j, k, 0.0)
+        fuel_yp = sparse_managment.get_pool_value(fuel, tile_map, i, j + 1, k, 0.0)
+        fuel_ym = sparse_managment.get_pool_value(fuel, tile_map, i, j - 1, k, 0.0)
+        fuel_zp = sparse_managment.get_pool_value(fuel, tile_map, i, j, k + 1, 0.0)
+        fuel_zm = sparse_managment.get_pool_value(fuel, tile_map, i, j, k - 1, 0.0)
+
+        T_xp = sparse_managment.get_pool_value(T, tile_map, i + 1, j, k, t_reference)
+        T_xm = sparse_managment.get_pool_value(T, tile_map, i - 1, j, k, t_reference)
+        T_yp = sparse_managment.get_pool_value(T, tile_map, i, j + 1, k, t_reference)
+        T_ym = sparse_managment.get_pool_value(T, tile_map, i, j - 1, k, t_reference)
+        T_zp = sparse_managment.get_pool_value(T, tile_map, i, j, k + 1, t_reference)
+        T_zm = sparse_managment.get_pool_value(T, tile_map, i, j, k - 1, t_reference)
+
+        fuel_front = (
+            abs(fuel_xp - fuel_xm)
+            + abs(fuel_yp - fuel_ym)
+            + abs(fuel_zp - fuel_zm)
+        ) / 100.0
+
+        temperature_front = (
+            abs(T_xp - T_xm)
+            + abs(T_yp - T_ym)
+            + abs(T_zp - T_zm)
+        ) / max(fuel_ignition_temperature, 1.0)
+
+        front_factor = min(max(0.5 * (fuel_front + temperature_front), 0.0), 1.0)
+
         n = noise._value_noise_3d(
             float(i) * burn_noise_scale,
             float(j) * burn_noise_scale,
@@ -246,7 +274,15 @@ def update_scalar_fields_maccormack(
         burn_noise = 1.0 + burn_noise_amplitude * n
         burn_noise = max(0.0, min(burn_noise, 2.0))
 
-        fuel_burn_source = -fuel_burn_rate * fuel_corrected * oxygen_center * burn_noise
+        burn_front_weight = front_factor * front_factor
+
+        fuel_burn_source = (
+            -fuel_burn_rate
+            * fuel_corrected
+            * oxygen_center
+            * burn_noise
+            * burn_front_weight
+        )
         temperature_burn_source = temperature_production_rate * -fuel_burn_source
         smoke_burn_source = smoke_production_rate * -fuel_burn_source
     else:
