@@ -66,7 +66,7 @@ PERCENTAGE_MAPPING = {
     "temperature_dissipation": (0.0, 10),
     "temperature_production_rate": (0.0, 1),
     "buoyancy": (0.0, 0.01),
-    "expansion_rate": (0.0, 0.1),
+    "expansion_rate": (0.0, 0.03),
     "smoke_dissipation": (0.0, 10),
     "smoke_production_rate": (0.0, 1),
     "fuel_dissipation": (0.0, 10),

@@ -411,7 +411,7 @@ def add_artifical_divergence(
     b,
     tile_map,
     rho,
-    dt,
+    delta,
     nx,
     ny,
     nz,
@@ -435,8 +435,6 @@ def add_artifical_divergence(
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    rho_over_dt = rho / dt
-
     thermal_divergence = expansion_rate * (
         T[tile_index, local_i, local_j, local_k] - t_reference
     )
@@ -457,7 +455,7 @@ def add_artifical_divergence(
         if abs(source_extra_pressure) > abs(extra_pressure_term):
             extra_pressure_term = source_extra_pressure
 
-    b[tile_index, local_i, local_j, local_k] -= rho_over_dt * (
+    b[tile_index, local_i, local_j, local_k] -= rho/delta * (
         thermal_divergence + extra_pressure_term
     )
 
@@ -511,16 +509,6 @@ def pressure_poisson_multigrid(
         nz,
     )
 
-    remove_rhs_mean(
-        b,
-        tile_map,
-        rhs_partial_sums,
-        rhs_sum_buffer,
-        nx,
-        ny,
-        nz,
-    )
-
     reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         p,
         tile_map,
@@ -540,11 +528,22 @@ def pressure_poisson_multigrid(
         b,
         tile_map,
         rho,
-        dt,
+        delta,
         nx,
         ny,
         nz,
     )
+
+    remove_rhs_mean(
+        b,
+        tile_map,
+        rhs_partial_sums,
+        rhs_sum_buffer,
+        nx,
+        ny,
+        nz,
+    )
+
 
     for _ in range(num_vcycles):
         multigrid.v_cycle(
