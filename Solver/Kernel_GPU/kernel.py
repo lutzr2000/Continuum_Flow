@@ -377,12 +377,6 @@ def compute_inital_velocity(simulation_cfg):
 
 def solver(
     config: dict,
-    obstacle_base_masks: list,
-    obstacle_mask: np.ndarray,
-    source_base_masks: list,
-    source_masks: list,
-    animated_obstacles: bool,
-    animated_sources: bool,
 ) -> None:
     r"""
     Run one simulation.
@@ -424,22 +418,6 @@ def solver(
         Full solver configuration containing simulation settings, domain
         dimensions, physics parameters, source definitions, output settings,
         and optional meta information such as the cancellation flag path.
-    obstacle_base_masks
-        Packed obstacle voxel/mask descriptions used to rebuild animated
-        obstacle masks and obstacle velocity fields over time.
-    obstacle_mask
-        Initial dense obstacle mask on the simulation domain.
-    source_base_masks
-        Packed source voxel/mask descriptions used for animated source-mask
-        updates and optional source noise field generation.
-    source_masks
-        Initial dense source masks on the simulation domain.
-    animated_obstacles
-        Whether obstacle masks and obstacle velocities must be updated during
-        the simulation loop.
-    animated_sources
-        Whether source masks and source noise values must be updated during the
-        simulation loop.
 
     Returns
     -------
@@ -681,57 +659,55 @@ def solver(
         )
 
         # ------------Update masks-------------------
-        if animated_sources:
+        _profile_section(
+            profile_stats,
+            "update_source_masks",
+            lambda: update_masks.update_masks(
+                source_masks,
+                source_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                aggregate_mask=source_mask,
+            ),
+            synchronize_cuda=True,
+        )
+        if source_noise_base_fields:
             _profile_section(
                 profile_stats,
-                "update_source_masks",
-                lambda: update_masks.update_masks(
-                    source_masks,
-                    source_base_masks,
+                "update_source_values",
+                lambda: update_masks.update_source_values(
+                    source_noise,
+                    source_noise_base_fields,
                     t,
                     delta,
                     origin_x,
                     origin_y,
                     origin_z,
-                    aggregate_mask=source_mask,
                 ),
                 synchronize_cuda=True,
             )
-            if source_noise_base_fields:
-                _profile_section(
-                    profile_stats,
-                    "update_source_values",
-                    lambda: update_masks.update_source_values(
-                        source_noise,
-                        source_noise_base_fields,
-                        t,
-                        delta,
-                        origin_x,
-                        origin_y,
-                        origin_z,
-                    ),
-                    synchronize_cuda=True,
-                )
 
-        if animated_obstacles:
-            _profile_section(
-                profile_stats,
-                "update_obstacle_masks",
-                lambda: update_masks.update_masks(
-                    obstacle_mask,
-                    obstacle_base_masks,
-                    t,
-                    delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
-                    scratch_A,
-                    scratch_B,
-                    scratch_C,
-                    tile_map=tile_map,
-                ),
-                synchronize_cuda=True,
-            )
+        _profile_section(
+            profile_stats,
+            "update_obstacle_masks",
+            lambda: update_masks.update_masks(
+                obstacle_mask,
+                obstacle_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                tile_map=tile_map,
+            ),
+            synchronize_cuda=True,
+        )
 
         # ------------Start Active tiles-------------------
         if simulate_sparsely:
