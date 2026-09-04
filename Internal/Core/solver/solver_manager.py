@@ -1,4 +1,6 @@
-﻿import json
+﻿import base64
+from multiprocessing.connection import Listener
+import secrets
 import subprocess
 import sys
 import threading
@@ -12,6 +14,8 @@ class SolverManager:
         self._write_lock = threading.Lock()
 
         self._process = None
+        self._listener = None
+        self._connection = None
         self._ready = False
         self._starting = False
         self._reader_thread = None
@@ -125,11 +129,11 @@ class SolverManager:
     def _send(self, message):
         with self._write_lock:
             process = self._process
-            if process is None or process.stdin is None or process.poll() is not None:
+            connection = self._connection
+            if process is None or connection is None or process.poll() is not None:
                 raise RuntimeError("Solver worker is not running")
 
-            process.stdin.write(json.dumps(message) + "\n")
-            process.stdin.flush()
+            connection.send(message)
 
     def _handle_message(self, message):
         message_type = str(message.get("type") or "").strip().lower()
@@ -176,24 +180,23 @@ class SolverManager:
 
             self._condition.notify_all()
 
-    def _read_messages(self, process):
+    def _read_messages(self, process, listener):
+        connection = None
         try:
-            if process.stdout is None:
-                return
+            connection = listener.accept()
+            with self._condition:
+                self._connection = connection
+                self._condition.notify_all()
 
-            for raw_line in process.stdout:
-                line = raw_line.strip()
-                if not line:
-                    continue
-
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    print("[Solver]", line)
-                    continue
-
+            while True:
+                message = connection.recv()
                 self._handle_message(message)
+        except (EOFError, OSError):
+            pass
         finally:
+            if connection is not None:
+                connection.close()
+            listener.close()
             return_code = process.poll()
             with self._condition:
                 self._mark_active_job_failed_locked(
@@ -213,31 +216,54 @@ class SolverManager:
         self._preload_in_flight.clear()
         self._job_results.clear()
 
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-u",
-                "-m",
-                "Solver.General.main",
-                "--worker",
-            ],
-            cwd=str(self._addon_root()),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            creationflags=self._creation_flags(),
-        )
+        authkey = secrets.token_bytes(32)
+        listener = Listener(("127.0.0.1", 0), authkey=authkey)
+        host, port = listener.address
+
+        try:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-u",
+                    "-m",
+                    "Solver.General.main",
+                    "--worker",
+                    "--connection-host",
+                    str(host),
+                    "--connection-port",
+                    str(port),
+                    "--connection-authkey",
+                    base64.b64encode(authkey).decode("ascii"),
+                ],
+                cwd=str(self._addon_root()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=self._creation_flags(),
+            )
+        except Exception:
+            listener.close()
+            raise
+
         self._process = process
+        self._listener = listener
         self._reader_thread = threading.Thread(
             target=self._read_messages,
-            args=(process,),
+            args=(process, listener),
             daemon=True,
         )
         self._reader_thread.start()
 
     def _reset_runtime_state_locked(self):
+        connection = self._connection
+        listener = self._listener
+        self._connection = None
+        self._listener = None
+
+        if connection is not None:
+            connection.close()
+        if listener is not None:
+            listener.close()
+
         self._process = None
         self._ready = False
         self._starting = False

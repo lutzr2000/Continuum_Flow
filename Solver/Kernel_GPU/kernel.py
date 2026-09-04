@@ -576,47 +576,7 @@ def solver(
         min_size=8,
     )
 
-    # --------------- dense -------------------#
     # masks
-    obstacle_mask = cuda.to_device(np.ascontiguousarray(obstacle_mask, dtype=np.bool_))
-    source_mask_host = (
-        np.any(np.stack(source_masks, axis=0), axis=0)
-        if source_masks
-        else np.zeros(shape, dtype=np.bool_)
-    )
-    source_mask = cuda.to_device(np.ascontiguousarray(source_mask_host, dtype=np.bool_))
-    source_mask_stack = (
-        np.ascontiguousarray(np.asarray(source_masks, dtype=np.bool_))
-        if source_masks
-        else np.zeros((0,) + shape, dtype=np.bool_)
-    )
-    source_masks = cuda.to_device(source_mask_stack)
-    source_noise_base_fields = build_source_noise_fields(
-        simulation.get("sources") or [],
-        source_base_masks,
-    )
-    source_noise_host = np.zeros(
-        (len(source_noise_base_fields),) + shape, dtype=GPU_FIELD_DTYPE
-    )
-    source_noise = cuda.to_device(
-        np.ascontiguousarray(source_noise_host, dtype=GPU_FIELD_DTYPE)
-    )
-
-    if source_noise_base_fields:
-        _profile_section(
-            profile_stats,
-            "update_source_values_initial",
-            lambda: update_masks.update_source_values(
-                source_noise,
-                source_noise_base_fields,
-                t,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-            ),
-            synchronize_cuda=True,
-        )
 
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
@@ -659,55 +619,7 @@ def solver(
         )
 
         # ------------Update masks-------------------
-        _profile_section(
-            profile_stats,
-            "update_source_masks",
-            lambda: update_masks.update_masks(
-                source_masks,
-                source_base_masks,
-                t,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-                aggregate_mask=source_mask,
-            ),
-            synchronize_cuda=True,
-        )
-        if source_noise_base_fields:
-            _profile_section(
-                profile_stats,
-                "update_source_values",
-                lambda: update_masks.update_source_values(
-                    source_noise,
-                    source_noise_base_fields,
-                    t,
-                    delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
-                ),
-                synchronize_cuda=True,
-            )
 
-        _profile_section(
-            profile_stats,
-            "update_obstacle_masks",
-            lambda: update_masks.update_masks(
-                obstacle_mask,
-                obstacle_base_masks,
-                t,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-                scratch_A,
-                scratch_B,
-                scratch_C,
-                tile_map=tile_map,
-            ),
-            synchronize_cuda=True,
-        )
 
         # ------------Start Active tiles-------------------
         if simulate_sparsely:

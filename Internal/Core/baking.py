@@ -214,8 +214,9 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             self.cleanup_done = True
             solver_status.bake_running = False
             solver_status.active_bake_operator = None
-            bpy.context.window_manager.event_timer_remove(self.event_timer)
-            self.event_timer = None
+            if self.event_timer is not None:
+                bpy.context.window_manager.event_timer_remove(self.event_timer)
+                self.event_timer = None
             bake_completed_successfully = (
                 not self.cancel_requested
                 and bool(self.job_result)
@@ -236,9 +237,9 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
             VDBWatcher.stop()
 
-            geometry_directory = Path(self.bake_directory).resolve() / "geometry"
-            shutil.rmtree(geometry_directory)
-            print("Removed geometry directory:", geometry_directory)
+            # geometry_directory = Path(self.bake_directory).resolve() / "geometry"
+            # shutil.rmtree(geometry_directory)
+            # print("Removed geometry directory:", geometry_directory)
         
             self.output_node.last_bake_directory = str(self.output_directory) 
             set_bake_progress(0, 0)
