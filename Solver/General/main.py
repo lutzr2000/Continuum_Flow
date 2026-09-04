@@ -9,7 +9,10 @@ def main(config=None):
     print("Started")
 
 
-def run_with_worker_logging(connection, callback, *args):
+def run_worker_loop(host, port, authkey):
+    connection = Client((host, port), authkey=authkey)
+    connection.send({"type": "ready"})
+
     class ConnectionLogStream:
         def write(self, text):
             message = str(text).strip()
@@ -19,14 +22,6 @@ def run_with_worker_logging(connection, callback, *args):
 
         def flush(self):
             pass
-
-    with contextlib.redirect_stdout(ConnectionLogStream()):
-        callback(*args)
-
-
-def run_worker_loop(host, port, authkey):
-    connection = Client((host, port), authkey=authkey)
-    connection.send({"type": "ready"})
 
     try:
         while True:
@@ -40,19 +35,12 @@ def run_worker_loop(host, port, authkey):
             if command == "shutdown":
                 break
 
-            if command == "preload":
-                connection.send({
-                    "type": "preload_complete",
-                    "backend": str(message.get("backend") or "").strip().upper(),
-                    "success": True,
-                })
-                continue
-
             if command == "run_job":
                 job_id = int(message.get("job_id", 0) or 0)
                 connection.send({"type": "job_started", "job_id": job_id})
                 try:
-                    run_with_worker_logging(connection, main, message.get("config") or {})
+                    with contextlib.redirect_stdout(ConnectionLogStream()):
+                        main(message.get("config") or {})
                 except Exception:
                     connection.send({
                         "type": "job_finished",
@@ -69,10 +57,6 @@ def run_worker_loop(host, port, authkey):
                     })
                 continue
 
-            connection.send({
-                "type": "error",
-                "message": f"Unknown solver worker command: {command}",
-            })
     finally:
         connection.close()
 
@@ -90,5 +74,3 @@ if __name__ == "__main__":
             connection_port,
             connection_authkey,
         )
-    else:
-        main()

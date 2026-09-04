@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import bpy
 import json
 from datetime import datetime, timezone
@@ -77,29 +76,19 @@ def export_config_dict(config_dict):
     export_root_directory = Path(config_dict["simulation"]["outputs"][0]["output_path"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
 
-    export_directory = create_bake_subdirectory(export_root_directory, config_dict)
+    export_directory = create_bake_subdirectory(export_root_directory)
     set_subdirectory_paths(config_dict, export_directory)
     export_geometry.export_alembics(config_dict, export_directory)
 
     return export_directory, config_dict
 
 
-def create_bake_subdirectory(base_directory, config_dict):
+def create_bake_subdirectory(base_directory):
     """
     Create a fresh subfolder for one bake run inside the configured output root.
     """
-    node_tree_name = (config_dict.get("meta") or {}).get("node_tree_name")
-
-    node_tree_name = re.sub(
-        r"[^A-Za-z0-9._-]+",
-        "_",
-        str(node_tree_name or "bake").strip(),
-    )
-    node_tree_name = node_tree_name.strip("._-") or "bake"
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-
-    bake_directory = Path(base_directory) / f"{node_tree_name}_bake_{timestamp}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y_%m_%d_%H_%M_%S")
+    bake_directory = Path(base_directory) / f"Bake_run_{timestamp}"
 
     bake_directory.mkdir(
         parents=True,

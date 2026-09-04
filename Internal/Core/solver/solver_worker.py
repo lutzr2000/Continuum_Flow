@@ -4,36 +4,26 @@ import traceback
 from .solver_manager import solver_manager
 
 
-def start_worker_in_background(preload_backend=None):
+def start_worker_in_background():
     if solver_manager.is_ready():
-        if preload_backend:
-            solver_manager.request_preload(preload_backend)
         return
 
     threading.Thread(
         target=_background_start,
-        args=(preload_backend,),
         daemon=True,
     ).start()
 
 
-def _background_start(preload_backend=None):
+def _background_start():
     try:
-        ensure_worker_running(wait=True, timeout=120.0, preload_backend=preload_backend)
+        ensure_worker_running(wait=True, timeout=120.0)
     except Exception:
         print("Failed to start solver worker in background:")
         traceback.print_exc()
 
 
-def ensure_worker_running(wait=True, timeout=120.0, preload_backend=None):
-    ready = solver_manager.start(wait=wait, timeout=timeout)
-    if ready and preload_backend:
-        solver_manager.request_preload(preload_backend)
-    return ready
-
-
-def request_preload(backend, config=None):
-    solver_manager.request_preload(backend, config=config)
+def ensure_worker_running(wait=True, timeout=120.0):
+    return solver_manager.start(wait=wait, timeout=timeout)
 
 
 def start_job(config):

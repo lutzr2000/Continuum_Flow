@@ -1,6 +1,9 @@
 from pathlib import Path
 import contextlib
+import io
+import os
 import re
+from time import perf_counter
 import bpy
 
 # -------------- avoid UI redraw ----------------
@@ -23,6 +26,25 @@ def suspend_continuum_frame_handler():
             handlers.append(handler)
 
 
+@contextlib.contextmanager
+def suppress_alembic_output():
+    saved_stdout = os.dup(1)
+    saved_stderr = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+
+    try:
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        os.dup2(saved_stdout, 1)
+        os.dup2(saved_stderr, 2)
+        os.close(saved_stdout)
+        os.close(saved_stderr)
+        os.close(devnull_fd)
+
+
 # -------------- Alembic export ----------------
 def sanitize_export_name(name, fallback="geometry"):
     sanitized = re.sub(
@@ -35,6 +57,7 @@ def sanitize_export_name(name, fallback="geometry"):
 
 
 def export_alembics(config_dict, export_directory):
+    export_start_time = perf_counter()
     geometry_dir = Path(export_directory) / "geometry"
     geometry_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,6 +94,8 @@ def export_alembics(config_dict, export_directory):
             start_frame=start_frame,
             end_frame=export_end_frame,
         )
+
+    print(f"Geometry export time: {perf_counter() - export_start_time:.2f} s")
 
 
 def collect_group_objects(entries):
@@ -122,21 +147,22 @@ def export_objects_as_alembic(source_objects, file_path, start_frame, end_frame)
             bpy.context.view_layer.objects.active = source_objects[0]
 
         with suspend_continuum_frame_handler():
-            bpy.ops.wm.alembic_export(
-                filepath=str(file_path),
-                start=int(start_frame),
-                end=int(end_frame),
-                selected=True,
-                flatten=False,
-                uvs=False,
-                normals=False,
-                vcolors=False,
-                apply_subdiv=False,
-                curves_as_mesh=False,
-                use_instancing=False,
-                triangulate=True,
-                as_background_job=False,
-            )
+            with suppress_alembic_output():
+                bpy.ops.wm.alembic_export(
+                    filepath=str(file_path),
+                    start=int(start_frame),
+                    end=int(end_frame),
+                    selected=True,
+                    flatten=False,
+                    uvs=False,
+                    normals=False,
+                    vcolors=False,
+                    apply_subdiv=False,
+                    curves_as_mesh=False,
+                    use_instancing=False,
+                    triangulate=True,
+                    as_background_job=False,
+                )
 
     finally:
         bpy.ops.object.select_all(action="DESELECT")

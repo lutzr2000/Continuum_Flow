@@ -22,8 +22,6 @@ class SolverManager:
         self._active_job_id = None
         self._job_results = {}
         self._next_job_id = 1
-        self._preloaded_backends = set()
-        self._preload_in_flight = set()
         self._last_error = None
 
     def start(self, wait=True, timeout=120.0):
@@ -47,26 +45,6 @@ class SolverManager:
                     self._condition.wait(timeout=remaining)
 
             return self._ready and self._process is not None and self._process.poll() is None
-
-    def request_preload(self, backend, config=None):
-        backend = str(backend or "").strip().upper()
-        if not backend:
-            return
-
-        self.start(wait=True, timeout=120.0)
-
-        with self._condition:
-            if backend in self._preloaded_backends or backend in self._preload_in_flight:
-                return
-            self._preload_in_flight.add(backend)
-
-        self._send(
-            {
-                "command": "preload",
-                "backend": backend,
-                "config": config or {},
-            }
-        )
 
     def start_job(self, config):
         self.start(wait=True, timeout=120.0)
@@ -143,13 +121,6 @@ class SolverManager:
                 self._ready = True
                 self._starting = False
                 self._last_error = None
-            elif message_type == "preload_complete":
-                backend = str(message.get("backend") or "").strip().upper()
-                self._preload_in_flight.discard(backend)
-                if message.get("success", True) and backend:
-                    self._preloaded_backends.add(backend)
-                elif message.get("message"):
-                    self._last_error = message.get("message")
             elif message_type == "job_started":
                 self._active_job_id = int(message.get("job_id", 0) or 0) or None
             elif message_type == "job_finished":
@@ -212,8 +183,6 @@ class SolverManager:
         self._last_error = None
         self._starting = True
         self._ready = False
-        self._preloaded_backends.clear()
-        self._preload_in_flight.clear()
         self._job_results.clear()
 
         authkey = secrets.token_bytes(32)
@@ -270,7 +239,6 @@ class SolverManager:
         self._reader_thread = None
         self._active_job_id = None
         self._last_error = None
-        self._preload_in_flight.clear()
 
     def _mark_active_job_failed_locked(self, message):
         if self._active_job_id is None:
