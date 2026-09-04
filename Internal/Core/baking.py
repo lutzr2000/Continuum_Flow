@@ -296,6 +296,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         meta_config = config_dict.setdefault("meta", {})
         meta_config["cancel_flag_path"] = str(self.cancel_flag_path)
         meta_config["parent_sys_path"] = list(sys.path)
+        #export_config.write_config(config_dict, self.bake_directory) # for debugging, write the config to the bake directory
 
         output_config = simulation_config["outputs"][0]
         simulation_settings = simulation_config.get("settings") or {}

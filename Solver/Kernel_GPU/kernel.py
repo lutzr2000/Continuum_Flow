@@ -533,7 +533,8 @@ def solver(
         # )
         # cuda.synchronize()
 
-        # # ------------Update masks-------------------
+        # ------------Update masks-------------------
+        update_masks.update_masks(t, simulation)
 
         # # ------------Start Active tiles-------------------
         # if simulate_sparsely:

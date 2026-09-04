@@ -30,7 +30,7 @@ wheels = [
     "./wheels/nvidia_nvvm-13.2.78-py3-none-win_amd64.whl",
     "./wheels/packaging-26.0-py3-none-any.whl",
     "./wheels/scipy-1.17.1-cp313-cp313-win_amd64.whl",
-    "./wheels/trimesh-4.12.2-py3-none-any.whl"
+    "./wheels/usd_core-26.8-cp313-none-win_amd64.whl"
 ]
 
 [permissions]

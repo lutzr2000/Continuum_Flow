@@ -83,6 +83,18 @@ def export_config_dict(config_dict):
     return export_directory, config_dict
 
 
+def write_config(config_dict, bake_directory, filename="config.json"):
+    """
+    Persist the exported solver configuration inside the concrete bake folder.
+    """
+    config_path = Path(bake_directory).resolve() / filename
+    config_path.write_text(
+        json.dumps(config_dict, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return config_path
+
+
 def create_bake_subdirectory(base_directory):
     """
     Create a fresh subfolder for one bake run inside the configured output root.
