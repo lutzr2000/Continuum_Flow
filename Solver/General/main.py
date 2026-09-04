@@ -153,9 +153,7 @@ def _get_solver_kernel_module(solver_backend):
 
     if solver_backend == "CPU":
         if cpu_kernel_module is None:
-            import Solver.Kernel_CPU.kernel as _cpu_kernel_module
-            cpu_kernel_module = _cpu_kernel_module
-        return cpu_kernel_module
+            print("Not implemented")
 
     if gpu_kernel_module is None:
         import Solver.Kernel_GPU.kernel as _gpu_kernel_module

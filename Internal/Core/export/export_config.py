@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import bpy
 import json
 from datetime import datetime, timezone
@@ -95,22 +94,11 @@ def create_bake_subdirectory(base_directory, config_dict):
     """
     Create a fresh subfolder for one bake run inside the configured output root.
     """
-    node_tree_name = (config_dict.get("meta") or {}).get("node_tree_name")
-
-    node_tree_name = re.sub(
-        r"[^A-Za-z0-9._-]+",
-        "_",
-        str(node_tree_name or "bake").strip(),
-    )
-    node_tree_name = node_tree_name.strip("._-") or "bake"
-
-    timestamp = datetime.now(timezone.utc).strftime(
-        "%Y%m%d_%H%M%S_%f"
-    )
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
     bake_directory = (
         Path(base_directory)
-        / f"{node_tree_name}_bake_{timestamp}"
+        / f"Bake_run_{timestamp}"
     )
 
     bake_directory.mkdir(
