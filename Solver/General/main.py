@@ -6,7 +6,18 @@ import traceback
 
 
 def main(config=None):
-    print("Started")
+    config = config or {}
+    simulation = config.get("simulation") or {}
+    settings = simulation.get("settings") or {}
+    backend = str(settings.get("solver_backend", "GPU")).strip().upper()
+
+    if backend == "CPU":
+        print("CPU solver not implemented yet.")
+        return
+
+    if backend == "GPU":
+        from Solver.Kernel_GPU.kernel import solver
+        return solver(config)
 
 
 def run_worker_loop(host, port, authkey):
