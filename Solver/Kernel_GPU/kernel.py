@@ -499,6 +499,13 @@ def solver(
     )
 
     # masks
+    obstacle_mask = cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
+    source_masks = cuda.to_device(
+        np.zeros(
+            (len(simulation.get("sources", [])),) + sparse_pool_shape,
+            dtype=np.bool_,
+        )
+    )
 
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
@@ -518,7 +525,8 @@ def solver(
     time_step_count = 0
     active_tile_counter_host = initial_active_tile_count
     next_tile_index_counter_host = initial_next_tile_index
-    dt = output_time_step #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    dt = output_time_step  #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
@@ -534,7 +542,17 @@ def solver(
         # cuda.synchronize()
 
         # ------------Update masks-------------------
-        update_masks.update_masks(t, simulation)
+        update_masks.update_masks(
+            t,
+            simulation,
+            obstacle_mask,
+            source_masks,
+            tile_map,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+        )
 
         # # ------------Start Active tiles-------------------
         # if simulate_sparsely:
@@ -995,33 +1013,33 @@ def solver(
         t = t + dt
         time_step_count += 1
 
-        # # ------------Output-------------------
-        # device_fields = {
-        #     "u": u,
-        #     "v": v,
-        #     "w": w,
-        #     "pressure": p,
-        #     "temperature": temperature,
-        #     "smoke": smoke,
-        #     "fuel": fuel,
-        #     "flame": flame,
-        # }
-        # while t >= next_output_time:
-        #     output.enqueue_device_output(
-        #         simulation,
-        #         writer_slots,
-        #         device_fields,
-        #         tile_map,
-        #         kernel_config.TILE_SIZE,
-        #         active_tile_counter_host,
-        #         next_tile_index_counter_host,
-        #         output_index,
-        #         t,
-        #     )
-        #     cuda.synchronize()
+        # ------------Output-------------------
+        device_fields = {
+            "u": u,
+            "v": v,
+            "w": w,
+            "pressure": p,
+            "temperature": temperature,
+            "smoke": smoke,
+            "fuel": fuel,
+            "flame": flame,
+        }
+        while t >= next_output_time:
+            output.enqueue_device_output(
+                simulation,
+                writer_slots,
+                device_fields,
+                tile_map,
+                kernel_config.TILE_SIZE,
+                active_tile_counter_host,
+                next_tile_index_counter_host,
+                output_index,
+                t,
+            )
+            cuda.synchronize()
 
-        #     output_index += 1
-        #     next_output_time += output_time_step
+            output_index += 1
+            next_output_time += output_time_step
 
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:

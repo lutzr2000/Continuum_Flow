@@ -169,7 +169,7 @@ def export_objects_as_usdc(source_objects, file_path, start_frame, end_frame):
                     export_normals=False,
                     export_uvmaps=False,
                     use_instancing=False,
-                    triangulate_meshes=True,
+                    triangulate_meshes=False,
                 )
 
     finally:

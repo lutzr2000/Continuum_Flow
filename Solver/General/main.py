@@ -1,11 +1,18 @@
 import base64
 import contextlib
 from multiprocessing.connection import Client
+import os
+from pathlib import Path
+import platform
+import shutil
 import sys
 import traceback
 
+_dll_directory_handles = []
+_registered_cuda_library_dirs = set()
 
-def _restore_parent_sys_path(config):
+
+def get_sys_path(config):
     meta = config.get("meta") or {}
     parent_sys_path = meta.get("parent_sys_path") or []
     if not parent_sys_path:
@@ -25,9 +32,56 @@ def _restore_parent_sys_path(config):
     sys.path[:] = restored_paths + current_paths
 
 
+def find_cuda_libs():
+    """Make CUDA libraries bundled in NVIDIA Python wheels discoverable."""
+    system = platform.system()
+    if system not in ("Windows", "Linux"):
+        return
+
+    dirs = set()
+    pattern = "*.dll" if system == "Windows" else "*.so*"
+
+    for entry in sys.path:
+        root = Path(entry) / "nvidia"
+        if not root.is_dir():
+            continue
+
+        for lib in root.rglob(pattern):
+            dirs.add(lib.parent)
+
+            if system == "Windows":
+                name = lib.name.lower()
+                alias = (
+                    "cudart.dll"
+                    if name.startswith("cudart64_")
+                    else "nvvm.dll" if name.startswith("nvvm64_") else None
+                )
+                if alias and not (dst := lib.parent / alias).exists():
+                    try:
+                        shutil.copy2(lib, dst)
+                    except OSError as e:
+                        print(f"Could not create CUDA DLL alias {dst}: {e}")
+
+    paths = [
+        str(p) for p in sorted(dirs) if str(p) not in _registered_cuda_library_dirs
+    ]
+    _registered_cuda_library_dirs.update(paths)
+
+    if system == "Windows":
+        for path in paths:
+            try:
+                _dll_directory_handles.append(os.add_dll_directory(path))
+            except OSError as e:
+                print(f"Could not register CUDA DLL directory {path}: {e}")
+    elif paths:
+        old = os.environ.get("LD_LIBRARY_PATH")
+        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(paths + ([old] if old else []))
+
+
 def main(config=None):
     config = config or {}
-    _restore_parent_sys_path(config)
+    get_sys_path(config)
+    find_cuda_libs()
     simulation = config.get("simulation") or {}
     settings = simulation.get("settings") or {}
     backend = str(settings.get("solver_backend", "GPU")).strip().upper()
@@ -38,6 +92,7 @@ def main(config=None):
 
     if backend == "GPU":
         from Solver.Kernel_GPU.kernel import solver
+
         return solver(config)
 
 
@@ -74,19 +129,23 @@ def run_worker_loop(host, port, authkey):
                     with contextlib.redirect_stdout(ConnectionLogStream()):
                         main(message.get("config") or {})
                 except Exception:
-                    connection.send({
-                        "type": "job_finished",
-                        "job_id": job_id,
-                        "success": False,
-                        "message": "Solver job failed",
-                        "traceback": traceback.format_exc(),
-                    })
+                    connection.send(
+                        {
+                            "type": "job_finished",
+                            "job_id": job_id,
+                            "success": False,
+                            "message": "Solver job failed",
+                            "traceback": traceback.format_exc(),
+                        }
+                    )
                 else:
-                    connection.send({
-                        "type": "job_finished",
-                        "job_id": job_id,
-                        "success": True,
-                    })
+                    connection.send(
+                        {
+                            "type": "job_finished",
+                            "job_id": job_id,
+                            "success": True,
+                        }
+                    )
                 continue
 
     finally:
