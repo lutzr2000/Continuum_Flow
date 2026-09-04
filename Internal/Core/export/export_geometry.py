@@ -9,7 +9,7 @@ import bpy
 # -------------- avoid UI redraw ----------------
 @contextlib.contextmanager
 def suspend_continuum_frame_handler():
-    """Avoid node and UI updates while Alembic evaluates every export frame."""
+    """Avoid node and UI updates while the exporter evaluates animation frames."""
     from . import export_config
 
     handler = export_config.continuum_flow_frame_change_post
@@ -27,7 +27,7 @@ def suspend_continuum_frame_handler():
 
 
 @contextlib.contextmanager
-def suppress_alembic_output():
+def suppress_export_output():
     saved_stdout = os.dup(1)
     saved_stderr = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
@@ -45,7 +45,7 @@ def suppress_alembic_output():
         os.close(devnull_fd)
 
 
-# -------------- Alembic export ----------------
+# -------------- USD export ----------------
 def sanitize_export_name(name, fallback="geometry"):
     sanitized = re.sub(
         r"[^A-Za-z0-9._-]+",
@@ -56,7 +56,7 @@ def sanitize_export_name(name, fallback="geometry"):
     return sanitized or fallback
 
 
-def export_alembics(config_dict, export_directory):
+def export_usdc(config_dict, export_directory):
     export_start_time = perf_counter()
     geometry_dir = Path(export_directory) / "geometry"
     geometry_dir.mkdir(parents=True, exist_ok=True)
@@ -72,9 +72,9 @@ def export_alembics(config_dict, export_directory):
 
     obstacle_objects = collect_group_objects(simulation.get("obstacles", []))
     if obstacle_objects:
-        export_objects_as_alembic(
+        export_objects_as_usdc(
             obstacle_objects,
-            geometry_dir / "obstacles.abc",
+            geometry_dir / "obstacles.usdc",
             start_frame=start_frame,
             end_frame=export_end_frame,
         )
@@ -88,9 +88,9 @@ def export_alembics(config_dict, export_directory):
             source_entry.get("node_name"),
             fallback="source",
         )
-        export_objects_as_alembic(
+        export_objects_as_usdc(
             source_objects,
-            geometry_dir / f"{source_name}.abc",
+            geometry_dir / f"{source_name}.usdc",
             start_frame=start_frame,
             end_frame=export_end_frame,
         )
@@ -131,12 +131,15 @@ def collect_entry_objects(entry):
     return collected
 
 
-def export_objects_as_alembic(source_objects, file_path, start_frame, end_frame):
+def export_objects_as_usdc(source_objects, file_path, start_frame, end_frame):
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     active_object = getattr(bpy.context.view_layer.objects, "active", None)
     selected_objects = list(getattr(bpy.context, "selected_objects", ()))
+    scene = bpy.context.scene
+    original_frame_start = scene.frame_start
+    original_frame_end = scene.frame_end
 
     try:
         bpy.ops.object.select_all(action="DESELECT")
@@ -147,24 +150,31 @@ def export_objects_as_alembic(source_objects, file_path, start_frame, end_frame)
             bpy.context.view_layer.objects.active = source_objects[0]
 
         with suspend_continuum_frame_handler():
-            with suppress_alembic_output():
-                bpy.ops.wm.alembic_export(
+            scene.frame_start = int(start_frame)
+            scene.frame_end = int(end_frame)
+            with suppress_export_output():
+                bpy.ops.wm.usd_export(
                     filepath=str(file_path),
-                    start=int(start_frame),
-                    end=int(end_frame),
-                    selected=True,
-                    flatten=False,
-                    uvs=False,
-                    normals=False,
-                    vcolors=False,
-                    apply_subdiv=False,
-                    curves_as_mesh=False,
+                    selected_objects_only=True,
+                    export_animation=True,
+                    export_meshes=True,
+                    export_lights=False,
+                    export_cameras=False,
+                    export_curves=False,
+                    export_points=False,
+                    export_volumes=False,
+                    export_hair=False,
+                    export_armatures=False,
+                    export_materials=False,
+                    export_normals=False,
+                    export_uvmaps=False,
                     use_instancing=False,
-                    triangulate=True,
-                    as_background_job=False,
+                    triangulate_meshes=True,
                 )
 
     finally:
+        scene.frame_start = original_frame_start
+        scene.frame_end = original_frame_end
         bpy.ops.object.select_all(action="DESELECT")
 
         for selected_object in selected_objects:

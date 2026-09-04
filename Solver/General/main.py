@@ -5,8 +5,29 @@ import sys
 import traceback
 
 
+def _restore_parent_sys_path(config):
+    meta = config.get("meta") or {}
+    parent_sys_path = meta.get("parent_sys_path") or []
+    if not parent_sys_path:
+        return
+
+    restored_paths = []
+    seen = set()
+
+    for entry in parent_sys_path:
+        normalized = str(entry or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        restored_paths.append(normalized)
+        seen.add(normalized)
+
+    current_paths = [path for path in sys.path if path not in seen]
+    sys.path[:] = restored_paths + current_paths
+
+
 def main(config=None):
     config = config or {}
+    _restore_parent_sys_path(config)
     simulation = config.get("simulation") or {}
     settings = simulation.get("settings") or {}
     backend = str(settings.get("solver_backend", "GPU")).strip().upper()

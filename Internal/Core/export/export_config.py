@@ -71,14 +71,14 @@ PERCENTAGE_MAPPING = {
 # -------------- export ----------------
 def export_config_dict(config_dict):
     """
-    Prepare a fresh bake subfolder and export the Alembic geometry assets into it.
+    Prepare a fresh bake subfolder and export the USD geometry assets into it.
     """
     export_root_directory = Path(config_dict["simulation"]["outputs"][0]["output_path"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
 
     export_directory = create_bake_subdirectory(export_root_directory)
     set_subdirectory_paths(config_dict, export_directory)
-    export_geometry.export_alembics(config_dict, export_directory)
+    export_geometry.export_usdc(config_dict, export_directory)
 
     return export_directory, config_dict
 
@@ -355,9 +355,9 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         **build_geometry_entries(
             geometry_nodes,
             mesh_file=(
-                f"geometry/{export_geometry.sanitize_export_name(node.name, fallback='source')}.abc"
+                f"geometry/{export_geometry.sanitize_export_name(node.name, fallback='source')}.usdc"
             ),
-            mesh_format="alembic",
+            mesh_format="usdc",
         ),
     }
 
@@ -376,8 +376,8 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
         "node_name": node.name,
         **build_geometry_entries(
             geometry_nodes,
-            mesh_file="geometry/obstacles.abc",
-            mesh_format="alembic",
+            mesh_file="geometry/obstacles.usdc",
+            mesh_format="usdc",
         ),
     }
 

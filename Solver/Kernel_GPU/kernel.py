@@ -518,509 +518,509 @@ def solver(
     time_step_count = 0
     active_tile_counter_host = initial_active_tile_count
     next_tile_index_counter_host = initial_next_tile_index
-
+    dt = output_time_step #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        # ------------Clear scratch-------------------
-        sparse_managment.reset_pools(
-            (scratch_A, scratch_B, scratch_C),
-            zero_pool,
-            next_tile_index_counter_host,
-        )
-        cuda.synchronize()
+        # # ------------Clear scratch-------------------
+        # sparse_managment.reset_pools(
+        #     (scratch_A, scratch_B, scratch_C),
+        #     zero_pool,
+        #     next_tile_index_counter_host,
+        # )
+        # cuda.synchronize()
 
-        # ------------Update masks-------------------
+        # # ------------Update masks-------------------
 
-        # ------------Start Active tiles-------------------
-        if simulate_sparsely:
-            sparse_managment.build_activity_mask[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                smoke,
-                fuel,
-                flame,
-                tile_map,
-                source_mask,
-                base_tile_map,
-                sparse_threshold,
-                nx,
-                ny,
-                nz,
-            )
-            cuda.synchronize()
+        # # ------------Start Active tiles-------------------
+        # if simulate_sparsely:
+        #     sparse_managment.build_activity_mask[
+        #         tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        #     ](
+        #         smoke,
+        #         fuel,
+        #         flame,
+        #         tile_map,
+        #         source_mask,
+        #         base_tile_map,
+        #         sparse_threshold,
+        #         nx,
+        #         ny,
+        #         nz,
+        #     )
+        #     cuda.synchronize()
 
-            active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
-            free_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
-            reused_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
+        #     active_tile_counter.copy_to_device(np.zeros(1, dtype=np.int32))
+        #     free_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
+        #     reused_slot_count.copy_to_device(np.zeros(1, dtype=np.int32))
 
-            sparse_managment.release_inactive_tile_slots[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                base_tile_map,
-                tile_map,
-                kernel_config.TILE_DILATE,
-                free_slot_stack,
-                free_slot_count,
-            )
-            cuda.synchronize()
+        #     sparse_managment.release_inactive_tile_slots[
+        #         tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        #     ](
+        #         base_tile_map,
+        #         tile_map,
+        #         kernel_config.TILE_DILATE,
+        #         free_slot_stack,
+        #         free_slot_count,
+        #     )
+        #     cuda.synchronize()
 
-            sparse_managment.activate_tiles_with_reuse[
-                tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-            ](
-                base_tile_map,
-                tile_map,
-                kernel_config.TILE_DILATE,
-                free_slot_stack,
-                free_slot_count,
-                reused_slot_stack,
-                reused_slot_count,
-                next_tile_index_counter,
-                active_tile_counter,
-            )
-            cuda.synchronize()
+        #     sparse_managment.activate_tiles_with_reuse[
+        #         tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        #     ](
+        #         base_tile_map,
+        #         tile_map,
+        #         kernel_config.TILE_DILATE,
+        #         free_slot_stack,
+        #         free_slot_count,
+        #         reused_slot_stack,
+        #         reused_slot_count,
+        #         next_tile_index_counter,
+        #         active_tile_counter,
+        #     )
+        #     cuda.synchronize()
 
-            reused_slot_count_host = int(reused_slot_count.copy_to_host()[0])
-            if reused_slot_count_host > 0:
-                sparse_managment.reset_reused_pool_slots(
-                    [
-                        (u, u_initial),
-                        (v, v_initial),
-                        (w, w_initial),
-                        (u_work, u_initial),
-                        (v_work, v_initial),
-                        (w_work, w_initial),
-                        (scratch_A, reference_temperature),
-                        (scratch_B, 0.0),
-                        (scratch_C, 0.0),
-                        (p, 0.0),
-                        (pressure_rhs, 0.0),
-                        (temperature, reference_temperature),
-                        (smoke, 0.0),
-                        (fuel, 0.0),
-                        (temperature_work, reference_temperature),
-                        (smoke_work, 0.0),
-                        (fuel_work, 0.0),
-                        (flame, 0.0),
-                        (vorticity_magnitude, 0.0),
-                    ],
-                    reused_slot_stack,
-                    reused_slot_count_host,
-                )
-                cuda.synchronize()
+        #     reused_slot_count_host = int(reused_slot_count.copy_to_host()[0])
+        #     if reused_slot_count_host > 0:
+        #         sparse_managment.reset_reused_pool_slots(
+        #             [
+        #                 (u, u_initial),
+        #                 (v, v_initial),
+        #                 (w, w_initial),
+        #                 (u_work, u_initial),
+        #                 (v_work, v_initial),
+        #                 (w_work, w_initial),
+        #                 (scratch_A, reference_temperature),
+        #                 (scratch_B, 0.0),
+        #                 (scratch_C, 0.0),
+        #                 (p, 0.0),
+        #                 (pressure_rhs, 0.0),
+        #                 (temperature, reference_temperature),
+        #                 (smoke, 0.0),
+        #                 (fuel, 0.0),
+        #                 (temperature_work, reference_temperature),
+        #                 (smoke_work, 0.0),
+        #                 (fuel_work, 0.0),
+        #                 (flame, 0.0),
+        #                 (vorticity_magnitude, 0.0),
+        #             ],
+        #             reused_slot_stack,
+        #             reused_slot_count_host,
+        #         )
+        #         cuda.synchronize()
 
-            next_tile_index_counter_host = int(
-                next_tile_index_counter.copy_to_host()[0]
-            )
+        #     next_tile_index_counter_host = int(
+        #         next_tile_index_counter.copy_to_host()[0]
+        #     )
 
-            if next_tile_index_counter_host > sparse_tile_capacity:
-                next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
-                    sparse_tile_capacity,
-                    next_tile_index_counter_host,
-                    tile_growth_size,
-                )
+        #     if next_tile_index_counter_host > sparse_tile_capacity:
+        #         next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
+        #             sparse_tile_capacity,
+        #             next_tile_index_counter_host,
+        #             tile_growth_size,
+        #         )
 
-                (
-                    u,
-                    v,
-                    w,
-                    u_work,
-                    v_work,
-                    w_work,
-                    scratch_A,
-                    scratch_B,
-                    scratch_C,
-                    p,
-                    pressure_rhs,
-                    temperature,
-                    smoke,
-                    fuel,
-                    temperature_work,
-                    smoke_work,
-                    fuel_work,
-                    flame,
-                    zero_pool,
-                    vorticity_magnitude,
-                ) = sparse_managment.ensure_pool_capacities(
-                    [
-                        (u, u_initial),
-                        (v, v_initial),
-                        (w, w_initial),
-                        (u_work, u_initial),
-                        (v_work, v_initial),
-                        (w_work, w_initial),
-                        (scratch_A, reference_temperature),
-                        (scratch_B, 0.0),
-                        (scratch_C, 0.0),
-                        (p, 0.0),
-                        (pressure_rhs, 0.0),
-                        (temperature, reference_temperature),
-                        (smoke, 0.0),
-                        (fuel, 0.0),
-                        (temperature_work, reference_temperature),
-                        (smoke_work, 0.0),
-                        (fuel_work, 0.0),
-                        (flame, 0.0),
-                        (zero_pool, 0.0),
-                        (vorticity_magnitude, 0.0),
-                    ],
-                    sparse_tile_capacity,
-                    next_sparse_tile_capacity,
-                )
-                cuda.synchronize()
+        #         (
+        #             u,
+        #             v,
+        #             w,
+        #             u_work,
+        #             v_work,
+        #             w_work,
+        #             scratch_A,
+        #             scratch_B,
+        #             scratch_C,
+        #             p,
+        #             pressure_rhs,
+        #             temperature,
+        #             smoke,
+        #             fuel,
+        #             temperature_work,
+        #             smoke_work,
+        #             fuel_work,
+        #             flame,
+        #             zero_pool,
+        #             vorticity_magnitude,
+        #         ) = sparse_managment.ensure_pool_capacities(
+        #             [
+        #                 (u, u_initial),
+        #                 (v, v_initial),
+        #                 (w, w_initial),
+        #                 (u_work, u_initial),
+        #                 (v_work, v_initial),
+        #                 (w_work, w_initial),
+        #                 (scratch_A, reference_temperature),
+        #                 (scratch_B, 0.0),
+        #                 (scratch_C, 0.0),
+        #                 (p, 0.0),
+        #                 (pressure_rhs, 0.0),
+        #                 (temperature, reference_temperature),
+        #                 (smoke, 0.0),
+        #                 (fuel, 0.0),
+        #                 (temperature_work, reference_temperature),
+        #                 (smoke_work, 0.0),
+        #                 (fuel_work, 0.0),
+        #                 (flame, 0.0),
+        #                 (zero_pool, 0.0),
+        #                 (vorticity_magnitude, 0.0),
+        #             ],
+        #             sparse_tile_capacity,
+        #             next_sparse_tile_capacity,
+        #         )
+        #         cuda.synchronize()
 
-                sparse_tile_capacity = next_sparse_tile_capacity
+        #         sparse_tile_capacity = next_sparse_tile_capacity
 
-                print(
-                    "Tile buffer grown to:",
-                    sparse_tile_capacity,
-                    "tiles",
-                )
+        #         print(
+        #             "Tile buffer grown to:",
+        #             sparse_tile_capacity,
+        #             "tiles",
+        #         )
 
-            active_tile_counter_host = int(active_tile_counter.copy_to_host()[0])
-        else:
-            active_tile_counter_host = total_tile_count
-            next_tile_index_counter_host = total_tile_count
+        #     active_tile_counter_host = int(active_tile_counter.copy_to_host()[0])
+        # else:
+        #     active_tile_counter_host = total_tile_count
+        #     next_tile_index_counter_host = total_tile_count
 
-        # ------------time step-------------------
-        velocity_maxima.copy_to_device(np.zeros(3, dtype=GPU_FIELD_DTYPE))
+        # # ------------time step-------------------
+        # velocity_maxima.copy_to_device(np.zeros(3, dtype=GPU_FIELD_DTYPE))
 
-        dt = time_step.compute_new_timestep_gpu(
-            u,
-            v,
-            w,
-            tile_map,
-            active_tile_counter_host,
-            velocity_maxima,
-            delta,
-            cfl,
-            output_time_step,
-        )
-        cuda.synchronize()
+        # dt = time_step.compute_new_timestep_gpu(
+        #     u,
+        #     v,
+        #     w,
+        #     tile_map,
+        #     active_tile_counter_host,
+        #     velocity_maxima,
+        #     delta,
+        #     cfl,
+        #     output_time_step,
+        # )
+        # cuda.synchronize()
 
-        # ------------BC-------------------
-        u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
-            simulation,
-            t,
-            u,
-            v,
-            w,
-            u_initial,
-            v_initial,
-            w_initial,
-            scratch_A,
-            scratch_B,
-            scratch_C,
-            p,
-            temperature,
-            smoke,
-            fuel,
-            flame,
-            dt,
-            obstacle_mask,
-            source_masks,
-            source_noise,
-            tile_map,
-            animated_obstacles,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # # ------------BC-------------------
+        # u, v, w, p, temperature, smoke, fuel, flame = apply_all_BC(
+        #     simulation,
+        #     t,
+        #     u,
+        #     v,
+        #     w,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     scratch_A,
+        #     scratch_B,
+        #     scratch_C,
+        #     p,
+        #     temperature,
+        #     smoke,
+        #     fuel,
+        #     flame,
+        #     dt,
+        #     obstacle_mask,
+        #     source_masks,
+        #     source_noise,
+        #     tile_map,
+        #     animated_obstacles,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        # ------------Clear scratch-------------------
-        sparse_managment.reset_pools(
-            (scratch_A, scratch_B, scratch_C),
-            zero_pool,
-            next_tile_index_counter_host,
-        )
-        cuda.synchronize()
+        # # ------------Clear scratch-------------------
+        # sparse_managment.reset_pools(
+        #     (scratch_A, scratch_B, scratch_C),
+        #     zero_pool,
+        #     next_tile_index_counter_host,
+        # )
+        # cuda.synchronize()
 
-        # ------------Vorticity-------------------
-        if simulation.get("physics").get("extras").get("vorticity") > 0.0:
-            vorticity.compute_vorticity[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
-                u,
-                v,
-                w,
-                u_initial,
-                v_initial,
-                w_initial,
-                obstacle_mask,
-                vorticity_magnitude,
-                delta,
-                tile_map,
-                nx,
-                ny,
-                nz,
-            )
-            cuda.synchronize()
+        # # ------------Vorticity-------------------
+        # if simulation.get("physics").get("extras").get("vorticity") > 0.0:
+        #     vorticity.compute_vorticity[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+        #         u,
+        #         v,
+        #         w,
+        #         u_initial,
+        #         v_initial,
+        #         w_initial,
+        #         obstacle_mask,
+        #         vorticity_magnitude,
+        #         delta,
+        #         tile_map,
+        #         nx,
+        #         ny,
+        #         nz,
+        #     )
+        #     cuda.synchronize()
 
-        # ------------force params-------------------
-        (
-            fx_const,
-            fy_const,
-            fz_const,
-            swirl_config_device,
-            has_swirl_nodes,
-            turbulence_config_device,
-            has_turbulence_nodes,
-        ) = _build_force_params(simulation, t)
-        cuda.synchronize()
+        # # ------------force params-------------------
+        # (
+        #     fx_const,
+        #     fy_const,
+        #     fz_const,
+        #     swirl_config_device,
+        #     has_swirl_nodes,
+        #     turbulence_config_device,
+        #     has_turbulence_nodes,
+        # ) = _build_force_params(simulation, t)
+        # cuda.synchronize()
 
-        # ------------Velocity update-------------------
-        sparse_managment.copy_pools(
-            (
-                (u_work, u),
-                (v_work, v),
-                (w_work, w),
-            ),
-            next_tile_index_counter_host,
-        )
-        cuda.synchronize()
+        # # ------------Velocity update-------------------
+        # sparse_managment.copy_pools(
+        #     (
+        #         (u_work, u),
+        #         (v_work, v),
+        #         (w_work, w),
+        #     ),
+        #     next_tile_index_counter_host,
+        # )
+        # cuda.synchronize()
 
-        velocity_update.advect_velocity_semi_lagrangian[
-            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            u,
-            v,
-            w,
-            scratch_A,
-            scratch_B,
-            scratch_C,
-            dt,
-            delta,
-            tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # velocity_update.advect_velocity_semi_lagrangian[
+        #     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        # ](
+        #     u,
+        #     v,
+        #     w,
+        #     scratch_A,
+        #     scratch_B,
+        #     scratch_C,
+        #     dt,
+        #     delta,
+        #     tile_map,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        velocity_update.update_velocity_maccormack[
-            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            u,
-            v,
-            w,
-            obstacle_mask,
-            scratch_A,
-            scratch_B,
-            scratch_C,
-            dt,
-            u_work,
-            v_work,
-            w_work,
-            delta,
-            simulation.get("physics").get("fluid").get("density"),
-            simulation.get("physics").get("fluid").get("viscosity"),
-            vorticity_magnitude,
-            simulation.get("physics").get("extras").get("vorticity"),
-            temperature,
-            simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
-            reference_temperature,
-            tile_map,
-            fx_const,
-            fy_const,
-            fz_const,
-            has_swirl_nodes,
-            swirl_config_device,
-            origin_x,
-            origin_y,
-            origin_z,
-            has_turbulence_nodes,
-            turbulence_config_device,
-            t,
-            u_initial,
-            v_initial,
-            w_initial,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # velocity_update.update_velocity_maccormack[
+        #     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        # ](
+        #     u,
+        #     v,
+        #     w,
+        #     obstacle_mask,
+        #     scratch_A,
+        #     scratch_B,
+        #     scratch_C,
+        #     dt,
+        #     u_work,
+        #     v_work,
+        #     w_work,
+        #     delta,
+        #     simulation.get("physics").get("fluid").get("density"),
+        #     simulation.get("physics").get("fluid").get("viscosity"),
+        #     vorticity_magnitude,
+        #     simulation.get("physics").get("extras").get("vorticity"),
+        #     temperature,
+        #     simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
+        #     reference_temperature,
+        #     tile_map,
+        #     fx_const,
+        #     fy_const,
+        #     fz_const,
+        #     has_swirl_nodes,
+        #     swirl_config_device,
+        #     origin_x,
+        #     origin_y,
+        #     origin_z,
+        #     has_turbulence_nodes,
+        #     turbulence_config_device,
+        #     t,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        # ------------Velocity swap-------------------
-        u, u_work = u_work, u
-        v, v_work = v_work, v
-        w, w_work = w_work, w
+        # # ------------Velocity swap-------------------
+        # u, u_work = u_work, u
+        # v, v_work = v_work, v
+        # w, w_work = w_work, w
 
-        # ------------Pressure solve-------------------
-        extra_pressure, noise_amplitudes = (
-            get_source_values(simulation, "extra_pressure", t),
-            get_source_values(simulation, "noise_amplitude", t)
-            / GPU_FIELD_DTYPE(100.0),
-        )
-        cuda.synchronize()
+        # # ------------Pressure solve-------------------
+        # extra_pressure, noise_amplitudes = (
+        #     get_source_values(simulation, "extra_pressure", t),
+        #     get_source_values(simulation, "noise_amplitude", t)
+        #     / GPU_FIELD_DTYPE(100.0),
+        # )
+        # cuda.synchronize()
 
-        p = pressure_solve.pressure_poisson_multigrid(
-            u,
-            v,
-            w,
-            p,
-            temperature,
-            pressure_rhs,
-            dt,
-            source_masks,
-            extra_pressure,
-            source_noise,
-            noise_amplitudes,
-            delta,
-            simulation.get("physics").get("fluid").get("density"),
-            simulation.get("physics").get("temperature").get("expansion_rate"),
-            reference_temperature,
-            tile_map,
-            tile_shape,
-            u_initial,
-            v_initial,
-            w_initial,
-            p_levels,
-            b_levels,
-            delta_levels,
-            simulation.get("settings").get("iterations"),
-            pressure_rhs_partial_sums,
-            pressure_rhs_sum,
-            zero_levels,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # p = pressure_solve.pressure_poisson_multigrid(
+        #     u,
+        #     v,
+        #     w,
+        #     p,
+        #     temperature,
+        #     pressure_rhs,
+        #     dt,
+        #     source_masks,
+        #     extra_pressure,
+        #     source_noise,
+        #     noise_amplitudes,
+        #     delta,
+        #     simulation.get("physics").get("fluid").get("density"),
+        #     simulation.get("physics").get("temperature").get("expansion_rate"),
+        #     reference_temperature,
+        #     tile_map,
+        #     tile_shape,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     p_levels,
+        #     b_levels,
+        #     delta_levels,
+        #     simulation.get("settings").get("iterations"),
+        #     pressure_rhs_partial_sums,
+        #     pressure_rhs_sum,
+        #     zero_levels,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        # ------------Velocity projection-------------------
-        pressure_solve.project_velocity_kernel[
-            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            u,
-            v,
-            w,
-            p,
-            obstacle_mask,
-            dt,
-            delta,
-            simulation.get("physics").get("fluid").get("density"),
-            tile_map,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # # ------------Velocity projection-------------------
+        # pressure_solve.project_velocity_kernel[
+        #     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        # ](
+        #     u,
+        #     v,
+        #     w,
+        #     p,
+        #     obstacle_mask,
+        #     dt,
+        #     delta,
+        #     simulation.get("physics").get("fluid").get("density"),
+        #     tile_map,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        # ------------Scalar update-------------------
-        sparse_managment.copy_pools(
-            (
-                (u_work, u),
-                (v_work, v),
-                (w_work, w),
-            ),
-            next_tile_index_counter_host,
-        )
-        cuda.synchronize()
+        # # ------------Scalar update-------------------
+        # sparse_managment.copy_pools(
+        #     (
+        #         (u_work, u),
+        #         (v_work, v),
+        #         (w_work, w),
+        #     ),
+        #     next_tile_index_counter_host,
+        # )
+        # cuda.synchronize()
 
-        scalar_update.predict_scalar_fields_semi_lagrangian[
-            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            temperature,
-            smoke,
-            fuel,
-            u,
-            v,
-            w,
-            dt,
-            scratch_A,
-            scratch_B,
-            scratch_C,
-            delta,
-            reference_temperature,
-            tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # scalar_update.predict_scalar_fields_semi_lagrangian[
+        #     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        # ](
+        #     temperature,
+        #     smoke,
+        #     fuel,
+        #     u,
+        #     v,
+        #     w,
+        #     dt,
+        #     scratch_A,
+        #     scratch_B,
+        #     scratch_C,
+        #     delta,
+        #     reference_temperature,
+        #     tile_map,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        scalar_update.update_scalar_fields_maccormack[
-            tile_shape, kernel_config.THREADS_PER_BLOCK_3D
-        ](
-            temperature,
-            smoke,
-            fuel,
-            scratch_A,
-            scratch_B,
-            scratch_C,
-            u,
-            v,
-            w,
-            dt,
-            temperature_work,
-            smoke_work,
-            fuel_work,
-            flame,
-            delta,
-            simulation.get("physics").get("temperature").get("dissipation"),
-            simulation.get("physics").get("temperature").get("production_rate"),
-            simulation.get("physics").get("smoke").get("dissipation"),
-            simulation.get("physics").get("smoke").get("production_rate"),
-            simulation.get("physics").get("fuel").get("dissipation"),
-            simulation.get("physics").get("fuel").get("burn_rate"),
-            simulation.get("physics").get("fuel").get("ignition_temperature"),
-            simulation.get("physics").get("burning").get("scale"),
-            simulation.get("physics").get("burning").get("amplitude"),
-            reference_temperature,
-            tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
-            nx,
-            ny,
-            nz,
-        )
-        cuda.synchronize()
+        # scalar_update.update_scalar_fields_maccormack[
+        #     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
+        # ](
+        #     temperature,
+        #     smoke,
+        #     fuel,
+        #     scratch_A,
+        #     scratch_B,
+        #     scratch_C,
+        #     u,
+        #     v,
+        #     w,
+        #     dt,
+        #     temperature_work,
+        #     smoke_work,
+        #     fuel_work,
+        #     flame,
+        #     delta,
+        #     simulation.get("physics").get("temperature").get("dissipation"),
+        #     simulation.get("physics").get("temperature").get("production_rate"),
+        #     simulation.get("physics").get("smoke").get("dissipation"),
+        #     simulation.get("physics").get("smoke").get("production_rate"),
+        #     simulation.get("physics").get("fuel").get("dissipation"),
+        #     simulation.get("physics").get("fuel").get("burn_rate"),
+        #     simulation.get("physics").get("fuel").get("ignition_temperature"),
+        #     simulation.get("physics").get("burning").get("scale"),
+        #     simulation.get("physics").get("burning").get("amplitude"),
+        #     reference_temperature,
+        #     tile_map,
+        #     u_initial,
+        #     v_initial,
+        #     w_initial,
+        #     nx,
+        #     ny,
+        #     nz,
+        # )
+        # cuda.synchronize()
 
-        # ------------Swap-------------------
-        temperature, temperature_work = temperature_work, temperature
-        smoke, smoke_work = smoke_work, smoke
-        fuel, fuel_work = fuel_work, fuel
+        # # ------------Swap-------------------
+        # temperature, temperature_work = temperature_work, temperature
+        # smoke, smoke_work = smoke_work, smoke
+        # fuel, fuel_work = fuel_work, fuel
 
         # ------------time updated-------------------
         t = t + dt
         time_step_count += 1
 
-        # ------------Output-------------------
-        device_fields = {
-            "u": u,
-            "v": v,
-            "w": w,
-            "pressure": p,
-            "temperature": temperature,
-            "smoke": smoke,
-            "fuel": fuel,
-            "flame": flame,
-        }
-        while t >= next_output_time:
-            output.enqueue_device_output(
-                simulation,
-                writer_slots,
-                device_fields,
-                tile_map,
-                kernel_config.TILE_SIZE,
-                active_tile_counter_host,
-                next_tile_index_counter_host,
-                output_index,
-                t,
-            )
-            cuda.synchronize()
+        # # ------------Output-------------------
+        # device_fields = {
+        #     "u": u,
+        #     "v": v,
+        #     "w": w,
+        #     "pressure": p,
+        #     "temperature": temperature,
+        #     "smoke": smoke,
+        #     "fuel": fuel,
+        #     "flame": flame,
+        # }
+        # while t >= next_output_time:
+        #     output.enqueue_device_output(
+        #         simulation,
+        #         writer_slots,
+        #         device_fields,
+        #         tile_map,
+        #         kernel_config.TILE_SIZE,
+        #         active_tile_counter_host,
+        #         next_tile_index_counter_host,
+        #         output_index,
+        #         t,
+        #     )
+        #     cuda.synchronize()
 
-            output_index += 1
-            next_output_time += output_time_step
+        #     output_index += 1
+        #     next_output_time += output_time_step
 
         # ------------Memory track-------------------
         if time_step_count % 30 == 0:
