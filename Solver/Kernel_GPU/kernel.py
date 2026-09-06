@@ -19,6 +19,7 @@ import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
+import Solver.Kernel_GPU.voxelise_mesh as voxelise_mesh
 import Solver.Kernel_GPU.output as output
 import Solver.Kernel_GPU.multigrid as multigrid
 import Solver.General.forces as forces
@@ -78,7 +79,8 @@ def build_source_noise_fields(source_entries, source_base_masks):
                 coarse_shape = np.maximum(
                     1,
                     np.ceil(
-                        base_shape.astype(GPU_FIELD_DTYPE) / GPU_FIELD_DTYPE(scale_voxels)
+                        base_shape.astype(GPU_FIELD_DTYPE)
+                        / GPU_FIELD_DTYPE(scale_voxels)
                     ).astype(np.int32),
                 )
 
@@ -364,7 +366,9 @@ def solver(
         initial_next_tile_index = 0
         initial_active_tile_count = 0
     else:
-        tile_map_values = np.arange(total_tile_count, dtype=np.int32).reshape(tile_shape)
+        tile_map_values = np.arange(total_tile_count, dtype=np.int32).reshape(
+            tile_shape
+        )
         base_tile_map_values = np.ones(tile_shape, dtype=np.int32)
         initial_next_tile_index = total_tile_count
         initial_active_tile_count = total_tile_count
@@ -396,7 +400,9 @@ def solver(
 
     # ------------fields------------------
     # --------------- sparse -------------------#
-    sparse_tile_capacity = total_tile_count if not simulate_sparsely else max(1, tile_growth_size)
+    sparse_tile_capacity = (
+        total_tile_count if not simulate_sparsely else max(1, tile_growth_size)
+    )
     sparse_pool_shape = (
         sparse_tile_capacity,
         kernel_config.TILE_SIZE,
@@ -463,6 +469,23 @@ def solver(
     pressure_rhs_sum = cuda.device_array(1, dtype=GPU_FIELD_DTYPE)
 
     # masks
+    bake_path = simulation["outputs"][0]["output_path"]
+
+    source_base_masks = [
+        voxelise_mesh.voxelise_all_meshes(
+            delta, source.get("geometry_inputs"), bake_path
+        )
+        for source in simulation.get("sources") or []
+    ]
+
+    obstacles = simulation.get("obstacles") or []
+    obstacle_base_masks = (
+        voxelise_mesh.voxelise_all_meshes(
+            delta, obstacles[0].get("geometry_inputs"), bake_path
+        )
+        if obstacles
+        else []
+    )
 
     # multigrid levels
     p_levels, b_levels, delta_levels, zero_levels = multigrid.create_multigrid_levels(
@@ -471,15 +494,14 @@ def solver(
         min_size=8,
     )
 
-
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
     shared_memory_blocks, writer_slots = output.setup_output(
-            simulation,
-            simulation.get("outputs")[0].get("output_path"),
-            shape,
+        simulation,
+        bake_path,
+        shape,
     )
     cuda.synchronize()
 
