@@ -150,6 +150,45 @@ def get_matrix_data(mesh_object, time_value):
     return matrix, rate
 
 
+def get_tile_bounds(
+    voxels,
+    matrix,
+    delta,
+    origin,
+    tile_grid_shape,
+):
+    tile_size = kernel_config.TILE_SIZE
+
+    bounds_min = np.asarray(voxels["bounds_min"], dtype=np.float32)
+    bounds_max = np.asarray(voxels["bounds_max"], dtype=np.float32)
+
+    center = (bounds_min + bounds_max) * 0.5
+    extent = (bounds_max - bounds_min) * 0.5
+
+    linear = matrix[:3, :3]
+    translation = matrix[:3, 3]
+
+    world_center = linear @ center + translation
+    world_extent = np.abs(linear) @ extent
+
+    world_min = world_center - world_extent
+    world_max = world_center + world_extent
+
+    cell_min = np.floor((world_min - origin) / delta).astype(np.int32)
+    cell_max = np.ceil((world_max - origin) / delta).astype(np.int32)
+
+    tile_min = np.floor_divide(cell_min, tile_size)
+    tile_max = np.floor_divide(cell_max, tile_size)
+
+    tile_min = np.maximum(tile_min, 0)
+    tile_max = np.minimum(
+        tile_max,
+        np.asarray(tile_grid_shape, dtype=np.int32) - 1,
+    )
+
+    return tile_min, tile_max
+
+
 def update_source_masks(
     source_masks,
     source_base_masks,
@@ -179,13 +218,37 @@ def update_source_masks(
 
             local_mask = voxels["mask"]
 
+            origin = np.asarray(
+                (origin_x, origin_y, origin_z),
+                dtype=np.float32,
+            )
+
+            tile_min, tile_max = get_tile_bounds(
+                voxels,
+                matrix,
+                delta,
+                origin,
+                tile_map.shape,
+            )
+
+            if (
+                tile_min[0] > tile_max[0]
+                or tile_min[1] > tile_max[1]
+                or tile_min[2] > tile_max[2]
+            ):
+                continue
+
             threads = (
                 kernel_config.TILE_SIZE,
                 kernel_config.TILE_SIZE,
                 kernel_config.TILE_SIZE,
             )
 
-            blocks = tile_map.shape
+            blocks = (
+                int(tile_max[0] - tile_min[0] + 1),
+                int(tile_max[1] - tile_min[1] + 1),
+                int(tile_max[2] - tile_min[2] + 1),
+            )
 
             update_source_masks_gpu[blocks, threads](
                 source_mask,
@@ -197,6 +260,9 @@ def update_source_masks(
                 np.float32(origin_x),
                 np.float32(origin_y),
                 np.float32(origin_z),
+                int(tile_min[0]),
+                int(tile_min[1]),
+                int(tile_min[2]),
             )
 
 
@@ -224,18 +290,39 @@ def update_obstacle_mask(
 
         local_mask = voxels["mask"]
 
+        origin = np.asarray(
+            (origin_x, origin_y, origin_z),
+            dtype=np.float32,
+        )
+
+        tile_min, tile_max = get_tile_bounds(
+            voxels,
+            matrix,
+            delta,
+            origin,
+            tile_map.shape,
+        )
+
+        if (
+            tile_min[0] > tile_max[0]
+            or tile_min[1] > tile_max[1]
+            or tile_min[2] > tile_max[2]
+        ):
+            continue
+
         threads = (
             kernel_config.TILE_SIZE,
             kernel_config.TILE_SIZE,
             kernel_config.TILE_SIZE,
         )
 
-        blocks = tile_map.shape
+        blocks = (
+            int(tile_max[0] - tile_min[0] + 1),
+            int(tile_max[1] - tile_min[1] + 1),
+            int(tile_max[2] - tile_min[2] + 1),
+        )
 
-        update_obstacle_mask_gpu[
-            blocks,
-            threads,
-        ](
+        update_obstacle_mask_gpu[blocks, threads](
             obstacle_mask,
             velocity_x,
             velocity_y,
@@ -249,6 +336,9 @@ def update_obstacle_mask(
             np.float32(origin_x),
             np.float32(origin_y),
             np.float32(origin_z),
+            int(tile_min[0]),
+            int(tile_min[1]),
+            int(tile_min[2]),
         )
 
 
@@ -263,22 +353,19 @@ def update_source_masks_gpu(
     ox,
     oy,
     oz,
+    offset_i,
+    offset_j,
+    offset_k,
 ):
-    # Welches Sparse-Tile?
-    ti = cuda.blockIdx.x
-    tj = cuda.blockIdx.y
-    tk = cuda.blockIdx.z
+    ti = cuda.blockIdx.x + offset_i
+    tj = cuda.blockIdx.y + offset_j
+    tk = cuda.blockIdx.z + offset_k
 
-    # Welches Voxel innerhalb dieses Tiles?
     i = cuda.threadIdx.x
     j = cuda.threadIdx.y
     k = cuda.threadIdx.z
 
-    if (
-        ti >= tile_map.shape[0]
-        or tj >= tile_map.shape[1]
-        or tk >= tile_map.shape[2]
-    ):
+    if ti >= tile_map.shape[0] or tj >= tile_map.shape[1] or tk >= tile_map.shape[2]:
         return
 
     tile = tile_map[ti, tj, tk]
@@ -299,26 +386,11 @@ def update_source_masks_gpu(
     y = oy + gj * delta
     z = oz + gk * delta
 
-    bx = (
-        inv[0, 0] * x
-        + inv[0, 1] * y
-        + inv[0, 2] * z
-        + inv[0, 3]
-    )
+    bx = inv[0, 0] * x + inv[0, 1] * y + inv[0, 2] * z + inv[0, 3]
 
-    by = (
-        inv[1, 0] * x
-        + inv[1, 1] * y
-        + inv[1, 2] * z
-        + inv[1, 3]
-    )
+    by = inv[1, 0] * x + inv[1, 1] * y + inv[1, 2] * z + inv[1, 3]
 
-    bz = (
-        inv[2, 0] * x
-        + inv[2, 1] * y
-        + inv[2, 2] * z
-        + inv[2, 3]
-    )
+    bz = inv[2, 0] * x + inv[2, 1] * y + inv[2, 2] * z + inv[2, 3]
 
     bi = int(math.floor((bx - local_origin[0]) / delta + 0.5))
     bj = int(math.floor((by - local_origin[1]) / delta + 0.5))
@@ -348,20 +420,19 @@ def update_obstacle_mask_gpu(
     ox,
     oy,
     oz,
+    offset_i,
+    offset_j,
+    offset_k,
 ):
-    ti = cuda.blockIdx.x
-    tj = cuda.blockIdx.y
-    tk = cuda.blockIdx.z
+    ti = cuda.blockIdx.x + offset_i
+    tj = cuda.blockIdx.y + offset_j
+    tk = cuda.blockIdx.z + offset_k
 
     i = cuda.threadIdx.x
     j = cuda.threadIdx.y
     k = cuda.threadIdx.z
 
-    if (
-        ti >= tile_map.shape[0]
-        or tj >= tile_map.shape[1]
-        or tk >= tile_map.shape[2]
-    ):
+    if ti >= tile_map.shape[0] or tj >= tile_map.shape[1] or tk >= tile_map.shape[2]:
         return
 
     tile = tile_map[ti, tj, tk]
@@ -382,26 +453,11 @@ def update_obstacle_mask_gpu(
     y = oy + gj * delta
     z = oz + gk * delta
 
-    bx = (
-        inv[0, 0] * x
-        + inv[0, 1] * y
-        + inv[0, 2] * z
-        + inv[0, 3]
-    )
+    bx = inv[0, 0] * x + inv[0, 1] * y + inv[0, 2] * z + inv[0, 3]
 
-    by = (
-        inv[1, 0] * x
-        + inv[1, 1] * y
-        + inv[1, 2] * z
-        + inv[1, 3]
-    )
+    by = inv[1, 0] * x + inv[1, 1] * y + inv[1, 2] * z + inv[1, 3]
 
-    bz = (
-        inv[2, 0] * x
-        + inv[2, 1] * y
-        + inv[2, 2] * z
-        + inv[2, 3]
-    )
+    bz = inv[2, 0] * x + inv[2, 1] * y + inv[2, 2] * z + inv[2, 3]
 
     bi = int(math.floor((bx - local_origin[0]) / delta + 0.5))
     bj = int(math.floor((by - local_origin[1]) / delta + 0.5))
@@ -416,22 +472,13 @@ def update_obstacle_mask_gpu(
         mask[tile, i, j, k] = True
 
         velocity_x[tile, i, j, k] = (
-            rate[0, 0] * bx
-            + rate[0, 1] * by
-            + rate[0, 2] * bz
-            + rate[0, 3]
+            rate[0, 0] * bx + rate[0, 1] * by + rate[0, 2] * bz + rate[0, 3]
         )
 
         velocity_y[tile, i, j, k] = (
-            rate[1, 0] * bx
-            + rate[1, 1] * by
-            + rate[1, 2] * bz
-            + rate[1, 3]
+            rate[1, 0] * bx + rate[1, 1] * by + rate[1, 2] * bz + rate[1, 3]
         )
 
         velocity_z[tile, i, j, k] = (
-            rate[2, 0] * bx
-            + rate[2, 1] * by
-            + rate[2, 2] * bz
-            + rate[2, 3]
+            rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
         )
