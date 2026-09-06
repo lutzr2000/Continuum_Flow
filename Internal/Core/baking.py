@@ -214,7 +214,9 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             self.cleanup_done = True
             solver_status.bake_running = False
             solver_status.active_bake_operator = None
-            bpy.context.window_manager.event_timer_remove(self.event_timer)
+            if self.event_timer is not None:
+                bpy.context.window_manager.event_timer_remove(self.event_timer)
+                self.event_timer = None
             self.event_timer = None
             bake_completed_successfully = (
                 not self.cancel_requested
@@ -238,7 +240,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
             geometry_directory = Path(self.bake_directory).resolve() / "geometry"
             shutil.rmtree(geometry_directory)
-            print("Removed geometry directory:", geometry_directory)
         
             self.output_node.last_bake_directory = str(self.output_directory) 
             set_bake_progress(0, 0)
@@ -299,7 +300,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         output_config = simulation_config["outputs"][0]
         simulation_settings = simulation_config.get("settings") or {}
-        solver_backend = str(simulation_settings.get("solver_backend", "GPU")).strip().upper()
         start_frame = int(simulation_settings.get("start_frame", 1))
         end_frame = int(simulation_settings.get("end_frame", start_frame))
         total_frames = max(1, end_frame - start_frame)
@@ -318,7 +318,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         solver_worker.ensure_worker_running(
             wait=True,
             timeout=120.0,
-            preload_backend=solver_backend,
         )
         self.job_id = solver_worker.start_job(config_dict)
 
