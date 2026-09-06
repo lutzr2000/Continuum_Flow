@@ -4,6 +4,7 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.multigrid as multigrid
+import Solver.Kernel_GPU.noise as noise
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
@@ -405,6 +406,9 @@ def add_artifical_divergence(
     T,
     source_mask,
     source_extra_pressure,
+    noise_scale,
+    noise_amplitude,
+    noise_seed,
     expansion_rate,
     t_reference,
     b,
@@ -442,7 +446,18 @@ def add_artifical_divergence(
     extra_pressure_term = 0.0
 
     if source_mask[tile_index, local_i, local_j, local_k]:
-        extra_pressure_term = source_extra_pressure
+        scalar_multiplier = 1.0
+        if noise_amplitude != 0.0:
+            scale = max(noise_scale, 1.0e-6)
+            noise_value = noise._value_noise_3d(
+                i / scale,
+                j / scale,
+                k / scale,
+                noise_seed,
+            )
+            scalar_multiplier = max(1.0 + noise_value * noise_amplitude, 0.0)
+
+        extra_pressure_term = source_extra_pressure * scalar_multiplier
 
     b[tile_index, local_i, local_j, local_k] -= (
         rho / delta * (thermal_divergence + extra_pressure_term)
@@ -458,6 +473,9 @@ def pressure_poisson_multigrid(
     b,
     dt,
     source_masks,
+    source_noise_scales,
+    source_noise_amplitudes,
+    source_noise_seeds,
     extra_pressure,
     delta,
     rho,
@@ -512,6 +530,9 @@ def pressure_poisson_multigrid(
             T,
             source_mask,
             extra_pressure[source_idx],
+            source_noise_scales[source_idx],
+            source_noise_amplitudes[source_idx],
+            source_noise_seeds[source_idx],
             expansion_rate,
             t_reference,
             b,

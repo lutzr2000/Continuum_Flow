@@ -28,10 +28,10 @@ import Solver.Kernel_GPU.sparse_managment as sparse_managment
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 
-def get_source_values(simulation, var_name, t, index=None):
+def get_source_values(simulation, var_name, t, index=None, dtype=GPU_FIELD_DTYPE):
     source_entries = simulation.get("sources") or []
     animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
-    values = np.zeros(len(source_entries), dtype=GPU_FIELD_DTYPE)
+    values = np.zeros(len(source_entries), dtype=dtype)
 
     for source_idx, source_entry in enumerate(source_entries):
         value = source_entry.get(var_name, 0.0)
@@ -53,7 +53,7 @@ def get_source_values(simulation, var_name, t, index=None):
             else:
                 value = value[index]
 
-        values[source_idx] = np.asarray(value, dtype=GPU_FIELD_DTYPE)
+        values[source_idx] = np.asarray(value, dtype=dtype)
 
     return values
 
@@ -618,6 +618,31 @@ def solver(
         source_temperature_values = get_source_values(simulation, "temperature", t)
         source_smoke_values = get_source_values(simulation, "smoke", t)
         source_fuel_values = get_source_values(simulation, "fuel", t)
+        source_noise_scales = get_source_values(
+            simulation,
+            "noise_scale",
+            t,
+        )
+
+        source_noise_amplitudes = (
+            get_source_values(
+                simulation,
+                "noise_amplitude",
+                t,
+            )
+            / 100.0
+        )
+
+        source_noise_seeds = get_source_values(
+            simulation,
+            "noise_seed",
+            t,
+            dtype=np.int32,
+        )
+        source_noise_enabled = get_source_values(
+            simulation, "source_noise", t, dtype=np.bool_
+        )
+        source_noise_amplitudes[~source_noise_enabled] = 0.0
 
         source_velocity_x_values = get_source_values(
             simulation,
@@ -657,6 +682,9 @@ def solver(
                 source_velocity_x_values[source_idx],
                 source_velocity_y_values[source_idx],
                 source_velocity_z_values[source_idx],
+                source_noise_scales[source_idx],
+                source_noise_amplitudes[source_idx],
+                source_noise_seeds[source_idx],
                 dt,
             )
 
@@ -789,6 +817,9 @@ def solver(
             pressure_rhs,
             dt,
             source_masks,
+            source_noise_scales,
+            source_noise_amplitudes,
+            source_noise_seeds,
             extra_pressure,
             delta,
             simulation.get("physics").get("fluid").get("density"),
