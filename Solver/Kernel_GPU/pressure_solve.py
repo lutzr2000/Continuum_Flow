@@ -1,3 +1,4 @@
+from Solver.Kernel_GPU.timing import profiled_run
 import numpy as np
 from numba import cuda
 
@@ -464,6 +465,7 @@ def add_artifical_divergence(
     )
 
 
+@profiled_run
 def pressure_poisson_multigrid(
     u,
     v,
@@ -496,81 +498,96 @@ def pressure_poisson_multigrid(
     nx,
     ny,
     nz,
+    *,
+    timings=None,
 ):
-    pressure_equation_right_side[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
-        u,
-        v,
-        w,
-        b,
-        dt,
-        delta,
-        rho,
-        tile_map,
-        u_initial,
-        v_initial,
-        w_initial,
-        nx,
-        ny,
-        nz,
-    )
-
-    reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
-        p,
-        tile_map,
-        nx,
-        ny,
-        nz,
-    )
-
-    for source_idx, source_mask in enumerate(source_masks):
-        add_artifical_divergence[
-            tile_shape,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            T,
-            source_mask,
-            extra_pressure[source_idx],
-            source_noise_scales[source_idx],
-            source_noise_amplitudes[source_idx],
-            source_noise_seeds[source_idx],
-            expansion_rate,
-            t_reference,
+    with timings.section(
+        "pressure_poisson_multigrid", "pressure_equation_right_side", gpu=True
+    ):
+        pressure_equation_right_side[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+            u,
+            v,
+            w,
             b,
-            tile_map,
-            rho,
+            dt,
             delta,
+            rho,
+            tile_map,
+            u_initial,
+            v_initial,
+            w_initial,
             nx,
             ny,
             nz,
         )
 
-    remove_rhs_mean(
-        b,
-        tile_map,
-        rhs_partial_sums,
-        rhs_sum_buffer,
-        nx,
-        ny,
-        nz,
-    )
+    with timings.section(
+        "pressure_poisson_multigrid", "reset_inactive_pressure", gpu=True
+    ):
+        reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
+            p,
+            tile_map,
+            nx,
+            ny,
+            nz,
+        )
+
+    for source_idx, source_mask in enumerate(source_masks):
+        with timings.section(
+            "pressure_poisson_multigrid", "add_artifical_divergence", gpu=True
+        ):
+            add_artifical_divergence[
+                tile_shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                T,
+                source_mask,
+                extra_pressure[source_idx],
+                source_noise_scales[source_idx],
+                source_noise_amplitudes[source_idx],
+                source_noise_seeds[source_idx],
+                expansion_rate,
+                t_reference,
+                b,
+                tile_map,
+                rho,
+                delta,
+                nx,
+                ny,
+                nz,
+            )
+
+    with timings.section("pressure_poisson_multigrid", "remove_rhs_mean", gpu=True):
+        remove_rhs_mean(
+            b,
+            tile_map,
+            rhs_partial_sums,
+            rhs_sum_buffer,
+            nx,
+            ny,
+            nz,
+        )
 
     for _ in range(num_vcycles):
-        multigrid.v_cycle(
-            0,
-            p_levels,
-            b_levels,
-            p,
-            b,
-            zero_levels,
-            delta,
-            delta_levels,
-            pre_smooth=2,
-            post_smooth=4,
-            coarse_smooth=20,
-            nx=nx,
-            ny=ny,
-            nz=nz,
-            tile_map=tile_map,
-        )
+        with timings.section(
+            "pressure_poisson_multigrid", "multigrid.v_cycle", gpu=True
+        ):
+            multigrid.v_cycle(
+                0,
+                p_levels,
+                b_levels,
+                p,
+                b,
+                zero_levels,
+                delta,
+                delta_levels,
+                pre_smooth=2,
+                post_smooth=4,
+                coarse_smooth=20,
+                nx=nx,
+                ny=ny,
+                nz=nz,
+                tile_map=tile_map,
+            )
 
     return p
