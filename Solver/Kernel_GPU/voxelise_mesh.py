@@ -5,8 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
-import Solver.Kernel_GPU.kernel_config as kernel_config
 from numba import cuda
+
+import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
 def voxelise_all_meshes(delta, mesh_objects, bake_path):
@@ -26,7 +27,10 @@ def voxelise_all_meshes(delta, mesh_objects, bake_path):
             dtype=np.float32,
         )
 
-        voxels = voxelize_triangles(triangles, delta)
+        voxels = voxelize_triangles(
+            triangles,
+            delta,
+        )
 
         if voxels is not None:
             base_masks.append(
@@ -44,6 +48,7 @@ def voxelize_triangles(triangles, delta):
         return None
 
     vertices = triangles.reshape(-1, 3)
+
     bounds_min = vertices.min(axis=0).astype(np.float32)
     bounds_max = vertices.max(axis=0).astype(np.float32)
 
@@ -51,11 +56,20 @@ def voxelize_triangles(triangles, delta):
     hi = np.ceil(bounds_max / delta).astype(np.int32) + 1
 
     shape = tuple((hi - lo + 1).tolist())
-    origin = np.asarray(lo * delta, dtype=np.float32)
+
+    origin = np.asarray(
+        lo * delta,
+        dtype=np.float32,
+    )
 
     triangles_gpu = cuda.to_device(triangles)
-    surface_mask = cuda.to_device(np.zeros(shape, dtype=np.uint8))
-    mask = cuda.to_device(np.zeros(shape, dtype=np.uint8))
+
+    mask = cuda.to_device(
+        np.zeros(
+            shape,
+            dtype=np.uint8,
+        )
+    )
 
     blocks = tuple(
         (shape[i] + kernel_config.THREADS_PER_BLOCK_3D[i] - 1)
@@ -63,30 +77,38 @@ def voxelize_triangles(triangles, delta):
         for i in range(3)
     )
 
-    surface[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+    surface[
+        blocks,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
         triangles_gpu,
-        surface_mask,
+        mask,
         np.float32(delta),
         origin[0],
         origin[1],
         origin[2],
     )
 
-    dilate[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-        surface_mask,
-        mask,
-    )
-
     return {
         "mask": mask.copy_to_host().astype(np.bool_),
         "origin": origin,
         "bounds_min": origin,
-        "bounds_max": np.asarray(hi * delta, dtype=np.float32),
+        "bounds_max": np.asarray(
+            hi * delta,
+            dtype=np.float32,
+        ),
     }
 
 
 @cuda.jit(cache=True)
-def surface(triangles, mask, delta, ox, oy, oz):
+def surface(
+    triangles,
+    mask,
+    delta,
+    ox,
+    oy,
+    oz,
+):
     i, j, k = cuda.grid(3)
 
     if i >= mask.shape[0] or j >= mask.shape[1] or k >= mask.shape[2]:
@@ -99,12 +121,38 @@ def surface(triangles, mask, delta, ox, oy, oz):
     for t in range(triangles.shape[0]):
         tri = triangles[t]
 
-        xmin = min(tri[0, 0], tri[1, 0], tri[2, 0])
-        xmax = max(tri[0, 0], tri[1, 0], tri[2, 0])
-        ymin = min(tri[0, 1], tri[1, 1], tri[2, 1])
-        ymax = max(tri[0, 1], tri[1, 1], tri[2, 1])
-        zmin = min(tri[0, 2], tri[1, 2], tri[2, 2])
-        zmax = max(tri[0, 2], tri[1, 2], tri[2, 2])
+        xmin = min(
+            tri[0, 0],
+            tri[1, 0],
+            tri[2, 0],
+        )
+        xmax = max(
+            tri[0, 0],
+            tri[1, 0],
+            tri[2, 0],
+        )
+
+        ymin = min(
+            tri[0, 1],
+            tri[1, 1],
+            tri[2, 1],
+        )
+        ymax = max(
+            tri[0, 1],
+            tri[1, 1],
+            tri[2, 1],
+        )
+
+        zmin = min(
+            tri[0, 2],
+            tri[1, 2],
+            tri[2, 2],
+        )
+        zmax = max(
+            tri[0, 2],
+            tri[1, 2],
+            tri[2, 2],
+        )
 
         if (
             x < xmin - delta
@@ -130,41 +178,57 @@ def surface(triangles, mask, delta, ox, oy, oz):
 
         length = math.sqrt(nx * nx + ny * ny + nz * nz)
 
-        if length == 0:
+        if length == 0.0:
             continue
 
         distance = abs(
             nx * (x - tri[0, 0]) + ny * (y - tri[0, 1]) + nz * (z - tri[0, 2])
         )
 
-        if distance <= delta * 0.87 * length:
-            mask[i, j, k] = 1
-            return
+        if distance > delta * 0.87 * length:
+            continue
 
+        # Surface voxel.
+        mask[i, j, k] = 1
 
-@cuda.jit(cache=True)
-def dilate(src, dst):
-    x, y, z = cuda.grid(3)
+        # Normalize outward triangle normal.
+        nx /= length
+        ny /= length
+        nz /= length
 
-    if x >= src.shape[0] or y >= src.shape[1] or z >= src.shape[2]:
+        # Move one voxel inward:
+        # inward = negative outward normal.
+        ii = i
+        jj = j
+        kk = k
+
+        anx = abs(nx)
+        any_ = abs(ny)
+        anz = abs(nz)
+
+        if anx >= any_ and anx >= anz:
+            if nx > 0.0:
+                ii -= 1
+            else:
+                ii += 1
+
+        elif any_ >= anz:
+            if ny > 0.0:
+                jj -= 1
+            else:
+                jj += 1
+
+        else:
+            if nz > 0.0:
+                kk -= 1
+            else:
+                kk += 1
+
+        if (
+            0 <= ii < mask.shape[0]
+            and 0 <= jj < mask.shape[1]
+            and 0 <= kk < mask.shape[2]
+        ):
+            mask[ii, jj, kk] = 1
+
         return
-
-    if not src[x, y, z]:
-        return
-
-    dst[x, y, z] = 1
-
-    if x > 0:
-        dst[x - 1, y, z] = 1
-    if x + 1 < src.shape[0]:
-        dst[x + 1, y, z] = 1
-
-    if y > 0:
-        dst[x, y - 1, z] = 1
-    if y + 1 < src.shape[1]:
-        dst[x, y + 1, z] = 1
-
-    if z > 0:
-        dst[x, y, z - 1] = 1
-    if z + 1 < src.shape[2]:
-        dst[x, y, z + 1] = 1

@@ -495,7 +495,6 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
-    cuda.synchronize()
 
     reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         p,
@@ -504,7 +503,6 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
-    cuda.synchronize()
 
     for source_idx, source_mask in enumerate(source_masks):
         add_artifical_divergence[
@@ -524,7 +522,6 @@ def pressure_poisson_multigrid(
             ny,
             nz,
         )
-        cuda.synchronize()
 
     remove_rhs_mean(
         b,
@@ -535,7 +532,6 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
-    cuda.synchronize()
 
     for _ in range(num_vcycles):
         multigrid.v_cycle(
@@ -555,6 +551,5 @@ def pressure_poisson_multigrid(
             nz=nz,
             tile_map=tile_map,
         )
-        cuda.synchronize()
 
     return p
