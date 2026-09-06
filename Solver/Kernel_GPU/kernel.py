@@ -288,6 +288,23 @@ def solver(
                 )
             )
 
+    for base_masks in source_base_masks:
+        for entry in base_masks:
+            times, matrices, rates = update_masks.prepare_matrix_data(
+                entry["mesh_object"]
+            )
+            entry["matrix_times"] = times
+            entry["matrix_matrices"] = matrices
+            entry["matrix_rates"] = rates
+
+    for entry in obstacle_base_masks:
+        times, matrices, rates = update_masks.prepare_matrix_data(
+            entry["mesh_object"]
+        )
+        entry["matrix_times"] = times
+        entry["matrix_matrices"] = matrices
+        entry["matrix_rates"] = rates
+
     with timings.section("solver", "initialize_fields_and_masks", gpu=True):
         zero_pool = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
