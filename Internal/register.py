@@ -148,10 +148,6 @@ def register():
         bpy.app.handlers.frame_change_post.append(continuum_flow_frame_change_post)
 
     sync_ui_animation_state(getattr(bpy.context, "scene", None))
-    solver_worker.start_worker_in_background(
-        preload_backend="GPU" if solver_status.gpu_available else "CPU"
-    )
-
 
 def unregister():
     solver_worker.shutdown_worker(restart=False)

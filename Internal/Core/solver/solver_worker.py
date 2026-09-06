@@ -14,6 +14,10 @@ def start_worker_in_background():
     ).start()
 
 
+def get_stats():
+    return solver_manager.get_stats()
+
+
 def _background_start():
     try:
         ensure_worker_running(wait=True, timeout=120.0)

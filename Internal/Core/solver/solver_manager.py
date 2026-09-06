@@ -21,6 +21,7 @@ class SolverManager:
         self._preloaded_backends = set()
         self._preload_in_flight = set()
         self._last_error = None
+        self._stats = {}
 
     def start(self, wait=True, timeout=120.0):
         with self._condition:
@@ -88,6 +89,10 @@ class SolverManager:
     def get_job_result(self, job_id):
         with self._condition:
             return self._job_results.pop(int(job_id), None)
+
+    def get_stats(self):
+        with self._condition:
+            return dict(self._stats)
 
     def wait_for_job(self, job_id, timeout=None):
         with self._condition:
@@ -173,6 +178,16 @@ class SolverManager:
                 log_message = message.get("message")
                 if log_message:
                     print("[Solver]", log_message)
+            elif message_type == "stats":
+                self._stats = {
+                    "frame": int(message.get("frame", 0)),
+                    "active_tiles": int(message.get("active_tiles", 0)),
+                    "total_tiles": int(message.get("total_tiles", 0)),
+                    "active_cells": int(message.get("active_cells", 0)),
+                    "total_cells": int(message.get("total_cells", 0)),
+                    "vram_used_mb": float(message.get("vram_used_mb", 0.0)),
+                    "vram_total_mb": float(message.get("vram_total_mb", 0.0)),
+                }
 
             self._condition.notify_all()
 
@@ -244,6 +259,7 @@ class SolverManager:
         self._reader_thread = None
         self._active_job_id = None
         self._last_error = None
+        self._stats = {}
         self._preload_in_flight.clear()
 
     def _mark_active_job_failed_locked(self, message):

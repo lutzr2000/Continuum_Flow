@@ -9,6 +9,11 @@ import shutil
 import platform
 
 
+def emit_message(message):
+    sys.__stdout__.write(json.dumps(message) + "\n")
+    sys.__stdout__.flush()
+
+
 def main(config):
     total_start_time = perf_counter()
 
@@ -42,7 +47,6 @@ def main(config):
 
 
 def prepare_cuda_libraries():
-
     system = platform.system()
 
     for entry in map(Path, sys.path):
@@ -85,8 +89,7 @@ def prepare_cuda_libraries():
 
 
 def run_worker():
-    sys.__stdout__.write(json.dumps({"type": "ready"}) + "\n")
-    sys.__stdout__.flush()
+    emit_message({"type": "ready"})
 
     for raw_line in sys.stdin:
         payload = raw_line.strip()
@@ -103,16 +106,12 @@ def run_worker():
             job_id = int(message.get("job_id", 0) or 0)
             config = message.get("config") or {}
 
-            sys.__stdout__.write(
-                json.dumps(
-                    {
-                        "type": "job_started",
-                        "job_id": job_id,
-                    }
-                )
-                + "\n"
+            emit_message(
+                {
+                    "type": "job_started",
+                    "job_id": job_id,
+                }
             )
-            sys.__stdout__.flush()
 
             logger = _JsonLogStream()
 
@@ -125,45 +124,59 @@ def run_worker():
                     finally:
                         logger.flush()
 
-                sys.__stdout__.write(
-                    json.dumps(
-                        {
-                            "type": "job_finished",
-                            "job_id": job_id,
-                            "success": True,
-                        }
-                    )
-                    + "\n"
+                emit_message(
+                    {
+                        "type": "stats",
+                        "frame": 0,
+                        "active_tiles": 0,
+                        "total_tiles": 0,
+                        "active_cells": 0,
+                        "total_cells": 0,
+                        "vram_used_mb": 0.0,
+                        "vram_total_mb": 0.0,
+                    }
                 )
-                sys.__stdout__.flush()
+
+                emit_message(
+                    {
+                        "type": "job_finished",
+                        "job_id": job_id,
+                        "success": True,
+                    }
+                )
 
             except Exception:
-                sys.__stdout__.write(
-                    json.dumps(
-                        {
-                            "type": "job_finished",
-                            "job_id": job_id,
-                            "success": False,
-                            "message": "Solver job failed",
-                            "traceback": traceback.format_exc(),
-                        }
-                    )
-                    + "\n"
+                emit_message(
+                    {
+                        "type": "stats",
+                        "frame": 0,
+                        "active_tiles": 0,
+                        "total_tiles": 0,
+                        "active_cells": 0,
+                        "total_cells": 0,
+                        "vram_used_mb": 0.0,
+                        "vram_total_mb": 0.0,
+                    }
                 )
-                sys.__stdout__.flush()
+
+                emit_message(
+                    {
+                        "type": "job_finished",
+                        "job_id": job_id,
+                        "success": False,
+                        "message": "Solver job failed",
+                        "traceback": traceback.format_exc(),
+                    }
+                )
 
             continue
 
-        sys.__stdout__.write(
-            json.dumps(
-                {
-                    "type": "error",
-                    "message": f"Unknown solver worker command: {command}",
-                }
-            )
-            + "\n"
+        emit_message(
+            {
+                "type": "error",
+                "message": f"Unknown solver worker command: {command}",
+            }
         )
-        sys.__stdout__.flush()
 
 
 class _JsonLogStream:
@@ -182,16 +195,12 @@ class _JsonLogStream:
             line = line.rstrip()
 
             if line:
-                sys.__stdout__.write(
-                    json.dumps(
-                        {
-                            "type": "log",
-                            "message": line,
-                        }
-                    )
-                    + "\n"
+                emit_message(
+                    {
+                        "type": "log",
+                        "message": line,
+                    }
                 )
-                sys.__stdout__.flush()
 
         return len(text)
 
@@ -199,16 +208,12 @@ class _JsonLogStream:
         remaining = self._buffer.strip()
 
         if remaining:
-            sys.__stdout__.write(
-                json.dumps(
-                    {
-                        "type": "log",
-                        "message": remaining,
-                    }
-                )
-                + "\n"
+            emit_message(
+                {
+                    "type": "log",
+                    "message": remaining,
+                }
             )
-            sys.__stdout__.flush()
 
         self._buffer = ""
 

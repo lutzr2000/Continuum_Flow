@@ -10,21 +10,24 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
-import Solver.Kernel_GPU.velocity_update as velocity_update
-import Solver.Kernel_GPU.scalar_update as scalar_update
-import Solver.Kernel_GPU.pressure_solve as pressure_solve
-import Solver.Kernel_GPU.vorticity as vorticity
+from Solver.General.main import emit_message
+import Solver.General.forces as forces
+
 import Solver.Kernel_GPU.kernel_config as kernel_config
-import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
-import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
+import Solver.Kernel_GPU.multigrid as multigrid
+import Solver.Kernel_GPU.output as output
+import Solver.Kernel_GPU.pressure_solve as pressure_solve
+import Solver.Kernel_GPU.scalar_update as scalar_update
+import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.time_step as time_step
 import Solver.Kernel_GPU.update_masks as update_masks
+import Solver.Kernel_GPU.velocity_update as velocity_update
+import Solver.Kernel_GPU.vorticity as vorticity
 import Solver.Kernel_GPU.voxelise_mesh as voxelise_mesh
-import Solver.Kernel_GPU.output as output
-import Solver.Kernel_GPU.multigrid as multigrid
-import Solver.General.forces as forces
-import Solver.Kernel_GPU.sparse_managment as sparse_managment
+
+import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
+import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
+import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
@@ -1095,20 +1098,24 @@ def solver(
                     t,
                 )
 
-            output_index += 1
-            next_output_time += output_time_step
+            ctx = cuda.current_context()
+            free_vram, total_vram = ctx.get_memory_info()
 
-        # ------------Memory track-------------------
-        if time_step_count % 30 == 0:
-            print(
-                f"Active cells: {active_tile_counter_host*kernel_config.TILE_SIZE**3} / ",
-                total_tile_count * kernel_config.TILE_SIZE**3,
+            emit_message(
+                {
+                    "type": "stats",
+                    "frame": output_index,
+                    "active_tiles": active_tile_counter_host,
+                    "total_tiles": total_tile_count,
+                    "active_cells": active_tile_counter_host * kernel_config.TILE_SIZE**3,
+                    "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
+                    "vram_used_mb": (total_vram - free_vram) / 1024**2,
+                    "vram_total_mb": total_vram / 1024**2,
+                }
             )
 
-            ctx = cuda.current_context()
-            free, total = ctx.get_memory_info()
-            used = total - free
-            print(f"VRAM used: {used / 1024**2:.1f} MB")
+            output_index += 1
+            next_output_time += output_time_step
 
     # ------------Shutdown output-------------------
     with timings.section("solver", "output.shutdown_output", gpu=True):
