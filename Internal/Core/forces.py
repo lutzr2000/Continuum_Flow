@@ -2,6 +2,7 @@ import math
 from . import viewer
 
 import bpy
+from .domain_grid import dimensions
 import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
@@ -239,11 +240,7 @@ def get_linked_domain_node(simulation_node):
 
 
 def domain_dimensions(domain_node):
-    return (
-        float(domain_node.nx) * float(domain_node.resolution),
-        float(domain_node.ny) * float(domain_node.resolution),
-        float(domain_node.nz) * float(domain_node.resolution),
-    )
+    return dimensions(domain_node)
 
 
 def domain_center(domain_node):

@@ -54,14 +54,14 @@ This node controls the size and resolution of your simulation domain. The domain
 **Resolution**
     The grid size used in the simulation. The grid size is the same in every direction.
 
-**NX**
-    Number of grid cells in x direction. 
+**Lx**
+    Requested domain length in x direction, in meters. The exported cell count is rounded up to a complete tile.
 
-**NY**
-    Number of grid cells in y direction.
+**Ly**
+    Requested domain length in y direction, in meters. The exported cell count is rounded up to a complete tile.
 
-**NZ**
-    Number of grid cells in z direction.
+**Lz**
+    Requested domain length in z direction, in meters. The exported cell count is rounded up to a complete tile.
 
 **Boundary Conditions**
     Lets you choose the boundary conditions for each face of your simulation domain.

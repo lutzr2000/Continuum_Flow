@@ -1,4 +1,5 @@
 import bpy
+from .domain_grid import dimensions
 import gpu
 from gpu_extras.batch import batch_for_shader
 
@@ -161,10 +162,7 @@ def build_segments(domain_node):
     Build the preview line data for the full domain and one sample cell.
     """
     resolution = float(domain_node.resolution)
-
-    width = float(domain_node.nx) * resolution
-    depth = float(domain_node.ny) * resolution
-    height = float(domain_node.nz) * resolution
+    width, depth, height = dimensions(domain_node)
 
     min_corner = (
         -(width * 0.5),

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from . import export_geometry
 from .. import viewer 
+from ..domain_grid import grid_shape
 from bpy.app.handlers import persistent
 
 NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
@@ -268,12 +269,13 @@ def build_domain_node_entries(node):
     """
     Serialize one domain node.
     """
+    nx, ny, nz = grid_shape(node)
     return {
         "resolution": float(node.resolution),
         "grid": {
-            "nx": int(node.nx),
-            "ny": int(node.ny),
-            "nz": int(node.nz),
+            "nx": nx,
+            "ny": ny,
+            "nz": nz,
         },
         "boundary_conditions": {
             axis: {

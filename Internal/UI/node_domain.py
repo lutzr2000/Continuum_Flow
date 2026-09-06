@@ -2,7 +2,6 @@ from . import sockets
 from . import node_base
 import bpy
 from bpy.props import FloatProperty
-from bpy.props import IntProperty
 from bpy.props import FloatVectorProperty
 from bpy.props import EnumProperty
 
@@ -34,9 +33,9 @@ class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
         ("INFLOW", "Inflow", "Inflow boundary with prescribed velocity"),
     )
     resolution: FloatProperty(name="Resolution", default=0.1, min=0.000001, soft_min=0.000001, unit="LENGTH", description="Grid resolution", options=set())  # type: ignore
-    nx: IntProperty(name="NX", default=128, min=32, max=4096, soft_min=32,step=4, description="Grid cells in x", options=set())  # type: ignore
-    ny: IntProperty(name="NY", default=128, min=32, max=4096, soft_min=32,step=4, description="Grid cells in y", options=set())  # type: ignore
-    nz: IntProperty(name="NZ", default=128, min=32, max=4096, soft_min=32,step=4, description="Grid cells in z", options=set())  # type: ignore
+    lx: FloatProperty(name="Lx", default=12.8, min=0.000001, soft_min=0.000001, unit="LENGTH", description="Requested domain length in x", options=set())  # type: ignore
+    ly: FloatProperty(name="Ly", default=12.8, min=0.000001, soft_min=0.000001, unit="LENGTH", description="Requested domain length in y", options=set())  # type: ignore
+    lz: FloatProperty(name="Lz", default=12.8, min=0.000001, soft_min=0.000001, unit="LENGTH", description="Requested domain length in z", options=set())  # type: ignore
     x_low_bc: EnumProperty(name="X Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
     x_high_bc: EnumProperty(name="X High", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
     y_low_bc: EnumProperty(name="Y Low", items=boundary_condition_items, default="OUTFLOW", options=set())  # type: ignore
@@ -64,7 +63,7 @@ class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
-        for property_name in ("resolution", "nx", "ny", "nz"):
+        for property_name in ("resolution", "lx", "ly", "lz"):
             col.prop(self, property_name)
         layout.separator()
         layout.label(text="Boundary Conditions")
