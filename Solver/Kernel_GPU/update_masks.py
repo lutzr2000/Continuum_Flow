@@ -177,9 +177,7 @@ def update_source_masks(
             matrix, _ = get_matrix_data(mesh_object, t)
             inv = np.linalg.inv(matrix).astype(np.float32)
 
-            local_mask = cuda.to_device(
-                np.ascontiguousarray(voxels["mask"], dtype=np.bool_)
-            )
+            local_mask = voxels["mask"]
 
             threads = kernel_config.THREADS_PER_BLOCK_3D
             blocks = kernel_config.volume_blocks_per_grid(
@@ -222,9 +220,7 @@ def update_obstacle_mask(
         matrix, rate = get_matrix_data(mesh_object, t)
         inv = np.linalg.inv(matrix).astype(np.float32)
 
-        local_mask = cuda.to_device(
-            np.ascontiguousarray(voxels["mask"], dtype=np.bool_)
-        )
+        local_mask = voxels["mask"]
 
         threads = kernel_config.THREADS_PER_BLOCK_3D
         blocks = kernel_config.volume_blocks_per_grid(

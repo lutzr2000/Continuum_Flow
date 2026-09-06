@@ -67,7 +67,7 @@ def voxelize_triangles(triangles, delta):
     mask = cuda.to_device(
         np.zeros(
             shape,
-            dtype=np.uint8,
+            dtype=np.bool_,
         )
     )
 
@@ -90,7 +90,7 @@ def voxelize_triangles(triangles, delta):
     )
 
     return {
-        "mask": mask.copy_to_host().astype(np.bool_),
+        "mask": mask,
         "origin": origin,
         "bounds_min": origin,
         "bounds_max": np.asarray(
