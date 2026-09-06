@@ -53,71 +53,41 @@ def get_pool_value(field, tile_map, i, j, k, default_value):
 
 @cuda.jit(cache=True)
 def build_activity_mask(
-    smoke: Any,
-    fuel: Any,
-    flame: Any,
-    tile_map: Any,
-    source_mask: Any,
-    base_tile_map: Any,
-    threshold: float,
-    nx: int,
-    ny: int,
-    nz: int,
-) -> None:
-    r"""
-    Mark coarse tiles as active when they contain sources or significant fluid data.
-
-    Each CUDA thread processes one tile of ``base_tile_map``. A tile is marked
-    active if at least one cell inside the tile satisfies one of the following
-    conditions:
-
-    - the cell is flagged in ``source_mask``
-    - the smoke value is greater than or equal to ``threshold``
-    - the fuel value is greater than or equal to ``threshold``
-    - the flame value is greater than or equal to ``threshold``
-
-    Tiles without activity remain marked as inactive. Tiles outside the sparse
-    field, indicated by ``tile_map == -1``, are only activated if they contain
-    a source cell.
-
-    Parameters
-    ----------
-    smoke
-        smoke field.
-    fuel
-        fuel field.
-    flame
-        flame field.
-    tile_map
-        tile lookup map for the simulation fields.
-    source_mask
-        Boolean mask indicating source cells that must always activate a tile.
-    base_tile_map
-        Output tile activity map written in coarse-tile resolution. Inactive
-        tiles are set to ``-1`` and active tiles to ``1``.
-    threshold
-        Minimum field value required to mark a tile as active.
-    nx, ny, nz
-        Domain resolution in cells along the x-, y-, and z-axis.
-
-    Returns
-    -------
-    None
-        The result is written in-place to ``base_tile_map``.
-    """
+    smoke,
+    fuel,
+    flame,
+    tile_map,
+    source_tile_mask,
+    base_tile_map,
+    threshold,
+    nx,
+    ny,
+    nz,
+):
     tile_i, tile_j, tile_k = cuda.grid(3)
-    tiles_x, tiles_y, tiles_z = base_tile_map.shape
 
-    if tile_i >= tiles_x or tile_j >= tiles_y or tile_k >= tiles_z:
+    if (
+        tile_i >= base_tile_map.shape[0]
+        or tile_j >= base_tile_map.shape[1]
+        or tile_k >= base_tile_map.shape[2]
+    ):
         return
 
     base_tile_map[tile_i, tile_j, tile_k] = -1
 
+    # Sources activate a tile regardless of existing sparse allocation.
+    if source_tile_mask[tile_i, tile_j, tile_k]:
+        base_tile_map[tile_i, tile_j, tile_k] = 1
+        return
+
+    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    if tile_index == -1:
+        return
+
     cell_i_start = tile_i * tile_size
     cell_j_start = tile_j * tile_size
     cell_k_start = tile_k * tile_size
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
 
     for local_i in range(tile_size):
         i = cell_i_start + local_i
@@ -133,14 +103,6 @@ def build_activity_mask(
                 k = cell_k_start + local_k
                 if k >= nz:
                     break
-
-                # tiles that contain a source are always active
-                if source_mask[i, j, k]:
-                    base_tile_map[tile_i, tile_j, tile_k] = 1
-                    return
-
-                if tile_index == -1:
-                    continue
 
                 if (
                     smoke[tile_index, local_i, local_j, local_k] >= threshold
@@ -401,7 +363,7 @@ def ensure_pool_capacities(
                 tile_size,
                 tile_size,
             ),
-            dtype=kernel_config.GPU_FIELD_DTYPE,
+            dtype=pool_tile_buffer.dtype,
         )
 
         if current_capacity_tiles > 0:

@@ -41,7 +41,7 @@ def compute_vorticity(
         vorticity_magnitude[tile_index, local_i, local_j, local_k] = 0.0
         return
 
-    if obstacle_mask[i, j, k]:
+    if obstacle_mask[tile_index, local_i, local_j, local_k]:
         vorticity_magnitude[tile_index, local_i, local_j, local_k] = 0.0
         return
 
@@ -103,12 +103,15 @@ def apply_vorticity_confinement(
     ny,
     nz,
 ):
-    """
-    Compute the local vorticity confinement force in one GPU cell.
-    """
-    tile_i = i // kernel_config.TILE_SIZE
-    tile_j = j // kernel_config.TILE_SIZE
-    tile_k = k // kernel_config.TILE_SIZE
+    tile_size = kernel_config.TILE_SIZE
+
+    tile_i = i // tile_size
+    tile_j = j // tile_size
+    tile_k = k // tile_size
+
+    local_i = i % tile_size
+    local_j = j % tile_size
+    local_k = k % tile_size
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
 
@@ -122,7 +125,7 @@ def apply_vorticity_confinement(
         or i >= nx - 2
         or j >= ny - 2
         or k >= nz - 2
-        or obstacle_mask[i, j, k]
+        or obstacle_mask[tile_index, local_i, local_j, local_k]
     ):
         return 0.0, 0.0, 0.0
 

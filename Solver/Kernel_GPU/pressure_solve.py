@@ -376,13 +376,14 @@ def project_velocity_kernel(
     ) = sparse_managment.tile_to_index()
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
+
     if tile_index == -1:
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    if obstacle_mask[i, j, k]:
+    if obstacle_mask[tile_index, local_i, local_j, local_k]:
         return
 
     pressure_coeff = dt / (2.0 * rho * delta)
@@ -402,10 +403,8 @@ def project_velocity_kernel(
 @cuda.jit(cache=True)
 def add_artifical_divergence(
     T,
-    source_masks,
-    extra_pressure,
-    source_noise,
-    noise_amplitudes,
+    source_mask,
+    source_extra_pressure,
     expansion_rate,
     t_reference,
     b,
@@ -429,6 +428,7 @@ def add_artifical_divergence(
     ) = sparse_managment.tile_to_index()
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
+
     if tile_index == -1:
         return
 
@@ -440,23 +440,12 @@ def add_artifical_divergence(
     )
 
     extra_pressure_term = 0.0
-    source_count = source_masks.shape[0]
-    for source_idx in range(source_count):
-        if not source_masks[source_idx, i, j, k]:
-            continue
-        source_extra_pressure = extra_pressure[source_idx]
-        source_extra_pressure *= min(
-            max(
-                1.0 + noise_amplitudes[source_idx] * source_noise[source_idx, i, j, k],
-                0.0,
-            ),
-            2.0,
-        )
-        if abs(source_extra_pressure) > abs(extra_pressure_term):
-            extra_pressure_term = source_extra_pressure
 
-    b[tile_index, local_i, local_j, local_k] -= rho/delta * (
-        thermal_divergence + extra_pressure_term
+    if source_mask[tile_index, local_i, local_j, local_k]:
+        extra_pressure_term = source_extra_pressure
+
+    b[tile_index, local_i, local_j, local_k] -= (
+        rho / delta * (thermal_divergence + extra_pressure_term)
     )
 
 
@@ -470,8 +459,6 @@ def pressure_poisson_multigrid(
     dt,
     source_masks,
     extra_pressure,
-    source_noise,
-    noise_amplitudes,
     delta,
     rho,
     expansion_rate,
@@ -508,6 +495,7 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
+    cuda.synchronize()
 
     reset_inactive_pressure[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
         p,
@@ -516,23 +504,27 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
+    cuda.synchronize()
 
-    add_artifical_divergence[tile_shape, kernel_config.THREADS_PER_BLOCK_3D](
-        T,
-        source_masks,
-        extra_pressure,
-        source_noise,
-        noise_amplitudes,
-        expansion_rate,
-        t_reference,
-        b,
-        tile_map,
-        rho,
-        delta,
-        nx,
-        ny,
-        nz,
-    )
+    for source_idx, source_mask in enumerate(source_masks):
+        add_artifical_divergence[
+            tile_shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            T,
+            source_mask,
+            extra_pressure[source_idx],
+            expansion_rate,
+            t_reference,
+            b,
+            tile_map,
+            rho,
+            delta,
+            nx,
+            ny,
+            nz,
+        )
+        cuda.synchronize()
 
     remove_rhs_mean(
         b,
@@ -543,7 +535,7 @@ def pressure_poisson_multigrid(
         ny,
         nz,
     )
-
+    cuda.synchronize()
 
     for _ in range(num_vcycles):
         multigrid.v_cycle(
@@ -563,5 +555,6 @@ def pressure_poisson_multigrid(
             nz=nz,
             tile_map=tile_map,
         )
+        cuda.synchronize()
 
     return p
