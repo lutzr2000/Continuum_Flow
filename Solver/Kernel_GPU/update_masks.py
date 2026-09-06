@@ -6,79 +6,148 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
-def _animation_times(mesh_object):
+def update_source_tile_mask(
+    source_tile_mask,
+    source_base_masks,
+    t,
+    delta,
+    origin,
+):
+    source_tile_mask.copy_to_device(np.zeros(source_tile_mask.shape, dtype=np.bool_))
+
+    tile_size = kernel_config.TILE_SIZE
+
+    for base_masks in source_base_masks:
+        for entry in base_masks:
+            mesh_object = entry["mesh_object"]
+            voxels = entry["voxels"]
+
+            matrix, _ = get_matrix_data(
+                mesh_object,
+                t,
+            )
+
+            bounds_min = np.asarray(voxels["bounds_min"])
+            bounds_max = np.asarray(voxels["bounds_max"])
+
+            center = (bounds_min + bounds_max) * 0.5
+            extent = (bounds_max - bounds_min) * 0.5
+
+            linear = matrix[:3, :3]
+            translation = matrix[:3, 3]
+
+            world_center = linear @ center + translation
+            world_extent = np.abs(linear) @ extent
+
+            world_min = world_center - world_extent
+            world_max = world_center + world_extent
+
+            cell_min = np.floor((world_min - origin) / delta)
+
+            cell_max = np.ceil((world_max - origin) / delta)
+
+            tile_min = np.floor_divide(
+                cell_min,
+                tile_size,
+            )
+
+            tile_max = np.floor_divide(
+                cell_max,
+                tile_size,
+            )
+
+            tile_min = np.maximum(tile_min, 0)
+            tile_max = np.minimum(
+                tile_max,
+                np.asarray(source_tile_mask.shape) - 1,
+            )
+
+            mark_source_tiles[
+                (
+                    int(tile_max[0] - tile_min[0] + 1),
+                    int(tile_max[1] - tile_min[1] + 1),
+                    int(tile_max[2] - tile_min[2] + 1),
+                ),
+                1,
+            ](
+                source_tile_mask,
+                int(tile_min[0]),
+                int(tile_min[1]),
+                int(tile_min[2]),
+            )
+
+
+@cuda.jit(cache=True)
+def mark_source_tiles(
+    source_tile_mask,
+    offset_i,
+    offset_j,
+    offset_k,
+):
+    i, j, k = cuda.grid(3)
+
+    i += offset_i
+    j += offset_j
+    k += offset_k
+
+    if (
+        i < source_tile_mask.shape[0]
+        and j < source_tile_mask.shape[1]
+        and k < source_tile_mask.shape[2]
+    ):
+        source_tile_mask[i, j, k] = True
+
+
+def get_matrix_data(mesh_object, time_value):
     animation = mesh_object.get("transform_animation") or {}
+
     if "times" in animation:
-        return np.asarray(animation.get("times") or (0.0,), dtype=np.float32)
-
-    timeline = mesh_object.get("animation_timeline") or {}
-    return np.asarray(timeline.get("times") or (0.0,), dtype=np.float32)
-
-
-def _as_f32(a):
-    """Return a contiguous float32 view/copy of the given array-like input."""
-    return np.ascontiguousarray(a, dtype=np.float32)
-
-
-def _world_matrix_at_time(mesh_object, time_value):
-    animation = mesh_object.get("transform_animation") or {}
-    times = _animation_times(mesh_object)
-    matrices = np.asarray(
-        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
-        dtype=np.float32,
-    ).reshape((-1, 4, 4))
-
-    if matrices.size == 0:
-        return np.eye(4, dtype=np.float32)
-    if times.size <= 1 or matrices.shape[0] <= 1:
-        return _as_f32(matrices[0])
-    if time_value <= float(times[0]):
-        return _as_f32(matrices[0])
-    if time_value >= float(times[-1]):
-        return _as_f32(matrices[min(len(matrices) - 1, len(times) - 1)])
-
-    last_segment = min(len(times), len(matrices)) - 1
-    for idx in range(last_segment):
-        t0 = float(times[idx])
-        t1 = float(times[idx + 1])
-        if time_value <= t1:
-            if t1 <= t0:
-                return _as_f32(matrices[idx])
-            alpha = np.float32((time_value - t0) / (t1 - t0))
-            return _as_f32(matrices[idx] * (1.0 - alpha) + matrices[idx + 1] * alpha)
-
-    return _as_f32(matrices[last_segment])
-
-
-def _world_matrix_rate_at_time(mesh_object, time_value):
-    animation = mesh_object.get("transform_animation") or {}
-    times = _animation_times(mesh_object)
-    matrices = np.asarray(
-        animation.get("matrices_world", (np.eye(4, dtype=np.float32),)),
-        dtype=np.float32,
-    ).reshape((-1, 4, 4))
-
-    if times.size <= 1 or matrices.shape[0] <= 1:
-        return np.zeros((4, 4), dtype=np.float32)
-
-    last_segment = min(len(times), len(matrices)) - 1
-    if time_value <= float(times[0]):
-        idx = 0
-    elif time_value >= float(times[last_segment]):
-        idx = max(0, last_segment - 1)
+        times = np.asarray(animation.get("times") or (0.0,))
     else:
+        timeline = mesh_object.get("animation_timeline") or {}
+        times = np.asarray(timeline.get("times") or (0.0,))
+
+    matrices = np.asarray(animation.get("matrices_world", (np.eye(4),))).reshape(
+        -1, 4, 4
+    )
+
+    if len(matrices) == 0:
+        return np.eye(4), np.zeros((4, 4))
+
+    if len(times) <= 1 or len(matrices) <= 1:
+        return matrices[0], np.zeros((4, 4))
+
+    last = min(len(times), len(matrices)) - 1
+
+    if time_value <= times[0]:
         idx = 0
-        for candidate in range(last_segment):
-            if time_value <= float(times[candidate + 1]):
-                idx = candidate
-                break
+        alpha = 0.0
 
-    t0 = float(times[idx])
-    t1 = float(times[idx + 1])
-    if t1 <= t0:
-        return np.zeros((4, 4), dtype=np.float32)
+    elif time_value >= times[last]:
+        idx = last - 1
+        alpha = 1.0
 
-    return _as_f32((matrices[idx + 1] - matrices[idx]) / np.float32(t1 - t0))
+    else:
+        idx = np.searchsorted(times[: last + 1], time_value) - 1
+        idx = max(0, idx)
+
+        t0 = times[idx]
+        t1 = times[idx + 1]
+
+        if t1 <= t0:
+            return matrices[idx], np.zeros((4, 4))
+
+        alpha = (time_value - t0) / (t1 - t0)
+
+    dt = times[idx + 1] - times[idx]
+
+    if dt <= 0:
+        return matrices[idx], np.zeros((4, 4))
+
+    matrix = matrices[idx] * (1.0 - alpha) + matrices[idx + 1] * alpha
+    rate = (matrices[idx + 1] - matrices[idx]) / dt
+
+    return matrix, rate
 
 
 def update_source_masks(
@@ -98,7 +167,7 @@ def update_source_masks(
             mesh_object = entry["mesh_object"]
             voxels = entry["voxels"]
 
-            matrix = _world_matrix_at_time(mesh_object, t)
+            matrix, _ = get_matrix_data(mesh_object, t)
             inv = np.linalg.inv(matrix).astype(np.float32)
 
             local_mask = cuda.to_device(
@@ -111,7 +180,7 @@ def update_source_masks(
                 threads,
             )
 
-            _update_sparse_mask[blocks, threads](
+            update_source_masks_gpu[blocks, threads](
                 source_mask,
                 tile_map,
                 local_mask,
@@ -143,8 +212,7 @@ def update_obstacle_mask(
         mesh_object = entry["mesh_object"]
         voxels = entry["voxels"]
 
-        matrix = _world_matrix_at_time(mesh_object, t)
-        rate = _world_matrix_rate_at_time(mesh_object, t)
+        matrix, rate = get_matrix_data(mesh_object, t)
         inv = np.linalg.inv(matrix).astype(np.float32)
 
         local_mask = cuda.to_device(
@@ -157,7 +225,7 @@ def update_obstacle_mask(
             threads,
         )
 
-        _update_sparse_obstacle[
+        update_obstacle_mask_gpu[
             blocks,
             threads,
         ](
@@ -178,7 +246,7 @@ def update_obstacle_mask(
 
 
 @cuda.jit(cache=True)
-def _update_sparse_mask(
+def update_source_masks_gpu(
     mask,
     tile_map,
     local_mask,
@@ -230,7 +298,7 @@ def _update_sparse_mask(
 
 
 @cuda.jit(cache=True)
-def _update_sparse_obstacle(
+def update_obstacle_mask_gpu(
     mask,
     velocity_x,
     velocity_y,
@@ -295,107 +363,3 @@ def _update_sparse_obstacle(
                     velocity_z[tile, i, j, k] = (
                         rate[2, 0] * bx + rate[2, 1] * by + rate[2, 2] * bz + rate[2, 3]
                     )
-
-
-def update_source_tile_mask(
-    source_tile_mask,
-    source_base_masks,
-    t,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-):
-    source_tile_mask.copy_to_device(np.zeros(source_tile_mask.shape, dtype=np.bool_))
-
-    tile_size = kernel_config.TILE_SIZE
-    origin = np.asarray(
-        (origin_x, origin_y, origin_z),
-        dtype=np.float32,
-    )
-
-    for base_masks in source_base_masks:
-        for entry in base_masks:
-            mesh_object = entry["mesh_object"]
-            voxels = entry["voxels"]
-
-            matrix = _world_matrix_at_time(
-                mesh_object,
-                t,
-            )
-
-            bounds_min = np.asarray(
-                voxels["bounds_min"],
-                dtype=np.float32,
-            )
-            bounds_max = np.asarray(
-                voxels["bounds_max"],
-                dtype=np.float32,
-            )
-
-            center = (bounds_min + bounds_max) * 0.5
-            extent = (bounds_max - bounds_min) * 0.5
-
-            linear = matrix[:3, :3]
-            translation = matrix[:3, 3]
-
-            world_center = linear @ center + translation
-            world_extent = np.abs(linear) @ extent
-
-            world_min = world_center - world_extent
-            world_max = world_center + world_extent
-
-            cell_min = np.floor((world_min - origin) / delta).astype(np.int32)
-
-            cell_max = np.ceil((world_max - origin) / delta).astype(np.int32)
-
-            tile_min = np.floor_divide(
-                cell_min,
-                tile_size,
-            )
-
-            tile_max = np.floor_divide(
-                cell_max,
-                tile_size,
-            )
-
-            tile_min = np.maximum(tile_min, 0)
-            tile_max = np.minimum(
-                tile_max,
-                np.asarray(source_tile_mask.shape) - 1,
-            )
-
-            _mark_source_tiles[
-                (
-                    int(tile_max[0] - tile_min[0] + 1),
-                    int(tile_max[1] - tile_min[1] + 1),
-                    int(tile_max[2] - tile_min[2] + 1),
-                ),
-                1,
-            ](
-                source_tile_mask,
-                int(tile_min[0]),
-                int(tile_min[1]),
-                int(tile_min[2]),
-            )
-
-
-@cuda.jit(cache=True)
-def _mark_source_tiles(
-    source_tile_mask,
-    offset_i,
-    offset_j,
-    offset_k,
-):
-    i, j, k = cuda.grid(3)
-
-    i += offset_i
-    j += offset_j
-    k += offset_k
-
-    if (
-        i < source_tile_mask.shape[0]
-        and j < source_tile_mask.shape[1]
-        and k < source_tile_mask.shape[2]
-    ):
-        source_tile_mask[i, j, k] = True

@@ -170,6 +170,7 @@ def solver(
     origin_x = -0.5 * nx * delta
     origin_y = -0.5 * ny * delta
     origin_z = 0.0
+    origin = (origin_x, origin_y, origin_z)
 
     simulate_sparsely = bool(simulation.get("settings").get("simulate_sparsely"))
     sparse_threshold = simulation.get("settings").get("adaptive_domain_threshold")
@@ -377,9 +378,7 @@ def solver(
             source_base_masks,
             t,
             delta,
-            origin_x,
-            origin_y,
-            origin_z,
+            origin,
         )
 
         # ------------Start Active tiles-------------------
