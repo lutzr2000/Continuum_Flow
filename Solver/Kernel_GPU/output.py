@@ -165,9 +165,6 @@ def _get_writer_slot(writer_slots, output_index):
         if not slot["busy"]:
             return slot
 
-    print(
-        f"All VDB writer slots busy. This slows down the simulation. Using more writers might improve performance"
-    )
     slot = writer_slots[start]
     _wait_for_writer_ack(slot["file"])
     slot["busy"] = False

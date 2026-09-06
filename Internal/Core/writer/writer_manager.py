@@ -25,10 +25,13 @@ class _VDBWriterProcess:
     One persistent UI-side VDB writer process.
     """
 
-    def __init__(self, writer_script, writer_config=None):
+    def __init__(self, writer_script, writer_config=None, writer_id=0):
         command = [sys.executable, str(writer_script)]
         if writer_config is not None:
-            command.append(json.dumps(writer_config))
+            process_config = dict(writer_config)
+            process_config["writer_id"] = int(writer_id)
+            process_config["parent_sys_path"] = list(sys.path)
+            command.append(json.dumps(process_config))
         self._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -89,11 +92,12 @@ class _VDBWriterProcessPool:
 
         self._processes = []
         try:
-            for _ in range(process_count):
+            for writer_id in range(process_count):
                 self._processes.append(
                     _VDBWriterProcess(
                         writer_script,
                         writer_config=writer_config,
+                        writer_id=writer_id,
                     )
                 )
         except Exception:

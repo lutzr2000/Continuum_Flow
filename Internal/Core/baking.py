@@ -266,6 +266,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 "domain": simulation_config.get("domain") or {},
                 "outputs": [{
                     "precision": output_config.get("precision", "float32"),
+                    "output_path": output_config.get("output_path", ""),
                 }],
             },
         }
