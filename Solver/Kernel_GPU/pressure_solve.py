@@ -74,31 +74,38 @@ def pressure_equation_right_side(
 
 
 @cuda.jit(cache=True)
-def sum_rhs_partial_kernel(b, tile_map, partial_sums, nx, ny, nz):
-    """
-    Reduce the interior RHS into one partial sum per CUDA block.
-    """
+def rhs_sum_count_partial_kernel(
+    b,
+    tile_map,
+    partial_sums,
+    partial_counts,
+    nx,
+    ny,
+    nz,
+):
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
     interior_cell_count = interior_nx * interior_ny * interior_nz
 
-    if interior_cell_count <= 0:
-        return
-
     tid = cuda.threadIdx.x
-    block_size = cuda.blockDim.x
     global_idx = cuda.grid(1)
     stride = cuda.gridsize(1)
 
     shared_sums = cuda.shared.array(
-        shape=REDUCTION_THREADS_PER_BLOCK,
+        REDUCTION_THREADS_PER_BLOCK,
+        dtype=GPU_FIELD_DTYPE,
+    )
+    shared_counts = cuda.shared.array(
+        REDUCTION_THREADS_PER_BLOCK,
         dtype=GPU_FIELD_DTYPE,
     )
 
-    local_sum = GPU_FIELD_DTYPE(0.0)
-    flat_idx = global_idx
+    local_sum = 0.0
+    local_count = 0.0
+
     plane_size = interior_ny * interior_nz
+    flat_idx = global_idx
 
     while flat_idx < interior_cell_count:
         i = flat_idx // plane_size + 1
@@ -109,27 +116,42 @@ def sum_rhs_partial_kernel(b, tile_map, partial_sums, nx, ny, nz):
         tile_i = i // kernel_config.TILE_SIZE
         tile_j = j // kernel_config.TILE_SIZE
         tile_k = k // kernel_config.TILE_SIZE
+
         tile_index = tile_map[tile_i, tile_j, tile_k]
+
         if tile_index != -1:
-            local_i = i - tile_i * kernel_config.TILE_SIZE
-            local_j = j - tile_j * kernel_config.TILE_SIZE
-            local_k = k - tile_k * kernel_config.TILE_SIZE
-            local_sum += b[tile_index, local_i, local_j, local_k]
+            local_i = i % kernel_config.TILE_SIZE
+            local_j = j % kernel_config.TILE_SIZE
+            local_k = k % kernel_config.TILE_SIZE
+
+            local_sum += b[
+                tile_index,
+                local_i,
+                local_j,
+                local_k,
+            ]
+
+            local_count += 1.0
 
         flat_idx += stride
 
     shared_sums[tid] = local_sum
+    shared_counts[tid] = local_count
     cuda.syncthreads()
 
-    offset = block_size >> 1
+    offset = cuda.blockDim.x >> 1
+
     while offset > 0:
         if tid < offset:
             shared_sums[tid] += shared_sums[tid + offset]
+            shared_counts[tid] += shared_counts[tid + offset]
+
         cuda.syncthreads()
         offset >>= 1
 
     if tid == 0:
         partial_sums[cuda.blockIdx.x] = shared_sums[0]
+        partial_counts[cuda.blockIdx.x] = shared_counts[0]
 
 
 @cuda.jit(cache=True)
@@ -221,7 +243,63 @@ def sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
 
 
 @cuda.jit(cache=True)
-def subtract_rhs_mean_kernel(b, rhs_mean, tile_map, nx, ny, nz):
+def rhs_mean_kernel(
+    partial_sums,
+    partial_counts,
+    partial_count,
+    rhs_mean,
+):
+    tid = cuda.threadIdx.x
+
+    shared_sums = cuda.shared.array(
+        REDUCTION_THREADS_PER_BLOCK,
+        dtype=GPU_FIELD_DTYPE,
+    )
+    shared_counts = cuda.shared.array(
+        REDUCTION_THREADS_PER_BLOCK,
+        dtype=GPU_FIELD_DTYPE,
+    )
+
+    total_sum = 0.0
+    total_count = 0.0
+
+    idx = tid
+
+    while idx < partial_count:
+        total_sum += partial_sums[idx]
+        total_count += partial_counts[idx]
+        idx += cuda.blockDim.x
+
+    shared_sums[tid] = total_sum
+    shared_counts[tid] = total_count
+    cuda.syncthreads()
+
+    offset = cuda.blockDim.x >> 1
+
+    while offset > 0:
+        if tid < offset:
+            shared_sums[tid] += shared_sums[tid + offset]
+            shared_counts[tid] += shared_counts[tid + offset]
+
+        cuda.syncthreads()
+        offset >>= 1
+
+    if tid == 0:
+        if shared_counts[0] > 0.0:
+            rhs_mean[0] = shared_sums[0] / shared_counts[0]
+        else:
+            rhs_mean[0] = 0.0
+
+
+@cuda.jit(cache=True)
+def subtract_rhs_mean_kernel(
+    b,
+    rhs_mean,
+    tile_map,
+    nx,
+    ny,
+    nz,
+):
     (
         tile_i,
         tile_j,
@@ -235,13 +313,14 @@ def subtract_rhs_mean_kernel(b, rhs_mean, tile_map, nx, ny, nz):
     ) = sparse_managment.tile_to_index()
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
+
     if tile_index == -1:
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    b[tile_index, local_i, local_j, local_k] -= rhs_mean
+    b[tile_index, local_i, local_j, local_k] -= rhs_mean[0]
 
 
 @cuda.jit(cache=True)
@@ -270,73 +349,50 @@ def remove_rhs_mean(
     b,
     tile_map,
     rhs_partial_sums,
-    rhs_sum_buffer,
+    rhs_partial_counts,
+    rhs_mean_buffer,
     nx,
     ny,
     nz,
 ):
-    """
-    Enforce the Neumann compatibility condition by removing
-    the mean RHS over active interior cells.
-    """
-
-    interior_cell_count = max((nx - 2) * (ny - 2) * (nz - 2), 1)
-
-    reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
-
-    blockspergrid_3d = kernel_config.volume_blocks_per_grid(
-        (nx, ny, nz),
-        kernel_config.THREADS_PER_BLOCK_3D,
+    interior_cell_count = max(
+        (nx - 2) * (ny - 2) * (nz - 2),
+        1,
     )
 
-    sum_rhs_partial_kernel[reduction_blocks, REDUCTION_THREADS_PER_BLOCK](
+    reduction_blocks = kernel_config.reduction_blocks_per_grid(
+        interior_cell_count
+    )
+
+    rhs_sum_count_partial_kernel[
+        reduction_blocks,
+        REDUCTION_THREADS_PER_BLOCK,
+    ](
         b,
         tile_map,
         rhs_partial_sums,
+        rhs_partial_counts,
         nx,
         ny,
         nz,
     )
 
-    sum_partial_sums_kernel[1, REDUCTION_THREADS_PER_BLOCK](
+    rhs_mean_kernel[
+        1,
+        REDUCTION_THREADS_PER_BLOCK,
+    ](
         rhs_partial_sums,
+        rhs_partial_counts,
         reduction_blocks,
-        rhs_sum_buffer,
+        rhs_mean_buffer,
     )
-
-    rhs_sum = float(rhs_sum_buffer.copy_to_host()[0])
-
-    count_rhs_active_partial_kernel[reduction_blocks, REDUCTION_THREADS_PER_BLOCK](
-        b,
-        tile_map,
-        rhs_partial_sums,
-        nx,
-        ny,
-        nz,
-    )
-
-    sum_partial_sums_kernel[1, REDUCTION_THREADS_PER_BLOCK](
-        rhs_partial_sums,
-        reduction_blocks,
-        rhs_sum_buffer,
-    )
-
-    active_cell_count = int(rhs_sum_buffer.copy_to_host()[0])
-
-    if active_cell_count <= 0:
-        return
-
-    rhs_mean = rhs_sum / float(active_cell_count)
-
-    if abs(rhs_mean) <= 1.0e-12:
-        return
 
     subtract_rhs_mean_kernel[
-        blockspergrid_3d,
+        tile_map.shape,
         kernel_config.THREADS_PER_BLOCK_3D,
     ](
         b,
-        rhs_mean,
+        rhs_mean_buffer,
         tile_map,
         nx,
         ny,
@@ -493,7 +549,8 @@ def pressure_poisson_multigrid(
     delta_levels,
     num_vcycles,
     rhs_partial_sums,
-    rhs_sum_buffer,
+    rhs_partial_counts,
+    rhs_mean_buffer,
     zero_levels,
     nx,
     ny,
@@ -562,7 +619,8 @@ def pressure_poisson_multigrid(
             b,
             tile_map,
             rhs_partial_sums,
-            rhs_sum_buffer,
+            rhs_partial_counts,
+            rhs_mean_buffer,
             nx,
             ny,
             nz,

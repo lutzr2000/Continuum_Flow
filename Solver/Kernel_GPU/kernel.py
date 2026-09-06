@@ -93,7 +93,13 @@ def is_animated(base_masks):
         mesh_object = entry["mesh_object"]
         animation = mesh_object.get("transform_animation") or {}
 
-        if len(animation.get("matrices_world") or ()) > 1:
+        matrices = np.asarray(animation.get("matrices_world", ()))
+        if matrices.size == 0:
+            continue
+        matrices = matrices.reshape(-1, 4, 4)
+
+        # Repeated samples of the same transform are static.
+        if len(matrices) > 1 and np.any(matrices[1:] != matrices[0]):
             return True
 
     return False
@@ -247,6 +253,38 @@ def solver(
         kernel_config.TILE_SIZE,
     )
 
+    # masks
+    bake_path = simulation["outputs"][0]["output_path"]
+
+    sources = simulation.get("sources") or []
+    obstacles = simulation.get("obstacles") or []
+    # add times
+    for entry in sources + obstacles:
+        for obj in entry.get("geometry_inputs") or []:
+            obj["animation_timeline"] = simulation["animation_timeline"]
+
+    with timings.section("solver", "voxelise_mesh.source_masks", gpu=True):
+        source_base_masks = []
+        for source in sources:
+            source_base_masks.append(
+                voxelise_mesh.voxelise_all_meshes(
+                    delta,
+                    source.get("geometry_inputs"),
+                    bake_path,
+                )
+            )
+
+    with timings.section("solver", "voxelise_mesh.obstacle_masks", gpu=True):
+        obstacle_base_masks = []
+        for obstacle in obstacles:
+            obstacle_base_masks.extend(
+                voxelise_mesh.voxelise_all_meshes(
+                    delta,
+                    obstacle.get("geometry_inputs"),
+                    bake_path,
+                )
+            )
+
     with timings.section("solver", "initialize_fields_and_masks", gpu=True):
         zero_pool = cuda.to_device(np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE))
 
@@ -302,42 +340,22 @@ def solver(
         pressure_rhs = cuda.to_device(
             np.zeros(sparse_pool_shape, dtype=GPU_FIELD_DTYPE)
         )
-        pressure_rhs_partial_sums = cuda.device_array(
+        rhs_partial_sums = cuda.device_array(
             kernel_config.MAX_REDUCTION_BLOCKS,
             dtype=GPU_FIELD_DTYPE,
         )
-        pressure_rhs_sum = cuda.device_array(1, dtype=GPU_FIELD_DTYPE)
+
+        rhs_partial_counts = cuda.device_array(
+            kernel_config.MAX_REDUCTION_BLOCKS,
+            dtype=GPU_FIELD_DTYPE,
+        )
+
+        rhs_mean_buffer = cuda.device_array(
+            1,
+            dtype=GPU_FIELD_DTYPE,
+        )
 
         # masks
-        bake_path = simulation["outputs"][0]["output_path"]
-
-        sources = simulation.get("sources") or []
-        obstacles = simulation.get("obstacles") or []
-        # add times
-        for entry in sources + obstacles:
-            for obj in entry.get("geometry_inputs") or []:
-                obj["animation_timeline"] = simulation["animation_timeline"]
-
-        source_base_masks = []
-        for source in sources:
-            source_base_masks.append(
-                voxelise_mesh.voxelise_all_meshes(
-                    delta,
-                    source.get("geometry_inputs"),
-                    bake_path,
-                )
-            )
-
-        obstacle_base_masks = []
-        for obstacle in obstacles:
-            obstacle_base_masks.extend(
-                voxelise_mesh.voxelise_all_meshes(
-                    delta,
-                    obstacle.get("geometry_inputs"),
-                    bake_path,
-                )
-            )
-
         source_masks = []
         for _ in sources:
             source_masks.append(
@@ -349,6 +367,16 @@ def solver(
         )  # this one is needed for detemining which tiles are active due to source activity
 
         obstacle_mask = cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
+
+        animated_sources = [
+            is_animated(base_masks)
+            for base_masks in source_base_masks
+        ]
+        has_animated_sources = any(animated_sources)
+
+        animated_obstacles = is_animated(
+            obstacle_base_masks
+        )
 
         # multigrid levels
         p_levels, b_levels, delta_levels, zero_levels = (
@@ -588,32 +616,36 @@ def solver(
             next_tile_index_counter_host = total_tile_count
 
         # ------------Update masks-------------------
-        with timings.section("solver", "update_masks.update_source_masks", gpu=True):
-            update_masks.update_source_masks(
-                source_masks,
-                source_base_masks,
-                t,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-                tile_map,
-            )
+        if time_step_count == 0 or has_animated_sources:
+            with timings.section("solver", "update_masks.update_source_masks", gpu=True):
+                update_masks.update_source_masks(
+                    source_masks,
+                    source_base_masks,
+                    animated_sources,
+                    time_step_count == 0,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    tile_map,
+                )
 
         with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
-            update_masks.update_obstacle_mask(
-                obstacle_mask,
-                obstacle_base_masks,
-                t,
-                delta,
-                origin_x,
-                origin_y,
-                origin_z,
-                tile_map,
-                scratch_A,
-                scratch_B,
-                scratch_C,
-            )
+            if time_step_count == 0 or animated_obstacles:
+                update_masks.update_obstacle_mask(
+                    obstacle_mask,
+                    obstacle_base_masks,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    tile_map,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                )
 
         # ------------time step-------------------
         with timings.section("solver", "velocity_maxima.copy_to_device", gpu=True):
@@ -930,8 +962,9 @@ def solver(
                 b_levels,
                 delta_levels,
                 simulation.get("settings").get("iterations"),
-                pressure_rhs_partial_sums,
-                pressure_rhs_sum,
+                rhs_partial_sums,
+                rhs_partial_counts,
+                rhs_mean_buffer,
                 zero_levels,
                 nx,
                 ny,
@@ -961,16 +994,6 @@ def solver(
             )
 
         # ------------Scalar update-------------------
-        with timings.section("solver", "sparse_managment.copy_pools", gpu=True):
-            sparse_managment.copy_pools(
-                (
-                    (u_work, u),
-                    (v_work, v),
-                    (w_work, w),
-                ),
-                next_tile_index_counter_host,
-            )
-
         with timings.section(
             "solver", "scalar_update.predict_scalar_fields_semi_lagrangian", gpu=True
         ):
@@ -1096,6 +1119,3 @@ def solver(
         print("Simulation cancelled after clean shutdown.")
     else:
         print("Simulation finished!")
-
-    total_runtime = perf_counter() - total_start_time
-    print(f"Solver runtime: {total_runtime:.3f} s")

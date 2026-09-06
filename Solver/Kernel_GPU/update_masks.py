@@ -153,6 +153,8 @@ def get_matrix_data(mesh_object, time_value):
 def update_source_masks(
     source_masks,
     source_base_masks,
+    animated_sources,
+    initial_update,
     t,
     delta,
     origin_x,
@@ -160,7 +162,12 @@ def update_source_masks(
     origin_z,
     tile_map,
 ):
-    for source_mask, base_masks in zip(source_masks, source_base_masks):
+    for source_idx, (source_mask, base_masks) in enumerate(
+        zip(source_masks, source_base_masks)
+    ):
+        if not initial_update and not animated_sources[source_idx]:
+            continue
+
         source_mask[:] = False
 
         for entry in base_masks:
