@@ -154,8 +154,10 @@ This node lets you specify the output of your simulation. It is worth paying som
 **FPS**
     The frame rate at which data is saved. Defaults to your scene frame rate.
 
-**Writers**
-    Number of writer CPU processes. Especially when simulating on the GPU, large amounts of data are calculated quickly and need additional compute power to be saved. Usually, the default value of four is fine.
+VDB writer processes start with four workers and scale up automatically whenever the
+solver has only one free writer left. This warms up extra workers before they are
+needed. The maximum adapts to the number of logical CPU cores. It uses at most
+half of them and is limited to a value between 4 and 32.
 
 **Precision**
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.

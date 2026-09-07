@@ -324,6 +324,11 @@ def main():
         if line == "__QUIT__":
             break
 
+        if line == "__PING__":
+            sys.stdout.write('{"status": "ok"}\n')
+            sys.stdout.flush()
+            continue
+
         try:
             write_vdb(json.loads(line))
 

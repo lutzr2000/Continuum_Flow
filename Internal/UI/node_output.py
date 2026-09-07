@@ -47,7 +47,6 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     )
 
     fps: IntProperty(name="FPS", default=24, min=1, soft_min=1, description="Output frame rate", options=set())  # type: ignore
-    writer_processes: IntProperty(name="Writers", default=4, min=1, max=16, soft_min=1, description="How many writer processes are launched, usually four give the best performance", options=set())  # type: ignore
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(
@@ -150,7 +149,6 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         self._set_layout_enabled(context, layout)
 
         layout.prop(self, "fps")
-        layout.prop(self, "writer_processes")
         layout.prop(self, "output_precision")
 
         layout.separator()

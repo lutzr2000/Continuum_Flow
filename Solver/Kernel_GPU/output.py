@@ -12,6 +12,22 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 
+class _WriterSlots(list):
+    """Writer slots which can grow when all current writers are occupied."""
+
+    def __init__(self, max_count, create_slot):
+        super().__init__()
+        self.max_count = int(max_count)
+        self.create_slot = create_slot
+
+    def grow(self, prewarm=False):
+        if len(self) >= self.max_count:
+            return None
+        slot = self.create_slot(prewarm=prewarm)
+        self.append(slot)
+        return slot
+
+
 def _enabled_output_field_names(output_fields):
     """
     Return only output field names that are explicitly enabled in the config.
@@ -56,9 +72,12 @@ def setup_output(simulations, outpath, shape):
             ((output_cfg.get("performance") or {}).get("writer_processes", 1)),
         )
     )
+    max_writer_count = int(
+        output_cfg.get("host_vdb_writer", {}).get("max_process_count", writer_count)
+    )
 
     shared_memory_blocks = []
-    writer_slots = []
+    writer_slots = None
 
     tile_shape = _tile_shape_for_dense_shape(shape)
     sparse_pool_shape = _sparse_pool_shape_for_dense_shape(shape)
@@ -78,7 +97,7 @@ def setup_output(simulations, outpath, shape):
         int(np.prod(sparse_pool_shape)) * np.dtype(sparse_pool_dtype).itemsize
     )
 
-    for _slot_index in range(writer_count):
+    def create_writer_slot(prewarm=False):
         fields = {}
 
         tile_map_shm = shared_memory.SharedMemory(
@@ -130,25 +149,31 @@ def setup_output(simulations, outpath, shape):
             )
         )
         writer_file = writer_socket.makefile("rwb")
+        if prewarm:
+            writer_file.write(b"__WARMUP__\n")
+            writer_file.flush()
+            _wait_for_writer_ack(writer_file)
 
-        writer_slots.append(
-            {
-                "fields": fields,
-                "tile_map": {
-                    "array": tile_map_array,
-                    "shape": tile_shape,
-                    "shm_name": tile_map_shm.name,
-                },
-                "active_tiles": {
-                    "array": active_tile_meta_array,
-                    "shape": active_tile_meta_shape,
-                    "shm_name": active_tile_meta_shm.name,
-                },
-                "socket": writer_socket,
-                "file": writer_file,
-                "busy": False,
-            }
-        )
+        return {
+            "fields": fields,
+            "tile_map": {
+                "array": tile_map_array,
+                "shape": tile_shape,
+                "shm_name": tile_map_shm.name,
+            },
+            "active_tiles": {
+                "array": active_tile_meta_array,
+                "shape": active_tile_meta_shape,
+                "shm_name": active_tile_meta_shm.name,
+            },
+            "socket": writer_socket,
+            "file": writer_file,
+            "busy": False,
+        }
+
+    writer_slots = _WriterSlots(max(writer_count, max_writer_count), create_writer_slot)
+    for _slot_index in range(writer_count):
+        writer_slots.grow()
 
     return shared_memory_blocks, writer_slots
 
@@ -156,14 +181,22 @@ def setup_output(simulations, outpath, shape):
 def _get_writer_slot(writer_slots, output_index):
     _drain_ready_writer_acks(writer_slots)
 
-    slot_count = len(writer_slots)
+    free_slot_count = sum(not slot["busy"] for slot in writer_slots)
+    if free_slot_count <= 1 and hasattr(writer_slots, "grow"):
+        writer_slots.grow(prewarm=True)
 
+    slot_count = len(writer_slots)
     start = int(output_index) % slot_count
 
     for offset in range(slot_count):
         slot = writer_slots[(start + offset) % slot_count]
         if not slot["busy"]:
             return slot
+
+    if hasattr(writer_slots, "grow"):
+        new_slot = writer_slots.grow(prewarm=True)
+        if new_slot is not None:
+            return new_slot
 
     slot = writer_slots[start]
     _wait_for_writer_ack(slot["file"])

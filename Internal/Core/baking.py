@@ -259,8 +259,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     def launch_writer_manager(self, config_dict):
         simulation_config = config_dict.get("simulation") or {}
         output_config = (simulation_config.get("outputs") or [{}])[0]
-        performance_config = output_config.get("performance") or {}
-        writer_process_count = int(performance_config.get("writer_processes", 4))
         writer_config = {
             "simulation": {
                 "domain": simulation_config.get("domain") or {},
@@ -272,7 +270,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         }
 
         server = writer_manager.HostVDBWriterServer(
-            writer_process_count=writer_process_count,
             writer_config=writer_config,
         )
         server.start()

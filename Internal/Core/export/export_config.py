@@ -505,7 +505,6 @@ def build_output_node_entries(node):
             "flame": {"enabled": bool(getattr(node, "export_flame", False))},
         },
         "performance": {
-            "writer_processes": int(getattr(node, "writer_processes", 4)),
         },
         "output_path": output_path,
     }
