@@ -13,9 +13,9 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_idname = "CONTINUUM_FLOW_VIEWER_NODE"
     bl_label = "Viewer"
     bl_icon = "HIDE_OFF"
-    bl_width_default = 180.0
-    bl_width_min = 160.0
-    bl_width_max = 260.0
+    bl_width_default = 260.0
+    bl_width_min = 240.0
+    bl_width_max = 420.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
     live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
 
@@ -48,10 +48,12 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
         if stats:
             col.separator()
 
-            active_tiles = stats["active_tiles"]
-            total_tiles = stats["total_tiles"]
+            active_cells = int(stats["active_tiles"]) * 64
+            total_cells = int(stats["total_tiles"]) * 64
+            active_cells_text = f"{active_cells:,}".replace(",", ".")
+            total_cells_text = f"{total_cells:,}".replace(",", ".")
 
-            col.label(text=f"Tiles: {active_tiles} / {total_tiles}")
+            col.label(text=f"Cells: {active_cells_text} / {total_cells_text}")
 
             col.label(
                 text=f"VRAM: {stats['vram_used_mb']:.1f} / "
