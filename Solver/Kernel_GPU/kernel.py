@@ -394,10 +394,6 @@ def solver(
         ]
         has_animated_sources = any(animated_sources)
 
-        animated_obstacles = is_animated(
-            obstacle_base_masks
-        )
-
         # multigrid levels
         p_levels, b_levels, delta_levels, zero_levels = (
             multigrid.create_multigrid_levels(
@@ -652,7 +648,7 @@ def solver(
                 )
 
         with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
-            if time_step_count == 0 or animated_obstacles:
+            if obstacle_base_masks:
                 update_masks.update_obstacle_mask(
                     obstacle_mask,
                     obstacle_base_masks,
