@@ -1,11 +1,25 @@
+from typing import Any
+
 from numba import cuda
 
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_trilinear_inner_sparse(
-    field, tile_map, x0, y0, z0, x1, y1, z1, tx, ty, tz, default_value
-):
+    field: Any, tile_map: Any, x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, tx: float, ty: float, tz: float, default_value: float
+) -> float:
+    r"""
+    Interpolate a sparse scalar field between the eight surrounding cells.
+
+    Trilinear interpolation applies the one-dimensional blend
+
+    .. math::
+
+        L(a,b,t) = a + t(b-a)
+
+    successively along x, y, and z. Inactive neighboring tiles contribute
+    ``default_value``.
+    """
     c000 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z0, default_value)
     c100 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z0, default_value)
     c010 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z0, default_value)
@@ -27,8 +41,11 @@ def _sample_trilinear_inner_sparse(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_cell_extrema_inner_sparse(
-    field, tile_map, x0, y0, z0, x1, y1, z1, default_value
-):
+    field: Any, tile_map: Any, x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, default_value: float
+) -> tuple[float, float]:
+    """
+    Sample cell extrema inner sparse.
+    """
     c000 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z0, default_value)
     c100 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z0, default_value)
     c010 = sparse_managment.get_pool_value(field, tile_map, x0, y1, z0, default_value)
@@ -51,20 +68,23 @@ def _sample_cell_extrema_inner_sparse(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_trilinear_vec3_sparse(
-    field_x,
-    field_y,
-    field_z,
-    tile_map,
-    x,
-    y,
-    z,
-    nx,
-    ny,
-    nz,
-    default_x,
-    default_y,
-    default_z,
-):
+    field_x: Any,
+    field_y: Any,
+    field_z: Any,
+    tile_map: Any,
+    x: float,
+    y: float,
+    z: float,
+    nx: int,
+    ny: int,
+    nz: int,
+    default_x: Any,
+    default_y: Any,
+    default_z: Any,
+) -> tuple[float, float, float]:
+    """
+    Sample trilinear vec3 sparse.
+    """
     x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
 
     sample_x = _sample_trilinear_inner_sparse(
@@ -80,7 +100,7 @@ def _sample_trilinear_vec3_sparse(
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _clamp(value, lower, upper):
+def _clamp(value: float, lower: float, upper: float) -> float:
     """
     Clamp one scalar value to the inclusive `[lower, upper]` interval.
     """
@@ -92,7 +112,7 @@ def _clamp(value, lower, upper):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _prepare_trilinear_coords(x, y, z, nx, ny, nz):
+def _prepare_trilinear_coords(x: float, y: float, z: float, nx: int, ny: int, nz: int) -> Any:
     """
     Clamp one sample position to the domain and derive the surrounding cell coordinates.
     Lastly computes interpolation weights tx, ty, tz.
@@ -136,21 +156,34 @@ def _prepare_trilinear_coords(x, y, z, nx, ny, nz):
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _backtrace_position_sparse(
-    u,
-    v,
-    w,
-    tile_map,
-    x_start,
-    y_start,
-    z_start,
-    dt_over_delta,
-    nx,
-    ny,
-    nz,
-    u_initial,
-    v_initial,
-    w_initial,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    tile_map: Any,
+    x_start: float,
+    y_start: float,
+    z_start: float,
+    dt_over_delta: float,
+    nx: int,
+    ny: int,
+    nz: int,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+) -> tuple[float, float, float]:
+    r"""
+    Trace a sample position backward through the sparse velocity field.
+
+    The explicit characteristic step in grid coordinates is
+
+    .. math::
+
+        \mathbf{x}_{d} = \mathbf{x} -
+        \frac{\Delta t}{\Delta x}\,\mathbf{u}(\mathbf{x}).
+
+    The velocity at the evolving position is obtained by trilinear
+    interpolation.
+    """
     n_substeps = 1
     substep_dt = dt_over_delta / n_substeps
     x_pos = x_start
@@ -182,21 +215,29 @@ def _backtrace_position_sparse(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _forward_trace_position_sparse(
-    u,
-    v,
-    w,
-    tile_map,
-    x_start,
-    y_start,
-    z_start,
-    dt_over_delta,
-    nx,
-    ny,
-    nz,
-    u_initial,
-    v_initial,
-    w_initial,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    tile_map: Any,
+    x_start: float,
+    y_start: float,
+    z_start: float,
+    dt_over_delta: float,
+    nx: int,
+    ny: int,
+    nz: int,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+) -> tuple[float, float, float]:
+    r"""
+    Trace a sample position forward along the velocity characteristic.
+
+    .. math::
+
+        \mathbf{x}_{f} = \mathbf{x} +
+        \frac{\Delta t}{\Delta x}\,\mathbf{u}(\mathbf{x}).
+    """
     return _backtrace_position_sparse(
         u,
         v,

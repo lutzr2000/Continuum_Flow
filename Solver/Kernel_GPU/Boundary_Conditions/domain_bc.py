@@ -1,3 +1,5 @@
+from typing import Any
+
 from numba import cuda
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
@@ -17,7 +19,10 @@ SIDE_TO_AXIS_AND_INDEX = {
     "z_high": (2, 1),
 }
 
-def convert_bc_config_format(bc_config):
+def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
+    """
+    Convert bc config format.
+    """
     converted = {}
     type_map = {
         "OUTFLOW": 0,
@@ -53,7 +58,10 @@ def convert_bc_config_format(bc_config):
 
 
 @cuda.jit(cache=True)
-def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
+def pressure_poisson_apply_neumann_bcs(p: Any, tile_map: Any, nx: int, ny: int, nz: int) -> None:
+    """
+    Pressure poisson apply neumann bcs.
+    """
     i, j, k = cuda.grid(3)
 
     tile_i = i // tile_size
@@ -96,7 +104,10 @@ def pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz):
         )
 
 @cuda.jit(cache=True)
-def pressure_poisson_apply_neumann_bcs_dense(p):
+def pressure_poisson_apply_neumann_bcs_dense(p: Any) -> None:
+    """
+    Pressure poisson apply neumann bcs dense.
+    """
     i, j, k = cuda.grid(3)
 
     nx, ny, nz = p.shape
@@ -121,33 +132,33 @@ def pressure_poisson_apply_neumann_bcs_dense(p):
 
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(
-    u,
-    v,
-    w,
-    p,
-    T,
-    smoke,
-    fuel,
-    tile_map,
-    ref_temp,
-    u_initial,
-    v_initial,
-    w_initial,
-    i,
-    j,
-    k,
-    src_i,
-    src_j,
-    src_k,
-    axis,
-    side_index,
-    bc_mode,
-    u_value,
-    v_value,
-    w_value,
-    temp_value,
-    use_temp,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    i: int,
+    j: int,
+    k: int,
+    src_i: Any,
+    src_j: Any,
+    src_k: Any,
+    axis: Any,
+    side_index: int,
+    bc_mode: Any,
+    u_value: Any,
+    v_value: Any,
+    w_value: Any,
+    temp_value: Any,
+    use_temp: Any,
+) -> None:
     """
     applies one configured domain-face boundary condition to a single GPU cell.
 
@@ -243,58 +254,58 @@ def _apply_face_state(
 
 @cuda.jit(cache=True)
 def _domain_bc_kernel(
-    u,
-    v,
-    w,
-    p,
-    T,
-    smoke,
-    fuel,
-    tile_map,
-    ref_temp,
-    u_initial,
-    v_initial,
-    w_initial,
-    x_low_mode,
-    x_low_u,
-    x_low_v,
-    x_low_w,
-    x_low_temp,
-    x_low_use_temp,
-    x_high_mode,
-    x_high_u,
-    x_high_v,
-    x_high_w,
-    x_high_temp,
-    x_high_use_temp,
-    y_low_mode,
-    y_low_u,
-    y_low_v,
-    y_low_w,
-    y_low_temp,
-    y_low_use_temp,
-    y_high_mode,
-    y_high_u,
-    y_high_v,
-    y_high_w,
-    y_high_temp,
-    y_high_use_temp,
-    z_low_mode,
-    z_low_u,
-    z_low_v,
-    z_low_w,
-    z_low_temp,
-    z_low_use_temp,
-    z_high_mode,
-    z_high_u,
-    z_high_v,
-    z_high_w,
-    z_high_temp,
-    z_high_use_temp,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    x_low_mode: Any,
+    x_low_u: Any,
+    x_low_v: Any,
+    x_low_w: Any,
+    x_low_temp: Any,
+    x_low_use_temp: Any,
+    x_high_mode: Any,
+    x_high_u: Any,
+    x_high_v: Any,
+    x_high_w: Any,
+    x_high_temp: Any,
+    x_high_use_temp: Any,
+    y_low_mode: Any,
+    y_low_u: Any,
+    y_low_v: Any,
+    y_low_w: Any,
+    y_low_temp: Any,
+    y_low_use_temp: Any,
+    y_high_mode: Any,
+    y_high_u: Any,
+    y_high_v: Any,
+    y_high_w: Any,
+    y_high_temp: Any,
+    y_high_use_temp: Any,
+    z_low_mode: Any,
+    z_low_u: Any,
+    z_low_v: Any,
+    z_low_w: Any,
+    z_low_temp: Any,
+    z_low_use_temp: Any,
+    z_high_mode: Any,
+    z_high_u: Any,
+    z_high_v: Any,
+    z_high_w: Any,
+    z_high_temp: Any,
+    z_high_use_temp: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
     """
     Apply all configured domain face boundary conditions in one 3D launch.
 
@@ -485,23 +496,23 @@ def _domain_bc_kernel(
 
 
 def domain_bc(
-    u,
-    v,
-    w,
-    p,
-    T,
-    smoke,
-    fuel,
-    bc_config,
-    tile_map,
-    ref_temp,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    bc_config: dict[str, Any],
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> Any:
     """
     Apply all configured domain boundary conditions to the GPU field state.
 

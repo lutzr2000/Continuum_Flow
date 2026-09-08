@@ -1,3 +1,5 @@
+from typing import Any
+
 from contextlib import contextmanager
 from functools import wraps
 from time import perf_counter
@@ -6,12 +8,18 @@ from numba import cuda
 
 
 class RunTimings:
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Initialize the instance state.
+        """
         self.entries = {}
 
     @contextmanager
-    def section(self, group, name, gpu=False):
+    def section(self, group: str, name: str, gpu: bool=False) -> None:
         # Drain earlier work so it cannot be charged to this section.
+        """
+        Section.
+        """
         if gpu:
             cuda.synchronize()
         start = perf_counter()
@@ -27,7 +35,10 @@ class RunTimings:
                 entry[0] += 1
                 entry[1] += elapsed
 
-    def report(self, total, status):
+    def report(self, total: float, status: str) -> None:
+        """
+        Report.
+        """
         print(f"Timing report ({status}) - total run: {total:.6f} s")
         width = max(62, max((len(name) for _, name in self.entries), default=0))
 
@@ -53,9 +64,16 @@ class RunTimings:
                 )
 
 
-def profiled_run(function):
+def profiled_run(function: Any) -> Any:
+    """
+    Decorate a solver function with CPU and GPU timing collection.
+    """
+
     @wraps(function)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        """
+        Run the wrapped function while collecting profiling data.
+        """
         if kwargs.get("timings") is not None:
             return function(*args, **kwargs)
         timings = RunTimings()

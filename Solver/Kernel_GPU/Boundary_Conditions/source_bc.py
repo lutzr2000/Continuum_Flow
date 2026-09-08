@@ -1,3 +1,5 @@
+from typing import Any
+
 from numba import cuda
 
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
@@ -6,25 +8,25 @@ import Solver.Kernel_GPU.noise as noise
 
 @cuda.jit(cache=True)
 def source_bc(
-    u,
-    v,
-    w,
-    T,
-    smoke,
-    fuel,
-    tile_map,
-    source_mask,
-    temperature_value,
-    smoke_value,
-    fuel_value,
-    velocity_x_value,
-    velocity_y_value,
-    velocity_z_value,
-    noise_scale,
-    noise_amplitude,
-    noise_seed,
-    dt,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    tile_map: Any,
+    source_mask: Any,
+    temperature_value: Any,
+    smoke_value: Any,
+    fuel_value: Any,
+    velocity_x_value: Any,
+    velocity_y_value: Any,
+    velocity_z_value: Any,
+    noise_scale: float,
+    noise_amplitude: Any,
+    noise_seed: Any,
+    dt: float,
+) -> None:
     """
     Apply source values with procedural spatial noise.
     """

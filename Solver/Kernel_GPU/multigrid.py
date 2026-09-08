@@ -7,7 +7,10 @@ import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
-def create_multigrid_levels(shape, delta, min_size=8):
+def create_multigrid_levels(shape: tuple[int, int, int], delta: float, min_size: int=8) -> Any:
+    """
+    Create multigrid levels.
+    """
     p_levels = []
     b_levels = []
     delta_levels = []
@@ -35,7 +38,14 @@ def create_multigrid_levels(shape, delta, min_size=8):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def residual(p, b, delta, i, j, k):
+def residual(p: Any, b: Any, delta: float, i: int, j: int, k: int) -> Any:
+    r"""
+    Evaluate the discrete Poisson residual at one dense-grid cell.
+
+    .. math::
+
+        r_{i,j,k} = b_{i,j,k} - (\nabla_h^2 p)_{i,j,k}.
+    """
     inv_delta2 = 1.0 / (delta * delta)
 
     laplace = (
@@ -53,14 +63,17 @@ def residual(p, b, delta, i, j, k):
 
 @cuda.jit(device=True, inline=True, cache=True)
 def residual_level_0(
-    p,
-    b,
-    inv_delta2,
-    tile_map,
-    i,
-    j,
-    k,
-):
+    p: Any,
+    b: Any,
+    inv_delta2: Any,
+    tile_map: Any,
+    i: int,
+    j: int,
+    k: int,
+) -> Any:
+    r"""
+    Evaluate :math:`r = b - \nabla_h^2 p` on the sparse finest grid.
+    """
     tile_i = i // kernel_config.TILE_SIZE
     tile_j = j // kernel_config.TILE_SIZE
     tile_k = k // kernel_config.TILE_SIZE
@@ -92,7 +105,15 @@ def residual_level_0(
 
 
 @cuda.jit(cache=True)
-def restrict_residual(p, b, coarse_b, delta, nx, ny, nz):
+def restrict_residual(p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: int, nz: int) -> None:
+    r"""
+    Restrict the fine-grid residual to a dense coarse grid by averaging.
+
+    .. math::
+
+        b_H(I,J,K) = \frac{1}{8}\sum_{a,b,c\in\{0,1\}}
+        r_h(2I+a, 2J+b, 2K+c).
+    """
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
@@ -134,15 +155,18 @@ def restrict_residual(p, b, coarse_b, delta, nx, ny, nz):
 
 @cuda.jit(cache=True)
 def restrict_residual_level_0(
-    p,
-    b,
-    coarse_b,
-    delta,
-    tile_map,
-    nx,
-    ny,
-    nz,
-):
+    p: Any,
+    b: Any,
+    coarse_b: Any,
+    delta: float,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Restrict the sparse finest-grid residual to the first dense coarse grid.
+    """
     I, J, K = cuda.grid(3)
 
     cnx, cny, cnz = coarse_b.shape
@@ -196,7 +220,15 @@ def restrict_residual_level_0(
 
 
 @cuda.jit(cache=True)
-def prolongate_add_nearest_level_0(coarse_e, fine_p, tile_map, field_shape):
+def prolongate_add_nearest_level_0(coarse_e: Any, fine_p: Any, tile_map: Any, field_shape: tuple[int, int, int]) -> None:
+    r"""
+    Prolongate coarse error by nearest-neighbor injection and add it to level 0.
+
+    .. math::
+
+        p_h(i,j,k) \leftarrow p_h(i,j,k)
+        + e_H(\lfloor i/2\rfloor,\lfloor j/2\rfloor,\lfloor k/2\rfloor).
+    """
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = field_shape
@@ -231,7 +263,10 @@ def prolongate_add_nearest_level_0(coarse_e, fine_p, tile_map, field_shape):
 
 
 @cuda.jit(cache=True)
-def prolongate_add_nearest(coarse_e, fine_p):
+def prolongate_add_nearest(coarse_e: Any, fine_p: Any) -> None:
+    """
+    Prolongate coarse error by nearest-neighbor injection onto a dense grid.
+    """
     I, J, K = cuda.grid(3)
     cnx, cny, cnz = coarse_e.shape
     fnx, fny, fnz = fine_p.shape
@@ -257,7 +292,10 @@ def prolongate_add_nearest(coarse_e, fine_p):
 
 
 @cuda.jit(cache=True)
-def rbgs_step(p, b, delta, parity):
+def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
+    """
+    Perform one red or black Gauss-Seidel pressure-smoothing sweep.
+    """
     i, j, k = cuda.grid(3)
 
     nx, ny, nz = p.shape
@@ -285,7 +323,10 @@ def rbgs_step(p, b, delta, parity):
 
 
 @cuda.jit(cache=True)
-def rbgs_step_level_0(p, b, delta, parity, tile_map, nx, ny, nz):
+def rbgs_step_level_0(p: Any, b: Any, delta: float, parity: int, tile_map: Any, nx: int, ny: int, nz: int) -> None:
+    """
+    Perform one red or black Gauss-Seidel sweep on the sparse finest grid.
+    """
     (
         tile_i,
         tile_j,
@@ -348,28 +389,6 @@ def smooth(
     smoother uses red-black Gauss-Seidel and reapplies Neumann boundary
     conditions after the requested number of iterations.
 
-    Parameters
-    ----------
-    p
-        Pressure buffer updated in-place for the current multigrid level.
-    b
-        Right-hand-side buffer for the current multigrid level.
-    delta
-        Cell size of the current level.
-    iterations
-        Number of smoothing iterations to perform.
-    level
-        Current multigrid level. ``0`` is the finest level.
-    tile_map
-        Sparse tile lookup map for level 0. Dense levels ignore it.
-    nx, ny, nz
-        Finest-level simulation resolution in cells. Required for level 0 and
-        ignored for dense levels.
-
-    Returns
-    -------
-    None
-        The pressure buffer ``p`` is modified in-place.
     """
     if level == 0:
         blocks = kernel_config.volume_blocks_per_grid(
@@ -466,40 +485,6 @@ def v_cycle(
     Level 0 uses ``tile_map`` to access the pooled tile storage,
     while all coarser levels operate on dense arrays.
 
-    Parameters
-    ----------
-    level
-        Current multigrid level. ``0`` is the finest level.
-    p_levels
-        Dense pressure buffers for all coarser multigrid levels above level 0.
-    b_levels
-        Dense right-hand-side buffers matching ``p_levels``.
-    p_level0
-        Sparse pressure buffer for the finest simulation level.
-    b_level0
-        Sparse pressure right-hand-side buffer for the finest simulation level.
-    zero_levels
-        Zero-filled dense arrays used to reset coarse pressure buffers before
-        each coarse solve.
-    base_delta
-        Cell size of the finest simulation level.
-    delta_levels
-        Cell sizes for the dense coarse multigrid levels in ``p_levels``.
-    pre_smooth
-        Number of smoothing iterations before restriction.
-    post_smooth
-        Number of smoothing iterations after prolongation.
-    coarse_smooth
-        Number of smoothing iterations on the coarsest level.
-    nx, ny, nz
-        Finest-level simulation resolution in cells.
-    tile_map
-        Sparse tile lookup map for level 0. Coarser dense levels ignore it.
-
-    Returns
-    -------
-    None
-        The pressure buffers are updated in-place across the current V-cycle.
     """
     if level == 0:
         p = p_level0

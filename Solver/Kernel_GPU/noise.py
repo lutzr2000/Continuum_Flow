@@ -1,17 +1,28 @@
+from typing import Any
+
 from numba import cuda
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _smoothstep(t):
+def _smoothstep(t: float) -> Any:
+    """
+    Evaluate the cubic smoothstep interpolation polynomial.
+    """
     return t * t * (3.0 - 2.0 * t)
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _lerp(a, b, t):
+def _lerp(a: Any, b: Any, t: float) -> Any:
+    """
+    Linearly interpolate between two scalar values.
+    """
     return a + t * (b - a)
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _fast_floor(x):
+def _fast_floor(x: float) -> Any:
+    """
+    Compute the greatest integer not larger than the input value.
+    """
     i = int(x)
     if x < float(i):
         return i - 1
@@ -19,7 +30,10 @@ def _fast_floor(x):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _hash_noise_3d(ix, iy, iz, seed):
+def _hash_noise_3d(ix: int, iy: int, iz: int, seed: int) -> Any:
+    """
+    Hash noise 3d.
+    """
     n = ix * 15731 + iy * 789221 + iz * 1376312589 + seed * 1013
     n = (n << 13) ^ n
     nn = n * (n * n * 15731 + 789221) + 1376312589
@@ -28,7 +42,10 @@ def _hash_noise_3d(ix, iy, iz, seed):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _value_noise_3d(x, y, z, seed):
+def _value_noise_3d(x: float, y: float, z: float, seed: int) -> Any:
+    """
+    Value noise 3d.
+    """
     x0 = _fast_floor(x)
     y0 = _fast_floor(y)
     z0 = _fast_floor(z)

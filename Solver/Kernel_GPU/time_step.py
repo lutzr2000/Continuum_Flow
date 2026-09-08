@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 from numba import cuda
 
@@ -9,7 +11,19 @@ from Solver.Kernel_GPU.kernel_config import (
 )
 
 @cuda.jit
-def velocity_maxima_timestep(u, v, w, tile_map, maxima, total_tile_count):
+def velocity_maxima_timestep(u: Any, v: Any, w: Any, tile_map: Any, maxima: Any, total_tile_count: int) -> None:
+    r"""
+    Reduce the absolute velocity maxima of all active sparse cells.
+
+    Each CUDA block first computes local component-wise maxima in shared
+    memory. The block results are then accumulated atomically into ``maxima``:
+
+    .. math::
+
+        m_q = \max_{\mathbf{x} \in \Omega_{\mathrm{active}}}
+              \lvert q(\mathbf{x}) \rvert,
+        \qquad q \in \{u, v, w\}.
+    """
     s_u = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
     s_v = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
     s_w = cuda.shared.array(REDUCTION_THREADS_PER_BLOCK, dtype=GPU_FIELD_DTYPE)
@@ -79,8 +93,25 @@ def velocity_maxima_timestep(u, v, w, tile_map, maxima, total_tile_count):
 
 
 def compute_new_timestep_gpu(
-    u, v, w, tile_map, active_tile_count, maxima, delta, cfl_max, max_dt=None
-):
+    u: Any, v: Any, w: Any, tile_map: Any, active_tile_count: int, maxima: Any, delta: float, cfl_max: float, max_dt: float | None = None
+) -> float:
+    r"""
+    Compute a stable timestep from the component-wise velocity maxima.
+
+    The timestep satisfies the configured CFL limit independently along every
+    coordinate axis:
+
+    .. math::
+
+        \Delta t = \min\left(
+            \frac{C_{\max}\,\Delta x}{\max |u|},
+            \frac{C_{\max}\,\Delta x}{\max |v|},
+            \frac{C_{\max}\,\Delta x}{\max |w|},
+            \Delta t_{\max}
+        \right).
+
+    A small denominator bound prevents division by zero in stationary fields.
+    """
     eps = 1e-12
 
     if active_tile_count <= 0:

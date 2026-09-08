@@ -1,4 +1,6 @@
 """CUDA voxelization of object-local base masks only."""
+from typing import Any
+
 
 import math
 from pathlib import Path
@@ -10,7 +12,7 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
-def voxelise_all_meshes(delta, mesh_objects, bake_path):
+def voxelise_all_meshes(delta: float, mesh_objects: Any, bake_path: str) -> Any:
     """Build base-mask entries only, preserving the mesh object metadata."""
 
     base_masks = []
@@ -43,7 +45,10 @@ def voxelise_all_meshes(delta, mesh_objects, bake_path):
     return base_masks
 
 
-def voxelize_triangles(triangles, delta):
+def voxelize_triangles(triangles: Any, delta: float) -> Any:
+    """
+    Voxelize triangles.
+    """
     if triangles.size == 0:
         return None
 
@@ -102,13 +107,16 @@ def voxelize_triangles(triangles, delta):
 
 @cuda.jit(cache=True)
 def surface(
-    triangles,
-    mask,
-    delta,
-    ox,
-    oy,
-    oz,
-):
+    triangles: Any,
+    mask: Any,
+    delta: float,
+    ox: Any,
+    oy: Any,
+    oz: Any,
+) -> None:
+    """
+    Surface.
+    """
     i, j, k = cuda.grid(3)
 
     if i >= mask.shape[0] or j >= mask.shape[1] or k >= mask.shape[2]:

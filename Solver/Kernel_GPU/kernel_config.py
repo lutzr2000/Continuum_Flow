@@ -25,17 +25,6 @@ def volume_blocks_per_grid(
     corresponding volume dimension by the number of threads per block and
     rounding up to ensure that the complete volume is covered.
 
-    Parameters
-    ----------
-    shape
-        Number of elements along the x-, y-, and z-axis of the volume.
-    threadsperblock
-        Number of CUDA threads per block along each axis.
-
-    Returns
-    -------
-    tuple[int, int, int]
-        Number of CUDA blocks required along the x-, y-, and z-axis.
     """
     return tuple(
         (int(shape[axis]) + threadsperblock[axis] - 1) // threadsperblock[axis]
@@ -55,20 +44,6 @@ def reduction_blocks_per_grid(
     elements and the number of threads per block. The result is capped at
     ``max_blocks`` to limit the number of reduction blocks.
 
-    Parameters
-    ----------
-    total_size
-        Total number of elements processed by the reduction.
-    threadsperblock
-        Number of CUDA threads per block.
-    max_blocks
-        Maximum number of CUDA blocks that may be launched.
-
-    Returns
-    -------
-    int
-        Number of CUDA blocks required for the reduction, capped at
-        ``max_blocks``.
     """
     return min(
         max_blocks,

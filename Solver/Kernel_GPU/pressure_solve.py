@@ -1,3 +1,5 @@
+from typing import Any
+
 from Solver.Kernel_GPU.timing import profiled_run
 import numpy as np
 from numba import cuda
@@ -16,21 +18,35 @@ REDUCTION_THREADS_PER_BLOCK = (
 
 @cuda.jit(cache=True)
 def pressure_equation_right_side(
-    u,
-    v,
-    w,
-    b,
-    dt,
-    delta,
-    rho,
-    tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    b: Any,
+    dt: float,
+    delta: float,
+    rho: float,
+    tile_map: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Assemble the pressure-Poisson right-hand side from velocity divergence.
+
+    Centered differences approximate the divergence and form
+
+    .. math::
+
+        b = \frac{\rho}{\Delta t}\,\nabla\!\cdot\mathbf{u}
+          = \frac{\rho}{\Delta t}
+            \left(\partial_x u + \partial_y v + \partial_z w\right).
+
+    Boundary cells are assigned zero because their pressure conditions are
+    handled separately.
+    """
     (
         tile_i,
         tile_j,
@@ -75,14 +91,17 @@ def pressure_equation_right_side(
 
 @cuda.jit(cache=True)
 def rhs_sum_count_partial_kernel(
-    b,
-    tile_map,
-    partial_sums,
-    partial_counts,
-    nx,
-    ny,
-    nz,
-):
+    b: Any,
+    tile_map: Any,
+    partial_sums: Any,
+    partial_counts: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Rhs sum count partial kernel.
+    """
     interior_nx = nx - 2
     interior_ny = ny - 2
     interior_nz = nz - 2
@@ -155,7 +174,7 @@ def rhs_sum_count_partial_kernel(
 
 
 @cuda.jit(cache=True)
-def count_rhs_active_partial_kernel(b, tile_map, partial_counts, nx, ny, nz):
+def count_rhs_active_partial_kernel(b: Any, tile_map: Any, partial_counts: Any, nx: int, ny: int, nz: int) -> None:
     """
     Reduce the number of active RHS cells into one partial count per CUDA block.
     """
@@ -210,7 +229,7 @@ def count_rhs_active_partial_kernel(b, tile_map, partial_counts, nx, ny, nz):
 
 
 @cuda.jit(cache=True)
-def sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
+def sum_partial_sums_kernel(partial_sums: Any, partial_count: int, rhs_sum: Any) -> None:
     """
     Reduce the block partial sums into one scalar sum on the GPU. This is needed
     for computing RHS mean.
@@ -244,11 +263,18 @@ def sum_partial_sums_kernel(partial_sums, partial_count, rhs_sum):
 
 @cuda.jit(cache=True)
 def rhs_mean_kernel(
-    partial_sums,
-    partial_counts,
-    partial_count,
-    rhs_mean,
-):
+    partial_sums: Any,
+    partial_counts: Any,
+    partial_count: int,
+    rhs_mean: Any,
+) -> None:
+    r"""
+    Divide the global right-hand-side sum by the active-cell count.
+
+    .. math::
+
+        \bar b = \frac{1}{N}\sum_{i=1}^{N} b_i.
+    """
     tid = cuda.threadIdx.x
 
     shared_sums = cuda.shared.array(
@@ -293,13 +319,23 @@ def rhs_mean_kernel(
 
 @cuda.jit(cache=True)
 def subtract_rhs_mean_kernel(
-    b,
-    rhs_mean,
-    tile_map,
-    nx,
-    ny,
-    nz,
-):
+    b: Any,
+    rhs_mean: Any,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Subtract the active-domain mean from every pressure right-hand-side cell.
+
+    .. math::
+
+        b_i \leftarrow b_i - \bar b.
+
+    This compatibility correction makes the Neumann Poisson problem solvable
+    by ensuring that the discrete right-hand side has zero mean.
+    """
     (
         tile_i,
         tile_j,
@@ -324,7 +360,10 @@ def subtract_rhs_mean_kernel(
 
 
 @cuda.jit(cache=True)
-def reset_inactive_pressure(p, tile_map, nx, ny, nz):
+def reset_inactive_pressure(p: Any, tile_map: Any, nx: int, ny: int, nz: int) -> None:
+    """
+    Reset inactive pressure.
+    """
     (
         tile_i,
         tile_j,
@@ -346,15 +385,18 @@ def reset_inactive_pressure(p, tile_map, nx, ny, nz):
 
 
 def remove_rhs_mean(
-    b,
-    tile_map,
-    rhs_partial_sums,
-    rhs_partial_counts,
-    rhs_mean_buffer,
-    nx,
-    ny,
-    nz,
-):
+    b: Any,
+    tile_map: Any,
+    rhs_partial_sums: Any,
+    rhs_partial_counts: Any,
+    rhs_mean_buffer: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Compute and remove the mean of the active pressure right-hand side.
+    """
     interior_cell_count = max(
         (nx - 2) * (ny - 2) * (nz - 2),
         1,
@@ -402,19 +444,19 @@ def remove_rhs_mean(
 
 @cuda.jit(cache=True)
 def project_velocity_kernel(
-    u,
-    v,
-    w,
-    p,
-    obstacle_mask,
-    dt,
-    delta,
-    rho,
-    tile_map,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    obstacle_mask: Any,
+    dt: float,
+    delta: float,
+    rho: Any,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
     """
     Apply the pressure projection `u <- u - dt/rho * grad(p)` to one interior cell.
 
@@ -460,22 +502,25 @@ def project_velocity_kernel(
 
 @cuda.jit(cache=True)
 def add_artifical_divergence(
-    T,
-    source_mask,
-    source_extra_pressure,
-    noise_scale,
-    noise_amplitude,
-    noise_seed,
-    expansion_rate,
-    t_reference,
-    b,
-    tile_map,
-    rho,
-    delta,
-    nx,
-    ny,
-    nz,
-):
+    T: Any,
+    source_mask: Any,
+    source_extra_pressure: Any,
+    noise_scale: float,
+    noise_amplitude: Any,
+    noise_seed: Any,
+    expansion_rate: float,
+    t_reference: float,
+    b: Any,
+    tile_map: Any,
+    rho: Any,
+    delta: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Add artifical divergence.
+    """
     (
         tile_i,
         tile_j,
@@ -523,41 +568,53 @@ def add_artifical_divergence(
 
 @profiled_run
 def pressure_poisson_multigrid(
-    u,
-    v,
-    w,
-    p,
-    T,
-    b,
-    dt,
-    source_masks,
-    source_noise_scales,
-    source_noise_amplitudes,
-    source_noise_seeds,
-    extra_pressure,
-    delta,
-    rho,
-    expansion_rate,
-    t_reference,
-    tile_map,
-    tile_shape,
-    u_initial,
-    v_initial,
-    w_initial,
-    p_levels,
-    b_levels,
-    delta_levels,
-    num_vcycles,
-    rhs_partial_sums,
-    rhs_partial_counts,
-    rhs_mean_buffer,
-    zero_levels,
-    nx,
-    ny,
-    nz,
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    b: Any,
+    dt: float,
+    source_masks: Any,
+    source_noise_scales: Any,
+    source_noise_amplitudes: Any,
+    source_noise_seeds: Any,
+    extra_pressure: Any,
+    delta: float,
+    rho: Any,
+    expansion_rate: float,
+    t_reference: float,
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    p_levels: Any,
+    b_levels: Any,
+    delta_levels: Any,
+    num_vcycles: Any,
+    rhs_partial_sums: Any,
+    rhs_partial_counts: Any,
+    rhs_mean_buffer: Any,
+    zero_levels: Any,
+    nx: int,
+    ny: int,
+    nz: int,
     *,
-    timings=None,
-):
+    timings: Any=None,
+) -> Any:
+    r"""
+    Solve the pressure Poisson equation with repeated multigrid V-cycles.
+
+    The projection pressure satisfies
+
+    .. math::
+
+        \nabla^2 p = \frac{\rho}{\Delta t}\,\nabla\!\cdot\mathbf{u}.
+
+    The right-hand side is assembled and made compatible with Neumann
+    boundary conditions before the multigrid hierarchy reduces the residual.
+    """
     with timings.section(
         "pressure_poisson_multigrid", "pressure_equation_right_side", gpu=True
     ):

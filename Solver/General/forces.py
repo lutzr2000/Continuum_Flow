@@ -1,11 +1,19 @@
+from typing import Any
+
 import numpy as np
 
-def _get_animation_times(container):
+def _get_animation_times(container: Any) -> Any:
+    """
+    Get animation times.
+    """
     timeline = container.get("animation_timeline") or {}
     return timeline.get("times") or ()
 
 
-def get_animated_node_value(node, var_name, t, default=0.0, animation_times=()):
+def get_animated_node_value(node: Any, var_name: str, t: float, default: Any=0.0, animation_times: Any=()) -> Any:
+    """
+    Get animated node value.
+    """
     value = node.get(var_name, default)
 
     animation_entry = (node.get("animations") or {}).get(var_name) or {}
@@ -23,7 +31,10 @@ def get_animated_node_value(node, var_name, t, default=0.0, animation_times=()):
     return default if value is None else value
 
 
-def constant_force(simulation, t):
+def constant_force(simulation: dict[str, Any], t: float) -> Any:
+    """
+    Constant force.
+    """
     fx = 0.0
     fy = 0.0
     fz = 0.0
@@ -40,7 +51,10 @@ def constant_force(simulation, t):
     return fx, fy, fz
 
 
-def swirl_force(simulation, t):
+def swirl_force(simulation: dict[str, Any], t: float) -> Any:
+    """
+    Swirl force.
+    """
     swirl_nodes = []
     animation_times = _get_animation_times(simulation)
 
@@ -68,7 +82,10 @@ def swirl_force(simulation, t):
     return swirl_nodes, swirl_nodes.shape[0] > 0
 
 
-def turbulence_force(simulation, t):
+def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
+    """
+    Turbulence force.
+    """
     turbulence_nodes = []
     animation_times = _get_animation_times(simulation)
 

@@ -1,3 +1,5 @@
+from typing import Any
+
 import math
 
 import numpy as np
@@ -10,12 +12,15 @@ ZERO_4 = np.zeros((4, 4))
 
 
 def update_source_tile_mask(
-    source_tile_mask,
-    source_base_masks,
-    t,
-    delta,
-    origin,
-):
+    source_tile_mask: Any,
+    source_base_masks: Any,
+    t: float,
+    delta: float,
+    origin: tuple[int, int, int],
+) -> None:
+    """
+    Update source tile mask.
+    """
     source_tile_mask.copy_to_device(np.zeros(source_tile_mask.shape, dtype=np.bool_))
 
     tile_size = kernel_config.TILE_SIZE
@@ -84,11 +89,14 @@ def update_source_tile_mask(
 
 @cuda.jit(cache=True)
 def mark_source_tiles(
-    source_tile_mask,
-    offset_i,
-    offset_j,
-    offset_k,
-):
+    source_tile_mask: Any,
+    offset_i: Any,
+    offset_j: Any,
+    offset_k: Any,
+) -> None:
+    """
+    Mark source tiles.
+    """
     i, j, k = cuda.grid(3)
 
     i += offset_i
@@ -103,7 +111,10 @@ def mark_source_tiles(
         source_tile_mask[i, j, k] = True
 
 
-def prepare_matrix_data(mesh_object):
+def prepare_matrix_data(mesh_object: Any) -> Any:
+    """
+    Prepare matrix data.
+    """
     animation = mesh_object.get("transform_animation") or {}
 
     times = animation.get("times")
@@ -144,7 +155,10 @@ def prepare_matrix_data(mesh_object):
     return times, matrices, rates
 
 
-def get_matrix_data(times, matrices, rates, time_value):
+def get_matrix_data(times: Any, matrices: Any, rates: Any, time_value: float) -> Any:
+    """
+    Get matrix data.
+    """
     n = matrices.shape[0]
 
     if n == 0:
@@ -186,12 +200,15 @@ def get_matrix_data(times, matrices, rates, time_value):
 
 
 def get_tile_bounds(
-    voxels,
-    matrix,
-    delta,
-    origin,
-    tile_grid_shape,
-):
+    voxels: Any,
+    matrix: Any,
+    delta: float,
+    origin: tuple[int, int, int],
+    tile_grid_shape: Any,
+) -> Any:
+    """
+    Get tile bounds.
+    """
     tile_size = kernel_config.TILE_SIZE
 
     bounds_min = np.asarray(
@@ -248,13 +265,16 @@ def get_tile_bounds(
 
 
 def prepare_cell_transform(
-    inv,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-    local_origin,
-):
+    inv: Any,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    local_origin: Any,
+) -> Any:
+    """
+    Prepare cell transform.
+    """
     inv_delta = np.float32(1.0 / delta)
 
     a00 = np.float32(inv[0, 0])
@@ -319,17 +339,20 @@ def prepare_cell_transform(
 
 
 def update_source_masks(
-    source_masks,
-    source_base_masks,
-    animated_sources,
-    initial_update,
-    t,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-    tile_map,
-):
+    source_masks: Any,
+    source_base_masks: Any,
+    animated_sources: Any,
+    initial_update: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+) -> None:
+    """
+    Update source masks.
+    """
     for source_idx, (source_mask, base_masks) in enumerate(
         zip(
             source_masks,
@@ -444,18 +467,21 @@ def update_source_masks(
 
 
 def update_obstacle_mask(
-    obstacle_mask,
-    obstacle_base_masks,
-    t,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-    tile_map,
-    velocity_x,
-    velocity_y,
-    velocity_z,
-):
+    obstacle_mask: Any,
+    obstacle_base_masks: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+) -> None:
+    """
+    Update obstacle mask.
+    """
     obstacle_mask[:] = False
 
     for entry in obstacle_base_masks:
@@ -624,25 +650,28 @@ def update_obstacle_mask(
 
 @cuda.jit(cache=True)
 def update_source_masks_gpu(
-    mask,
-    tile_map,
-    local_mask,
-    c0,
-    c1,
-    c2,
-    a00,
-    a01,
-    a02,
-    a10,
-    a11,
-    a12,
-    a20,
-    a21,
-    a22,
-    offset_i,
-    offset_j,
-    offset_k,
-):
+    mask: Any,
+    tile_map: Any,
+    local_mask: Any,
+    c0: Any,
+    c1: Any,
+    c2: Any,
+    a00: Any,
+    a01: Any,
+    a02: Any,
+    a10: Any,
+    a11: Any,
+    a12: Any,
+    a20: Any,
+    a21: Any,
+    a22: Any,
+    offset_i: Any,
+    offset_j: Any,
+    offset_k: Any,
+) -> None:
+    """
+    Update source masks gpu.
+    """
     ti = cuda.blockIdx.x + offset_i
     tj = cuda.blockIdx.y + offset_j
     tk = cuda.blockIdx.z + offset_k
@@ -701,40 +730,43 @@ def update_source_masks_gpu(
 
 @cuda.jit(cache=True)
 def update_obstacle_mask_gpu(
-    mask,
-    velocity_x,
-    velocity_y,
-    velocity_z,
-    tile_map,
-    local_mask,
-    c0,
-    c1,
-    c2,
-    a00,
-    a01,
-    a02,
-    a10,
-    a11,
-    a12,
-    a20,
-    a21,
-    a22,
-    vx_i,
-    vx_j,
-    vx_k,
-    vx_c,
-    vy_i,
-    vy_j,
-    vy_k,
-    vy_c,
-    vz_i,
-    vz_j,
-    vz_k,
-    vz_c,
-    offset_i,
-    offset_j,
-    offset_k,
-):
+    mask: Any,
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    tile_map: Any,
+    local_mask: Any,
+    c0: Any,
+    c1: Any,
+    c2: Any,
+    a00: Any,
+    a01: Any,
+    a02: Any,
+    a10: Any,
+    a11: Any,
+    a12: Any,
+    a20: Any,
+    a21: Any,
+    a22: Any,
+    vx_i: Any,
+    vx_j: Any,
+    vx_k: Any,
+    vx_c: Any,
+    vy_i: Any,
+    vy_j: Any,
+    vy_k: Any,
+    vy_c: Any,
+    vz_i: Any,
+    vz_j: Any,
+    vz_k: Any,
+    vz_c: Any,
+    offset_i: Any,
+    offset_j: Any,
+    offset_k: Any,
+) -> None:
+    """
+    Update obstacle mask gpu.
+    """
     ti = cuda.blockIdx.x + offset_i
     tj = cuda.blockIdx.y + offset_j
     tk = cuda.blockIdx.z + offset_k

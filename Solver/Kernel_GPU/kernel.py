@@ -143,7 +143,7 @@ def is_animated(base_masks: list[dict[str, Any]]) -> bool:
 def solver(
     config: dict,
     *,
-    timings=None,
+    timings: Any=None,
 ) -> None:
     r"""
     The solver initializes sparse tile storage, voxelizes source and obstacle

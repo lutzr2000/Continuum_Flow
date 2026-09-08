@@ -1,25 +1,60 @@
-from numba import cuda
 import math
+from typing import Any
+
+from numba import cuda
 
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
+
 @cuda.jit(cache=True)
 def compute_vorticity(
-    u,
-    v,
-    w,
-    u_initial,
-    v_initial,
-    w_initial,
-    obstacle_mask,
-    vorticity_magnitude,
-    delta,
-    tile_map,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    obstacle_mask: Any,
+    vorticity_magnitude: Any,
+    delta: float,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Compute the vorticity magnitude of the velocity field for one grid cell.
+
+    Vorticity is the curl of the velocity field
+    :math:`\mathbf{u} = (u, v, w)`:
+
+    .. math::
+
+        \boldsymbol{\omega} = \nabla \times \mathbf{u}
+        = \begin{pmatrix}
+            \partial_y w - \partial_z v \\
+            \partial_z u - \partial_x w \\
+            \partial_x v - \partial_y u
+          \end{pmatrix}.
+
+    Each derivative is approximated with a second-order centered difference.
+
+    .. math::
+
+        \partial_y w_{i,j,k}
+        \approx \frac{w_{i,j+1,k} - w_{i,j-1,k}}{2\,\Delta x}.
+
+    The resulting magnitude is written to ``vorticity_magnitude``:
+
+    .. math::
+
+        \lVert\boldsymbol{\omega}\rVert
+        = \sqrt{\omega_x^2 + \omega_y^2 + \omega_z^2}.
+
+    Cells outside the active sparse domain, cells on the outer grid boundary,
+    and obstacle cells are skipped or assigned zero vorticity.
+    """
     (
         tile_i,
         tile_j,
@@ -85,24 +120,55 @@ def compute_vorticity(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def apply_vorticity_confinement(
-    u,
-    v,
-    w,
-    obstacle_mask,
-    omega_magnitude,
-    i,
-    j,
-    k,
-    delta,
-    vorticity_strength,
-    tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    obstacle_mask: Any,
+    omega_magnitude: Any,
+    i: int,
+    j: int,
+    k: int,
+    delta: float,
+    vorticity_strength: float,
+    tile_map: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> tuple[float, float, float]:
+    r"""
+    Compute the vorticity-confinement force for one grid cell.
+
+    First, the centered-difference gradient of the vorticity magnitude is
+    evaluated and normalized:
+
+    .. math::
+
+        \mathbf{N}
+        = \frac{\nabla \lVert\boldsymbol{\omega}\rVert}
+               {\lVert\nabla \lVert\boldsymbol{\omega}\rVert\rVert}.
+
+    The local vorticity vector is reconstructed from the velocity curl:
+
+    .. math::
+
+        \boldsymbol{\omega} = \nabla \times \mathbf{u}.
+
+    Finally, the confinement force points perpendicular to both the magnitude
+    gradient and the vorticity vector:
+
+    .. math::
+
+        \mathbf{f}_{\mathrm{conf}}
+        = \varepsilon\,\mathbf{N} \times \boldsymbol{\omega},
+
+    where :math:`\varepsilon` is ``vorticity_strength``. This force restores
+    rotational detail that numerical dissipation would otherwise remove. A
+    zero force is returned for inactive tiles, cells near the domain boundary,
+    obstacle cells, and cells whose magnitude gradient cannot be normalized.
+    """
     tile_size = kernel_config.TILE_SIZE
 
     tile_i = i // tile_size

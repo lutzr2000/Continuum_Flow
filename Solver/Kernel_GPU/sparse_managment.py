@@ -5,7 +5,7 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 tile_size = kernel_config.TILE_SIZE
 
 @cuda.jit(device=True, inline=True, cache=True)
-def tile_to_index():
+def tile_to_index() -> Any:
     """
     Map tiles to cell indices.
     """
@@ -35,7 +35,10 @@ def tile_to_index():
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def get_pool_value(field, tile_map, i, j, k, default_value):
+def get_pool_value(field: Any, tile_map: Any, i: int, j: int, k: int, default_value: float) -> Any:
+    """
+    Read a sparse field value or return the background value for an inactive tile.
+    """
     tile_i = i // tile_size
     tile_j = j // tile_size
     tile_k = k // tile_size
@@ -53,17 +56,20 @@ def get_pool_value(field, tile_map, i, j, k, default_value):
 
 @cuda.jit(cache=True)
 def build_activity_mask(
-    smoke,
-    fuel,
-    flame,
-    tile_map,
-    source_tile_mask,
-    base_tile_map,
-    threshold,
-    nx,
-    ny,
-    nz,
-):
+    smoke: Any,
+    fuel: Any,
+    flame: Any,
+    tile_map: Any,
+    source_tile_mask: Any,
+    base_tile_map: Any,
+    threshold: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Build activity mask.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
 
     if (
@@ -115,12 +121,15 @@ def build_activity_mask(
 
 @cuda.jit(cache=True)
 def compact_active_tile_map(
-    current_tile_map,
-    previous_tile_map,
-    compacted_tile_map,
-    previous_index_lookup,
-    next_tile_index_counter,
-):
+    current_tile_map: Any,
+    previous_tile_map: Any,
+    compacted_tile_map: Any,
+    previous_index_lookup: Any,
+    next_tile_index_counter: Any,
+) -> None:
+    """
+    Compact active tile map.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = current_tile_map.shape
 
@@ -138,7 +147,10 @@ def compact_active_tile_map(
 
 
 @cuda.jit(cache=True)
-def remap_sparse_pool(old_pool, new_pool, previous_index_lookup, active_tile_count):
+def remap_sparse_pool(old_pool: Any, new_pool: Any, previous_index_lookup: Any, active_tile_count: int) -> None:
+    """
+    Remap sparse pool.
+    """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
     total_cell_count = active_tile_count * cells_per_tile
@@ -168,7 +180,10 @@ def remap_sparse_pool(old_pool, new_pool, previous_index_lookup, active_tile_cou
 
 
 @cuda.jit(cache=True)
-def fill_sparse_tile_buffer_range(pool, start_tile, fill_value):
+def fill_sparse_tile_buffer_range(pool: Any, start_tile: int, fill_value: float) -> None:
+    """
+    Fill sparse tile buffer range.
+    """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
     tile_count = pool.shape[0] - start_tile
@@ -190,7 +205,10 @@ def fill_sparse_tile_buffer_range(pool, start_tile, fill_value):
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def tile_is_active_in_margin(base_tile_map, tile_i, tile_j, tile_k, margin):
+def tile_is_active_in_margin(base_tile_map: Any, tile_i: Any, tile_j: Any, tile_k: Any, margin: int) -> Any:
+    """
+    Tile is active in margin.
+    """
     tiles_x, tiles_y, tiles_z = base_tile_map.shape
 
     for di in range(-margin, margin + 1):
@@ -215,7 +233,10 @@ def tile_is_active_in_margin(base_tile_map, tile_i, tile_j, tile_k, margin):
 
 
 @cuda.jit(cache=True)
-def copy_sparse_tile_buffer_range(src_pool, dst_pool, tile_count):
+def copy_sparse_tile_buffer_range(src_pool: Any, dst_pool: Any, tile_count: int) -> None:
+    """
+    Copy sparse tile buffer range.
+    """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
     total_cell_count = tile_count * cells_per_tile
@@ -241,12 +262,15 @@ def copy_sparse_tile_buffer_range(src_pool, dst_pool, tile_count):
 
 @cuda.jit(cache=True)
 def release_inactive_tile_slots(
-    base_tile_map,
-    tile_map,
-    margin,
-    free_slot_stack,
-    free_slot_count,
-):
+    base_tile_map: Any,
+    tile_map: Any,
+    margin: int,
+    free_slot_stack: Any,
+    free_slot_count: int,
+) -> None:
+    """
+    Release inactive tile slots.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_map.shape
 
@@ -267,16 +291,19 @@ def release_inactive_tile_slots(
 
 @cuda.jit(cache=True)
 def activate_tiles_with_reuse(
-    base_tile_map,
-    tile_map,
-    margin,
-    free_slot_stack,
-    free_slot_count,
-    reused_slot_stack,
-    reused_slot_count,
-    next_tile_index_counter,
-    active_tile_counter,
-):
+    base_tile_map: Any,
+    tile_map: Any,
+    margin: int,
+    free_slot_stack: Any,
+    free_slot_count: int,
+    reused_slot_stack: Any,
+    reused_slot_count: int,
+    next_tile_index_counter: Any,
+    active_tile_counter: Any,
+) -> None:
+    """
+    Activate tiles with reuse.
+    """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_map.shape
 
@@ -304,7 +331,10 @@ def activate_tiles_with_reuse(
 
 
 @cuda.jit(cache=True)
-def fill_sparse_tile_slots(pool, slot_indices, slot_count, fill_value):
+def fill_sparse_tile_slots(pool: Any, slot_indices: Any, slot_count: int, fill_value: float) -> None:
+    """
+    Fill sparse tile slots.
+    """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
     total_cell_count = slot_count * cells_per_tile
@@ -325,10 +355,13 @@ def fill_sparse_tile_slots(pool, slot_indices, slot_count, fill_value):
 
 
 def required_pool_capacity(
-    current_capacity_tiles,
-    required_capacity_tiles,
-    tile_growth_size,
-):
+    current_capacity_tiles: Any,
+    required_capacity_tiles: Any,
+    tile_growth_size: Any,
+) -> Any:
+    """
+    Required pool capacity.
+    """
     required_capacity_tiles = int(required_capacity_tiles)
     current_capacity_tiles = int(current_capacity_tiles)
     tile_growth_size = max(int(tile_growth_size), 1)
@@ -344,10 +377,13 @@ def required_pool_capacity(
 
 
 def ensure_pool_capacities(
-    pool_specs,
-    current_capacity_tiles,
-    target_capacity_tiles,
-):
+    pool_specs: Any,
+    current_capacity_tiles: Any,
+    target_capacity_tiles: Any,
+) -> Any:
+    """
+    Ensure pool capacities.
+    """
     if target_capacity_tiles == current_capacity_tiles:
         return [pool for pool, _fill_value in pool_specs]
 
@@ -391,7 +427,10 @@ def ensure_pool_capacities(
     return resized_pools
 
 
-def reset_reused_pool_slots(pool_specs, reused_slot_stack, reused_slot_count):
+def reset_reused_pool_slots(pool_specs: Any, reused_slot_stack: Any, reused_slot_count: int) -> None:
+    """
+    Reset reused pool slots.
+    """
     if reused_slot_count <= 0:
         return
 
@@ -409,7 +448,10 @@ def reset_reused_pool_slots(pool_specs, reused_slot_stack, reused_slot_count):
         )
 
 
-def copy_pools(dst_src_pairs, active_tile_count):
+def copy_pools(dst_src_pairs: Any, active_tile_count: int) -> None:
+    """
+    Copy pools.
+    """
     if active_tile_count <= 0:
         return
 
@@ -417,7 +459,10 @@ def copy_pools(dst_src_pairs, active_tile_count):
         dst_pool[:active_tile_count].copy_to_device(src_pool[:active_tile_count])
 
 
-def reset_pools(dst_pools, fill_pool, active_tile_count):
+def reset_pools(dst_pools: Any, fill_pool: Any, active_tile_count: int) -> None:
+    """
+    Reset pools.
+    """
     if active_tile_count <= 0:
         return
 

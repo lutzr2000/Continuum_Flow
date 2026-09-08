@@ -1,21 +1,26 @@
+from typing import Any
+
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 from numba import cuda
 
 
 @cuda.jit(cache=True)
 def obstacle_bc(
-    u,
-    v,
-    w,
-    smoke,
-    fuel,
-    flame,
-    mask,
-    obstacle_velocity_x,
-    obstacle_velocity_y,
-    obstacle_velocity_z,
-    tile_map,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    smoke: Any,
+    fuel: Any,
+    flame: Any,
+    mask: Any,
+    obstacle_velocity_x: Any,
+    obstacle_velocity_y: Any,
+    obstacle_velocity_z: Any,
+    tile_map: Any,
+) -> None:
+    """
+    Obstacle bc.
+    """
     (
         tile_i,
         tile_j,

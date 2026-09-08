@@ -1,3 +1,5 @@
+from typing import Any
+
 from numba import cuda
 
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
@@ -8,22 +10,32 @@ from Solver.Kernel_GPU.vorticity import apply_vorticity_confinement
 
 @cuda.jit(cache=True)
 def advect_velocity_semi_lagrangian(
-    u,
-    v,
-    w,
-    advected_u,
-    advected_v,
-    advected_w,
-    dt,
-    delta,
-    tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
+    u: Any,
+    v: Any,
+    w: Any,
+    advected_u: Any,
+    advected_v: Any,
+    advected_w: Any,
+    dt: float,
+    delta: float,
+    tile_map: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Build the semi-Lagrangian predictor for all three velocity components.
+
+    .. math::
+
+        \mathbf{u}^{*}(\mathbf{x}) =
+        \mathbf{u}^{n}\!\left(
+            \mathbf{x} - \Delta t\,\mathbf{u}^{n}(\mathbf{x})
+        \right).
+    """
     (
         tile_i,
         tile_j,
@@ -80,47 +92,57 @@ def advect_velocity_semi_lagrangian(
 
 @cuda.jit(cache=True)
 def update_velocity_maccormack(
-    u,
-    v,
-    w,
-    obstacle_mask,
-    predictor_u,
-    predictor_v,
-    predictor_w,
-    dt,
-    un,
-    vn,
-    wn,
-    delta,
-    rho,
-    nu,
-    vorticity_magnitude,
-    vorticity_strength,
-    temperature,
-    buoyancy_factor,
-    t_reference,
-    tile_map,
-    fx_const,
-    fy_const,
-    fz_const,
-    has_swirl_nodes,
-    swirl_config,
-    origin_x,
-    origin_y,
-    origin_z,
-    has_turbulence_nodes,
-    turbulence_config,
-    t,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
-    """
+    u: Any,
+    v: Any,
+    w: Any,
+    obstacle_mask: Any,
+    predictor_u: Any,
+    predictor_v: Any,
+    predictor_w: Any,
+    dt: float,
+    un: Any,
+    vn: Any,
+    wn: Any,
+    delta: float,
+    rho: float,
+    nu: float,
+    vorticity_magnitude: Any,
+    vorticity_strength: float,
+    temperature: Any,
+    buoyancy_factor: float,
+    t_reference: float,
+    tile_map: Any,
+    fx_const: Any,
+    fy_const: Any,
+    fz_const: Any,
+    has_swirl_nodes: bool,
+    swirl_config: Any,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    has_turbulence_nodes: bool,
+    turbulence_config: Any,
+    t: float,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
     CUDA kernel that updates velocity with a MacCormack-corrected
     semi-Lagrangian advection step on sparse velocity pools.
+
+    The correction uses a reverse trace,
+
+    .. math::
+
+        \mathbf{u}^{n+1} = \mathbf{u}^{*}
+        + \frac{1}{2}\left(\mathbf{u}^{n} - \widehat{\mathbf{u}}^{n}\right),
+
+    after which viscosity, buoyancy, vorticity confinement, and configured
+    external forces are accumulated explicitly.
     """
     (
         tile_i,

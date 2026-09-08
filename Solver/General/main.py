@@ -1,3 +1,5 @@
+from typing import Any
+
 from pathlib import Path
 from time import perf_counter
 import contextlib
@@ -9,12 +11,18 @@ import shutil
 import platform
 
 
-def emit_message(message):
+def emit_message(message: Any) -> None:
+    """
+    Emit message.
+    """
     sys.__stdout__.write(json.dumps(message) + "\n")
     sys.__stdout__.flush()
 
 
-def main(config):
+def main(config: dict[str, Any]) -> Any:
+    """
+    Main.
+    """
     total_start_time = perf_counter()
 
     try:
@@ -46,7 +54,10 @@ def main(config):
         print("################################################################")
 
 
-def prepare_cuda_libraries():
+def prepare_cuda_libraries() -> None:
+    """
+    Prepare cuda libraries.
+    """
     system = platform.system()
 
     for entry in map(Path, sys.path):
@@ -88,7 +99,10 @@ def prepare_cuda_libraries():
             return
 
 
-def run_worker():
+def run_worker() -> None:
+    """
+    Run worker.
+    """
     emit_message({"type": "ready"})
 
     for raw_line in sys.stdin:
@@ -180,10 +194,16 @@ def run_worker():
 
 
 class _JsonLogStream:
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Initialize the instance state.
+        """
         self._buffer = ""
 
-    def write(self, text):
+    def write(self, text: str) -> Any:
+        """
+        Write text to the configured output stream.
+        """
         text = str(text or "")
         if not text:
             return 0
@@ -204,7 +224,10 @@ class _JsonLogStream:
 
         return len(text)
 
-    def flush(self):
+    def flush(self) -> None:
+        """
+        Flush the configured output stream.
+        """
         remaining = self._buffer.strip()
 
         if remaining:

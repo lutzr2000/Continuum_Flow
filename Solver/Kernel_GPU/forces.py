@@ -23,23 +23,6 @@ def buoyancy_approximation(
 
         b = g \, \beta \, (T - T_{\mathrm{ref}}).
 
-    Parameters
-    ----------
-    T
-        temperature field.
-    tile_map
-        Mapping used to access tiles in ``T``.
-    i, j, k
-        Cell indices.
-    buoyancy_factor
-        Thermal buoyancy coefficient.
-    t_reference
-        Reference temperature.
-
-    Returns
-    -------
-    float
-        Buoyancy acceleration contribution for the cell ``(i, j, k)``.
     """
     g = 9.81
 
@@ -52,15 +35,18 @@ def buoyancy_approximation(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def apply_swirl_forces(
-    swirl_config,
-    i,
-    j,
-    k,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-):
+    swirl_config: Any,
+    i: int,
+    j: int,
+    k: int,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+) -> Any:
+    """
+    Apply swirl forces.
+    """
     Fx = 0.0
     Fy = 0.0
     Fz = 0.0
@@ -137,16 +123,19 @@ def apply_swirl_forces(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def apply_turbulence_forces(
-    turbulence_config,
-    i,
-    j,
-    k,
-    delta,
-    origin_x,
-    origin_y,
-    origin_z,
-    t,
-):
+    turbulence_config: Any,
+    i: int,
+    j: int,
+    k: int,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    t: float,
+) -> Any:
+    """
+    Apply turbulence forces.
+    """
     Fx = 0.0
     Fy = 0.0
     Fz = 0.0

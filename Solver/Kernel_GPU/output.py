@@ -1,3 +1,5 @@
+from typing import Any
+
 import json
 import os
 import select
@@ -11,7 +13,10 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
 # ------------setup------------------
-def setup_output(simulations, shape, tile_shape):
+def setup_output(simulations: dict[str, Any], shape: tuple[int, int, int], tile_shape: tuple[int, int, int]) -> Any:
+    """
+    Setup output.
+    """
     output_cfg = simulations["outputs"][0]
     output_fields = output_cfg["fields"]
     output_list = get_enabled_output_names(output_fields)
@@ -48,7 +53,10 @@ def setup_output(simulations, shape, tile_shape):
     return shared_memory_blocks, writer_state
 
 
-def grow_writer_slots(writer_state, prewarm=False):
+def grow_writer_slots(writer_state: Any, prewarm: bool=False) -> Any:
+    """
+    Grow writer slots.
+    """
     writer_slots = writer_state["slots"]
 
     if len(writer_slots) >= writer_state["max_count"]:
@@ -62,7 +70,10 @@ def grow_writer_slots(writer_state, prewarm=False):
     return slot
 
 
-def create_writer_slot(writer_context, prewarm=False):
+def create_writer_slot(writer_context: Any, prewarm: bool=False) -> Any:
+    """
+    Create writer slot.
+    """
     output_cfg = writer_context["output_cfg"]
     output_list = writer_context["output_list"]
     shape = writer_context["shape"]
@@ -163,7 +174,7 @@ def create_writer_slot(writer_context, prewarm=False):
     }
 
 
-def get_enabled_output_names(output_fields):
+def get_enabled_output_names(output_fields: dict[str, Any]) -> Any:
     """
     Return only output field names that are explicitly enabled in the config.
     """
@@ -180,16 +191,19 @@ def get_enabled_output_names(output_fields):
 
 # ------------enqueue------------------
 def enqueue_device_output(
-    simulations,
-    writer_state,
-    sim_fields,
-    tile_map,
-    tile_size,
-    active_tile_count,
-    used_tile_count,
-    output_index,
-    t,
-):
+    simulations: dict[str, Any],
+    writer_state: Any,
+    sim_fields: Any,
+    tile_map: Any,
+    tile_size: Any,
+    active_tile_count: int,
+    used_tile_count: int,
+    output_index: int,
+    t: float,
+) -> None:
+    """
+    Enqueue device output.
+    """
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
     frame_start = simulations.get("settings").get("start_frame")
     outpath = output_cfg.get("output_path")
@@ -238,7 +252,10 @@ def enqueue_device_output(
     slot["busy"] = True
 
 
-def get_writer_slot(writer_state, output_index):
+def get_writer_slot(writer_state: Any, output_index: int) -> Any:
+    """
+    Get writer slot.
+    """
     writer_slots = writer_state["slots"]
 
     busy_slots = [slot for slot in writer_slots if slot["busy"]]
@@ -287,10 +304,13 @@ def get_writer_slot(writer_state, output_index):
 
 @numba.njit(cache=True, nogil=True)
 def write_metadata(
-    tile_map_host,
-    active_tile_meta_array,
-    tile_size,
-):
+    tile_map_host: Any,
+    active_tile_meta_array: Any,
+    tile_size: Any,
+) -> None:
+    """
+    Write metadata.
+    """
     dim_x = tile_map_host.shape[0]
     dim_y = tile_map_host.shape[1]
     dim_z = tile_map_host.shape[2]
@@ -316,16 +336,19 @@ def write_metadata(
 
 
 def create_writer_payload(
-    fields,
-    tile_map,
-    active_tiles,
-    output_list,
-    output_path,
-    time_value,
-    tile_size,
-    active_tile_count,
-    used_tile_count,
-):
+    fields: Any,
+    tile_map: Any,
+    active_tiles: Any,
+    output_list: Any,
+    output_path: Any,
+    time_value: float,
+    tile_size: Any,
+    active_tile_count: int,
+    used_tile_count: int,
+) -> Any:
+    """
+    Create writer payload.
+    """
     payload = {
         "output_path": output_path,
         "time": float(time_value),
@@ -361,7 +384,10 @@ def create_writer_payload(
     return payload
 
 
-def shutdown_output(shared_memory_blocks, writer_state):
+def shutdown_output(shared_memory_blocks: Any, writer_state: Any) -> None:
+    """
+    Shutdown output.
+    """
     writer_slots = writer_state["slots"]
 
     for slot in writer_slots:

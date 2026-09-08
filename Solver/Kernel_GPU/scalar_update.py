@@ -1,3 +1,5 @@
+from typing import Any
+
 from numba import cuda
 
 import Solver.Kernel_GPU.advection_schemes as advection_schemes
@@ -7,28 +9,35 @@ import Solver.Kernel_GPU.noise as noise
 
 @cuda.jit(cache=True)
 def predict_scalar_fields_semi_lagrangian(
-    T,
-    smoke,
-    fuel,
-    u,
-    v,
-    w,
-    dt,
-    predictor_T,
-    predictor_smoke,
-    predictor_fuel,
-    delta,
-    t_reference,
-    tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
-    """
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    u: Any,
+    v: Any,
+    w: Any,
+    dt: float,
+    predictor_T: Any,
+    predictor_smoke: Any,
+    predictor_fuel: Any,
+    delta: float,
+    t_reference: float,
+    tile_map: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
     Build the semi-Lagrangian predictor state for the scalar update.
+
+    Each scalar :math:`\phi` is sampled at the backtraced departure point:
+
+    .. math::
+
+        \phi^{*}(\mathbf{x}) =
+        \phi^n\!\left(\mathbf{x} - \Delta t\,\mathbf{u}(\mathbf{x})\right).
     """
     (
         tile_i,
@@ -89,41 +98,51 @@ def predict_scalar_fields_semi_lagrangian(
 
 @cuda.jit(cache=True)
 def update_scalar_fields_maccormack(
-    T,
-    smoke,
-    fuel,
-    predictor_T,
-    predictor_smoke,
-    predictor_fuel,
-    u,
-    v,
-    w,
-    dt,
-    T_out,
-    smoke_out,
-    fuel_out,
-    flame_out,
-    delta,
-    temperature_dissipation_rate,
-    temperature_production_rate,
-    smoke_dissipation_rate,
-    smoke_production_rate,
-    fuel_dissipation_rate,
-    fuel_burn_rate,
-    fuel_ignition_temperature,
-    burn_noise_scale,
-    burn_noise_amplitude,
-    t_reference,
-    tile_map,
-    u_initial,
-    v_initial,
-    w_initial,
-    nx,
-    ny,
-    nz,
-):
-    """
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    predictor_T: Any,
+    predictor_smoke: Any,
+    predictor_fuel: Any,
+    u: Any,
+    v: Any,
+    w: Any,
+    dt: float,
+    T_out: Any,
+    smoke_out: Any,
+    fuel_out: Any,
+    flame_out: Any,
+    delta: float,
+    temperature_dissipation_rate: float,
+    temperature_production_rate: float,
+    smoke_dissipation_rate: float,
+    smoke_production_rate: float,
+    fuel_dissipation_rate: float,
+    fuel_burn_rate: float,
+    fuel_ignition_temperature: Any,
+    burn_noise_scale: float,
+    burn_noise_amplitude: Any,
+    t_reference: float,
+    tile_map: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
     Update scalars with a MacCormack-corrected semi-Lagrangian advection step.
+
+    A reverse advection estimates the predictor error and applies
+
+    .. math::
+
+        \phi^{n+1} = \phi^{*}
+        + \frac{1}{2}\left(\phi^n - \widehat{\phi}^n\right).
+
+    The corrected value is clamped to local source extrema before dissipation,
+    production, and combustion terms are applied.
     """
     (
         tile_i,
