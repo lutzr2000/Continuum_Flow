@@ -419,8 +419,8 @@ def solver(
     with timings.section("solver", "output.setup_output", gpu=True):
         shared_memory_blocks, writer_slots = output.setup_output(
             simulation,
-            bake_path,
             shape,
+            tile_shape,
         )
 
     # ------------time loop------------------

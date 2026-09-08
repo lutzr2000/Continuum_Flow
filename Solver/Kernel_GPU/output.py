@@ -9,26 +9,161 @@ import numpy as np
 
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
-GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
+
+# ------------setup------------------
+def setup_output(simulations, shape, tile_shape):
+    output_cfg = simulations["outputs"][0]
+    output_fields = output_cfg["fields"]
+    output_list = get_enabled_output_names(output_fields)
+
+    writer_count = int(
+        output_cfg.get("host_vdb_writer", {}).get(
+            "process_count",
+            ((output_cfg.get("performance") or {}).get("writer_processes", 1)),
+        )
+    )
+    max_writer_count = int(
+        output_cfg.get("host_vdb_writer", {}).get("max_process_count", writer_count)
+    )
+
+    shared_memory_blocks = []
+
+    writer_context = {
+        "output_cfg": output_cfg,
+        "output_list": output_list,
+        "shape": tuple(shape),
+        "tile_shape": tuple(tile_shape),
+        "shared_memory_blocks": shared_memory_blocks,
+    }
+
+    writer_state = {
+        "slots": [],
+        "max_count": max(writer_count, max_writer_count),
+        "context": writer_context,
+    }
+
+    for _ in range(writer_count):
+        grow_writer_slots(writer_state)
+
+    return shared_memory_blocks, writer_state
 
 
-class _WriterSlots(list):
-    """Writer slots which can grow when all current writers are occupied."""
+def grow_writer_slots(writer_state, prewarm=False):
+    writer_slots = writer_state["slots"]
 
-    def __init__(self, max_count, create_slot):
-        super().__init__()
-        self.max_count = int(max_count)
-        self.create_slot = create_slot
+    if len(writer_slots) >= writer_state["max_count"]:
+        return None
 
-    def grow(self, prewarm=False):
-        if len(self) >= self.max_count:
-            return None
-        slot = self.create_slot(prewarm=prewarm)
-        self.append(slot)
-        return slot
+    slot = create_writer_slot(
+        writer_state["context"],
+        prewarm=prewarm,
+    )
+    writer_slots.append(slot)
+    return slot
 
 
-def _enabled_output_field_names(output_fields):
+def create_writer_slot(writer_context, prewarm=False):
+    output_cfg = writer_context["output_cfg"]
+    output_list = writer_context["output_list"]
+    shape = writer_context["shape"]
+
+    tile_shape = writer_context["tile_shape"]
+    shared_memory_blocks = writer_context["shared_memory_blocks"]
+
+    active_tile_count_max = int(np.prod(tile_shape))
+    tile_map_nbytes = int(active_tile_count_max * np.dtype(np.int32).itemsize)
+    active_tile_meta_shape = (active_tile_count_max, 4)
+    active_tile_meta_nbytes = int(
+        np.prod(active_tile_meta_shape) * np.dtype(np.int32).itemsize
+    )
+
+    sparse_pool_shape = (
+        int(np.prod(tile_shape)),
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
+        kernel_config.TILE_SIZE,
+    )
+
+    sparse_pool_nbytes = int(
+        int(np.prod(sparse_pool_shape))
+        * np.dtype(kernel_config.GPU_FIELD_DTYPE).itemsize
+    )
+
+    fields = {}
+
+    tile_map_shm = shared_memory.SharedMemory(
+        create=True,
+        size=tile_map_nbytes,
+    )
+    shared_memory_blocks.append(tile_map_shm)
+    tile_map_array = np.ndarray(
+        tile_shape,
+        dtype=np.int32,
+        buffer=tile_map_shm.buf,
+    )
+    tile_map_array.fill(-1)
+
+    active_tile_meta_shm = shared_memory.SharedMemory(
+        create=True,
+        size=active_tile_meta_nbytes,
+    )
+    shared_memory_blocks.append(active_tile_meta_shm)
+    active_tile_meta_array = np.ndarray(
+        active_tile_meta_shape,
+        dtype=np.int32,
+        buffer=active_tile_meta_shm.buf,
+    )
+    active_tile_meta_array.fill(0)
+
+    for variable_name in output_list:
+        shm = shared_memory.SharedMemory(
+            create=True,
+            size=sparse_pool_nbytes,
+        )
+        shared_memory_blocks.append(shm)
+
+        fields[variable_name] = {
+            "array": np.ndarray(
+                sparse_pool_shape,
+                dtype=kernel_config.GPU_FIELD_DTYPE,
+                buffer=shm.buf,
+            ),
+            "dense_shape": shape,
+            "pool_shape": sparse_pool_shape,
+            "shm_name": shm.name,
+        }
+
+    writer_socket = socket.create_connection(
+        (
+            output_cfg["host_vdb_writer"]["host"],
+            int(output_cfg["host_vdb_writer"]["port"]),
+        )
+    )
+    writer_file = writer_socket.makefile("rwb")
+    if prewarm:
+        writer_file.write(b"__WARMUP__\n")
+        writer_file.flush()
+        writer_file.readline()
+
+    return {
+        "fields": fields,
+        "tile_map": {
+            "array": tile_map_array,
+            "shape": tile_shape,
+            "shm_name": tile_map_shm.name,
+        },
+        "active_tiles": {
+            "array": active_tile_meta_array,
+            "shape": active_tile_meta_shape,
+            "shm_name": active_tile_meta_shm.name,
+        },
+        "socket": writer_socket,
+        "file": writer_file,
+        "busy": False,
+    }
+
+
+def get_enabled_output_names(output_fields):
     """
     Return only output field names that are explicitly enabled in the config.
     """
@@ -43,199 +178,115 @@ def _enabled_output_field_names(output_fields):
     return enabled_fields
 
 
-def _tile_shape_for_dense_shape(shape):
-    tile_size = int(kernel_config.TILE_SIZE)
-    return tuple((int(axis_size) + tile_size - 1) // tile_size for axis_size in shape)
-
-
-def _sparse_pool_shape_for_dense_shape(shape):
-    tile_shape = _tile_shape_for_dense_shape(shape)
-    tile_size = int(kernel_config.TILE_SIZE)
-    return (
-        int(np.prod(tile_shape)),
-        tile_size,
-        tile_size,
-        tile_size,
-    )
-
-
-def setup_output(simulations, outpath, shape):
-    os.makedirs(outpath, exist_ok=True)
-
-    output_cfg = simulations["outputs"][0]
+# ------------enqueue------------------
+def enqueue_device_output(
+    simulations,
+    writer_state,
+    sim_fields,
+    tile_map,
+    tile_size,
+    active_tile_count,
+    used_tile_count,
+    output_index,
+    t,
+):
+    output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
+    frame_start = simulations.get("settings").get("start_frame")
+    outpath = output_cfg.get("output_path")
     output_fields = output_cfg["fields"]
-    output_list = _enabled_output_field_names(output_fields)
+    output_list = get_enabled_output_names(output_fields)
 
-    writer_count = int(
-        output_cfg.get("host_vdb_writer", {}).get(
-            "process_count",
-            ((output_cfg.get("performance") or {}).get("writer_processes", 1)),
-        )
-    )
-    max_writer_count = int(
-        output_cfg.get("host_vdb_writer", {}).get("max_process_count", writer_count)
-    )
+    slot = get_writer_slot(writer_state, output_index)
+    fields = slot["fields"]
+    tile_map_slot = slot["tile_map"]
+    active_tiles_slot = slot["active_tiles"]
 
-    shared_memory_blocks = []
-    writer_slots = None
+    tile_map.copy_to_host(tile_map_slot["array"])
+    tile_map_host = tile_map_slot["array"]
+    max_slot_index = int(tile_map_host.max())
+    used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
 
-    tile_shape = _tile_shape_for_dense_shape(shape)
-    sparse_pool_shape = _sparse_pool_shape_for_dense_shape(shape)
-
-    tile_map_dtype = np.int32
-    tile_map_nbytes = int(np.prod(tile_shape)) * np.dtype(tile_map_dtype).itemsize
-
-    active_tile_meta_shape = (int(np.prod(tile_shape)), 4)
-    active_tile_meta_dtype = np.int32
-    active_tile_meta_nbytes = (
-        int(np.prod(active_tile_meta_shape))
-        * np.dtype(active_tile_meta_dtype).itemsize
+    write_metadata(
+        tile_map_host,
+        active_tiles_slot["array"],
+        int(tile_size),
     )
 
-    sparse_pool_dtype = GPU_FIELD_DTYPE
-    sparse_pool_nbytes = (
-        int(np.prod(sparse_pool_shape)) * np.dtype(sparse_pool_dtype).itemsize
-    )
-
-    def create_writer_slot(prewarm=False):
-        fields = {}
-
-        tile_map_shm = shared_memory.SharedMemory(
-            create=True,
-            size=tile_map_nbytes,
-        )
-        shared_memory_blocks.append(tile_map_shm)
-        tile_map_array = np.ndarray(
-            tile_shape,
-            dtype=tile_map_dtype,
-            buffer=tile_map_shm.buf,
-        )
-        tile_map_array.fill(-1)
-
-        active_tile_meta_shm = shared_memory.SharedMemory(
-            create=True,
-            size=active_tile_meta_nbytes,
-        )
-        shared_memory_blocks.append(active_tile_meta_shm)
-        active_tile_meta_array = np.ndarray(
-            active_tile_meta_shape,
-            dtype=active_tile_meta_dtype,
-            buffer=active_tile_meta_shm.buf,
-        )
-        active_tile_meta_array.fill(0)
-
+    if used_tile_count > 0:
         for variable_name in output_list:
-            shm = shared_memory.SharedMemory(
-                create=True,
-                size=sparse_pool_nbytes,
+            sim_fields[variable_name][:used_tile_count].copy_to_host(
+                fields[variable_name]["array"][:used_tile_count]
             )
-            shared_memory_blocks.append(shm)
 
-            fields[variable_name] = {
-                "array": np.ndarray(
-                    sparse_pool_shape,
-                    dtype=sparse_pool_dtype,
-                    buffer=shm.buf,
-                ),
-                "dense_shape": tuple(shape),
-                "pool_shape": sparse_pool_shape,
-                "shm_name": shm.name,
-            }
+    frame_idx = int(frame_start) + int(output_index)
+    output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
 
-        writer_socket = socket.create_connection(
-            (
-                output_cfg["host_vdb_writer"]["host"],
-                int(output_cfg["host_vdb_writer"]["port"]),
-            )
+    writer_payload = create_writer_payload(
+        fields,
+        tile_map_slot,
+        active_tiles_slot,
+        output_list,
+        output_path,
+        t,
+        int(tile_size),
+        active_tile_count,
+        used_tile_count,
+    )
+
+    slot["file"].write((json.dumps(writer_payload) + "\n").encode("utf-8"))
+    slot["file"].flush()
+    slot["busy"] = True
+
+
+def get_writer_slot(writer_state, output_index):
+    writer_slots = writer_state["slots"]
+
+    busy_slots = [slot for slot in writer_slots if slot["busy"]]
+
+    if busy_slots:
+        ready_sockets, _, _ = select.select(
+            [slot["socket"] for slot in busy_slots],
+            [],
+            [],
+            0.0,
         )
-        writer_file = writer_socket.makefile("rwb")
-        if prewarm:
-            writer_file.write(b"__WARMUP__\n")
-            writer_file.flush()
-            _wait_for_writer_ack(writer_file)
 
-        return {
-            "fields": fields,
-            "tile_map": {
-                "array": tile_map_array,
-                "shape": tile_shape,
-                "shm_name": tile_map_shm.name,
-            },
-            "active_tiles": {
-                "array": active_tile_meta_array,
-                "shape": active_tile_meta_shape,
-                "shm_name": active_tile_meta_shm.name,
-            },
-            "socket": writer_socket,
-            "file": writer_file,
-            "busy": False,
-        }
+        if ready_sockets:
+            ready_socket_ids = {id(sock) for sock in ready_sockets}
 
-    writer_slots = _WriterSlots(max(writer_count, max_writer_count), create_writer_slot)
-    for _slot_index in range(writer_count):
-        writer_slots.grow()
-
-    return shared_memory_blocks, writer_slots
-
-
-def _get_writer_slot(writer_slots, output_index):
-    _drain_ready_writer_acks(writer_slots)
+            for slot in busy_slots:
+                if id(slot["socket"]) in ready_socket_ids:
+                    slot["file"].readline()
+                    slot["busy"] = False
 
     free_slot_count = sum(not slot["busy"] for slot in writer_slots)
-    if free_slot_count <= 1 and hasattr(writer_slots, "grow"):
-        writer_slots.grow(prewarm=True)
+
+    if free_slot_count <= 1:
+        grow_writer_slots(writer_state, prewarm=True)
 
     slot_count = len(writer_slots)
-    start = int(output_index) % slot_count
+    start = output_index % slot_count
 
     for offset in range(slot_count):
         slot = writer_slots[(start + offset) % slot_count]
+
         if not slot["busy"]:
             return slot
 
-    if hasattr(writer_slots, "grow"):
-        new_slot = writer_slots.grow(prewarm=True)
-        if new_slot is not None:
-            return new_slot
+    new_slot = grow_writer_slots(writer_state, prewarm=True)
+
+    if new_slot is not None:
+        return new_slot
 
     slot = writer_slots[start]
-    _wait_for_writer_ack(slot["file"])
+    slot["file"].readline()
     slot["busy"] = False
+
     return slot
 
 
-def _drain_ready_writer_acks(writer_slots):
-    busy_slots = [slot for slot in writer_slots if slot["busy"]]
-    if not busy_slots:
-        return
-
-    ready_sockets, _, _ = select.select(
-        [slot["socket"] for slot in busy_slots],
-        [],
-        [],
-        0.0,
-    )
-    if not ready_sockets:
-        return
-
-    ready_socket_ids = {id(sock) for sock in ready_sockets}
-    for slot in busy_slots:
-        if id(slot["socket"]) not in ready_socket_ids:
-            continue
-
-        _wait_for_writer_ack(slot["file"])
-        slot["busy"] = False
-
-
-def _copy_sparse_field_to_shared_memory(field_data, shared_array, used_tile_count):
-    if used_tile_count <= 0:
-        return
-
-    field_data[:used_tile_count].copy_to_host(shared_array[:used_tile_count])
-
-
 @numba.njit(cache=True, nogil=True)
-def _populate_active_tile_metadata(
+def write_metadata(
     tile_map_host,
     active_tile_meta_array,
     tile_size,
@@ -262,72 +313,6 @@ def _populate_active_tile_metadata(
                     active_tile_meta_array[active_idx, 3] = z * tile_size
 
                     active_idx += 1
-
-
-def enqueue_device_output(
-    simulations,
-    writer_slots,
-    sim_fields,
-    tile_map,
-    tile_size,
-    active_tile_count,
-    used_tile_count,
-    output_index,
-    t,
-):
-    output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
-    frame_start = simulations.get("settings").get("start_frame")
-    outpath = output_cfg.get("output_path")
-    output_fields = output_cfg["fields"]
-    output_list = _enabled_output_field_names(output_fields)
-
-    slot = _get_writer_slot(writer_slots, output_index)
-    fields = slot["fields"]
-    tile_map_slot = slot["tile_map"]
-    active_tiles_slot = slot["active_tiles"]
-
-    tile_map.copy_to_host(tile_map_slot["array"])
-    tile_map_host = tile_map_slot["array"]
-    max_slot_index = int(tile_map_host.max())
-    used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
-
-    _populate_active_tile_metadata(
-        tile_map_host,
-        active_tiles_slot["array"],
-        int(tile_size),
-    )
-
-    for variable_name in output_list:
-        _copy_sparse_field_to_shared_memory(
-            sim_fields[variable_name],
-            fields[variable_name]["array"],
-            used_tile_count,
-        )
-
-    frame_idx = int(frame_start) + int(output_index)
-    output_path = os.path.join(outpath, f"frame_{frame_idx:06d}.vdb")
-
-    writer_payload = create_writer_payload(
-        fields,
-        tile_map_slot,
-        active_tiles_slot,
-        output_list,
-        output_path,
-        t,
-        int(tile_size),
-        active_tile_count,
-        used_tile_count,
-    )
-
-    _send_payload_without_wait(slot["file"], writer_payload)
-    slot["busy"] = True
-
-
-def _vdb_grid_name(field_name):
-    """
-    Map internal solver field names to their exported VDB grid names.
-    """
-    return "density" if field_name == "smoke" else field_name
 
 
 def create_writer_payload(
@@ -359,7 +344,7 @@ def create_writer_payload(
     for field_name in output_list:
         payload["grids"].append(
             {
-                "name": _vdb_grid_name(field_name),
+                "name": "density" if field_name == "smoke" else field_name,
                 "layout": "sparse_tiles",
                 "dense_shape": fields[field_name]["dense_shape"],
                 "tile_size": int(tile_size),
@@ -376,25 +361,12 @@ def create_writer_payload(
     return payload
 
 
-def _send_payload_without_wait(writer_file, writer_payload):
-    writer_file.write((json.dumps(writer_payload) + "\n").encode("utf-8"))
-    writer_file.flush()
+def shutdown_output(shared_memory_blocks, writer_state):
+    writer_slots = writer_state["slots"]
 
-
-def _wait_for_writer_ack(writer_file):
-    response_line = writer_file.readline()
-    if not response_line:
-        raise RuntimeError("host VDB writer closed the connection")
-
-    response = json.loads(response_line.decode("utf-8"))
-    if response.get("status") != "ok":
-        raise RuntimeError(f"Host VDB writer error: {response!r}")
-
-
-def shutdown_output(shared_memory_blocks, writer_slots):
     for slot in writer_slots:
         if slot["busy"]:
-            _wait_for_writer_ack(slot["file"])
+            slot["file"].readline()
             slot["busy"] = False
 
     for slot in writer_slots:
