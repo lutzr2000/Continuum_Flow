@@ -47,7 +47,11 @@ def voxelise_all_meshes(delta: float, mesh_objects: Any, bake_path: str) -> Any:
 
 def voxelize_triangles(triangles: Any, delta: float) -> Any:
     """
-    Voxelize triangles.
+    Rasterize triangle surfaces into a padded object-local Boolean voxel mask.
+
+    Mesh bounds determine the grid origin and dimensions. Triangle data and an
+    initially empty mask are transferred to the GPU, where ``surface`` marks
+    cells whose centers lie within half a cell of a triangle.
     """
     if triangles.size == 0:
         return None
@@ -115,7 +119,11 @@ def surface(
     oz: Any,
 ) -> None:
     """
-    Surface.
+    Mark voxel cells intersecting any triangle of the input surface mesh.
+
+    Axis-aligned triangle bounds reject distant cells first. Remaining cells
+    are projected onto the triangle plane and tested with barycentric
+    coordinates, including a half-cell distance tolerance.
     """
     i, j, k = cuda.grid(3)
 

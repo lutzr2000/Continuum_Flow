@@ -19,7 +19,10 @@ def update_source_tile_mask(
     origin: tuple[int, int, int],
 ) -> None:
     """
-    Update source tile mask.
+    Rebuild the coarse tile-activity mask from all transformed source bounds.
+
+    Each source mesh's animated world-space bounds are converted to clamped
+    grid-tile bounds, then the enclosed tile range is marked on the GPU.
     """
     source_tile_mask.copy_to_device(np.zeros(source_tile_mask.shape, dtype=np.bool_))
 
@@ -95,7 +98,7 @@ def mark_source_tiles(
     offset_k: Any,
 ) -> None:
     """
-    Mark source tiles.
+    Mark one offset CUDA launch region as occupied by source geometry.
     """
     i, j, k = cuda.grid(3)
 
@@ -113,7 +116,11 @@ def mark_source_tiles(
 
 def prepare_matrix_data(mesh_object: Any) -> Any:
     """
-    Prepare matrix data.
+    Normalize transform-animation samples and precompute per-interval rates.
+
+    Missing timelines and matrices fall back to a single identity transform.
+    Samples are truncated to their shared length; positive-duration intervals
+    receive element-wise matrix rates for later interpolation.
     """
     animation = mesh_object.get("transform_animation") or {}
 
@@ -157,7 +164,11 @@ def prepare_matrix_data(mesh_object: Any) -> Any:
 
 def get_matrix_data(times: Any, matrices: Any, rates: Any, time_value: float) -> Any:
     """
-    Get matrix data.
+    Interpolate a world matrix and return its current element-wise rate.
+
+    Within an animation interval, the transform is evaluated linearly between
+    its two surrounding samples. Times outside the sampled range clamp to the
+    first or last interval.
     """
     n = matrices.shape[0]
 
@@ -207,7 +218,11 @@ def get_tile_bounds(
     tile_grid_shape: Any,
 ) -> Any:
     """
-    Get tile bounds.
+    Transform local voxel bounds and convert them into clamped tile bounds.
+
+    Absolute linear-transform coefficients provide a conservative world-space
+    axis-aligned extent, which is mapped through cell coordinates to the sparse
+    tile grid.
     """
     tile_size = kernel_config.TILE_SIZE
 
@@ -273,7 +288,10 @@ def prepare_cell_transform(
     local_origin: Any,
 ) -> Any:
     """
-    Prepare cell transform.
+    Pack an inverse world transform for repeated grid-cell evaluation.
+
+    The coefficients map world-grid indices directly into the voxel mask's
+    local cell coordinates, avoiding matrix operations inside CUDA kernels.
     """
     inv_delta = np.float32(1.0 / delta)
 
@@ -351,7 +369,11 @@ def update_source_masks(
     tile_map: Any,
 ) -> None:
     """
-    Update source masks.
+    Voxelize transformed source meshes into their sparse GPU masks.
+
+    Static sources may be skipped after the initial update. Animated transforms
+    are interpolated, inverted, reduced to affected tile bounds, and passed to
+    the GPU mask kernel for union into each source field.
     """
     for source_idx, (source_mask, base_masks) in enumerate(
         zip(
@@ -480,7 +502,10 @@ def update_obstacle_mask(
     velocity_z: Any,
 ) -> None:
     """
-    Update obstacle mask.
+    Rebuild the sparse obstacle mask from all transformed obstacle meshes.
+
+    The mask is cleared before each update, then every mesh is evaluated over
+    conservative tile bounds and unioned into the device field.
     """
     obstacle_mask[:] = False
 
@@ -670,7 +695,11 @@ def update_source_masks_gpu(
     offset_k: Any,
 ) -> None:
     """
-    Update source masks gpu.
+    Sample one transformed voxel mask and union occupied cells into a source mask.
+
+    Cell centers are mapped into local voxel coordinates. Optional transform
+    rates expand occupancy along the cell's motion path during ``dt`` so moving
+    sources do not leave temporal gaps.
     """
     ti = cuda.blockIdx.x + offset_i
     tj = cuda.blockIdx.y + offset_j
@@ -765,7 +794,10 @@ def update_obstacle_mask_gpu(
     offset_k: Any,
 ) -> None:
     """
-    Update obstacle mask gpu.
+    Sample one transformed voxel mask into the obstacle field.
+
+    Like the source kernel, motion over ``dt`` is considered when transform
+    rates are available, producing a conservative swept obstacle mask.
     """
     ti = cuda.blockIdx.x + offset_i
     tj = cuda.blockIdx.y + offset_j

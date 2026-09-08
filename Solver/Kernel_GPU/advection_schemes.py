@@ -44,7 +44,10 @@ def _sample_cell_extrema_inner_sparse(
     field: Any, tile_map: Any, x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, default_value: float
 ) -> tuple[float, float]:
     """
-    Sample cell extrema inner sparse.
+    Find the minimum and maximum among eight surrounding sparse-grid samples.
+
+    These bounds constrain MacCormack corrections so the higher-order update
+    cannot introduce values outside the local source-field range.
     """
     c000 = sparse_managment.get_pool_value(field, tile_map, x0, y0, z0, default_value)
     c100 = sparse_managment.get_pool_value(field, tile_map, x1, y0, z0, default_value)
@@ -83,7 +86,10 @@ def _sample_trilinear_vec3_sparse(
     default_z: Any,
 ) -> tuple[float, float, float]:
     """
-    Sample trilinear vec3 sparse.
+    Trilinearly sample three sparse fields at the same clamped position.
+
+    The shared coordinates and interpolation weights are computed once, then
+    applied independently to each component and its background value.
     """
     x0, y0, z0, x1, y1, z1, tx, ty, tz = _prepare_trilinear_coords(x, y, z, nx, ny, nz)
 

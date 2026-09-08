@@ -21,7 +21,10 @@ SIDE_TO_AXIS_AND_INDEX = {
 
 def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
     """
-    Convert bc config format.
+    Normalize user-facing domain boundary settings for CUDA kernel dispatch.
+
+    Text boundary modes are converted to compact integer codes, velocity
+    components become floats, and optional temperature aliases are preserved.
     """
     converted = {}
     type_map = {
@@ -59,8 +62,16 @@ def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
 
 @cuda.jit(cache=True)
 def pressure_poisson_apply_neumann_bcs(p: Any, tile_map: Any, nx: int, ny: int, nz: int) -> None:
-    """
-    Pressure poisson apply neumann bcs.
+    r"""
+    Apply homogeneous Neumann pressure conditions to the sparse domain faces.
+
+    Zero normal derivative is enforced by copying the adjacent interior value
+    onto each boundary cell:
+
+    .. math::
+
+        \frac{\partial p}{\partial n}=0
+        \quad\Longrightarrow\quad p_{\partial\Omega}=p_{\mathrm{adjacent}}.
     """
     i, j, k = cuda.grid(3)
 
@@ -105,8 +116,11 @@ def pressure_poisson_apply_neumann_bcs(p: Any, tile_map: Any, nx: int, ny: int, 
 
 @cuda.jit(cache=True)
 def pressure_poisson_apply_neumann_bcs_dense(p: Any) -> None:
-    """
-    Pressure poisson apply neumann bcs dense.
+    r"""
+    Apply homogeneous Neumann pressure conditions to a dense multigrid level.
+
+    Each boundary value is copied from its adjacent interior cell, enforcing
+    :math:`\partial p/\partial n = 0` on all six faces.
     """
     i, j, k = cuda.grid(3)
 

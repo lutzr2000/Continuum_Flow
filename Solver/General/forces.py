@@ -4,7 +4,9 @@ import numpy as np
 
 def _get_animation_times(container: Any) -> Any:
     """
-    Get animation times.
+    Read the shared animation sample times from a simulation container.
+
+    An empty tuple is returned when no animation timeline is configured.
     """
     timeline = container.get("animation_timeline") or {}
     return timeline.get("times") or ()
@@ -12,7 +14,11 @@ def _get_animation_times(container: Any) -> Any:
 
 def get_animated_node_value(node: Any, var_name: str, t: float, default: Any=0.0, animation_times: Any=()) -> Any:
     """
-    Get animated node value.
+    Resolve a node property at the animation sample nearest to ``t``.
+
+    Static node data provides the fallback. Animation values are considered
+    only where both a time and a value sample exist, and ``None`` resolves to
+    the supplied default.
     """
     value = node.get(var_name, default)
 
@@ -33,7 +39,10 @@ def get_animated_node_value(node: Any, var_name: str, t: float, default: Any=0.0
 
 def constant_force(simulation: dict[str, Any], t: float) -> Any:
     """
-    Constant force.
+    Sum all configured constant-force nodes at simulation time ``t``.
+
+    Animated force components are sampled individually and accumulated into a
+    single x-, y-, and z-force vector.
     """
     fx = 0.0
     fy = 0.0
@@ -53,7 +62,10 @@ def constant_force(simulation: dict[str, Any], t: float) -> Any:
 
 def swirl_force(simulation: dict[str, Any], t: float) -> Any:
     """
-    Swirl force.
+    Pack active swirl-force nodes into the GPU input layout.
+
+    Each row stores strength, world-space origin, normalized-axis input, and
+    radius. The accompanying Boolean indicates whether any swirl nodes exist.
     """
     swirl_nodes = []
     animation_times = _get_animation_times(simulation)
@@ -84,7 +96,11 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
 
 def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
     """
-    Turbulence force.
+    Pack turbulence-force nodes into the GPU input layout.
+
+    Each row contains the time-resolved amplitude followed by spatial scale,
+    temporal frequency, and random seed. The accompanying Boolean indicates
+    whether the packed array contains any nodes.
     """
     turbulence_nodes = []
     animation_times = _get_animation_times(simulation)

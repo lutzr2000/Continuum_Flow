@@ -15,7 +15,10 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 # ------------setup------------------
 def setup_output(simulations: dict[str, Any], shape: tuple[int, int, int], tile_shape: tuple[int, int, int]) -> Any:
     """
-    Setup output.
+    Initialize asynchronous frame-output state and its first writer slots.
+
+    Enabled fields, grid dimensions, writer limits, and owned shared-memory
+    blocks are collected into the context returned to the simulation loop.
     """
     output_cfg = simulations["outputs"][0]
     output_fields = output_cfg["fields"]
@@ -55,7 +58,10 @@ def setup_output(simulations: dict[str, Any], shape: tuple[int, int, int], tile_
 
 def grow_writer_slots(writer_state: Any, prewarm: bool=False) -> Any:
     """
-    Grow writer slots.
+    Allocate and register one writer slot unless the configured limit is met.
+
+    Optional prewarming performs a round trip with the host VDB writer before
+    the slot is made available for frame data.
     """
     writer_slots = writer_state["slots"]
 
@@ -72,7 +78,11 @@ def grow_writer_slots(writer_state: Any, prewarm: bool=False) -> Any:
 
 def create_writer_slot(writer_context: Any, prewarm: bool=False) -> Any:
     """
-    Create writer slot.
+    Create shared-memory buffers and a host-writer connection for one slot.
+
+    The slot owns a tile map, active-tile metadata, one sparse pool per enabled
+    field, and a socket stream used to submit work and receive completion
+    acknowledgements.
     """
     output_cfg = writer_context["output_cfg"]
     output_list = writer_context["output_list"]
@@ -202,7 +212,11 @@ def enqueue_device_output(
     t: float,
 ) -> None:
     """
-    Enqueue device output.
+    Copy one sparse GPU frame into shared memory and enqueue it for VDB output.
+
+    A free writer slot is acquired, tile metadata and enabled field pools are
+    transferred to its shared buffers, and a JSON payload referencing those
+    buffers is sent to the host writer without waiting for file completion.
     """
     output_cfg = ((simulations.get("outputs") or [None])[0]) or {}
     frame_start = simulations.get("settings").get("start_frame")
@@ -254,7 +268,11 @@ def enqueue_device_output(
 
 def get_writer_slot(writer_state: Any, output_index: int) -> Any:
     """
-    Get writer slot.
+    Acquire a free output slot while growing or waiting only when necessary.
+
+    Completed sockets are polled first. The pool is expanded proactively when
+    capacity is low; once its maximum size is reached, the selected busy slot
+    is awaited before reuse.
     """
     writer_slots = writer_state["slots"]
 
@@ -309,7 +327,10 @@ def write_metadata(
     tile_size: Any,
 ) -> None:
     """
-    Write metadata.
+    Build compact metadata rows for every active sparse tile.
+
+    Each row stores the pool index followed by the tile's x-, y-, and z-cell
+    origins in the dense output grid.
     """
     dim_x = tile_map_host.shape[0]
     dim_y = tile_map_host.shape[1]
@@ -347,7 +368,10 @@ def create_writer_payload(
     used_tile_count: int,
 ) -> Any:
     """
-    Create writer payload.
+    Build the JSON-serializable description consumed by the host VDB writer.
+
+    Large arrays remain in shared memory; the payload contains their names,
+    shapes, sparse layout metadata, output path, and simulation time.
     """
     payload = {
         "output_path": output_path,
@@ -386,7 +410,10 @@ def create_writer_payload(
 
 def shutdown_output(shared_memory_blocks: Any, writer_state: Any) -> None:
     """
-    Shutdown output.
+    Finish pending writes and release all writer and shared-memory resources.
+
+    Busy slots are acknowledged before sockets are closed. Every shared-memory
+    block owned by the output subsystem is then closed and unlinked.
     """
     writer_slots = writer_state["slots"]
 

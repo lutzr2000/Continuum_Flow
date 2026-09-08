@@ -100,7 +100,10 @@ def rhs_sum_count_partial_kernel(
     nz: int,
 ) -> None:
     """
-    Rhs sum count partial kernel.
+    Reduce active interior right-hand-side values into per-block sums and counts.
+
+    Grid-stride iteration gathers sparse cells, while shared-memory reductions
+    produce the two partial values later used to compute the global mean.
     """
     interior_nx = nx - 2
     interior_ny = ny - 2
@@ -362,7 +365,7 @@ def subtract_rhs_mean_kernel(
 @cuda.jit(cache=True)
 def reset_inactive_pressure(p: Any, tile_map: Any, nx: int, ny: int, nz: int) -> None:
     """
-    Reset inactive pressure.
+    Clear pressure values belonging to inactive or out-of-domain sparse cells.
     """
     (
         tile_i,
@@ -518,8 +521,18 @@ def add_artifical_divergence(
     ny: int,
     nz: int,
 ) -> None:
-    """
-    Add artifical divergence.
+    r"""
+    Add thermal expansion and source pressure to the Poisson right-hand side.
+
+    The correction subtracted from ``b`` is
+
+    .. math::
+
+        \frac{\rho}{\Delta x}\left[
+            \alpha(T-T_{\mathrm{ref}}) + p_{\mathrm{source}}
+        \right],
+
+    with optional procedural-noise modulation of the source term.
     """
     (
         tile_i,

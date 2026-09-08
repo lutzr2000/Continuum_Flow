@@ -13,15 +13,28 @@ import platform
 
 def emit_message(message: Any) -> None:
     """
-    Emit message.
+    Serialize one worker-protocol message as JSON and write it to stdout.
+
+    The real process stdout is used so messages remain available even while
+    solver output is redirected through ``_JsonLogStream``. Flushing after
+    every line lets the parent process receive progress events immediately.
     """
     sys.__stdout__.write(json.dumps(message) + "\n")
     sys.__stdout__.flush()
 
 
-def main(config: dict[str, Any]) -> Any:
+def main(config: dict[str, Any]) -> None:
     """
-    Main.
+    Configure the runtime environment and execute the requested solver backend.
+
+    Parent-process import paths from the job metadata are prepended to
+    ``sys.path`` before CUDA runtime libraries are discovered. The configured
+    backend is then normalized and dispatched; currently only the GPU solver
+    is implemented, while selecting the CPU backend raises
+    ``NotImplementedError``.
+
+    Total bake time is printed from a ``finally`` block, so timing information
+    is emitted after both successful runs and failures.
     """
     total_start_time = perf_counter()
 
@@ -56,7 +69,12 @@ def main(config: dict[str, Any]) -> Any:
 
 def prepare_cuda_libraries() -> None:
     """
-    Prepare cuda libraries.
+    Make bundled NVIDIA runtime libraries discoverable by the current process.
+
+    On Windows, directories containing NVIDIA DLLs are registered and stable
+    aliases are created for versioned CUDA Runtime and NVVM libraries when
+    needed. On Linux, discovered library directories are prepended to
+    ``LD_LIBRARY_PATH``. macOS requires no setup here.
     """
     system = platform.system()
 
@@ -101,7 +119,12 @@ def prepare_cuda_libraries() -> None:
 
 def run_worker() -> None:
     """
-    Run worker.
+    Serve newline-delimited JSON solver commands on standard input.
+
+    The worker announces readiness, executes ``run_job`` messages with stdout
+    and stderr converted into structured log events, and reports completion or
+    a formatted traceback. A ``shutdown`` command terminates the loop; unknown
+    commands produce protocol error messages without stopping the worker.
     """
     emit_message({"type": "ready"})
 
@@ -196,13 +219,16 @@ def run_worker() -> None:
 class _JsonLogStream:
     def __init__(self) -> None:
         """
-        Initialize the instance state.
+        Initialize an empty buffer for incomplete log lines.
         """
         self._buffer = ""
 
-    def write(self, text: str) -> Any:
+    def write(self, text: str) -> int:
         """
-        Write text to the configured output stream.
+        Buffer text and emit every complete non-empty line as a JSON log event.
+
+        Partial lines remain buffered until a newline arrives or ``flush`` is
+        called. The consumed character count follows the text-stream protocol.
         """
         text = str(text or "")
         if not text:
@@ -226,7 +252,7 @@ class _JsonLogStream:
 
     def flush(self) -> None:
         """
-        Flush the configured output stream.
+        Emit any remaining buffered text as one log event and clear the buffer.
         """
         remaining = self._buffer.strip()
 

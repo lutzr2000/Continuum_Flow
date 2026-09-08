@@ -19,7 +19,11 @@ def obstacle_bc(
     tile_map: Any,
 ) -> None:
     """
-    Obstacle bc.
+    Impose obstacle velocity and clear combustible scalars inside solid cells.
+
+    Active cells covered by the obstacle mask receive the voxelized obstacle
+    velocity, producing the moving-wall condition. Smoke, fuel, and flame are
+    reset so scalar material cannot remain inside solid geometry.
     """
     (
         tile_i,

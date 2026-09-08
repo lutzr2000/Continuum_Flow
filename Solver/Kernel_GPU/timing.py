@@ -10,7 +10,7 @@ from numba import cuda
 class RunTimings:
     def __init__(self) -> None:
         """
-        Initialize the instance state.
+        Initialize an empty timing accumulator keyed by group and section name.
         """
         self.entries = {}
 
@@ -18,7 +18,11 @@ class RunTimings:
     def section(self, group: str, name: str, gpu: bool=False) -> None:
         # Drain earlier work so it cannot be charged to this section.
         """
-        Section.
+        Measure one named CPU or GPU section and accumulate its duration.
+
+        GPU sections synchronize before and after the measured work so queued
+        CUDA operations are charged to the correct section. Timings are still
+        recorded when the wrapped block raises an exception.
         """
         if gpu:
             cuda.synchronize()
@@ -37,7 +41,7 @@ class RunTimings:
 
     def report(self, total: float, status: str) -> None:
         """
-        Report.
+        Print grouped call counts, total durations, shares, and mean runtimes.
         """
         print(f"Timing report ({status}) - total run: {total:.6f} s")
         width = max(62, max((len(name) for _, name in self.entries), default=0))

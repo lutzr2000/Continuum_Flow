@@ -3,7 +3,7 @@ from typing import Any
 from numba import cuda
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _smoothstep(t: float) -> Any:
+def _smoothstep(t: float) -> float:
     """
     Evaluate the cubic smoothstep interpolation polynomial.
     """
@@ -11,7 +11,7 @@ def _smoothstep(t: float) -> Any:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _lerp(a: Any, b: Any, t: float) -> Any:
+def _lerp(a: float, b: float, t: float) -> float:
     """
     Linearly interpolate between two scalar values.
     """
@@ -19,7 +19,7 @@ def _lerp(a: Any, b: Any, t: float) -> Any:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _fast_floor(x: float) -> Any:
+def _fast_floor(x: float) -> int:
     """
     Compute the greatest integer not larger than the input value.
     """
@@ -30,9 +30,12 @@ def _fast_floor(x: float) -> Any:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _hash_noise_3d(ix: int, iy: int, iz: int, seed: int) -> Any:
+def _hash_noise_3d(ix: int, iy: int, iz: int, seed: int) -> float:
     """
-    Hash noise 3d.
+    Hash integer lattice coordinates and a seed into a repeatable signed value.
+
+    The integer mixing function is masked to a positive 31-bit value and
+    normalized approximately to the interval ``[-1, 1]``.
     """
     n = ix * 15731 + iy * 789221 + iz * 1376312589 + seed * 1013
     n = (n << 13) ^ n
@@ -42,9 +45,18 @@ def _hash_noise_3d(ix: int, iy: int, iz: int, seed: int) -> Any:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _value_noise_3d(x: float, y: float, z: float, seed: int) -> Any:
-    """
-    Value noise 3d.
+def _value_noise_3d(x: float, y: float, z: float, seed: int) -> float:
+    r"""
+    Evaluate smooth three-dimensional value noise at a continuous position.
+
+    Hash values from the eight surrounding lattice corners are blended with
+    trilinear interpolation. Cubic smoothstep weights
+
+    .. math::
+
+        s(t) = t^2(3-2t)
+
+    provide continuous first derivatives across lattice boundaries.
     """
     x0 = _fast_floor(x)
     y0 = _fast_floor(y)

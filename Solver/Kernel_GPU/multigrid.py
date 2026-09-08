@@ -9,7 +9,11 @@ GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 def create_multigrid_levels(shape: tuple[int, int, int], delta: float, min_size: int=8) -> Any:
     """
-    Create multigrid levels.
+    Allocate the dense coarse levels used below the sparse simulation grid.
+
+    Every level halves each dimension with upward rounding and doubles the
+    physical cell spacing. Pressure, right-hand-side, and reusable zero buffers
+    are allocated until any dimension would fall below ``min_size``.
     """
     p_levels = []
     b_levels = []

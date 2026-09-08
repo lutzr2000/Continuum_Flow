@@ -29,6 +29,10 @@ def source_bc(
 ) -> None:
     """
     Apply source values with procedural spatial noise.
+
+    Source velocity is added directly. Temperature is assigned, while smoke
+    and fuel are integrated over ``dt`` and clamped to their valid ranges. A
+    seeded spatial noise sample can modulate all injected scalar values.
     """
     (
         tile_i,

@@ -7,7 +7,7 @@ tile_size = kernel_config.TILE_SIZE
 @cuda.jit(device=True, inline=True, cache=True)
 def tile_to_index() -> Any:
     """
-    Map tiles to cell indices.
+    Convert CUDA block and thread coordinates into tile-local and global cells.
     """
     tile_i = cuda.blockIdx.x
     tile_j = cuda.blockIdx.y
@@ -68,7 +68,11 @@ def build_activity_mask(
     nz: int,
 ) -> None:
     """
-    Build activity mask.
+    Mark tiles active when they contain source, smoke, fuel, or flame data.
+
+    The base activity map is rebuilt in parallel. Source tiles are activated
+    unconditionally; allocated tiles remain active only when at least one cell
+    exceeds the configured scalar threshold.
     """
     tile_i, tile_j, tile_k = cuda.grid(3)
 
@@ -128,7 +132,7 @@ def compact_active_tile_map(
     next_tile_index_counter: Any,
 ) -> None:
     """
-    Compact active tile map.
+    Assign contiguous pool indices to active tiles and record their old slots.
     """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = current_tile_map.shape
@@ -149,7 +153,9 @@ def compact_active_tile_map(
 @cuda.jit(cache=True)
 def remap_sparse_pool(old_pool: Any, new_pool: Any, previous_index_lookup: Any, active_tile_count: int) -> None:
     """
-    Remap sparse pool.
+    Copy active tile data from old sparse slots into their compacted slots.
+
+    Newly activated tiles without a previous slot are initialized to zero.
     """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
@@ -182,7 +188,7 @@ def remap_sparse_pool(old_pool: Any, new_pool: Any, previous_index_lookup: Any, 
 @cuda.jit(cache=True)
 def fill_sparse_tile_buffer_range(pool: Any, start_tile: int, fill_value: float) -> None:
     """
-    Fill sparse tile buffer range.
+    Fill every cell from ``start_tile`` through the end of a sparse pool.
     """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
@@ -207,7 +213,7 @@ def fill_sparse_tile_buffer_range(pool: Any, start_tile: int, fill_value: float)
 @cuda.jit(device=True, inline=True, cache=True)
 def tile_is_active_in_margin(base_tile_map: Any, tile_i: Any, tile_j: Any, tile_k: Any, margin: int) -> Any:
     """
-    Tile is active in margin.
+    Check whether an active base tile lies within a bounded neighborhood.
     """
     tiles_x, tiles_y, tiles_z = base_tile_map.shape
 
@@ -235,7 +241,7 @@ def tile_is_active_in_margin(base_tile_map: Any, tile_i: Any, tile_j: Any, tile_
 @cuda.jit(cache=True)
 def copy_sparse_tile_buffer_range(src_pool: Any, dst_pool: Any, tile_count: int) -> None:
     """
-    Copy sparse tile buffer range.
+    Copy all cells belonging to the first ``tile_count`` sparse slots.
     """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
@@ -269,7 +275,10 @@ def release_inactive_tile_slots(
     free_slot_count: int,
 ) -> None:
     """
-    Release inactive tile slots.
+    Remove inactive tiles from the map and push their slots onto the free stack.
+
+    Activity is dilated by ``margin`` so tiles near active content remain
+    allocated and can support neighboring stencil and advection samples.
     """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_map.shape
@@ -302,7 +311,10 @@ def activate_tiles_with_reuse(
     active_tile_counter: Any,
 ) -> None:
     """
-    Activate tiles with reuse.
+    Allocate required tiles from freed slots before extending the sparse pool.
+
+    Reused indices are recorded separately so all associated field buffers can
+    be reset before simulation kernels access the newly activated tiles.
     """
     tile_i, tile_j, tile_k = cuda.grid(3)
     tiles_x, tiles_y, tiles_z = tile_map.shape
@@ -333,7 +345,7 @@ def activate_tiles_with_reuse(
 @cuda.jit(cache=True)
 def fill_sparse_tile_slots(pool: Any, slot_indices: Any, slot_count: int, fill_value: float) -> None:
     """
-    Fill sparse tile slots.
+    Initialize the listed sparse pool slots with one scalar value.
     """
     flat_index = cuda.grid(1)
     cells_per_tile = tile_size * tile_size * tile_size
@@ -360,7 +372,10 @@ def required_pool_capacity(
     tile_growth_size: Any,
 ) -> Any:
     """
-    Required pool capacity.
+    Compute a geometrically grown capacity that covers the required slot count.
+
+    Growth proceeds in fixed increments and never exceeds the total number of
+    logical tiles.
     """
     required_capacity_tiles = int(required_capacity_tiles)
     current_capacity_tiles = int(current_capacity_tiles)
@@ -382,7 +397,10 @@ def ensure_pool_capacities(
     target_capacity_tiles: Any,
 ) -> Any:
     """
-    Ensure pool capacities.
+    Grow undersized GPU field pools while preserving all allocated tile data.
+
+    Pools already large enough are returned unchanged; replacement buffers are
+    initialized and populated through device-to-device copies.
     """
     if target_capacity_tiles == current_capacity_tiles:
         return [pool for pool, _fill_value in pool_specs]
@@ -429,7 +447,7 @@ def ensure_pool_capacities(
 
 def reset_reused_pool_slots(pool_specs: Any, reused_slot_stack: Any, reused_slot_count: int) -> None:
     """
-    Reset reused pool slots.
+    Restore field-specific defaults in every sparse slot reused this step.
     """
     if reused_slot_count <= 0:
         return
@@ -450,7 +468,7 @@ def reset_reused_pool_slots(pool_specs: Any, reused_slot_stack: Any, reused_slot
 
 def copy_pools(dst_src_pairs: Any, active_tile_count: int) -> None:
     """
-    Copy pools.
+    Copy the allocated portion of several sparse GPU pools in one operation.
     """
     if active_tile_count <= 0:
         return
@@ -461,7 +479,7 @@ def copy_pools(dst_src_pairs: Any, active_tile_count: int) -> None:
 
 def reset_pools(dst_pools: Any, fill_pool: Any, active_tile_count: int) -> None:
     """
-    Reset pools.
+    Reset scratch pools from a shared fill pool over the allocated tile range.
     """
     if active_tile_count <= 0:
         return

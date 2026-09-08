@@ -45,7 +45,11 @@ def apply_swirl_forces(
     origin_z: float,
 ) -> Any:
     """
-    Apply swirl forces.
+    Accumulate tangential force contributions from all configured swirl nodes.
+
+    For each node, the cell position is projected onto the swirl axis. The
+    normalized tangential direction is weighted by a linear radial falloff and
+    the configured node strength.
     """
     Fx = 0.0
     Fy = 0.0
@@ -134,7 +138,10 @@ def apply_turbulence_forces(
     t: float,
 ) -> Any:
     """
-    Apply turbulence forces.
+    Evaluate and accumulate procedural turbulence-force nodes at one cell.
+
+    Each node samples decorrelated three-dimensional value-noise channels in
+    space and time, scaled by its amplitude and frequency settings.
     """
     Fx = 0.0
     Fy = 0.0
