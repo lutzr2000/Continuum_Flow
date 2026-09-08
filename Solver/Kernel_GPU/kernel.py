@@ -1,14 +1,12 @@
-from Solver.Kernel_GPU.timing import profiled_run
-import json
 import math
-import sys
-from time import perf_counter
+import warnings
 from pathlib import Path
+from time import perf_counter
+from typing import Any
+
 import numpy as np
 from numba import cuda
-import warnings
-
-warnings.filterwarnings("ignore")
+from numpy.typing import DTypeLike, NDArray
 
 from Solver.General.main import emit_message
 import Solver.General.forces as forces
@@ -20,6 +18,7 @@ import Solver.Kernel_GPU.pressure_solve as pressure_solve
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.time_step as time_step
+from Solver.Kernel_GPU.timing import profiled_run
 import Solver.Kernel_GPU.update_masks as update_masks
 import Solver.Kernel_GPU.velocity_update as velocity_update
 import Solver.Kernel_GPU.vorticity as vorticity
@@ -29,10 +28,25 @@ import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 import Solver.Kernel_GPU.Boundary_Conditions.obstacle_bc as obstacle_bc
 import Solver.Kernel_GPU.Boundary_Conditions.source_bc as source_bc
 
+warnings.filterwarnings("ignore")
+
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 
-def get_source_values(simulation, var_name, t, index=None, dtype=GPU_FIELD_DTYPE):
+def get_source_values(
+    simulation: dict[str, Any],
+    var_name: str,
+    t: float,
+    index: int | None = None,
+    dtype: DTypeLike = GPU_FIELD_DTYPE,
+) -> NDArray:
+    """
+    Resolve source values for a simulation variable at a given time.
+
+    For each configured source, the function reads ``var_name`` from the
+    source definition. If animation data is available for that variable,
+    the value from the animation sample nearest to ``t`` is used instead.
+    """
     source_entries = simulation.get("sources") or []
     animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
     values = np.zeros(len(source_entries), dtype=dtype)
@@ -62,7 +76,16 @@ def get_source_values(simulation, var_name, t, index=None, dtype=GPU_FIELD_DTYPE
     return values
 
 
-def compute_inital_velocity(simulation_cfg):
+def compute_inital_velocity(
+    simulation_cfg: dict[str, Any],
+) -> tuple[float, float, float]:
+    """
+    Compute the initial velocity from the configured domain inflows.
+
+    The velocity vectors of all domain faces configured as inflows are
+    averaged component-wise. Both the string value ``"INFLOW"`` and the
+    numeric boundary-condition value ``1`` are recognized as inflows.
+    """
     total_u = 0.0
     total_v = 0.0
     total_w = 0.0
@@ -91,7 +114,15 @@ def compute_inital_velocity(simulation_cfg):
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def is_animated(base_masks):
+def is_animated(base_masks: list[dict[str, Any]]) -> bool:
+    """
+    Determine whether any mesh represented by the base masks is animated.
+
+    A mesh is considered animated when its transform animation contains
+    multiple world matrices and at least one matrix differs from the first
+    sample. Repeated samples of an identical transform are therefore treated
+    as static.
+    """
     for entry in base_masks:
         mesh_object = entry["mesh_object"]
         animation = mesh_object.get("transform_animation") or {}
@@ -115,53 +146,36 @@ def solver(
     timings=None,
 ) -> None:
     r"""
-    Run one simulation.
+    The solver initializes sparse tile storage, voxelizes source and obstacle
+    geometry, allocates the required GPU fields, sets up the multigrid pressure
+    solver, and initializes the asynchronous output pipeline.
 
-    The solver initializes the tile pools, uploads static and animated
-    masks to the GPU, advances the simulation in time, and writes output frames
-    through the host-side VDB writer pipeline.
+    During each simulation step, the solver performs the following operations:
 
-    The general time loop does the following steps:
-
-    1. Update the active tile map from the current scalar fields and
-       source activity.
-    2. Grow pool capacity if the persistent tile map requires more tile
-       slots.
-    3. Compute the new timestep from the current velocity field using the user
-       described CFL-number.
-    4. Reset scratch pools for the upcoming operations.
-    5. Refresh animated source masks, source noise fields, and obstacle masks
-       if needed.
+    1. Reset temporary scratch pools.
+    2. Update the source tile activity mask.
+    3. Update sparse tile activity, release inactive tile slots, reuse freed
+    slots, and grow GPU field pools when additional capacity is required.
+    4. Update animated source masks and the obstacle mask.
+    5. Compute the timestep from the current velocity field using the configured
+    CFL number.
     6. Apply domain, obstacle, and source boundary conditions.
-    7. Reset scratch pools again before physics updates.
+    7. Reset temporary scratch pools before the physics update.
     8. Compute vorticity magnitude when vorticity confinement is enabled.
-    9. Build force parameters for constant, swirl, and turbulence forces.
-    10. Copy the current velocity pools into work buffers.
-    11. Advect and update velocity using MacCormack.
-    12. Solve the pressure Poisson equation using multigrid.
-    13. Project the velocity using the computed pressure.
-    14. Advect and update scalar fields using MacCormack. Compute burn behavior.
-    15. Advance simulation time and emit output frames whenever an output time
-        step is reached.
-    16. Periodically report active tile count and GPU memory usage.
+    9. Evaluate constant, swirl, and turbulence force parameters.
+    10. Advect and update the velocity field using the MacCormack scheme.
+    11. Solve the pressure Poisson equation using multigrid.
+    12. Project the velocity field using the computed pressure.
+    13. Advect and update temperature, smoke, fuel, and flame fields using the
+        MacCormack scheme and configured combustion behavior.
+    14. Advance simulation time and enqueue output frames whenever an output
+        time is reached.
+    15. Emit simulation statistics including active tile counts and GPU memory
+        usage for generated output frames.
 
-    After the loop finishes, the writer pipeline is flushed and shut down
-    cleanly. A per-run timing report lists call counts, synchronized wall
-    times, percentages of total runtime and average milliseconds per call.
-    Pressure details are included in the top-level pressure solve time.
-
-    Parameters
-    ----------
-    config
-        Full solver configuration containing simulation settings, domain
-        dimensions, physics parameters, source definitions, output settings,
-        and optional meta information such as the cancellation flag path.
-
-    Returns
-    -------
-    None
-        The simulation is executed in-place on the GPU and output frames are
-        written to the configured VDB output directory.
+    The simulation loop also checks for a cancellation flag before each step.
+    When cancellation is requested, the loop exits cleanly and the output
+    pipeline is flushed and shut down.
     """
     total_start_time = perf_counter()
     simulation = config.get("simulation") or {}
@@ -298,9 +312,7 @@ def solver(
             entry["matrix_rates"] = rates
 
     for entry in obstacle_base_masks:
-        times, matrices, rates = update_masks.prepare_matrix_data(
-            entry["mesh_object"]
-        )
+        times, matrices, rates = update_masks.prepare_matrix_data(entry["mesh_object"])
         entry["matrix_times"] = times
         entry["matrix_matrices"] = matrices
         entry["matrix_rates"] = rates
@@ -388,10 +400,7 @@ def solver(
 
         obstacle_mask = cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
 
-        animated_sources = [
-            is_animated(base_masks)
-            for base_masks in source_base_masks
-        ]
+        animated_sources = [is_animated(base_masks) for base_masks in source_base_masks]
         has_animated_sources = any(animated_sources)
 
         # multigrid levels
@@ -617,12 +626,6 @@ def solver(
 
                 sparse_tile_capacity = next_sparse_tile_capacity
 
-                print(
-                    "Tile buffer grown to:",
-                    sparse_tile_capacity,
-                    "tiles",
-                )
-
             with timings.section(
                 "solver", "active_tile_counter.copy_to_host", gpu=True
             ):
@@ -633,7 +636,9 @@ def solver(
 
         # ------------Update masks-------------------
         if time_step_count == 0 or has_animated_sources:
-            with timings.section("solver", "update_masks.update_source_masks", gpu=True):
+            with timings.section(
+                "solver", "update_masks.update_source_masks", gpu=True
+            ):
                 update_masks.update_source_masks(
                     source_masks,
                     source_base_masks,
@@ -724,20 +729,15 @@ def solver(
             )
 
         # ------------Source BC-------------------
-        with timings.section("solver", "get_source_values.temperature", gpu=False):
+        with timings.section("solver", "get_source_values", gpu=False):
             source_temperature_values = get_source_values(simulation, "temperature", t)
-        with timings.section("solver", "get_source_values.smoke", gpu=False):
             source_smoke_values = get_source_values(simulation, "smoke", t)
-        with timings.section("solver", "get_source_values.fuel", gpu=False):
             source_fuel_values = get_source_values(simulation, "fuel", t)
-        with timings.section("solver", "get_source_values.noise_scale", gpu=False):
             source_noise_scales = get_source_values(
                 simulation,
                 "noise_scale",
                 t,
             )
-
-        with timings.section("solver", "get_source_values.noise_amplitude", gpu=False):
             source_noise_amplitudes = (
                 get_source_values(
                     simulation,
@@ -746,41 +746,35 @@ def solver(
                 )
                 / 100.0
             )
-
-        with timings.section("solver", "get_source_values.noise_seed", gpu=False):
             source_noise_seeds = get_source_values(
                 simulation,
                 "noise_seed",
                 t,
                 dtype=np.int32,
             )
-        with timings.section("solver", "get_source_values.source_noise", gpu=False):
             source_noise_enabled = get_source_values(
                 simulation, "source_noise", t, dtype=np.bool_
             )
-        source_noise_amplitudes[~source_noise_enabled] = 0.0
-
-        with timings.section("solver", "get_source_values.velocity", gpu=False):
+            source_noise_amplitudes[~source_noise_enabled] = 0.0
             source_velocity_x_values = get_source_values(
                 simulation,
                 "velocity",
                 t,
                 0,
             )
-        with timings.section("solver", "get_source_values.velocity", gpu=False):
             source_velocity_y_values = get_source_values(
                 simulation,
                 "velocity",
                 t,
                 1,
             )
-        with timings.section("solver", "get_source_values.velocity", gpu=False):
             source_velocity_z_values = get_source_values(
                 simulation,
                 "velocity",
                 t,
                 2,
             )
+            source_extra_pressure = get_source_values(simulation, "extra_pressure", t)
 
         for source_idx, source_mask in enumerate(source_masks):
             with timings.section("solver", "source_bc.source_bc", gpu=True):
@@ -838,21 +832,17 @@ def solver(
                 )
 
         # ------------force params-------------------
-        with timings.section("solver", "forces.constant_force", gpu=False):
+        with timings.section("solver", "get_force_params", gpu=False):
             fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
-        with timings.section("solver", "forces.swirl_force", gpu=False):
             swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
-        with timings.section("solver", "forces.turbulence_force", gpu=False):
             turbulence_config, has_turbulence_nodes = forces.turbulence_force(
                 simulation, t
             )
-        with timings.section("solver", "cuda.to_device", gpu=True):
             swirl_config_device = cuda.to_device(
                 np.ascontiguousarray(
                     np.asarray(swirl_config, dtype=GPU_FIELD_DTYPE).reshape((-1, 8))
                 )
             )
-        with timings.section("solver", "cuda.to_device", gpu=True):
             turbulence_config_device = cuda.to_device(
                 np.ascontiguousarray(
                     np.asarray(turbulence_config, dtype=GPU_FIELD_DTYPE).reshape(
@@ -946,9 +936,6 @@ def solver(
         w, w_work = w_work, w
 
         # ------------Pressure solve-------------------
-        with timings.section("solver", "get_source_values.extra_pressure", gpu=False):
-            extra_pressure = get_source_values(simulation, "extra_pressure", t)
-
         with timings.section(
             "solver", "pressure_solve.pressure_poisson_multigrid", gpu=True
         ):
@@ -964,7 +951,7 @@ def solver(
                 source_noise_scales,
                 source_noise_amplitudes,
                 source_noise_seeds,
-                extra_pressure,
+                source_extra_pressure,
                 delta,
                 simulation.get("physics").get("fluid").get("density"),
                 simulation.get("physics").get("temperature").get("expansion_rate"),
@@ -1120,7 +1107,8 @@ def solver(
                     "frame": output_index,
                     "active_tiles": active_tile_counter_host,
                     "total_tiles": total_tile_count,
-                    "active_cells": active_tile_counter_host * kernel_config.TILE_SIZE**3,
+                    "active_cells": active_tile_counter_host
+                    * kernel_config.TILE_SIZE**3,
                     "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
                     "vram_used_mb": (total_vram - free_vram) / 1024**2,
                     "vram_total_mb": total_vram / 1024**2,

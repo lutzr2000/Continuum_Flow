@@ -373,7 +373,6 @@ def clear_bake_directory(output_directory):
         print("Failed to remove bake directory:", output_directory, exc)
         return 0
 
-    print("Removed bake directory:", output_directory)
     return deleted_count
 
 

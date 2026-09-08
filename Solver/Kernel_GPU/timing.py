@@ -1,5 +1,3 @@
-"""Per-run wall-clock timings, including completed CUDA work and JIT compilation."""
-
 from contextlib import contextmanager
 from functools import wraps
 from time import perf_counter
@@ -32,6 +30,7 @@ class RunTimings:
     def report(self, total, status):
         print(f"Timing report ({status}) - total run: {total:.6f} s")
         width = max(62, max((len(name) for _, name in self.entries), default=0))
+
         for group in sorted(
             {key[0] for key in self.entries}, key=lambda name: (name != "solver", name)
         ):
@@ -44,6 +43,7 @@ class RunTimings:
                 for (entry_group, name), values in self.entries.items()
                 if entry_group == group
             )
+
             for name, (calls, elapsed) in sorted(
                 entries, key=lambda item: item[1][1], reverse=True
             ):
@@ -54,8 +54,6 @@ class RunTimings:
 
 
 def profiled_run(function):
-    """Own a fresh report per run; nested functions can share its collector."""
-
     @wraps(function)
     def wrapped(*args, **kwargs):
         if kwargs.get("timings") is not None:
