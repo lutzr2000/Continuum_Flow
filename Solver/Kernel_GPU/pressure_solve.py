@@ -177,7 +177,9 @@ def rhs_sum_count_partial_kernel(
 
 
 @cuda.jit(cache=True)
-def count_rhs_active_partial_kernel(b: Any, tile_map: Any, partial_counts: Any, nx: int, ny: int, nz: int) -> None:
+def count_rhs_active_partial_kernel(
+    b: Any, tile_map: Any, partial_counts: Any, nx: int, ny: int, nz: int
+) -> None:
     """
     Reduce the number of active RHS cells into one partial count per CUDA block.
     """
@@ -232,7 +234,9 @@ def count_rhs_active_partial_kernel(b: Any, tile_map: Any, partial_counts: Any, 
 
 
 @cuda.jit(cache=True)
-def sum_partial_sums_kernel(partial_sums: Any, partial_count: int, rhs_sum: Any) -> None:
+def sum_partial_sums_kernel(
+    partial_sums: Any, partial_count: int, rhs_sum: Any
+) -> None:
     """
     Reduce the block partial sums into one scalar sum on the GPU. This is needed
     for computing RHS mean.
@@ -405,9 +409,7 @@ def remove_rhs_mean(
         1,
     )
 
-    reduction_blocks = kernel_config.reduction_blocks_per_grid(
-        interior_cell_count
-    )
+    reduction_blocks = kernel_config.reduction_blocks_per_grid(interior_cell_count)
 
     rhs_sum_count_partial_kernel[
         reduction_blocks,
@@ -520,6 +522,7 @@ def add_artifical_divergence(
     nx: int,
     ny: int,
     nz: int,
+    dt: float,
 ) -> None:
     r"""
     Add thermal expansion and source pressure to the Poisson right-hand side.
@@ -572,7 +575,7 @@ def add_artifical_divergence(
             )
             scalar_multiplier = max(1.0 + noise_value * noise_amplitude, 0.0)
 
-        extra_pressure_term = source_extra_pressure * scalar_multiplier
+        extra_pressure_term = 1 / dt * source_extra_pressure * scalar_multiplier
 
     b[tile_index, local_i, local_j, local_k] -= (
         rho / delta * (thermal_divergence + extra_pressure_term)
@@ -614,7 +617,7 @@ def pressure_poisson_multigrid(
     ny: int,
     nz: int,
     *,
-    timings: Any=None,
+    timings: Any = None,
 ) -> Any:
     r"""
     Solve the pressure Poisson equation with repeated multigrid V-cycles.
@@ -682,6 +685,7 @@ def pressure_poisson_multigrid(
                 nx,
                 ny,
                 nz,
+                dt,
             )
 
     with timings.section("pressure_poisson_multigrid", "remove_rhs_mean", gpu=True):
