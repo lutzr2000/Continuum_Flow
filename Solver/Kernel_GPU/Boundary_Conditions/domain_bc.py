@@ -32,6 +32,7 @@ def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
         "INFLOW": 1,
         "WALL": 2,
         "SLIP": 3,
+        "SLIP_WALL": 3,
     }
 
     for side in SIDE_TO_AXIS_AND_INDEX:

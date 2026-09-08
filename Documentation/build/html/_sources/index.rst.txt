@@ -4,7 +4,7 @@ Bringing the fun of flow simulation to Blender!
 
 General
 -------
-This add-on allows for CPU- and NVIDIA GPU-based flow simulations within Blender. It is free and open source. The goal is to make simulating things like smoke and fire in Blender faster, more intuitive, and therefore more fun. The solver can be somewhere around 2 times faster on the CPU and be roughly 20 times faster on the GPU than Blender's native solver. The add-on is integrated into Blender and comes with its own custom node tree. The solver is based on this great tutorial (https://drzgan.github.io/Python_CFD/intro.html) by Prof. Dr. Zhengtao Gao and partially on the methods presented in the paper "Stable fluids" (https://doi.org/10.1145/311535.311548).
+This add-on allows for CPU- and NVIDIA GPU-based flow simulations within Blender. It is free and open source. The goal is to make simulating things like smoke and fire in Blender faster, more intuitive, and therefore more fun. The solver can be somewhere around 2 times faster on the CPU and be roughly 20 times faster on the GPU than Blender's native solver. The add-on is integrated into Blender and comes with its own custom node tree. The solver started from this great tutorial (https://drzgan.github.io/Python_CFD/intro.html) by Prof. Dr. Zhengtao Gao.
 
 Features
 --------
@@ -18,7 +18,6 @@ Features
 Limitations
 -----------
 - GPU is only supported for NVIDIA GPUs
-- No simulation of multi-phase flow (e.g. water)
 - No interaction with Blender's native force fields
 - No interaction with Blender's particle systems
 - Obstacles cannot deform (shape keys or armatures have no effect)

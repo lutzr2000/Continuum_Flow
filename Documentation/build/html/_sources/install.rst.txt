@@ -1,7 +1,7 @@
 Installation
 ============
 
-Continuum Flow consists of two parts: the UI part within Blender and the external Python script running the actual simulation. The code is only tested on Windows. Linux and MacOS can work but are untested. GPU is not supported on MacOS.
+Continuum Flow consists of two parts: the UI part within Blender and the external Python script running the actual simulation. GPU is not supported on MacOS.
 
 Requirements
 -------------
@@ -15,8 +15,8 @@ If you want to use the GPU, it is recommended to install the CUDA Toolkit first.
 Steps
 -----
 
-1. Install the required dependencies listed above
-2. Download the code from this page as a .zip
+1. Install CUDA Toolkit
+2. Download the code from the repo for your operating system and Blender version
 3. Open Blender
 4. Go to Edit > Preference > Add-ons
 5. In the top right corner, click on the downwards arrow and select install from disk

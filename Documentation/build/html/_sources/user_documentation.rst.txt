@@ -8,6 +8,8 @@ In general, Continuum Flow's workflow is node-based. After installation, there w
 
 The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
+Many simulation settings can be animated with Blender keyframes. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, swirl settings, and turbulence amplitude. Source and obstacle object transformations are animated as well. Values are sampled over the configured simulation frame range during export.
+
 Nodes
 -----
 To avoid a tedious setup, a node tree preset is provided, which can be found by pressing Shift+A, like all other nodes. This node tree preset contains the minimum number of nodes necessary for a simulation.
@@ -28,13 +30,13 @@ This is the core node of every simulation. It controls the frame range for your 
     The frame at which the simulation starts.
 
 **End Frame**
-    The frame at which the simulation ends.
+    Defines the end of the simulation interval. The simulation duration is calculated from ``End Frame - Start Frame``, and exported animation samples use the End Frame as their exclusive upper bound.
 
 **CFL**
     This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers.
 
 **Iterations**
-    Number of solver iterations. Usually the default of two is fine. Less itterations means a faster solve, but this can come at the cost of visual consistency.
+    Number of solver iterations. Usually the default of one is sufficient. Fewer iterations result in a faster solve, but this can come at the cost of visual consistency.
 
 **Adaptive Domain**
     Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.
@@ -54,14 +56,14 @@ This node controls the size and resolution of your simulation domain. The domain
 **Resolution**
     The grid size used in the simulation. The grid size is the same in every direction.
 
-**NX**
-    Number of grid cells in x direction. 
+**Lx**
+    Requested domain length in x direction, in meters. The exported cell count is rounded up to a complete tile.
 
-**NY**
-    Number of grid cells in y direction.
+**Ly**
+    Requested domain length in y direction, in meters. The exported cell count is rounded up to a complete tile.
 
-**NZ**
-    Number of grid cells in z direction.
+**Lz**
+    Requested domain length in z direction, in meters. The exported cell count is rounded up to a complete tile.
 
 **Boundary Conditions**
     Lets you choose the boundary conditions for each face of your simulation domain.
@@ -89,6 +91,9 @@ This node controls the general physics parameters of the simulation.
 **Temperature Dissipation**
     The rate at which temperature dissipates. Higher values mean faster dissipation.
 
+**Temperature Production Rate**
+    How much additional temperature is produced when fuel burns. Higher values make combustion heat the fluid more strongly.
+
 **Reference Temperature**
     Air cooler than this temperature will sink down, while warmer air will rise.
 
@@ -113,11 +118,13 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
+The following two settings control the procedural variation of combustion:
+
 **Scale**
-    Scale of the randomness of the combustion process.
+    Spatial scale of the procedural randomness applied to the combustion process.
 
 **Amplitude**
-    How random the combustion process is. Higher values mean more randomness.
+    Strength of the procedural modulation of the local fuel burn rate. Higher values produce greater spatial variation in combustion.
 
 **Vorticity**
     Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
@@ -133,13 +140,10 @@ Viewer
 This node lets you view the simulation domain in the viewport.
 
 **Show/Hide Domain**
-    Shows or hides the domain.
+    Shows or hides a viewport wireframe preview of the simulation-domain bounds and one sample grid cell. It does not create or hide simulation geometry.
 
 **Live Preview**
     When activated, the simulation can be seen in the viewport while simulating.
-
-**Target realtime preview**
-    In some cases the solver is actually faster than realtime. For previewing it can be usefull to look at the simulation in realtime. This setting slows the solver down to maintain a realtime preview.
 
 
 Output
@@ -154,14 +158,16 @@ This node lets you specify the output of your simulation. It is worth paying som
 **FPS**
     The frame rate at which data is saved. Defaults to your scene frame rate.
 
-**Writers**
-    Number of writer CPU processes. Especially when simulating on the GPU, large amounts of data are calculated quickly and need additional compute power to be saved. Usually, the default value of four is fine.
+VDB writer processes start with four workers and scale up automatically whenever the
+solver has only one free writer left. This warms up extra workers before they are
+needed. The maximum adapts to the number of logical CPU cores. It uses at most
+half of them and is limited to a value between 4 and 32.
 
 **Precision**
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
 **Fields**
-    Lets you select which of the available fields you want to save.
+    Lets you select which fields to save: velocity, pressure, temperature, density, fuel, and flame. Density and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead.
 
 **Path**
     Path on your disk where to save the data. You can use the usual Blender file browser.
@@ -169,6 +175,7 @@ This node lets you specify the output of your simulation. It is worth paying som
 **Bake/Free Bake**
     Bake: starts the simulation.
     Free Bake: deletes the baked data.
+    Press Esc during an active bake to request a clean cancellation.
 
 
 Obstacle
@@ -190,11 +197,11 @@ Source
 
 The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
 
-**Fuel Concentration**
-    Fuel concentration spawned within the source. 
+**Fuel Emission**
+    Amount of fuel emitted within the source over time.
 
-**Smoke Concentration**
-    Smoke concentration spawned within the source. 
+**Smoke Emission**
+    Amount of smoke emitted within the source over time.
 
 **Temperature**
     Temperature spawned within the source.
@@ -203,13 +210,13 @@ The Source node defines where fluid, smoke, temperature, pressure and velocity a
     Additional pressure spawned.
 
 **Source Noise**
-    Activates random variations of the source fields to create more dynamic and interesting flow. Does not affect velocity.
+    Activates procedural spatial variations of temperature, smoke emission, fuel emission, and extra pressure to create more dynamic flow. Source velocity is not affected.
 
 **Scale**
-    Scale of the random noise
+    Approximate feature size of the source noise in voxels. Larger values produce broader variations.
 
 **Seed**
-    Random seed for the noise generation
+    Random seed used to produce a repeatable source-noise pattern.
 
 **Amplitude**
     Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.
