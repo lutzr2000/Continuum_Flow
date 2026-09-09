@@ -4,7 +4,7 @@ import json
 import os
 import select
 import socket
-import numba
+from numba import cuda
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -110,6 +110,11 @@ def create_writer_slot(writer_context: Any) -> Any:
         buffer=active_tile_meta_shm.buf,
     )
     active_tile_meta_array.fill(0)
+    active_tile_meta_device = cuda.device_array(
+        active_tile_meta_shape,
+        dtype=np.int32,
+    )
+    active_tile_count_device = cuda.device_array(1, dtype=np.int32)
 
     for variable_name in output_list:
         shm = shared_memory.SharedMemory(
@@ -146,6 +151,8 @@ def create_writer_slot(writer_context: Any) -> Any:
         },
         "active_tiles": {
             "array": active_tile_meta_array,
+            "device_array": active_tile_meta_device,
+            "device_count": active_tile_count_device,
             "shape": active_tile_meta_shape,
             "shm_name": active_tile_meta_shm.name,
         },
@@ -205,10 +212,18 @@ def enqueue_device_output(
     max_slot_index = int(tile_map_host.max())
     used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
 
-    write_metadata(
-        tile_map_host,
-        active_tiles_slot["array"],
+    active_tiles_slot["device_count"].copy_to_device(np.zeros(1, dtype=np.int32))
+    write_metadata[
+        kernel_config.volume_blocks_per_grid(tile_map.shape),
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        tile_map,
+        active_tiles_slot["device_array"],
+        active_tiles_slot["device_count"],
         int(tile_size),
+    )
+    active_tiles_slot["device_array"][:active_tile_count].copy_to_host(
+        active_tiles_slot["array"][:active_tile_count]
     )
 
     if used_tile_count > 0:
@@ -280,40 +295,31 @@ def get_writer_slot(writer_state: Any, output_index: int) -> Any:
     return slot
 
 
-@numba.njit(cache=True, nogil=True)
+@cuda.jit(cache=True)
 def write_metadata(
-    tile_map_host: Any,
-    active_tile_meta_array: Any,
+    tile_map: Any,
+    active_tile_meta_device: Any,
+    active_tile_count_device: Any,
     tile_size: Any,
 ) -> None:
     """
-    Build compact metadata rows for every active sparse tile.
+    Build compact metadata rows for every active sparse tile on the GPU.
 
-    Each row stores the pool index followed by the tile's x-, y-, and z-cell
-    origins in the dense output grid.
+    An atomic counter compacts active tiles into rows containing the pool index
+    followed by the tile's x-, y-, and z-cell origins.
     """
-    dim_x = tile_map_host.shape[0]
-    dim_y = tile_map_host.shape[1]
-    dim_z = tile_map_host.shape[2]
+    x, y, z = cuda.grid(3)
 
-    active_idx = 0
+    if x >= tile_map.shape[0] or y >= tile_map.shape[1] or z >= tile_map.shape[2]:
+        return
 
-    for x in range(dim_x):
-        start_x = x * tile_size
-
-        for y in range(dim_y):
-            start_y = y * tile_size
-
-            for z in range(dim_z):
-                tile_idx = tile_map_host[x, y, z]
-
-                if tile_idx >= 0:
-                    active_tile_meta_array[active_idx, 0] = tile_idx
-                    active_tile_meta_array[active_idx, 1] = start_x
-                    active_tile_meta_array[active_idx, 2] = start_y
-                    active_tile_meta_array[active_idx, 3] = z * tile_size
-
-                    active_idx += 1
+    tile_idx = tile_map[x, y, z]
+    if tile_idx >= 0:
+        active_idx = cuda.atomic.add(active_tile_count_device, 0, 1)
+        active_tile_meta_device[active_idx, 0] = tile_idx
+        active_tile_meta_device[active_idx, 1] = x * tile_size
+        active_tile_meta_device[active_idx, 2] = y * tile_size
+        active_tile_meta_device[active_idx, 3] = z * tile_size
 
 
 def create_writer_payload(
