@@ -28,15 +28,7 @@ def setup_output(
     output_fields = output_cfg["fields"]
     output_list = get_enabled_output_names(output_fields)
 
-    writer_count = int(
-        output_cfg.get("host_vdb_writer", {}).get(
-            "process_count",
-            ((output_cfg.get("performance") or {}).get("writer_processes", 1)),
-        )
-    )
-    max_writer_count = int(
-        output_cfg.get("host_vdb_writer", {}).get("max_process_count", writer_count)
-    )
+    writer_count = int(output_cfg["host_vdb_writer"]["process_count"])
 
     shared_memory_blocks = []
 
@@ -50,37 +42,16 @@ def setup_output(
 
     writer_state = {
         "slots": [],
-        "max_count": max(writer_count, max_writer_count),
         "context": writer_context,
     }
 
     for _ in range(writer_count):
-        grow_writer_slots(writer_state)
+        writer_state["slots"].append(create_writer_slot(writer_context))
 
     return shared_memory_blocks, writer_state
 
 
-def grow_writer_slots(writer_state: Any, prewarm: bool = False) -> Any:
-    """
-    Allocate and register one writer slot unless the configured limit is met.
-
-    Optional prewarming performs a round trip with the host VDB writer before
-    the slot is made available for frame data.
-    """
-    writer_slots = writer_state["slots"]
-
-    if len(writer_slots) >= writer_state["max_count"]:
-        return None
-
-    slot = create_writer_slot(
-        writer_state["context"],
-        prewarm=prewarm,
-    )
-    writer_slots.append(slot)
-    return slot
-
-
-def create_writer_slot(writer_context: Any, prewarm: bool = False) -> Any:
+def create_writer_slot(writer_context: Any) -> Any:
     """
     Create shared-memory buffers and a host-writer connection for one slot.
 
@@ -165,10 +136,6 @@ def create_writer_slot(writer_context: Any, prewarm: bool = False) -> Any:
         )
     )
     writer_file = writer_socket.makefile("rwb")
-    if prewarm:
-        writer_file.write(b"__WARMUP__\n")
-        writer_file.flush()
-        writer_file.readline()
 
     return {
         "fields": fields,
@@ -272,11 +239,10 @@ def enqueue_device_output(
 
 def get_writer_slot(writer_state: Any, output_index: int) -> Any:
     """
-    Acquire a free output slot while growing or waiting only when necessary.
+    Acquire a free output slot, waiting only when all fixed slots are busy.
 
-    Completed sockets are polled first. The pool is expanded proactively when
-    capacity is low; once its maximum size is reached, the selected busy slot
-    is awaited before reuse.
+    Completed sockets are polled first; the selected busy slot is awaited
+    before reuse when no slot is immediately available.
     """
     writer_slots = writer_state["slots"]
 
@@ -298,11 +264,6 @@ def get_writer_slot(writer_state: Any, output_index: int) -> Any:
                     slot["file"].readline()
                     slot["busy"] = False
 
-    free_slot_count = sum(not slot["busy"] for slot in writer_slots)
-
-    if free_slot_count <= 1:
-        grow_writer_slots(writer_state, prewarm=True)
-
     slot_count = len(writer_slots)
     start = output_index % slot_count
 
@@ -311,11 +272,6 @@ def get_writer_slot(writer_state: Any, output_index: int) -> Any:
 
         if not slot["busy"]:
             return slot
-
-    new_slot = grow_writer_slots(writer_state, prewarm=True)
-
-    if new_slot is not None:
-        return new_slot
 
     slot = writer_slots[start]
     slot["file"].readline()

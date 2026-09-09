@@ -7,20 +7,15 @@ import sys
 import threading
 from pathlib import Path
 
-DEFAULT_VDB_WRITER_PROCESS_COUNT = 4
-ABSOLUTE_MAX_VDB_WRITER_PROCESS_COUNT = 32
+MAX_VDB_WRITER_PROCESS_COUNT = 8
 WRITER_CLOSE_TIMEOUT_SECONDS = 10
 WRITER_TERMINATE_TIMEOUT_SECONDS = 3
 
 
-def adaptive_writer_process_limit():
-    """Use at most half the logical CPUs, clamped to the writer range."""
-    logical_cpu_count = int(os.cpu_count() or DEFAULT_VDB_WRITER_PROCESS_COUNT)
-    cpu_limit = logical_cpu_count // 2
-    return max(
-        DEFAULT_VDB_WRITER_PROCESS_COUNT,
-        min(ABSOLUTE_MAX_VDB_WRITER_PROCESS_COUNT, cpu_limit),
-    )
+def get_writer_process_count():
+    """Return half the logical CPUs, capped at eight writer processes."""
+    logical_cpu_count = int(os.cpu_count() or 1)
+    return max(1, min(MAX_VDB_WRITER_PROCESS_COUNT, logical_cpu_count // 2))
 
 
 def _bake_directory():
@@ -72,22 +67,6 @@ class _VDBWriterProcess:
         if response.get("status") != "ok":
             raise RuntimeError(response.get("message", "unknown VDB writer error"))
 
-    def warm_up(self):
-        """Wait until the worker has completed startup and accepts commands."""
-        if self._process.stdin is None or self._process.stdout is None:
-            raise RuntimeError("VDB writer process is not connected.")
-        self._process.stdin.write("__PING__\n")
-        self._process.stdin.flush()
-        response_line = self._process.stdout.readline()
-        if not response_line:
-            stderr = self._process.stderr.read().strip() if self._process.stderr else ""
-            raise RuntimeError(f"VDB writer process failed during warm-up. {stderr}")
-        response = json.loads(response_line)
-        if response.get("status") != "ok":
-            raise RuntimeError(
-                response.get("message", "unknown VDB writer warm-up error")
-            )
-
     def close(self):
         if self._process.poll() is None and self._process.stdin is not None:
             try:
@@ -115,8 +94,7 @@ class _VDBWriterProcessPool:
 
     def __init__(
         self,
-        process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT,
-        max_process_count=None,
+        process_count=None,
         writer_config=None,
     ):
         writer_script = _bake_directory() / "writer_worker.py"
@@ -126,10 +104,7 @@ class _VDBWriterProcessPool:
         self._processes = []
         self._writer_script = writer_script
         self._writer_config = writer_config
-        self._max_process_count = max(
-            int(max_process_count or process_count), int(process_count)
-        )
-        self._growth_lock = threading.Lock()
+        process_count = int(process_count or get_writer_process_count())
         try:
             for writer_id in range(process_count):
                 self._processes.append(
@@ -152,47 +127,11 @@ class _VDBWriterProcessPool:
             self._available_processes.put(writer_process)
 
     def write(self, payload):
-        try:
-            writer_process = self._available_processes.get_nowait()
-        except queue.Empty:
-            with self._growth_lock:
-                try:
-                    writer_process = self._available_processes.get_nowait()
-                except queue.Empty:
-                    if len(self._processes) < self._max_process_count:
-                        writer_process = _VDBWriterProcess(
-                            self._writer_script,
-                            writer_config=self._writer_config,
-                            writer_id=len(self._processes),
-                        )
-                        self._processes.append(writer_process)
-                    else:
-                        writer_process = None
-            if writer_process is None:
-                writer_process = self._available_processes.get()
+        writer_process = self._available_processes.get()
         try:
             writer_process.write(payload)
         finally:
             self._available_processes.put(writer_process)
-
-    def prewarm_one(self):
-        """Start one additional idle worker and wait until it is ready."""
-        with self._growth_lock:
-            if len(self._processes) >= self._max_process_count:
-                return False
-            writer_process = _VDBWriterProcess(
-                self._writer_script,
-                writer_config=self._writer_config,
-                writer_id=len(self._processes),
-            )
-            try:
-                writer_process.warm_up()
-            except Exception:
-                writer_process.close()
-                raise
-            self._processes.append(writer_process)
-            self._available_processes.put(writer_process)
-            return True
 
     def close(self):
         for writer_process in self._processes:
@@ -218,11 +157,8 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
                     break
 
                 try:
-                    if line == "__WARMUP__":
-                        self.server.prewarm_writer()
-                    else:
-                        payload = json.loads(line)
-                        self.server.write_vdb(payload)
+                    payload = json.loads(line)
+                    self.server.write_vdb(payload)
                     response = {"status": "ok"}
                 except Exception as exc:
                     response = {"status": "error", "message": str(exc)}
@@ -241,26 +177,19 @@ class HostVDBWriterServer:
     def __init__(
         self,
         host="127.0.0.1",
-        writer_process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT,
-        max_writer_process_count=None,
+        writer_process_count=None,
         writer_config=None,
     ):
         self.host = host
-        self._writer_process_count = int(writer_process_count)
-        self._max_writer_process_count = int(
-            max_writer_process_count or adaptive_writer_process_limit()
-        )
-        self._max_writer_process_count = max(
-            self._writer_process_count, self._max_writer_process_count
+        self._writer_process_count = int(
+            writer_process_count or get_writer_process_count()
         )
         self._writer_pool = _VDBWriterProcessPool(
             process_count=self._writer_process_count,
-            max_process_count=self._max_writer_process_count,
             writer_config=writer_config,
         )
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
         self._server.write_vdb = self._writer_pool.write
-        self._server.prewarm_writer = self._writer_pool.prewarm_one
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -272,7 +201,6 @@ class HostVDBWriterServer:
             "host": self.host,
             "port": self.port,
             "process_count": self._writer_process_count,
-            "max_process_count": self._max_writer_process_count,
         }
 
     def start(self):
