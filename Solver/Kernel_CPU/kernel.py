@@ -1357,9 +1357,9 @@ def solver(
         while t >= next_output_time:
             with timings.section(
                 "solver",
-                "output.enqueue_output",
+                "output.enqueue_device_output",
             ):
-                output.enqueue_output(
+                output.enqueue_device_output(
                     simulation,
                     writer_slots,
                     cpu_fields,

@@ -54,7 +54,7 @@ def main(config: dict[str, Any]) -> None:
         )
 
         if solver_backend == "CPU":
-            import Solver.Kernel_GPU.kernel as solver_kernel_module
+            import Solver.Kernel_CPU.kernel as solver_kernel_module
 
             return solver_kernel_module.solver(config)
 

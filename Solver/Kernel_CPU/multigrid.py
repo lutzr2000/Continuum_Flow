@@ -123,6 +123,9 @@ def restrict_residual(
         b_H(I,J,K) = \frac{1}{8}\sum_{a,b,c\in\{0,1\}}
         r_h(2I+a, 2J+b, 2K+c).
     """
+    # Dense coarse levels use their own dimensions; the solver dimensions
+    # belong only to the sparse finest level.
+    nx, ny, nz = p.shape
     cnx, cny, cnz = coarse_b.shape
     total_cells = cnx * cny * cnz
 
