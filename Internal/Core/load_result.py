@@ -3,6 +3,7 @@ from pathlib import Path
 
 import bpy
 
+
 def normalize_directory_path(path_value):
     if not path_value:
         return None
@@ -24,8 +25,14 @@ class VDBWatcher:
         self.live_preview_enabled = False
         self.start_frame_index = 1
 
-    #-------------- start ----------------
-    def start(self, watch_dir, start_frame_index=1, live_preview_enabled=False, progress_callback=None):
+    # -------------- start ----------------
+    def start(
+        self,
+        watch_dir,
+        start_frame_index=1,
+        live_preview_enabled=False,
+        progress_callback=None,
+    ):
         self.watch_dir = Path(watch_dir).resolve()
         self.volume_object = None
         self.loaded_output_directory = None
@@ -37,7 +44,7 @@ class VDBWatcher:
 
         bpy.app.timers.register(self.timer, first_interval=0.5)
 
-    #-------------- running ----------------
+    # -------------- running ----------------
     def timer(self):
         if not self.running:
             return None
@@ -74,9 +81,11 @@ class VDBWatcher:
             if self.live_preview_enabled:
                 needs_reload = (
                     not self.vdb_is_valid()
-                    or getattr(self.volume_object.data, "filepath", "") != str(contiguous_vdbs[0])
+                    or getattr(self.volume_object.data, "filepath", "")
+                    != str(contiguous_vdbs[0])
                     or not bool(getattr(self.volume_object.data, "is_sequence", False))
-                    or int(getattr(self.volume_object.data, "frame_duration", 0)) != len(contiguous_vdbs)
+                    or int(getattr(self.volume_object.data, "frame_duration", 0))
+                    != len(contiguous_vdbs)
                 )
 
                 if needs_reload:
@@ -95,7 +104,6 @@ class VDBWatcher:
 
         return interval
 
-
     def ordered_vdbs(self):
         ordered = []
 
@@ -108,14 +116,12 @@ class VDBWatcher:
         ordered.sort(key=lambda item: item[0])
         return [path for _frame_index, path in ordered]
 
-
     def get_frame_index(self, path):
         frame_name_pattern = re.compile(r"^frame_(\d+)\.vdb$")
         match = frame_name_pattern.match(path.name)
         if match is None:
             return None
         return int(match.group(1))
-    
 
     def vdb_is_valid(self):
         volume_object = self.volume_object
@@ -128,7 +134,6 @@ class VDBWatcher:
         except Exception:
             return False
 
-
     def load_full_sequence(self, ordered_vdbs):
         first_vdb = ordered_vdbs[0]
         volume = self.load_volume_data(first_vdb)
@@ -140,12 +145,11 @@ class VDBWatcher:
         volume.frame_start = 1
         volume.frame_offset = 0
         volume.frame_duration = self.start_frame_index + len(ordered_vdbs)
-        volume.sequence_mode = 'CLIP'
+        volume.sequence_mode = "CLIP"
 
         last_frame_index = self.get_frame_index(ordered_vdbs[-1])
         if last_frame_index is not None:
             bpy.context.scene.frame_set(last_frame_index)
-
 
     def load_volume_data(self, filepath):
         if not self.vdb_is_valid():
@@ -165,18 +169,18 @@ class VDBWatcher:
         volume_data = getattr(volume_object, "data", None)
 
         if volume_data is not None:
-            volume_data["continuum_flow_output_directory"] = self.loaded_output_directory
+            volume_data["continuum_flow_output_directory"] = (
+                self.loaded_output_directory
+            )
 
         return volume_data
 
-
-    #-------------- stop ----------------
+    # -------------- stop ----------------
     def stop(self):
         self.running = False
         self.progress_callback = None
 
-
-    #-------------- finish ----------------
+    # -------------- finish ----------------
     def finish_bake(self):
         ordered_vdbs = self.ordered_vdbs()
         self.sequence_files = ordered_vdbs
@@ -187,8 +191,7 @@ class VDBWatcher:
         if self.progress_callback is not None:
             self.progress_callback(len(ordered_vdbs))
 
-
-    #-------------- clearing ----------------
+    # -------------- clearing ----------------
     def clear_vdb_data(self, output_directory):
         normalized_output_directory = normalize_directory_path(output_directory)
         if normalized_output_directory is None:
@@ -205,12 +208,10 @@ class VDBWatcher:
             self.sequence_files.clear()
             self.loaded_output_directory = None
 
-
     def remove_vdbs(self, volume_object):
         volume_data = getattr(volume_object, "data", None)
         bpy.data.objects.remove(volume_object, do_unlink=True)
         bpy.data.volumes.remove(volume_data)
-
 
     def find_vdb_sequence(self, output_directory):
         if output_directory is None:
@@ -218,13 +219,12 @@ class VDBWatcher:
 
         matches = []
         for volume_object in bpy.data.objects:
-            if getattr(volume_object, "type", "") != 'VOLUME':
+            if getattr(volume_object, "type", "") != "VOLUME":
                 continue
             if self.vdb_matches_directory(volume_object, output_directory):
                 matches.append(volume_object)
 
         return matches
-
 
     def vdb_matches_directory(self, volume_object, output_directory):
         if volume_object is None or output_directory is None:
@@ -266,28 +266,3 @@ class VDBWatcher:
                     pass
 
         return False
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

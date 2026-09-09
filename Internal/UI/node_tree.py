@@ -6,7 +6,6 @@ NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 NODE_CATEGORIES_ID = "CONTINUUM_FLOW_NODE_CATEGORIES"
 
 
-
 class ContinuumFlowNodeTree(bpy.types.NodeTree):
     """
     Custom node tree used as the main editor space for Continuum Flow nodes.

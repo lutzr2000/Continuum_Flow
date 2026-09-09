@@ -3,6 +3,7 @@ import os
 import sys
 from multiprocessing import shared_memory
 
+
 def _load_writer_config_from_argv(argv):
     if len(argv) < 2:
         return {}
@@ -18,7 +19,6 @@ for _dependency_path in reversed(WRITER_CONFIG.get("parent_sys_path") or ()):
 import numpy as np
 import numba
 import openvdb
-
 
 VDB_BRICK_TILES = 8
 
@@ -204,9 +204,7 @@ def write_vdb(payload):
     simulation = config.get("simulation") or {}
 
     if not isinstance(simulation, dict) or not simulation:
-        raise ValueError(
-            "Writer config must contain a non-empty 'simulation' object."
-        )
+        raise ValueError("Writer config must contain a non-empty 'simulation' object.")
 
     output_cfg = simulation.get("outputs", [{}])[0]
     precision = output_cfg.get("precision", "float32")
@@ -221,9 +219,7 @@ def write_vdb(payload):
         0.0,
     )
 
-    transform = openvdb.createLinearTransform(
-        voxelSize=delta
-    )
+    transform = openvdb.createLinearTransform(voxelSize=delta)
     transform.postTranslate(origin)
 
     grids = []
@@ -260,9 +256,7 @@ def write_vdb(payload):
             grid.transform = transform
 
             if hasattr(grid, "saveFloatAsHalf"):
-                grid.saveFloatAsHalf = (
-                    precision == "float16"
-                )
+                grid.saveFloatAsHalf = precision == "float16"
 
             if grid_payload.get("layout") == "sparse_tiles":
                 copy_sparse_tiles_into_grid(
@@ -332,9 +326,7 @@ def main():
         try:
             write_vdb(json.loads(line))
 
-            sys.stdout.write(
-                '{"status": "ok"}\n'
-            )
+            sys.stdout.write('{"status": "ok"}\n')
 
         except Exception as exc:
             sys.stdout.write(

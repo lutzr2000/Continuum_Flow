@@ -7,17 +7,20 @@ from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 
+
 def _update_simulation_start_frame(self, _context):
     self._clamp_frame_range()
 
+
 def _update_simulation_end_frame(self, _context):
     self._clamp_frame_range()
-    
+
 
 class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     """
     Node used to collect all simulation-wide settings and input dependencies.
     """
+
     cpu_available = False
     gpu_available = False
 
@@ -61,7 +64,9 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
             if name == "Forces"
             else sockets.ContinuumFlowLinkSocket.bl_idname
         )
-        return self._ensure_socket(self.inputs, socket_type, name, multi_input=multi_input)
+        return self._ensure_socket(
+            self.inputs, socket_type, name, multi_input=multi_input
+        )
 
     def _sync_node(self):
         self._ensure_input_socket("Domain")
@@ -90,7 +95,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
 
     def set_solver_status(self, cpu_available, gpu_available):
         self.cpu_available = cpu_available
-        self.gpu_available = gpu_available 
+        self.gpu_available = gpu_available
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)

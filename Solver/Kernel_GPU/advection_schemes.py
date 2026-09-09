@@ -4,9 +4,21 @@ from numba import cuda
 
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 
+
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_trilinear_inner_sparse(
-    field: Any, tile_map: Any, x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, tx: float, ty: float, tz: float, default_value: float
+    field: Any,
+    tile_map: Any,
+    x0: int,
+    y0: int,
+    z0: int,
+    x1: int,
+    y1: int,
+    z1: int,
+    tx: float,
+    ty: float,
+    tz: float,
+    default_value: float,
 ) -> float:
     r"""
     Interpolate a sparse scalar field between the eight surrounding cells.
@@ -41,7 +53,15 @@ def _sample_trilinear_inner_sparse(
 
 @cuda.jit(device=True, inline=True, cache=True)
 def _sample_cell_extrema_inner_sparse(
-    field: Any, tile_map: Any, x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, default_value: float
+    field: Any,
+    tile_map: Any,
+    x0: int,
+    y0: int,
+    z0: int,
+    x1: int,
+    y1: int,
+    z1: int,
+    default_value: float,
 ) -> tuple[float, float]:
     """
     Find the minimum and maximum among eight surrounding sparse-grid samples.
@@ -118,7 +138,9 @@ def _clamp(value: float, lower: float, upper: float) -> float:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def _prepare_trilinear_coords(x: float, y: float, z: float, nx: int, ny: int, nz: int) -> Any:
+def _prepare_trilinear_coords(
+    x: float, y: float, z: float, nx: int, ny: int, nz: int
+) -> Any:
     """
     Clamp one sample position to the domain and derive the surrounding cell coordinates.
     Lastly computes interpolation weights tx, ty, tz.

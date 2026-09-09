@@ -2,6 +2,7 @@ import bpy
 from .node_tree import ContinuumFlowNodeTree
 from ..Core.solver import solver_status
 
+
 class ContinuumFlowBaseNode(bpy.types.Node):
     """
     Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes.

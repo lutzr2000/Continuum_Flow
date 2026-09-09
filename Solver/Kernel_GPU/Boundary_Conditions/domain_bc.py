@@ -19,6 +19,7 @@ SIDE_TO_AXIS_AND_INDEX = {
     "z_high": (2, 1),
 }
 
+
 def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
     """
     Normalize user-facing domain boundary settings for CUDA kernel dispatch.
@@ -62,7 +63,9 @@ def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
 
 
 @cuda.jit(cache=True)
-def pressure_poisson_apply_neumann_bcs(p: Any, tile_map: Any, nx: int, ny: int, nz: int) -> None:
+def pressure_poisson_apply_neumann_bcs(
+    p: Any, tile_map: Any, nx: int, ny: int, nz: int
+) -> None:
     r"""
     Apply homogeneous Neumann pressure conditions to the sparse domain faces.
 
@@ -115,6 +118,7 @@ def pressure_poisson_apply_neumann_bcs(p: Any, tile_map: Any, nx: int, ny: int, 
             p, tile_map, i, j, nz - 2, 0.0
         )
 
+
 @cuda.jit(cache=True)
 def pressure_poisson_apply_neumann_bcs_dense(p: Any) -> None:
     r"""
@@ -144,6 +148,7 @@ def pressure_poisson_apply_neumann_bcs_dense(p: Any) -> None:
         p[i, j, k] = p[i, j, 1]
     elif k == nz - 1:
         p[i, j, k] = p[i, j, nz - 2]
+
 
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(

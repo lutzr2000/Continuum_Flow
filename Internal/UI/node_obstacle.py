@@ -1,6 +1,7 @@
 from . import sockets
 from . import node_base
 
+
 class ContinuumFlowObstacleNode(node_base.ContinuumFlowBaseNode):
     """
     Node used to define obstacle geometry inside the CFD domain.

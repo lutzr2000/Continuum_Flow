@@ -17,7 +17,9 @@ def suppress_process_output():
     try:
         os.dup2(devnull_fd, 1)
         os.dup2(devnull_fd, 2)
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
             yield
     finally:
         os.dup2(saved_stdout, 1)
@@ -104,5 +106,3 @@ def mesh_to_temp_object(source_object, depsgraph):
     )
     temp_object.matrix_world.identity()
     return temp_object, temp_mesh
-
-

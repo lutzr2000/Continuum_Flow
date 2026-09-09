@@ -30,20 +30,34 @@ class SolverManager:
                 self._launch_worker_locked()
 
             if wait:
-                deadline = None if timeout is None else (time.monotonic() + float(timeout))
+                deadline = (
+                    None if timeout is None else (time.monotonic() + float(timeout))
+                )
                 while True:
                     if self._process is not None and self._process.poll() is not None:
                         raise RuntimeError("Solver worker exited during startup")
-                    if self._ready and self._process is not None and self._process.poll() is None:
+                    if (
+                        self._ready
+                        and self._process is not None
+                        and self._process.poll() is None
+                    ):
                         break
                     if self._last_error:
                         raise RuntimeError(str(self._last_error))
-                    remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                    remaining = (
+                        None
+                        if deadline is None
+                        else max(0.0, deadline - time.monotonic())
+                    )
                     if remaining is not None and remaining <= 0:
                         raise RuntimeError("Timed out while starting solver worker")
                     self._condition.wait(timeout=remaining)
 
-            return self._ready and self._process is not None and self._process.poll() is None
+            return (
+                self._ready
+                and self._process is not None
+                and self._process.poll() is None
+            )
 
     def request_preload(self, backend, config=None):
         backend = str(backend or "").strip().upper()
@@ -53,7 +67,10 @@ class SolverManager:
         self.start(wait=True, timeout=120.0)
 
         with self._condition:
-            if backend in self._preloaded_backends or backend in self._preload_in_flight:
+            if (
+                backend in self._preloaded_backends
+                or backend in self._preload_in_flight
+            ):
                 return
             self._preload_in_flight.add(backend)
 
@@ -125,7 +142,11 @@ class SolverManager:
 
     def is_ready(self):
         with self._condition:
-            return self._ready and self._process is not None and self._process.poll() is None
+            return (
+                self._ready
+                and self._process is not None
+                and self._process.poll() is None
+            )
 
     def _send(self, message):
         with self._write_lock:
@@ -159,7 +180,9 @@ class SolverManager:
                 if self._active_job_id == job_id:
                     self._active_job_id = None
             elif message_type == "error":
-                self._last_error = message.get("message") or "Unknown solver worker error"
+                self._last_error = (
+                    message.get("message") or "Unknown solver worker error"
+                )
                 job_id = int(message.get("job_id", 0) or 0)
                 if job_id:
                     self._job_results[job_id] = {

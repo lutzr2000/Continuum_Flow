@@ -10,8 +10,11 @@ from Solver.Kernel_GPU.kernel_config import (
     TILE_SIZE,
 )
 
+
 @cuda.jit
-def velocity_maxima_timestep(u: Any, v: Any, w: Any, tile_map: Any, maxima: Any, total_tile_count: int) -> None:
+def velocity_maxima_timestep(
+    u: Any, v: Any, w: Any, tile_map: Any, maxima: Any, total_tile_count: int
+) -> None:
     r"""
     Reduce the absolute velocity maxima of all active sparse cells.
 
@@ -93,7 +96,15 @@ def velocity_maxima_timestep(u: Any, v: Any, w: Any, tile_map: Any, maxima: Any,
 
 
 def compute_new_timestep_gpu(
-    u: Any, v: Any, w: Any, tile_map: Any, active_tile_count: int, maxima: Any, delta: float, cfl_max: float, max_dt: float | None = None
+    u: Any,
+    v: Any,
+    w: Any,
+    tile_map: Any,
+    active_tile_count: int,
+    maxima: Any,
+    delta: float,
+    cfl_max: float,
+    max_dt: float | None = None,
 ) -> float:
     r"""
     Compute a stable timestep from the component-wise velocity maxima.

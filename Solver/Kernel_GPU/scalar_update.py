@@ -270,15 +270,11 @@ def update_scalar_fields_maccormack(
         T_zm = sparse_managment.get_pool_value(T, tile_map, i, j, k - 1, t_reference)
 
         fuel_front = (
-            abs(fuel_xp - fuel_xm)
-            + abs(fuel_yp - fuel_ym)
-            + abs(fuel_zp - fuel_zm)
+            abs(fuel_xp - fuel_xm) + abs(fuel_yp - fuel_ym) + abs(fuel_zp - fuel_zm)
         ) / 100.0
 
         temperature_front = (
-            abs(T_xp - T_xm)
-            + abs(T_yp - T_ym)
-            + abs(T_zp - T_zm)
+            abs(T_xp - T_xm) + abs(T_yp - T_ym) + abs(T_zp - T_zm)
         ) / max(fuel_ignition_temperature, 1.0)
 
         front_factor = min(max(0.5 * (fuel_front + temperature_front), 0.0), 1.0)
@@ -326,7 +322,5 @@ def update_scalar_fields_maccormack(
     smoke_out[tile_index, local_i, local_j, local_k] = min(
         max(smoke_updated, 0.0), 100.0
     )
-    fuel_out[tile_index, local_i, local_j, local_k] = min(
-        max(fuel_updated, 0.0), 100.0
-    )
+    fuel_out[tile_index, local_i, local_j, local_k] = min(max(fuel_updated, 0.0), 100.0)
     flame_out[tile_index, local_i, local_j, local_k] = max(-fuel_burn_source, 0.0)

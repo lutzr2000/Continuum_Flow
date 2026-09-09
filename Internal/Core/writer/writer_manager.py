@@ -84,7 +84,9 @@ class _VDBWriterProcess:
             raise RuntimeError(f"VDB writer process failed during warm-up. {stderr}")
         response = json.loads(response_line)
         if response.get("status") != "ok":
-            raise RuntimeError(response.get("message", "unknown VDB writer warm-up error"))
+            raise RuntimeError(
+                response.get("message", "unknown VDB writer warm-up error")
+            )
 
     def close(self):
         if self._process.poll() is None and self._process.stdin is not None:
@@ -111,7 +113,12 @@ class _VDBWriterProcessPool:
     Round-robin pool of persistent UI-side VDB writer processes.
     """
 
-    def __init__(self, process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT, max_process_count=None, writer_config=None):
+    def __init__(
+        self,
+        process_count=DEFAULT_VDB_WRITER_PROCESS_COUNT,
+        max_process_count=None,
+        writer_config=None,
+    ):
         writer_script = _bake_directory() / "writer_worker.py"
         if not writer_script.exists():
             raise FileNotFoundError(f"VDB writer script not found: {writer_script}")
@@ -119,7 +126,9 @@ class _VDBWriterProcessPool:
         self._processes = []
         self._writer_script = writer_script
         self._writer_config = writer_config
-        self._max_process_count = max(int(max_process_count or process_count), int(process_count))
+        self._max_process_count = max(
+            int(max_process_count or process_count), int(process_count)
+        )
         self._growth_lock = threading.Lock()
         try:
             for writer_id in range(process_count):

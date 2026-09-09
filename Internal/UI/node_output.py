@@ -8,6 +8,7 @@ from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 from bpy.props import StringProperty
 
+
 class CONTINUUM_FLOW_OT_output_bake_button(bpy.types.Operator):
     bl_idname = "continuum_flow.output_bake_button"
     bl_label = "Bake"
@@ -163,16 +164,23 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         layout.separator()
 
         disable_reason = self._bake_disable_reason()
-        is_free_bake = bake_main.output_node_has_baked_data(self) and not solver_status.bake_running
+        is_free_bake = (
+            bake_main.output_node_has_baked_data(self)
+            and not solver_status.bake_running
+        )
 
         button_row = layout.row()
         button_row.enabled = disable_reason is None and not solver_status.bake_running
         if is_free_bake:
-            button_row.operator("continuum_flow.output_free_bake_button", text="Free Bake", icon='TRASH')
+            button_row.operator(
+                "continuum_flow.output_free_bake_button", text="Free Bake", icon="TRASH"
+            )
         else:
-            button_row.operator("continuum_flow.output_bake_button", text="Bake", icon='RENDER_STILL')
+            button_row.operator(
+                "continuum_flow.output_bake_button", text="Bake", icon="RENDER_STILL"
+            )
 
         if disable_reason is not None:
-            layout.label(text=disable_reason, icon='INFO')
+            layout.label(text=disable_reason, icon="INFO")
         elif solver_status.bake_running:
-            layout.label(text="Bake is running", icon='INFO')
+            layout.label(text="Bake is running", icon="INFO")

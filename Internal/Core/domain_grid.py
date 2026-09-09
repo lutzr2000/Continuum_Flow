@@ -1,6 +1,5 @@
 import math
 
-
 TILE_SIZE = 4
 
 

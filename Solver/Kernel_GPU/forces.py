@@ -3,6 +3,7 @@ from typing import Any
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.noise as noise
 
+
 @cuda.jit(device=True, inline=True, cache=True)
 def buoyancy_approximation(
     T: Any,
@@ -26,9 +27,7 @@ def buoyancy_approximation(
     """
     g = 9.81
 
-    temperature = sparse_managment.get_pool_value(
-        T, tile_map, i, j, k, t_reference
-    )
+    temperature = sparse_managment.get_pool_value(T, tile_map, i, j, k, t_reference)
 
     return g * buoyancy_factor * (temperature - t_reference)
 

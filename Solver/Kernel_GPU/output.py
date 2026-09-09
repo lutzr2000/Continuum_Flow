@@ -13,7 +13,11 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
 # ------------setup------------------
-def setup_output(simulations: dict[str, Any], shape: tuple[int, int, int], tile_shape: tuple[int, int, int]) -> Any:
+def setup_output(
+    simulations: dict[str, Any],
+    shape: tuple[int, int, int],
+    tile_shape: tuple[int, int, int],
+) -> Any:
     """
     Initialize asynchronous frame-output state and its first writer slots.
 
@@ -56,7 +60,7 @@ def setup_output(simulations: dict[str, Any], shape: tuple[int, int, int], tile_
     return shared_memory_blocks, writer_state
 
 
-def grow_writer_slots(writer_state: Any, prewarm: bool=False) -> Any:
+def grow_writer_slots(writer_state: Any, prewarm: bool = False) -> Any:
     """
     Allocate and register one writer slot unless the configured limit is met.
 
@@ -76,7 +80,7 @@ def grow_writer_slots(writer_state: Any, prewarm: bool=False) -> Any:
     return slot
 
 
-def create_writer_slot(writer_context: Any, prewarm: bool=False) -> Any:
+def create_writer_slot(writer_context: Any, prewarm: bool = False) -> Any:
     """
     Create shared-memory buffers and a host-writer connection for one slot.
 

@@ -2,6 +2,7 @@ from typing import Any
 
 import numpy as np
 
+
 def _get_animation_times(container: Any) -> Any:
     """
     Read the shared animation sample times from a simulation container.
@@ -12,7 +13,9 @@ def _get_animation_times(container: Any) -> Any:
     return timeline.get("times") or ()
 
 
-def get_animated_node_value(node: Any, var_name: str, t: float, default: Any=0.0, animation_times: Any=()) -> Any:
+def get_animated_node_value(
+    node: Any, var_name: str, t: float, default: Any = 0.0, animation_times: Any = ()
+) -> Any:
     """
     Resolve a node property at the animation sample nearest to ``t``.
 
@@ -53,9 +56,15 @@ def constant_force(simulation: dict[str, Any], t: float) -> Any:
         if force_node.get("node_type") == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
             force = force_node.get("force") or {}
 
-            fx += get_animated_node_value(force_node, "fx", t, force.get("x", 0.0), animation_times)
-            fy += get_animated_node_value(force_node, "fy", t, force.get("y", 0.0), animation_times)
-            fz += get_animated_node_value(force_node, "fz", t, force.get("z", 0.0), animation_times)
+            fx += get_animated_node_value(
+                force_node, "fx", t, force.get("x", 0.0), animation_times
+            )
+            fy += get_animated_node_value(
+                force_node, "fy", t, force.get("y", 0.0), animation_times
+            )
+            fz += get_animated_node_value(
+                force_node, "fz", t, force.get("z", 0.0), animation_times
+            )
 
     return fx, fy, fz
 
@@ -75,19 +84,29 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
             continue
 
         strength = get_animated_node_value(node, "strength", t, 0.0, animation_times)
-        origin = get_animated_node_value(node, "origin", t, [0.0, 0.0, 0.0], animation_times)
-        axis = get_animated_node_value(node, "axis", t, [0.0, 0.0, 1.0], animation_times)
+        origin = get_animated_node_value(
+            node, "origin", t, [0.0, 0.0, 0.0], animation_times
+        )
+        axis = get_animated_node_value(
+            node, "axis", t, [0.0, 0.0, 1.0], animation_times
+        )
         radius = get_animated_node_value(node, "radius", t, 0.0, animation_times)
 
         origin = np.asarray(origin, dtype=np.float32)
         axis = np.asarray(axis, dtype=np.float32)
 
-        swirl_nodes.append([
-            strength,
-            origin[0], origin[1], origin[2],
-            axis[0], axis[1], axis[2],
-            radius,
-        ])
+        swirl_nodes.append(
+            [
+                strength,
+                origin[0],
+                origin[1],
+                origin[2],
+                axis[0],
+                axis[1],
+                axis[2],
+                radius,
+            ]
+        )
 
     swirl_nodes = np.asarray(swirl_nodes, dtype=np.float32).reshape((-1, 8))
 
@@ -114,12 +133,14 @@ def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
         frequency = node.get("frequency", 1.0)
         seed = node.get("seed", 0)
 
-        turbulence_nodes.append([
-            amplitude,
-            scale,
-            frequency,
-            seed,
-        ])
+        turbulence_nodes.append(
+            [
+                amplitude,
+                scale,
+                frequency,
+                seed,
+            ]
+        )
 
     turbulence_nodes = np.asarray(turbulence_nodes, dtype=np.float32).reshape((-1, 4))
 

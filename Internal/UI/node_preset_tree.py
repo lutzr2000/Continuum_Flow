@@ -1,5 +1,6 @@
-import bpy 
+import bpy
 from .node_tree import ContinuumFlowNodeTree
+
 
 def _node_cursor_location(context):
     """
@@ -10,6 +11,7 @@ def _node_cursor_location(context):
     if cursor is None:
         return (0.0, 0.0)
     return (float(cursor[0]), float(cursor[1]))
+
 
 def _active_continuum_flow_tree(context):
     """
@@ -25,6 +27,7 @@ def _active_continuum_flow_tree(context):
         space_data, "node_tree", None
     )
 
+
 class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
     """
     Add a ready-to-use Continuum Flow starter setup with the core nodes linked.
@@ -37,7 +40,7 @@ class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         return _active_continuum_flow_tree(context) is not None
-    
+
     def execute(self, context):
         node_tree = _active_continuum_flow_tree(context)
         if node_tree is None:
@@ -46,15 +49,31 @@ class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
 
         cursor_x, cursor_y = _node_cursor_location(context)
         node_specs = (
-            ("domain", "CONTINUUM_FLOW_DOMAIN_NODE", (cursor_x - 520.0, cursor_y + 250.0)),
+            (
+                "domain",
+                "CONTINUUM_FLOW_DOMAIN_NODE",
+                (cursor_x - 520.0, cursor_y + 250.0),
+            ),
             (
                 "physics",
                 "CONTINUUM_FLOW_PHYSICS_NODE",
                 (cursor_x - 520.0, cursor_y - 140.0),
             ),
-            ("simulation", "CONTINUUM_FLOW_SIMULATION_NODE", (cursor_x - 120.0, cursor_y)),
-            ("viewer", "CONTINUUM_FLOW_VIEWER_NODE", (cursor_x + 280.0, cursor_y + 120.0)),
-            ("output", "CONTINUUM_FLOW_OUTPUT_NODE", (cursor_x + 280.0, cursor_y - 120.0)),
+            (
+                "simulation",
+                "CONTINUUM_FLOW_SIMULATION_NODE",
+                (cursor_x - 120.0, cursor_y),
+            ),
+            (
+                "viewer",
+                "CONTINUUM_FLOW_VIEWER_NODE",
+                (cursor_x + 280.0, cursor_y + 120.0),
+            ),
+            (
+                "output",
+                "CONTINUUM_FLOW_OUTPUT_NODE",
+                (cursor_x + 280.0, cursor_y - 120.0),
+            ),
         )
 
         for node in node_tree.nodes:

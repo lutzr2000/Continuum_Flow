@@ -2,6 +2,7 @@ from typing import Any
 
 from numba import cuda
 
+
 @cuda.jit(device=True, inline=True, cache=True)
 def _smoothstep(t: float) -> float:
     """

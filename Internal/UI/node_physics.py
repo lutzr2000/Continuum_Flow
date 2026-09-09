@@ -2,6 +2,7 @@ from . import sockets
 from . import node_base
 from bpy.props import FloatProperty
 
+
 class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     """
     Node used to store the physical coefficients of the CFD simulation.

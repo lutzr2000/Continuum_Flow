@@ -7,6 +7,7 @@ def detect_gpu_available():
 
     try:
         from numba import cuda
+
         return len(list(cuda.gpus)) > 0
     except Exception:
         return False

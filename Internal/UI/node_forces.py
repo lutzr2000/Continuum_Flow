@@ -5,6 +5,7 @@ import bpy
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
 
+
 class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
     """
     Shared socket and property drawing helpers for force nodes.
@@ -15,7 +16,9 @@ class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
     def _ensure_output_socket(self):
         socket = self.outputs.get("Force")
         if socket is None:
-            socket = self.outputs.new(sockets.ContinuumFlowForceSocket.bl_idname, "Force")
+            socket = self.outputs.new(
+                sockets.ContinuumFlowForceSocket.bl_idname, "Force"
+            )
         return socket
 
     def _sync_node(self):

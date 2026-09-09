@@ -19,7 +19,11 @@ from .UI.sockets import (
 )
 
 from .UI.node_domain import ContinuumFlowDomainNode
-from .UI.node_forces import ContinuumFlowForceConstantNode,ContinuumFlowForceSwirlNode,ContinuumFlowForceTurbulenceNode
+from .UI.node_forces import (
+    ContinuumFlowForceConstantNode,
+    ContinuumFlowForceSwirlNode,
+    ContinuumFlowForceTurbulenceNode,
+)
 from .UI.node_geometry import ContinuumFlowGeometryNode
 from .UI.node_obstacle import ContinuumFlowObstacleNode
 from .UI.node_output import (
@@ -33,23 +37,23 @@ from .UI.node_source import ContinuumFlowSourceNode
 from .UI.node_viewer import ContinuumFlowViewerNode
 from .UI.node_preset_tree import ContinuumFlow_OT_add_basic_setup
 from .Core.baking import CONTINUUM_FLOW_OT_bake, CONTINUUM_FLOW_OT_free_bake
-from .Core.export.export_config import sync_ui_animation_state, continuum_flow_frame_change_post
+from .Core.export.export_config import (
+    sync_ui_animation_state,
+    continuum_flow_frame_change_post,
+)
 from .Core import forces
 from .Core.solver import solver_worker
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from .Core.solver import solver_status
 
-
 classes = (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
-
     ContinuumFlowIntSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
     ContinuumFlowGeometrySocket,
-
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
     ContinuumFlowOutputNode,
@@ -60,11 +64,9 @@ classes = (
     ContinuumFlowSourceNode,
     ContinuumFlowObstacleNode,
     ContinuumFlowViewerNode,
-
     ContinuumFlowForceConstantNode,
     ContinuumFlowForceSwirlNode,
     ContinuumFlowForceTurbulenceNode,
-
     ContinuumFlow_OT_add_basic_setup,
     ContinuumFlow_OT_viewer_toggle_domain,
     CONTINUUM_FLOW_OT_free_bake,
@@ -149,6 +151,7 @@ def register():
 
     sync_ui_animation_state(getattr(bpy.context, "scene", None))
 
+
 def unregister():
     solver_worker.shutdown_worker(restart=False)
     solver_status.gpu_available = False
@@ -175,5 +178,3 @@ def unregister():
 
     for cls in reversed(classes):
         safe_unregister_class(cls)
-
-

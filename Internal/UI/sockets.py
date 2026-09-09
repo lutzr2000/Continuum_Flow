@@ -109,7 +109,7 @@ class ContinuumFlowIntSocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.90, 0.55, 0.20, 1.0)
-    
+
 
 class ContinuumFlowForceSocket(bpy.types.NodeSocket):
     """
@@ -132,7 +132,7 @@ class ContinuumFlowForceSocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.45, 0.65, 0.95, 1.0)
-    
+
 
 class ContinuumFlowLinkSocket(bpy.types.NodeSocket):
     """
@@ -178,7 +178,7 @@ class ContinuumFlowResultSocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.65, 0.35, 0.85, 1.0)
-    
+
 
 class ContinuumFlowGeometrySocket(bpy.types.NodeSocket):
     """
@@ -201,6 +201,3 @@ class ContinuumFlowGeometrySocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.0, 214.0 / 255.0, 163.0 / 255.0, 1.0)
-
-
-

@@ -5,6 +5,7 @@ from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
 from bpy.props import IntProperty
 
+
 class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     """
     Node used to define a generic CFD source region and its scalar and velocity targets.
@@ -48,5 +49,3 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
         velocity_col.prop(self, "velocity", text="")
-
-

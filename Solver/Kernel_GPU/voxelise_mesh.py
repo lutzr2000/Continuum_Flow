@@ -1,4 +1,5 @@
 """CUDA voxelization of object-local base masks only."""
+
 from typing import Any
 
 

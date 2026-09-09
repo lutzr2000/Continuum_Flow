@@ -3,7 +3,7 @@ import bpy
 import json
 from datetime import datetime, timezone
 from . import export_geometry
-from .. import viewer 
+from .. import viewer
 from ..domain_grid import grid_shape
 from bpy.app.handlers import persistent
 
@@ -26,7 +26,6 @@ ANIMATABLE_PROPERTIES = {
         "burn_noise_amplitude",
         "vorticity",
     ),
-
     "CONTINUUM_FLOW_SOURCE_NODE": (
         "fuel",
         "smoke",
@@ -36,30 +35,24 @@ ANIMATABLE_PROPERTIES = {
         "noise_amplitude",
         "velocity",
     ),
-
     "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
         "strength",
         "origin",
         "axis",
         "radius",
     ),
-
     "CONTINUUM_FLOW_FORCE_CONSTANT_NODE": (
         "fx",
         "fy",
         "fz",
     ),
-
     "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
         "strength",
         "origin",
         "axis",
         "radius",
     ),
-
-    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": (
-        "amplitude",
-    ),
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": ("amplitude",),
 }
 
 PERCENTAGE_MAPPING = {
@@ -76,7 +69,7 @@ PERCENTAGE_MAPPING = {
 }
 
 
-#-------------- export ----------------
+# -------------- export ----------------
 def export_config_dict(config_dict):
     """
     Prepare a fresh bake subfolder and export the STL geometry assets into it.
@@ -97,10 +90,7 @@ def create_bake_subdirectory(base_directory, config_dict):
     """
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
-    bake_directory = (
-        Path(base_directory)
-        / f"Bake_run_{timestamp}"
-    )
+    bake_directory = Path(base_directory) / f"Bake_run_{timestamp}"
 
     bake_directory.mkdir(
         parents=True,
@@ -150,10 +140,10 @@ def export_geomtry_stls(config_dict, export_directory):
                 )
 
 
-#-------------- build ----------------
+# -------------- build ----------------
 def build_config_dict(context, simulation_node):
     """
-    Build the genetal simulation config 
+    Build the genetal simulation config
     """
     node_tree = getattr(simulation_node, "id_data")
 
@@ -239,25 +229,54 @@ def build_entries(simulation_node):
             "solver_backend": str(getattr(simulation_node, "solver_backend", "CPU")),
             "start_frame": start_frame,
             "end_frame": end_frame,
-            "simulation_length":simulation_length,
+            "simulation_length": simulation_length,
             "cfl": float(getattr(simulation_node, "cfl", 10.0)),
             "iterations": int(simulation_node.iterations),
-            "simulate_sparsely": bool(getattr(simulation_node, "simulate_sparsely", True)),
-            "adaptive_domain_threshold": float(getattr(simulation_node, "adaptive_domain_threshold", 0.001)),
+            "simulate_sparsely": bool(
+                getattr(simulation_node, "simulate_sparsely", True)
+            ),
+            "adaptive_domain_threshold": float(
+                getattr(simulation_node, "adaptive_domain_threshold", 0.001)
+            ),
         },
         "animation_timeline": {
             "fps": simulation_fps,
             "times": simulation_times,
         },
         "domain": build_domain_node_entries(domain_node),
-        "physics": (build_physics_node_entries(physics_node,start_frame,end_frame,simulation_fps,)),
-        "sources": [build_source_node_entries(node,start_frame,end_frame,simulation_fps,)
+        "physics": (
+            build_physics_node_entries(
+                physics_node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+            )
+        ),
+        "sources": [
+            build_source_node_entries(
+                node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+            )
             for node in source_nodes
         ],
-        "obstacles": [build_obstacle_node_entries(node,start_frame,end_frame,simulation_fps,)
+        "obstacles": [
+            build_obstacle_node_entries(
+                node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+            )
             for node in obstacle_nodes
         ],
-        "forces": [build_force_entries(node,start_frame,end_frame,simulation_fps,)
+        "forces": [
+            build_force_entries(
+                node,
+                start_frame,
+                end_frame,
+                simulation_fps,
+            )
             for node in force_nodes
         ],
         "outputs": [build_output_node_entries(output_node)],
@@ -299,43 +318,29 @@ def build_physics_node_entries(node, start_frame, end_frame, fps):
             "density": physics_value(node, "fluid_density"),
             "viscosity": physics_value(node, "fluid_viscosity"),
         },
-
         "temperature": {
             "dissipation": physics_value(node, "temperature_dissipation"),
-            "production_rate": physics_value(
-                node, "temperature_production_rate"
-            ),
-            "reference_temperature": physics_value(
-                node, "reference_temperature"
-            ),
+            "production_rate": physics_value(node, "temperature_production_rate"),
+            "reference_temperature": physics_value(node, "reference_temperature"),
             "buoyancy": physics_value(node, "buoyancy"),
             "expansion_rate": physics_value(node, "expansion_rate"),
         },
-
         "smoke": {
             "dissipation": physics_value(node, "smoke_dissipation"),
-            "production_rate": physics_value(
-                node, "smoke_production_rate"
-            ),
+            "production_rate": physics_value(node, "smoke_production_rate"),
         },
-
         "fuel": {
             "dissipation": physics_value(node, "fuel_dissipation"),
             "burn_rate": physics_value(node, "fuel_burn_rate"),
-            "ignition_temperature": physics_value(
-                node, "fuel_ignition_temperature"
-            ),
+            "ignition_temperature": physics_value(node, "fuel_ignition_temperature"),
         },
-
         "burning": {
             "scale": physics_value(node, "burn_noise_scale"),
             "amplitude": physics_value(node, "burn_noise_amplitude"),
         },
-
         "extras": {
             "vorticity": physics_value(node, "vorticity"),
         },
-
         "animations": animations,
         "animated_values": animated_values,
     }
@@ -346,9 +351,7 @@ def physics_value(node, property_name):
 
     if property_name in PERCENTAGE_MAPPING:
         minimum, maximum = PERCENTAGE_MAPPING[property_name]
-        value = minimum + (
-            (value / 100.0) * (maximum - minimum)
-        )
+        value = minimum + ((value / 100.0) * (maximum - minimum))
 
     return value
 
@@ -470,20 +473,24 @@ def build_force_entries(node, start_frame, end_frame, fps):
         }
 
     elif node.bl_idname == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
-        data.update({
-            "strength": float(node.strength),
-            "origin": safe_float_vector(node.origin),
-            "axis": safe_float_vector(node.axis),
-            "radius": float(node.radius),
-        })
+        data.update(
+            {
+                "strength": float(node.strength),
+                "origin": safe_float_vector(node.origin),
+                "axis": safe_float_vector(node.axis),
+                "radius": float(node.radius),
+            }
+        )
 
     elif node.bl_idname == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
-        data.update({
-            "scale": float(node.scale),
-            "frequency": float(node.frequency),
-            "amplitude": float(node.amplitude),
-            "seed": int(node.seed),
-        })
+        data.update(
+            {
+                "scale": float(node.scale),
+                "frequency": float(node.frequency),
+                "amplitude": float(node.amplitude),
+                "seed": int(node.seed),
+            }
+        )
 
     return data
 
@@ -504,8 +511,7 @@ def build_output_node_entries(node):
             "fuel": {"enabled": bool(getattr(node, "export_fuel", False))},
             "flame": {"enabled": bool(getattr(node, "export_flame", False))},
         },
-        "performance": {
-        },
+        "performance": {},
         "output_path": output_path,
     }
 
@@ -519,7 +525,7 @@ def build_viewer_node_entries(node):
     }
 
 
-#-------------- helper ----------------
+# -------------- helper ----------------
 def multiple_linked_nodes(node, socket_name, direction="input"):
     """
     Return all nodes connected to the socket.
@@ -574,9 +580,7 @@ def safe_float_vector(value):
     return [float(component) for component in value]
 
 
-def get_geometry_transforms(
-    geometry_nodes, start_frame, end_frame
-):
+def get_geometry_transforms(geometry_nodes, start_frame, end_frame):
     """
     Sample evaluated world transforms for linked geometry objects once per Blender frame.
     """
@@ -608,10 +612,7 @@ def get_geometry_transforms(
                 )
 
                 object_samples["matrices_world"].append(
-                    [
-                        [float(component) for component in row]
-                        for row in matrix_world
-                    ]
+                    [[float(component) for component in row] for row in matrix_world]
                 )
 
     finally:
@@ -640,7 +641,7 @@ def get_geometry_nodes(node_tree):
     return geometry_entries
 
 
-#-------------- animation data ----------------
+# -------------- animation data ----------------
 def build_animations(node, start_frame, end_frame):
     property_names = ANIMATABLE_PROPERTIES.get(
         node.bl_idname,
@@ -651,9 +652,7 @@ def build_animations(node, start_frame, end_frame):
     current_frame = scene.frame_current
 
     sampled = {
-        name: []
-        for name in property_names
-        if node_property_is_animated(node, name)
+        name: [] for name in property_names if node_property_is_animated(node, name)
     }
 
     try:
@@ -673,10 +672,7 @@ def build_animations(node, start_frame, end_frame):
         scene.frame_set(current_frame)
         sync_node_tree_animations(scene)
 
-    animations = {
-        name: {"values": values}
-        for name, values in sampled.items()
-    }
+    animations = {name: {"values": values} for name, values in sampled.items()}
     animated_values = {
         name: sample_animated_value(
             name,
@@ -726,18 +722,12 @@ def sample_animated_value(property_name, value):
         value,
         (int, float, bool),
     ):
-        return [
-            float(component)
-            for component in value
-        ]
+        return [float(component) for component in value]
 
     if property_name in PERCENTAGE_MAPPING:
         minimum, maximum = PERCENTAGE_MAPPING[property_name]
 
-        return minimum + (
-            (float(value) / 100.0)
-            * (maximum - minimum)
-        )
+        return minimum + ((float(value) / 100.0) * (maximum - minimum))
 
     return float(value)
 
@@ -752,9 +742,7 @@ def node_property_is_animated(node, property_name):
     if animation_data is None:
         return False
 
-    for fcurve in iter_action_curves(
-        getattr(animation_data, "action", None)
-    ):
+    for fcurve in iter_action_curves(getattr(animation_data, "action", None)):
         if getattr(fcurve, "data_path", None) == data_path:
             return True
 
@@ -782,7 +770,9 @@ def _set_node_property_component(node, property_name, value, array_index):
 
 def _iter_keyframeable_node_properties(node_tree):
     for node in getattr(node_tree, "nodes", ()):
-        for property_name in ANIMATABLE_PROPERTIES.get(getattr(node, "bl_idname", ""), ()):
+        for property_name in ANIMATABLE_PROPERTIES.get(
+            getattr(node, "bl_idname", ""), ()
+        ):
             try:
                 node.path_from_id(property_name)
             except Exception:
@@ -813,7 +803,10 @@ def sync_node_tree_animations(scene=None):
         property_path_map = {}
         for node, property_name in _iter_keyframeable_node_properties(node_tree):
             try:
-                property_path_map[node.path_from_id(property_name)] = (node, property_name)
+                property_path_map[node.path_from_id(property_name)] = (
+                    node,
+                    property_name,
+                )
             except Exception:
                 continue
 
@@ -830,6 +823,7 @@ def sync_node_tree_animations(scene=None):
                 int(getattr(fcurve, "array_index", -1)),
             )
 
+
 def sync_ui_animation_state(scene=None):
     sync_node_tree_animations(scene)
     viewer.redraw_UI()
@@ -838,4 +832,3 @@ def sync_ui_animation_state(scene=None):
 @persistent
 def continuum_flow_frame_change_post(scene, _depsgraph=None):
     sync_ui_animation_state(scene)
-

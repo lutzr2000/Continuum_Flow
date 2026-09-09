@@ -11,7 +11,7 @@ draw_handler = None
 current_drawn_force = None
 
 
-#-------------- general ----------------
+# -------------- general ----------------
 def force_preview_timer():
     """
     Keep the force preview in sync with node selection.
@@ -120,28 +120,26 @@ def draw_force_preview():
     if not current_drawn_force:
         return
 
-    node_tree = bpy.data.node_groups.get(
-        current_drawn_force.get("node_tree_name", "")
-    )
+    node_tree = bpy.data.node_groups.get(current_drawn_force.get("node_tree_name", ""))
     if node_tree is None:
         return
 
-    force_node = node_tree.nodes.get(
-        current_drawn_force.get("node_name", "")
-    )
+    force_node = node_tree.nodes.get(current_drawn_force.get("node_name", ""))
     if force_node is None:
         return
 
     if not viewer.overlay_enabeld():
         return
-    
+
     simulation_node = get_linked_simulation_node(force_node)
     domain_node = get_linked_domain_node(simulation_node)
 
     force_type = getattr(force_node, "bl_idname", "")
 
     if force_type == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
-        segments = build_constant_force_segments(force_node,simulation_node,domain_node)
+        segments = build_constant_force_segments(
+            force_node, simulation_node, domain_node
+        )
         if not segments:
             return
 
@@ -158,7 +156,7 @@ def draw_force_preview():
         return
 
     if force_type == "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
-        segments = build_swirl_force_segments(force_node,simulation_node,domain_node)
+        segments = build_swirl_force_segments(force_node, simulation_node, domain_node)
         if not segments:
             return
 
@@ -201,7 +199,7 @@ def draw_force_preview():
         gpu.state.blend_set("NONE")
 
 
-#-------------- helper ----------------
+# -------------- helper ----------------
 def get_linked_simulation_node(force_node):
     """
     Resolve the downstream simulation node connected to the force node.
@@ -214,7 +212,10 @@ def get_linked_simulation_node(force_node):
         simulation_node = getattr(link, "to_node", None)
         if simulation_node is None:
             continue
-        if getattr(simulation_node, "bl_idname", "") == "CONTINUUM_FLOW_SIMULATION_NODE":
+        if (
+            getattr(simulation_node, "bl_idname", "")
+            == "CONTINUUM_FLOW_SIMULATION_NODE"
+        ):
             return simulation_node
     return None
 
@@ -280,9 +281,12 @@ def arrow_segments(start, end, head_size):
     right_head = head_base - side * (head_size * 0.45)
 
     return [
-        start, end,
-        left_head, end,
-        right_head, end,
+        start,
+        end,
+        left_head,
+        end,
+        right_head,
+        end,
     ]
 
 
@@ -342,7 +346,7 @@ def line_box_intersection(origin, direction, box_min, box_max):
     return t_min, t_max
 
 
-#-------------- constant force ----------------
+# -------------- constant force ----------------
 def build_constant_force_segments(force_node, simulation_node, domain_node):
     """
     Build a simple arrow in the domain center for one constant force node.
@@ -353,11 +357,13 @@ def build_constant_force_segments(force_node, simulation_node, domain_node):
     if domain_node is None:
         return []
 
-    force_vector = Vector((
-        float(force_node.fx),
-        float(force_node.fy),
-        float(force_node.fz),
-    ))
+    force_vector = Vector(
+        (
+            float(force_node.fx),
+            float(force_node.fy),
+            float(force_node.fz),
+        )
+    )
 
     if force_vector.length <= 1.0e-9:
         return []
@@ -391,7 +397,7 @@ def build_constant_force_segments(force_node, simulation_node, domain_node):
     return arrow_segments(start, end, head_size)
 
 
-#-------------- swirl force ----------------
+# -------------- swirl force ----------------
 def build_swirl_force_segments(
     force_node,
     simulation_node,
@@ -440,17 +446,9 @@ def build_swirl_force_segments(
         segment_count=segment_count,
     )
 
-    valid_start_points = [
-        point
-        for point in start_points
-        if point is not None
-    ]
+    valid_start_points = [point for point in start_points if point is not None]
 
-    valid_end_points = [
-        point
-        for point in end_points
-        if point is not None
-    ]
+    valid_end_points = [point for point in end_points if point is not None]
 
     # cylinder does not intersect domain
     if not valid_start_points or not valid_end_points:
@@ -458,13 +456,9 @@ def build_swirl_force_segments(
 
     segments = []
 
-    segments.extend(
-        rim_segments(start_points)
-    )
+    segments.extend(rim_segments(start_points))
 
-    segments.extend(
-        rim_segments(end_points)
-    )
+    segments.extend(rim_segments(end_points))
 
     sample_indices = (
         0,
@@ -480,15 +474,14 @@ def build_swirl_force_segments(
         if start is None or end is None:
             continue
 
-        segments.extend((
-            start,
-            end,
-        ))
+        segments.extend(
+            (
+                start,
+                end,
+            )
+        )
 
-
-    width, depth, height = domain_dimensions(
-        domain_node
-    )
+    width, depth, height = domain_dimensions(domain_node)
 
     size_scale = max(
         min(width, depth, height),
@@ -505,9 +498,7 @@ def build_swirl_force_segments(
         Vector((0.0, 0.0, 0.0)),
     ) / len(valid_end_points)
 
-    mid_center = (
-        start_center + end_center
-    ) * 0.5
+    mid_center = (start_center + end_center) * 0.5
 
     # Rotationspfeil
     segments.extend(
@@ -585,10 +576,12 @@ def rim_segments(points):
         if p0 is None or p1 is None:
             continue
 
-        segments.extend((
-            p0,
-            p1,
-        ))
+        segments.extend(
+            (
+                p0,
+                p1,
+            )
+        )
 
     return segments
 
@@ -612,14 +605,10 @@ def sample_swirl_cylinder_rims(
     end_points = []
 
     for index in range(segment_count + 1):
-        angle = (
-            float(index)
-            / float(segment_count)
-        ) * (2.0 * math.pi)
+        angle = (float(index) / float(segment_count)) * (2.0 * math.pi)
 
-        radial = (
-            axis_u * (math.cos(angle) * radius)
-            + axis_v * (math.sin(angle) * radius)
+        radial = axis_u * (math.cos(angle) * radius) + axis_v * (
+            math.sin(angle) * radius
         )
 
         offset_origin = origin + radial
@@ -638,18 +627,14 @@ def sample_swirl_cylinder_rims(
 
         t_min, t_max = interval
 
-        start_points.append(
-            offset_origin + axis * t_min
-        )
+        start_points.append(offset_origin + axis * t_min)
 
-        end_points.append(
-            offset_origin + axis * t_max
-        )
+        end_points.append(offset_origin + axis * t_max)
 
     return start_points, end_points
 
 
-#-------------- turbulence force ----------------
+# -------------- turbulence force ----------------
 def build_turbulence_force_plane(
     force_node,
     simulation_node,
@@ -675,10 +660,7 @@ def build_turbulence_force_plane(
         render = getattr(scene, "render", None)
         fps = max(1, int(getattr(render, "fps", 24)))
 
-        time_value = (
-            float(getattr(scene, "frame_current", 0))
-            / float(fps)
-        )
+        time_value = float(getattr(scene, "frame_current", 0)) / float(fps)
 
     resolution = float(domain_node.resolution)
 
@@ -730,15 +712,9 @@ def build_turbulence_force_plane(
         min(1.0, amplitude / 4.0),
     )
 
-    u_values = [
-        ix * step_u
-        for ix in range(row_size)
-    ]
-    
-    noise_x_values = [
-        u * inv_scale
-        for u in u_values
-    ]
+    u_values = [ix * step_u for ix in range(row_size)]
+
+    noise_x_values = [u * inv_scale for u in u_values]
 
     for iy in range(row_size):
         v_amount = iy * step_v
@@ -753,11 +729,13 @@ def build_turbulence_force_plane(
             u_amount = u_values[ix]
             noise_x = noise_x_values[ix]
 
-            positions.append((
-                base_x + ux * u_amount,
-                base_y + uy * u_amount,
-                base_z + uz * u_amount,
-            ))
+            positions.append(
+                (
+                    base_x + ux * u_amount,
+                    base_y + uy * u_amount,
+                    base_z + uz * u_amount,
+                )
+            )
 
             value = amplitude * value_noise_2d(
                 noise_x,
@@ -775,12 +753,14 @@ def build_turbulence_force_plane(
 
             factor *= amplitude_factor
 
-            colors.append((
-                factor,
-                factor,
-                factor,
-                1.0,
-            ))
+            colors.append(
+                (
+                    factor,
+                    factor,
+                    factor,
+                    1.0,
+                )
+            )
 
     for iy in range(sample_count):
         row0 = iy * row_size
@@ -792,17 +772,21 @@ def build_turbulence_force_plane(
             i01 = row1 + ix
             i11 = i01 + 1
 
-            indices.append((
-                i00,
-                i10,
-                i11,
-            ))
+            indices.append(
+                (
+                    i00,
+                    i10,
+                    i11,
+                )
+            )
 
-            indices.append((
-                i00,
-                i11,
-                i01,
-            ))
+            indices.append(
+                (
+                    i00,
+                    i11,
+                    i01,
+                )
+            )
 
     return positions, colors, indices
 
@@ -881,7 +865,7 @@ def turbulence_color(value, amplitude):
     return (gray, gray, gray, 1.0)
 
 
-#-------------- turbulence ----------------
+# -------------- turbulence ----------------
 def turbulence_value(force_node, u, v, time_value):
     amplitude = float(force_node.amplitude)
     scale = float(force_node.scale)
@@ -950,6 +934,3 @@ def hash_noise_2d(ix, iy, seed):
     nn &= 0x7FFFFFFF
 
     return float(nn) / 1073741824.0 - 1.0
-
-
-

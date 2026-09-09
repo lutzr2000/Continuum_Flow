@@ -15,7 +15,7 @@ class RunTimings:
         self.entries = {}
 
     @contextmanager
-    def section(self, group: str, name: str, gpu: bool=False) -> None:
+    def section(self, group: str, name: str, gpu: bool = False) -> None:
         # Drain earlier work so it cannot be charged to this section.
         """
         Measure one named CPU or GPU section and accumulate its duration.

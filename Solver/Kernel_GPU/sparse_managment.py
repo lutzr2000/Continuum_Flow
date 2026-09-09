@@ -4,6 +4,7 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 
 tile_size = kernel_config.TILE_SIZE
 
+
 @cuda.jit(device=True, inline=True, cache=True)
 def tile_to_index() -> Any:
     """
@@ -35,7 +36,9 @@ def tile_to_index() -> Any:
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def get_pool_value(field: Any, tile_map: Any, i: int, j: int, k: int, default_value: float) -> Any:
+def get_pool_value(
+    field: Any, tile_map: Any, i: int, j: int, k: int, default_value: float
+) -> Any:
     """
     Read a sparse field value or return the background value for an inactive tile.
     """
@@ -151,7 +154,9 @@ def compact_active_tile_map(
 
 
 @cuda.jit(cache=True)
-def remap_sparse_pool(old_pool: Any, new_pool: Any, previous_index_lookup: Any, active_tile_count: int) -> None:
+def remap_sparse_pool(
+    old_pool: Any, new_pool: Any, previous_index_lookup: Any, active_tile_count: int
+) -> None:
     """
     Copy active tile data from old sparse slots into their compacted slots.
 
@@ -186,7 +191,9 @@ def remap_sparse_pool(old_pool: Any, new_pool: Any, previous_index_lookup: Any, 
 
 
 @cuda.jit(cache=True)
-def fill_sparse_tile_buffer_range(pool: Any, start_tile: int, fill_value: float) -> None:
+def fill_sparse_tile_buffer_range(
+    pool: Any, start_tile: int, fill_value: float
+) -> None:
     """
     Fill every cell from ``start_tile`` through the end of a sparse pool.
     """
@@ -211,7 +218,9 @@ def fill_sparse_tile_buffer_range(pool: Any, start_tile: int, fill_value: float)
 
 
 @cuda.jit(device=True, inline=True, cache=True)
-def tile_is_active_in_margin(base_tile_map: Any, tile_i: Any, tile_j: Any, tile_k: Any, margin: int) -> Any:
+def tile_is_active_in_margin(
+    base_tile_map: Any, tile_i: Any, tile_j: Any, tile_k: Any, margin: int
+) -> Any:
     """
     Check whether an active base tile lies within a bounded neighborhood.
     """
@@ -239,7 +248,9 @@ def tile_is_active_in_margin(base_tile_map: Any, tile_i: Any, tile_j: Any, tile_
 
 
 @cuda.jit(cache=True)
-def copy_sparse_tile_buffer_range(src_pool: Any, dst_pool: Any, tile_count: int) -> None:
+def copy_sparse_tile_buffer_range(
+    src_pool: Any, dst_pool: Any, tile_count: int
+) -> None:
     """
     Copy all cells belonging to the first ``tile_count`` sparse slots.
     """
@@ -343,7 +354,9 @@ def activate_tiles_with_reuse(
 
 
 @cuda.jit(cache=True)
-def fill_sparse_tile_slots(pool: Any, slot_indices: Any, slot_count: int, fill_value: float) -> None:
+def fill_sparse_tile_slots(
+    pool: Any, slot_indices: Any, slot_count: int, fill_value: float
+) -> None:
     """
     Initialize the listed sparse pool slots with one scalar value.
     """
@@ -445,7 +458,9 @@ def ensure_pool_capacities(
     return resized_pools
 
 
-def reset_reused_pool_slots(pool_specs: Any, reused_slot_stack: Any, reused_slot_count: int) -> None:
+def reset_reused_pool_slots(
+    pool_specs: Any, reused_slot_stack: Any, reused_slot_count: int
+) -> None:
     """
     Restore field-specific defaults in every sparse slot reused this step.
     """

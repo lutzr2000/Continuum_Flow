@@ -7,7 +7,10 @@ import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
-def create_multigrid_levels(shape: tuple[int, int, int], delta: float, min_size: int=8) -> Any:
+
+def create_multigrid_levels(
+    shape: tuple[int, int, int], delta: float, min_size: int = 8
+) -> Any:
     """
     Allocate the dense coarse levels used below the sparse simulation grid.
 
@@ -98,9 +101,7 @@ def residual_level_0(
         + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
         + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
         + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
-        - 6.0 * sparse_managment.get_pool_value(
-            p, tile_map, i, j, k, 0.0
-        )
+        - 6.0 * sparse_managment.get_pool_value(p, tile_map, i, j, k, 0.0)
     ) * inv_delta2
 
     rhs = b[tile_index, local_i, local_j, local_k]
@@ -109,7 +110,9 @@ def residual_level_0(
 
 
 @cuda.jit(cache=True)
-def restrict_residual(p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: int, nz: int) -> None:
+def restrict_residual(
+    p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: int, nz: int
+) -> None:
     r"""
     Restrict the fine-grid residual to a dense coarse grid by averaging.
 
@@ -147,9 +150,7 @@ def restrict_residual(p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: 
                     and j < ny - 1
                     and k < nz - 1
                 ):
-                    r = residual(
-                        p, b, delta, i, j, k
-                    )
+                    r = residual(p, b, delta, i, j, k)
 
                     s += r
                     count += 1.0
@@ -218,13 +219,13 @@ def restrict_residual_level_0(
                     s += r
                     count += 1.0
 
-    coarse_b[I, J, K] = (
-        s / count if count > 0.0 else 0.0
-    )
+    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
 
 
 @cuda.jit(cache=True)
-def prolongate_add_nearest_level_0(coarse_e: Any, fine_p: Any, tile_map: Any, field_shape: tuple[int, int, int]) -> None:
+def prolongate_add_nearest_level_0(
+    coarse_e: Any, fine_p: Any, tile_map: Any, field_shape: tuple[int, int, int]
+) -> None:
     r"""
     Prolongate coarse error by nearest-neighbor injection and add it to level 0.
 
@@ -327,7 +328,9 @@ def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
 
 
 @cuda.jit(cache=True)
-def rbgs_step_level_0(p: Any, b: Any, delta: float, parity: int, tile_map: Any, nx: int, ny: int, nz: int) -> None:
+def rbgs_step_level_0(
+    p: Any, b: Any, delta: float, parity: int, tile_map: Any, nx: int, ny: int, nz: int
+) -> None:
     """
     Perform one red or black Gauss-Seidel sweep on the sparse finest grid.
     """
@@ -407,19 +410,15 @@ def smooth(
 
     for _ in range(iterations):
         if level == 0:
-            rbgs_step_level_0[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 0, tile_map, nx, ny, nz)
-            rbgs_step_level_0[
-                blocks, kernel_config.THREADS_PER_BLOCK_3D
-            ](p, b, delta, 1, tile_map, nx, ny, nz)
+            rbgs_step_level_0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 0, tile_map, nx, ny, nz
+            )
+            rbgs_step_level_0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+                p, b, delta, 1, tile_map, nx, ny, nz
+            )
         else:
-            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 0
-            )
-            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 1
-            )
+            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
+            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
 
     if level == 0:
         BC.pressure_poisson_apply_neumann_bcs[

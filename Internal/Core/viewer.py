@@ -29,7 +29,7 @@ class ContinuumFlow_OT_viewer_toggle_domain(bpy.types.Operator):
             disable_domain_preview()
             self.report({"INFO"}, "Domain preview disabled.")
         else:
-            enable_domain_preview(domain_node,node_tree)
+            enable_domain_preview(domain_node, node_tree)
             self.report({"INFO"}, "Domain preview enabled.")
         return {"FINISHED"}
 
@@ -233,15 +233,11 @@ def domain_preview_enabled(domain_node):
     if not current_drawn_domain or domain_node is None:
         return False
 
-    node_tree = bpy.data.node_groups.get(
-        current_drawn_domain.get("node_tree_name", "")
-    )
+    node_tree = bpy.data.node_groups.get(current_drawn_domain.get("node_tree_name", ""))
     if node_tree is None:
         return False
 
-    active_domain = node_tree.nodes.get(
-        current_drawn_domain.get("node_name", "")
-    )
+    active_domain = node_tree.nodes.get(current_drawn_domain.get("node_name", ""))
     if active_domain is None:
         return False
 
