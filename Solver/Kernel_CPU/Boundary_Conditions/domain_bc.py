@@ -1,0 +1,779 @@
+from typing import Any
+
+from numba import njit, prange
+
+import Solver.Kernel_CPU.kernel_config as kernel_config
+import Solver.Kernel_CPU.sparse_managment as sparse_managment
+
+tile_size = kernel_config.TILE_SIZE
+
+
+# Boundary mode encoding:
+# 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
+
+SIDE_TO_AXIS_AND_INDEX = {
+    "x_low": (0, 0),
+    "x_high": (0, 1),
+    "y_low": (1, 0),
+    "y_high": (1, 1),
+    "z_low": (2, 0),
+    "z_high": (2, 1),
+}
+
+
+def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
+    """
+    Normalize user-facing domain boundary settings for CPU kernel dispatch.
+
+    Text boundary modes are converted to compact integer codes, velocity
+    components become floats, and optional temperature aliases are preserved.
+    """
+    converted = {}
+    type_map = {
+        "OUTFLOW": 0,
+        "INFLOW": 1,
+        "WALL": 2,
+        "SLIP": 3,
+        "SLIP_WALL": 3,
+    }
+
+    for side in SIDE_TO_AXIS_AND_INDEX:
+        face_cfg = (bc_config or {}).get(side, {})
+        bc_type = face_cfg.get("type", 0)
+
+        if isinstance(bc_type, str):
+            bc_type = type_map.get(bc_type.strip().upper(), 0)
+        else:
+            bc_type = int(bc_type)
+
+        velocity = face_cfg.get("velocity") or (0.0, 0.0, 0.0)
+
+        converted_face = {
+            "type": bc_type,
+            "u": float(velocity[0]) if len(velocity) > 0 else 0.0,
+            "v": float(velocity[1]) if len(velocity) > 1 else 0.0,
+            "w": float(velocity[2]) if len(velocity) > 2 else 0.0,
+        }
+
+        if "temperature" in face_cfg:
+            converted_face["temperature"] = float(face_cfg["temperature"])
+
+        if "T" in face_cfg:
+            converted_face["T"] = float(face_cfg["T"])
+
+        converted[side] = converted_face
+
+    return converted
+
+
+@njit(cache=True, parallel=True)
+def pressure_poisson_apply_neumann_bcs(
+    p: Any,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    r"""
+    Apply homogeneous Neumann pressure conditions to the sparse domain faces.
+
+    Zero normal derivative is enforced by copying the adjacent interior value
+    onto each boundary cell:
+
+    .. math::
+
+        \frac{\partial p}{\partial n}=0
+        \quad\Longrightarrow\quad p_{\partial\Omega}=p_{\mathrm{adjacent}}.
+    """
+    total_cells = nx * ny * nz
+
+    for index in prange(total_cells):
+        i = index // (ny * nz)
+
+        remainder = index % (ny * nz)
+        j = remainder // nz
+        k = remainder % nz
+
+        tile_i = i // tile_size
+        tile_j = j // tile_size
+        tile_k = k // tile_size
+
+        tile_index = tile_map[tile_i, tile_j, tile_k]
+
+        if tile_index == -1:
+            continue
+
+        local_i = i - tile_i * tile_size
+        local_j = j - tile_j * tile_size
+        local_k = k - tile_k * tile_size
+
+        if i == 0:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, 1, j, k, 0.0
+            )
+
+        elif i == nx - 1:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, nx - 2, j, k, 0.0
+            )
+
+        if j == 0:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, i, 1, k, 0.0
+            )
+
+        elif j == ny - 1:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, i, ny - 2, k, 0.0
+            )
+
+        if k == 0:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, i, j, 1, 0.0
+            )
+
+        elif k == nz - 1:
+            p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
+                p, tile_map, i, j, nz - 2, 0.0
+            )
+
+
+@njit(cache=True, parallel=True)
+def pressure_poisson_apply_neumann_bcs_dense(
+    p: Any,
+) -> None:
+    r"""
+    Apply homogeneous Neumann pressure conditions to a dense multigrid level.
+
+    Each boundary value is copied from its adjacent interior cell, enforcing
+    :math:`\partial p/\partial n = 0` on all six faces.
+    """
+    nx, ny, nz = p.shape
+
+    total_cells = nx * ny * nz
+
+    for index in prange(total_cells):
+        i = index // (ny * nz)
+
+        remainder = index % (ny * nz)
+        j = remainder // nz
+        k = remainder % nz
+
+        if i == 0:
+            p[i, j, k] = p[1, j, k]
+
+        elif i == nx - 1:
+            p[i, j, k] = p[nx - 2, j, k]
+
+        if j == 0:
+            p[i, j, k] = p[i, 1, k]
+
+        elif j == ny - 1:
+            p[i, j, k] = p[i, ny - 2, k]
+
+        if k == 0:
+            p[i, j, k] = p[i, j, 1]
+
+        elif k == nz - 1:
+            p[i, j, k] = p[i, j, nz - 2]
+
+
+@njit(cache=True, inline="always")
+def _apply_face_state(
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    i: int,
+    j: int,
+    k: int,
+    src_i: Any,
+    src_j: Any,
+    src_k: Any,
+    axis: Any,
+    side_index: int,
+    bc_mode: Any,
+    u_value: Any,
+    v_value: Any,
+    w_value: Any,
+    temp_value: Any,
+    use_temp: Any,
+) -> None:
+    """
+    Apply one configured domain-face boundary condition to a single CPU cell.
+
+    The helper updates velocity based on the selected boundary mode,
+    copies pressure from the adjacent interior cell, and propagates scalar
+    fields from the neighbor unless an explicit face temperature is configured.
+    """
+    src_tile_i = src_i // tile_size
+    src_tile_j = src_j // tile_size
+    src_tile_k = src_k // tile_size
+
+    src_tile_index = tile_map[
+        src_tile_i,
+        src_tile_j,
+        src_tile_k,
+    ]
+
+    if src_tile_index == -1:
+        neighbor_u = u_initial
+        neighbor_v = v_initial
+        neighbor_w = w_initial
+
+        neighbor_T = temp_value if use_temp else ref_temp
+        neighbor_smoke = 0.0
+        neighbor_fuel = 0.0
+
+    else:
+        src_local_i = src_i - src_tile_i * tile_size
+        src_local_j = src_j - src_tile_j * tile_size
+        src_local_k = src_k - src_tile_k * tile_size
+
+        neighbor_u = u[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+        neighbor_v = v[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+        neighbor_w = w[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+        neighbor_T = T[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+        neighbor_smoke = smoke[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+        neighbor_fuel = fuel[
+            src_tile_index,
+            src_local_i,
+            src_local_j,
+            src_local_k,
+        ]
+
+    dst_tile_i = i // tile_size
+    dst_tile_j = j // tile_size
+    dst_tile_k = k // tile_size
+
+    dst_tile_index = tile_map[
+        dst_tile_i,
+        dst_tile_j,
+        dst_tile_k,
+    ]
+
+    if dst_tile_index == -1:
+        return
+
+    dst_local_i = i - dst_tile_i * tile_size
+    dst_local_j = j - dst_tile_j * tile_size
+    dst_local_k = k - dst_tile_k * tile_size
+
+    if bc_mode == 0:
+        u[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = neighbor_u
+
+        v[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = neighbor_v
+
+        w[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = neighbor_w
+
+        if axis == 0:
+            u[
+                dst_tile_index,
+                dst_local_i,
+                dst_local_j,
+                dst_local_k,
+            ] = (
+                min(neighbor_u, 0.0) if side_index == 0 else max(neighbor_u, 0.0)
+            )
+
+        elif axis == 1:
+            v[
+                dst_tile_index,
+                dst_local_i,
+                dst_local_j,
+                dst_local_k,
+            ] = (
+                min(neighbor_v, 0.0) if side_index == 0 else max(neighbor_v, 0.0)
+            )
+
+        else:
+            w[
+                dst_tile_index,
+                dst_local_i,
+                dst_local_j,
+                dst_local_k,
+            ] = (
+                min(neighbor_w, 0.0) if side_index == 0 else max(neighbor_w, 0.0)
+            )
+
+    elif bc_mode == 1:
+        u[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = u_value
+
+        v[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = v_value
+
+        w[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = w_value
+
+    elif bc_mode == 2:
+        u[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = 0.0
+
+        v[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = 0.0
+
+        w[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = 0.0
+
+    else:
+        u[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = (
+            0.0 if axis == 0 else neighbor_u
+        )
+
+        v[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = (
+            0.0 if axis == 1 else neighbor_v
+        )
+
+        w[
+            dst_tile_index,
+            dst_local_i,
+            dst_local_j,
+            dst_local_k,
+        ] = (
+            0.0 if axis == 2 else neighbor_w
+        )
+
+    p[
+        dst_tile_index,
+        dst_local_i,
+        dst_local_j,
+        dst_local_k,
+    ] = sparse_managment.get_pool_value(
+        p,
+        tile_map,
+        src_i,
+        src_j,
+        src_k,
+        0.0,
+    )
+
+    T[
+        dst_tile_index,
+        dst_local_i,
+        dst_local_j,
+        dst_local_k,
+    ] = (
+        temp_value if use_temp else neighbor_T
+    )
+
+    smoke[
+        dst_tile_index,
+        dst_local_i,
+        dst_local_j,
+        dst_local_k,
+    ] = neighbor_smoke
+
+    fuel[
+        dst_tile_index,
+        dst_local_i,
+        dst_local_j,
+        dst_local_k,
+    ] = neighbor_fuel
+
+
+@njit(cache=True, parallel=True)
+def _domain_bc_kernel(
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    x_low_mode: Any,
+    x_low_u: Any,
+    x_low_v: Any,
+    x_low_w: Any,
+    x_low_temp: Any,
+    x_low_use_temp: Any,
+    x_high_mode: Any,
+    x_high_u: Any,
+    x_high_v: Any,
+    x_high_w: Any,
+    x_high_temp: Any,
+    x_high_use_temp: Any,
+    y_low_mode: Any,
+    y_low_u: Any,
+    y_low_v: Any,
+    y_low_w: Any,
+    y_low_temp: Any,
+    y_low_use_temp: Any,
+    y_high_mode: Any,
+    y_high_u: Any,
+    y_high_v: Any,
+    y_high_w: Any,
+    y_high_temp: Any,
+    y_high_use_temp: Any,
+    z_low_mode: Any,
+    z_low_u: Any,
+    z_low_v: Any,
+    z_low_w: Any,
+    z_low_temp: Any,
+    z_low_use_temp: Any,
+    z_high_mode: Any,
+    z_high_u: Any,
+    z_high_v: Any,
+    z_high_w: Any,
+    z_high_temp: Any,
+    z_high_use_temp: Any,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> None:
+    """
+    Apply all configured domain face boundary conditions in parallel.
+
+    One iteration owns one boundary cell and sequentially applies every
+    matching face condition for corners and edges in the same fixed side order.
+    """
+    total_cells = nx * ny * nz
+
+    for index in prange(total_cells):
+        i = index // (ny * nz)
+
+        remainder = index % (ny * nz)
+        j = remainder // nz
+        k = remainder % nz
+
+        if 0 < i < nx - 1 and 0 < j < ny - 1 and 0 < k < nz - 1:
+            continue
+
+        if i == 0:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                1,
+                j,
+                k,
+                0,
+                0,
+                x_low_mode,
+                x_low_u,
+                x_low_v,
+                x_low_w,
+                x_low_temp,
+                x_low_use_temp,
+            )
+
+        elif i == nx - 1:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                nx - 2,
+                j,
+                k,
+                0,
+                1,
+                x_high_mode,
+                x_high_u,
+                x_high_v,
+                x_high_w,
+                x_high_temp,
+                x_high_use_temp,
+            )
+
+        if j == 0:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                i,
+                1,
+                k,
+                1,
+                0,
+                y_low_mode,
+                y_low_u,
+                y_low_v,
+                y_low_w,
+                y_low_temp,
+                y_low_use_temp,
+            )
+
+        elif j == ny - 1:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                i,
+                ny - 2,
+                k,
+                1,
+                1,
+                y_high_mode,
+                y_high_u,
+                y_high_v,
+                y_high_w,
+                y_high_temp,
+                y_high_use_temp,
+            )
+
+        if k == 0:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                i,
+                j,
+                1,
+                2,
+                0,
+                z_low_mode,
+                z_low_u,
+                z_low_v,
+                z_low_w,
+                z_low_temp,
+                z_low_use_temp,
+            )
+
+        elif k == nz - 1:
+            _apply_face_state(
+                u,
+                v,
+                w,
+                p,
+                T,
+                smoke,
+                fuel,
+                tile_map,
+                ref_temp,
+                u_initial,
+                v_initial,
+                w_initial,
+                i,
+                j,
+                k,
+                i,
+                j,
+                nz - 2,
+                2,
+                1,
+                z_high_mode,
+                z_high_u,
+                z_high_v,
+                z_high_w,
+                z_high_temp,
+                z_high_use_temp,
+            )
+
+
+def domain_bc(
+    u: Any,
+    v: Any,
+    w: Any,
+    p: Any,
+    T: Any,
+    smoke: Any,
+    fuel: Any,
+    bc_config: dict[str, Any],
+    tile_map: Any,
+    ref_temp: Any,
+    u_initial: float,
+    v_initial: float,
+    w_initial: float,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> Any:
+    """
+    Apply all configured domain boundary conditions to the CPU field state.
+    """
+    bc_config = convert_bc_config_format(bc_config)
+
+    face_args = {}
+
+    for side in SIDE_TO_AXIS_AND_INDEX:
+        bc = bc_config[side]
+
+        bc_mode = int(bc["type"])
+        temperature = bc.get("T", bc.get("temperature"))
+
+        face_args[side] = (
+            bc_mode,
+            float(bc.get("u", 0.0)),
+            float(bc.get("v", 0.0)),
+            float(bc.get("w", 0.0)),
+            0.0 if temperature is None else float(temperature),
+            temperature is not None,
+        )
+
+    _domain_bc_kernel(
+        u,
+        v,
+        w,
+        p,
+        T,
+        smoke,
+        fuel,
+        tile_map,
+        ref_temp,
+        u_initial,
+        v_initial,
+        w_initial,
+        *face_args["x_low"],
+        *face_args["x_high"],
+        *face_args["y_low"],
+        *face_args["y_high"],
+        *face_args["z_low"],
+        *face_args["z_high"],
+        nx,
+        ny,
+        nz,
+    )
+
+    return u, v, w, p, T, smoke, fuel

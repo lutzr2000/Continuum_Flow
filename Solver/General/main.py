@@ -54,7 +54,9 @@ def main(config: dict[str, Any]) -> None:
         )
 
         if solver_backend == "CPU":
-            raise NotImplementedError("CPU solver is not implemented.")
+            import Solver.Kernel_GPU.kernel as solver_kernel_module
+
+            return solver_kernel_module.solver(config)
 
         elif solver_backend == "GPU":
             import Solver.Kernel_GPU.kernel as solver_kernel_module

@@ -56,6 +56,6 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
             col.label(text=f"Cells: {active_cells_text} / {total_cells_text}")
 
             col.label(
-                text=f"VRAM: {stats['vram_used_mb']:.1f} / "
+                text=f"(V)RAM: {stats['vram_used_mb']:.1f} / "
                 f"{stats['vram_total_mb']:.1f} MB"
             )
