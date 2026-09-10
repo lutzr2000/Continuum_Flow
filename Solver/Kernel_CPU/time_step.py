@@ -14,7 +14,7 @@ def velocity_maxima_timestep(
     u: Any,
     v: Any,
     w: Any,
-    tile_map: Any,
+    active_tile_slots: Any,
     maxima_per_tile: Any,
     total_tile_count: int,
 ) -> None:
@@ -27,38 +27,29 @@ def velocity_maxima_timestep(
     tile_size = TILE_SIZE
     cells_per_tile = tile_size * tile_size * tile_size
 
-    tiles_x, tiles_y, tiles_z = tile_map.shape
-    tiles_per_yz = tiles_y * tiles_z
-
     for idx in prange(total_tile_count):
-        tile_i = idx // tiles_per_yz
-        remainder = idx % tiles_per_yz
-        tile_j = remainder // tiles_z
-        tile_k = remainder % tiles_z
-
         max_u = CPU_FIELD_DTYPE(0.0)
         max_v = CPU_FIELD_DTYPE(0.0)
         max_w = CPU_FIELD_DTYPE(0.0)
 
-        tile_index = tile_map[tile_i, tile_j, tile_k]
+        tile_index = active_tile_slots[idx]
 
-        if tile_index != -1:
-            for local_flat in range(cells_per_tile):
-                local_i = local_flat // (tile_size * tile_size)
-                remainder2 = local_flat % (tile_size * tile_size)
-                local_j = remainder2 // tile_size
-                local_k = remainder2 % tile_size
+        for local_flat in range(cells_per_tile):
+            local_i = local_flat // (tile_size * tile_size)
+            remainder2 = local_flat % (tile_size * tile_size)
+            local_j = remainder2 // tile_size
+            local_k = remainder2 % tile_size
 
-                val_u = abs(u[tile_index, local_i, local_j, local_k])
-                val_v = abs(v[tile_index, local_i, local_j, local_k])
-                val_w = abs(w[tile_index, local_i, local_j, local_k])
+            val_u = abs(u[tile_index, local_i, local_j, local_k])
+            val_v = abs(v[tile_index, local_i, local_j, local_k])
+            val_w = abs(w[tile_index, local_i, local_j, local_k])
 
-                if val_u > max_u:
-                    max_u = val_u
-                if val_v > max_v:
-                    max_v = val_v
-                if val_w > max_w:
-                    max_w = val_w
+            if val_u > max_u:
+                max_u = val_u
+            if val_v > max_v:
+                max_v = val_v
+            if val_w > max_w:
+                max_w = val_w
 
         maxima_per_tile[idx, 0] = max_u
         maxima_per_tile[idx, 1] = max_v
@@ -70,6 +61,7 @@ def compute_new_timestep_cpu(
     v: Any,
     w: Any,
     tile_map: Any,
+    active_tile_slots: Any,
     active_tile_count: int,
     maxima: Any,
     delta: float,
@@ -98,10 +90,8 @@ def compute_new_timestep_cpu(
     if active_tile_count <= 0:
         return float(max_dt)
 
-    total_tile_count = tile_map.size
-
     maxima_per_tile = np.zeros(
-        (total_tile_count, 3),
+        (active_tile_count, 3),
         dtype=CPU_FIELD_DTYPE,
     )
 
@@ -109,9 +99,9 @@ def compute_new_timestep_cpu(
         u,
         v,
         w,
-        tile_map,
+        active_tile_slots,
         maxima_per_tile,
-        total_tile_count,
+        active_tile_count,
     )
 
     abs_u_max = np.max(maxima_per_tile[:, 0])

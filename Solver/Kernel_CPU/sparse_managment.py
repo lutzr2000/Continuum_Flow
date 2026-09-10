@@ -374,6 +374,8 @@ def activate_tiles_with_reuse(
     reused_slot_count: Any,
     next_tile_index_counter: Any,
     active_tile_counter: Any,
+    active_tile_coords: Any,
+    active_tile_slots: Any,
 ) -> None:
     """
     Allocate required tiles from freed slots before extending the sparse pool.
@@ -400,25 +402,24 @@ def activate_tiles_with_reuse(
                 ):
                     continue
 
-                active_count += 1
+                slot_index = tile_map[tile_i, tile_j, tile_k]
 
-                if tile_map[tile_i, tile_j, tile_k] != -1:
-                    continue
-
-                if free_count > 0:
+                if slot_index == -1 and free_count > 0:
                     free_count -= 1
-
                     slot_index = free_slot_stack[free_count]
-
                     tile_map[tile_i, tile_j, tile_k] = slot_index
-
                     reused_slot_stack[reused_count] = slot_index
                     reused_count += 1
+                elif slot_index == -1:
+                    slot_index = next_tile_index
+                    tile_map[tile_i, tile_j, tile_k] = slot_index
+                    next_tile_index += 1
 
-                    continue
-
-                tile_map[tile_i, tile_j, tile_k] = next_tile_index
-                next_tile_index += 1
+                active_tile_coords[active_count, 0] = tile_i
+                active_tile_coords[active_count, 1] = tile_j
+                active_tile_coords[active_count, 2] = tile_k
+                active_tile_slots[active_count] = slot_index
+                active_count += 1
 
     free_slot_count[0] = free_count
     reused_slot_count[0] = reused_count

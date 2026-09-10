@@ -14,6 +14,9 @@ CPU_FIELD_DTYPE = kernel_config.CPU_FIELD_DTYPE
 
 @njit(cache=True, parallel=True)
 def pressure_equation_right_side(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     u: Any,
     v: Any,
     w: Any,
@@ -43,9 +46,13 @@ def pressure_equation_right_side(
     Boundary cells are assigned zero because their pressure conditions are
     handled separately.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -69,7 +76,7 @@ def pressure_equation_right_side(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -122,6 +129,9 @@ def pressure_equation_right_side(
 
 @njit(cache=True, parallel=True)
 def rhs_sum_count_partial_kernel(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     b: Any,
     tile_map: Any,
     partial_sums: Any,
@@ -133,9 +143,13 @@ def rhs_sum_count_partial_kernel(
     """
     Reduce active interior right-hand-side values into per-tile sums and counts.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         tiles_y = tile_map.shape[1]
         tiles_z = tile_map.shape[2]
         tiles_per_yz = tiles_y * tiles_z
@@ -145,7 +159,7 @@ def rhs_sum_count_partial_kernel(
         tile_j = remainder // tiles_z
         tile_k = remainder % tiles_z
 
-        tile_index = tile_map[tile_i, tile_j, tile_k]
+        tile_index = active_tile_slots[active_tile_n]
 
         local_sum = 0.0
         local_count = 0.0
@@ -175,12 +189,15 @@ def rhs_sum_count_partial_kernel(
 
                             local_count += 1.0
 
-        partial_sums[tile_flat] = local_sum
-        partial_counts[tile_flat] = local_count
+        partial_sums[active_tile_n] = local_sum
+        partial_counts[active_tile_n] = local_count
 
 
 @njit(cache=True, parallel=True)
 def count_rhs_active_partial_kernel(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     tile_map: Any,
     partial_counts: Any,
     nx: int,
@@ -190,9 +207,13 @@ def count_rhs_active_partial_kernel(
     """
     Count active interior RHS cells per sparse tile.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         tiles_y = tile_map.shape[1]
         tiles_z = tile_map.shape[2]
         tiles_per_yz = tiles_y * tiles_z
@@ -202,7 +223,7 @@ def count_rhs_active_partial_kernel(
         tile_j = remainder // tiles_z
         tile_k = remainder % tiles_z
 
-        tile_index = tile_map[tile_i, tile_j, tile_k]
+        tile_index = active_tile_slots[active_tile_n]
 
         local_count = 0.0
 
@@ -224,7 +245,7 @@ def count_rhs_active_partial_kernel(
                         ):
                             local_count += 1.0
 
-        partial_counts[tile_flat] = local_count
+        partial_counts[active_tile_n] = local_count
 
 
 @njit(cache=True)
@@ -273,6 +294,9 @@ def rhs_mean_kernel(
 
 @njit(cache=True, parallel=True)
 def subtract_rhs_mean_kernel(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     b: Any,
     rhs_mean: Any,
     tile_map: Any,
@@ -290,9 +314,13 @@ def subtract_rhs_mean_kernel(
     This compatibility correction makes the Neumann Poisson problem solvable
     by ensuring that the discrete right-hand side has zero mean.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -316,7 +344,7 @@ def subtract_rhs_mean_kernel(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -336,6 +364,9 @@ def subtract_rhs_mean_kernel(
 
 @njit(cache=True, parallel=True)
 def reset_inactive_pressure(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     p: Any,
     tile_map: Any,
     nx: int,
@@ -345,9 +376,13 @@ def reset_inactive_pressure(
     """
     Clear pressure values belonging to inactive or out-of-domain sparse cells.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -371,7 +406,7 @@ def reset_inactive_pressure(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -388,6 +423,9 @@ def reset_inactive_pressure(
 
 
 def remove_rhs_mean(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     b: Any,
     tile_map: Any,
     rhs_partial_sums: Any,
@@ -400,9 +438,12 @@ def remove_rhs_mean(
     """
     Compute and remove the mean of the active pressure right-hand side.
     """
-    total_tile_count = tile_map.size
+    total_tile_count = active_tile_count
 
     rhs_sum_count_partial_kernel(
+        active_tile_coords,
+        active_tile_slots,
+        active_tile_count,
         b,
         tile_map,
         rhs_partial_sums,
@@ -420,6 +461,9 @@ def remove_rhs_mean(
     )
 
     subtract_rhs_mean_kernel(
+        active_tile_coords,
+        active_tile_slots,
+        active_tile_count,
         b,
         rhs_mean_buffer,
         tile_map,
@@ -431,6 +475,9 @@ def remove_rhs_mean(
 
 @njit(cache=True, parallel=True)
 def project_velocity_kernel(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     u: Any,
     v: Any,
     w: Any,
@@ -450,9 +497,13 @@ def project_velocity_kernel(
     Obstacle cells are skipped because their wall velocities are restored by the
     obstacle boundary conditions after the projection pass.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -476,7 +527,7 @@ def project_velocity_kernel(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -516,6 +567,9 @@ def project_velocity_kernel(
 
 @njit(cache=True, parallel=True)
 def add_artifical_divergence(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     T: Any,
     source_mask: Any,
     source_extra_pressure: Any,
@@ -546,9 +600,13 @@ def add_artifical_divergence(
 
     with optional procedural-noise modulation of the source term.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -572,7 +630,7 @@ def add_artifical_divergence(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -622,6 +680,9 @@ def add_artifical_divergence(
 
 @profiled_run
 def pressure_poisson_multigrid(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     u: Any,
     v: Any,
     w: Any,
@@ -671,6 +732,9 @@ def pressure_poisson_multigrid(
     """
     with timings.section("pressure_poisson_multigrid", "pressure_equation_right_side"):
         pressure_equation_right_side(
+            active_tile_coords,
+            active_tile_slots,
+            active_tile_count,
             u,
             v,
             w,
@@ -689,6 +753,9 @@ def pressure_poisson_multigrid(
 
     with timings.section("pressure_poisson_multigrid", "reset_inactive_pressure"):
         reset_inactive_pressure(
+            active_tile_coords,
+            active_tile_slots,
+            active_tile_count,
             p,
             tile_map,
             nx,
@@ -699,6 +766,9 @@ def pressure_poisson_multigrid(
     for source_idx, source_mask in enumerate(source_masks):
         with timings.section("pressure_poisson_multigrid", "add_artifical_divergence"):
             add_artifical_divergence(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_count,
                 T,
                 source_mask,
                 extra_pressure[source_idx],
@@ -719,6 +789,9 @@ def pressure_poisson_multigrid(
 
     with timings.section("pressure_poisson_multigrid", "remove_rhs_mean"):
         remove_rhs_mean(
+            active_tile_coords,
+            active_tile_slots,
+            active_tile_count,
             b,
             tile_map,
             rhs_partial_sums,
@@ -732,6 +805,9 @@ def pressure_poisson_multigrid(
     for _ in range(num_vcycles):
         with timings.section("pressure_poisson_multigrid", "multigrid.v_cycle"):
             multigrid.v_cycle(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_count,
                 0,
                 p_levels,
                 b_levels,

@@ -10,6 +10,9 @@ import Solver.Kernel_CPU.kernel_config as kernel_config
 
 @njit(cache=True, parallel=True)
 def predict_scalar_fields_semi_lagrangian(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     T: Any,
     smoke: Any,
     fuel: Any,
@@ -40,9 +43,13 @@ def predict_scalar_fields_semi_lagrangian(
         \phi^{*}(\mathbf{x}) =
         \phi^n\!\left(\mathbf{x} - \Delta t\,\mathbf{u}(\mathbf{x})\right).
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -66,7 +73,7 @@ def predict_scalar_fields_semi_lagrangian(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -117,6 +124,9 @@ def predict_scalar_fields_semi_lagrangian(
 
 @njit(cache=True, parallel=True)
 def update_scalar_fields_maccormack(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     T: Any,
     smoke: Any,
     fuel: Any,
@@ -163,9 +173,13 @@ def update_scalar_fields_maccormack(
     The corrected value is clamped to local source extrema before dissipation,
     production, and combustion terms are applied.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -189,7 +203,7 @@ def update_scalar_fields_maccormack(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue

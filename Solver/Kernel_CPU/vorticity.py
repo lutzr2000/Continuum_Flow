@@ -9,6 +9,9 @@ import Solver.Kernel_CPU.kernel_config as kernel_config
 
 @njit(cache=True, parallel=True)
 def compute_vorticity(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     u: Any,
     v: Any,
     w: Any,
@@ -55,9 +58,13 @@ def compute_vorticity(
     Cells outside the active sparse domain, cells on the outer grid boundary,
     and obstacle cells are skipped or assigned zero vorticity.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -81,7 +88,7 @@ def compute_vorticity(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue

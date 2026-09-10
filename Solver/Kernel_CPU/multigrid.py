@@ -352,6 +352,9 @@ def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
 
 @njit(cache=True, parallel=True)
 def rbgs_step_level_0(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     p: Any,
     b: Any,
     delta: float,
@@ -364,11 +367,15 @@ def rbgs_step_level_0(
     """
     Perform one red or black Gauss-Seidel sweep on the sparse finest grid.
     """
-    total_tiles = tile_map.shape[0] * tile_map.shape[1] * tile_map.shape[2]
+    total_tiles = active_tile_count
 
     delta2 = delta * delta
 
-    for tile_flat in prange(total_tiles):
+    for active_tile_n in prange(total_tiles):
+        tile_i = active_tile_coords[active_tile_n, 0]
+        tile_j = active_tile_coords[active_tile_n, 1]
+        tile_k = active_tile_coords[active_tile_n, 2]
+        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
         for local_i in range(kernel_config.TILE_SIZE):
             for local_j in range(kernel_config.TILE_SIZE):
                 for local_k in range(kernel_config.TILE_SIZE):
@@ -392,7 +399,7 @@ def rbgs_step_level_0(
                         tile_map.shape[2],
                     )
 
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
+                    tile_index = active_tile_slots[active_tile_n]
 
                     if tile_index == -1:
                         continue
@@ -423,6 +430,9 @@ def rbgs_step_level_0(
 
 
 def smooth(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     p: Any,
     b: Any,
     delta: float,
@@ -444,6 +454,9 @@ def smooth(
     for _ in range(iterations):
         if level == 0:
             rbgs_step_level_0(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_count,
                 p,
                 b,
                 delta,
@@ -454,6 +467,9 @@ def smooth(
                 nz,
             )
             rbgs_step_level_0(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_count,
                 p,
                 b,
                 delta,
@@ -480,6 +496,9 @@ def smooth(
 
 
 def v_cycle(
+    active_tile_coords,
+    active_tile_slots,
+    active_tile_count,
     level: int,
     p_levels: list[Any],
     b_levels: list[Any],
@@ -548,6 +567,9 @@ def v_cycle(
         delta = delta_levels[dense_level]
 
     smooth(
+        active_tile_coords,
+        active_tile_slots,
+        active_tile_count,
         p,
         b,
         delta,
@@ -563,6 +585,9 @@ def v_cycle(
 
     if level == last_level:
         smooth(
+            active_tile_coords,
+            active_tile_slots,
+            active_tile_count,
             p,
             b,
             delta,
@@ -603,6 +628,9 @@ def v_cycle(
         )
 
     v_cycle(
+        active_tile_coords,
+        active_tile_slots,
+        active_tile_count,
         level + 1,
         p_levels,
         b_levels,
@@ -634,6 +662,9 @@ def v_cycle(
         )
 
     smooth(
+        active_tile_coords,
+        active_tile_slots,
+        active_tile_count,
         p,
         b,
         delta,

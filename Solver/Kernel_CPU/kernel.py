@@ -311,6 +311,15 @@ def solver(
             dtype=np.int32,
         )
 
+        active_tile_coords = np.empty((total_tile_count, 3), dtype=np.int32)
+        active_tile_slots = np.empty(total_tile_count, dtype=np.int32)
+
+        if not simulate_sparsely:
+            active_tile_coords[:] = np.stack(
+                np.unravel_index(np.arange(total_tile_count), tile_shape), axis=1
+            )
+            active_tile_slots[:] = np.arange(total_tile_count, dtype=np.int32)
+
     tile_growth_size = max(
         1,
         math.ceil(
@@ -695,6 +704,8 @@ def solver(
                     reused_slot_count,
                     next_tile_index_counter,
                     active_tile_counter,
+                    active_tile_coords,
+                    active_tile_slots,
                 )
 
             reused_slot_count_host = int(reused_slot_count[0])
@@ -859,6 +870,7 @@ def solver(
                 v,
                 w,
                 tile_map,
+                active_tile_slots,
                 active_tile_counter_host,
                 velocity_maxima,
                 delta,
@@ -913,6 +925,9 @@ def solver(
             "obstacle_bc.obstacle_bc",
         ):
             obstacle_bc.obstacle_bc(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 u,
                 v,
                 w,
@@ -1013,6 +1028,9 @@ def solver(
                 "source_bc.source_bc",
             ):
                 source_bc.source_bc(
+                    active_tile_coords,
+                    active_tile_slots,
+                    active_tile_counter_host,
                     u,
                     v,
                     w,
@@ -1055,6 +1073,9 @@ def solver(
                 "vorticity.compute_vorticity",
             ):
                 vorticity.compute_vorticity(
+                    active_tile_coords,
+                    active_tile_slots,
+                    active_tile_counter_host,
                     u,
                     v,
                     w,
@@ -1126,6 +1147,9 @@ def solver(
             "velocity_update.advect_velocity_semi_lagrangian",
         ):
             velocity_update.advect_velocity_semi_lagrangian(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 u,
                 v,
                 w,
@@ -1148,6 +1172,9 @@ def solver(
             "velocity_update.update_velocity_maccormack",
         ):
             velocity_update.update_velocity_maccormack(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 u,
                 v,
                 w,
@@ -1198,6 +1225,9 @@ def solver(
             "pressure_solve.pressure_poisson_multigrid",
         ):
             p = pressure_solve.pressure_poisson_multigrid(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 u,
                 v,
                 w,
@@ -1239,6 +1269,9 @@ def solver(
             "pressure_solve.project_velocity_kernel",
         ):
             pressure_solve.project_velocity_kernel(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 u,
                 v,
                 w,
@@ -1259,6 +1292,9 @@ def solver(
             "scalar_update.predict_scalar_fields_semi_lagrangian",
         ):
             scalar_update.predict_scalar_fields_semi_lagrangian(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 temperature,
                 smoke,
                 fuel,
@@ -1285,6 +1321,9 @@ def solver(
             "scalar_update.update_scalar_fields_maccormack",
         ):
             scalar_update.update_scalar_fields_maccormack(
+                active_tile_coords,
+                active_tile_slots,
+                active_tile_counter_host,
                 temperature,
                 smoke,
                 fuel,
