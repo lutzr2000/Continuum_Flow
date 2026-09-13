@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 from numba import cuda
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import NDArray
 
 from Solver.General.main import emit_message
 import Solver.General.forces as forces
@@ -35,43 +35,94 @@ GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 def get_source_values(
     simulation: dict[str, Any],
-    var_name: str,
     t: float,
-    index: int | None = None,
-    dtype: DTypeLike = GPU_FIELD_DTYPE,
-) -> NDArray:
-    """
-    Resolve source values for a simulation variable at a given time.
-
-    For each configured source, the function reads ``var_name`` from the
-    source definition. If animation data is available for that variable,
-    the value from the animation sample nearest to ``t`` is used instead.
-    """
+) -> dict[str, NDArray]:
+    """Resolve all source properties at the animation sample nearest to ``t``."""
     source_entries = simulation.get("sources") or []
     animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
-    values = np.zeros(len(source_entries), dtype=dtype)
+    property_map = {
+        "temperature": ("temperature", None, GPU_FIELD_DTYPE, 1.0),
+        "smoke": ("smoke", None, GPU_FIELD_DTYPE, 1.0),
+        "fuel": ("fuel", None, GPU_FIELD_DTYPE, 1.0),
+        "noise_scale": ("noise_scale", None, GPU_FIELD_DTYPE, 1.0),
+        "noise_amplitude": ("noise_amplitude", None, GPU_FIELD_DTYPE, 0.01),
+        "noise_seed": ("noise_seed", None, np.int32, 1.0),
+        "noise_enabled": ("source_noise", None, np.bool_, 1.0),
+        "velocity_x": ("velocity", 0, GPU_FIELD_DTYPE, 1.0),
+        "velocity_y": ("velocity", 1, GPU_FIELD_DTYPE, 1.0),
+        "velocity_z": ("velocity", 2, GPU_FIELD_DTYPE, 1.0),
+        "extra_pressure": ("extra_pressure", None, GPU_FIELD_DTYPE, 1.0),
+    }
+    values = {
+        name: np.zeros(len(source_entries), dtype=dtype)
+        for name, (_, _, dtype, _) in property_map.items()
+    }
 
-    for source_idx, source_entry in enumerate(source_entries):
-        value = source_entry.get(var_name, 0.0)
+    for value_name, (property_name, component, dtype, scale) in property_map.items():
+        for source_idx, source_entry in enumerate(source_entries):
+            value = source_entry.get(property_name, 0.0)
+            animation_values = (
+                (source_entry.get("animations") or {}).get(property_name) or {}
+            ).get("values") or ()
+            sample_count = min(len(animation_times), len(animation_values))
+            if sample_count > 0:
+                nearest_time_idx = min(
+                    range(sample_count),
+                    key=lambda idx: abs(float(animation_times[idx]) - float(t)),
+                )
+                value = animation_values[nearest_time_idx]
+            if component is not None:
+                value = value[component] if value is not None else 0.0
+            values[value_name][source_idx] = np.asarray(value, dtype=dtype) * scale
 
-        animation_entry = (source_entry.get("animations") or {}).get(var_name) or {}
-        animation_values = animation_entry.get("values") or ()
-        sample_count = min(len(animation_times), len(animation_values))
+    values["noise_amplitude"][~values["noise_enabled"]] = 0.0
+    return values
 
-        if sample_count > 0:
-            nearest_time_idx = min(
-                range(sample_count),
-                key=lambda idx: abs(float(animation_times[idx]) - float(t)),
-            )
-            value = animation_values[nearest_time_idx]
 
-        if index is not None:
-            if value is None:
-                value = 0.0
-            else:
-                value = value[index]
+def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any]:
+    """Resolve all physics values at the animation sample nearest to ``t``."""
+    physics = simulation.get("physics") or {}
+    animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
+    animations = physics.get("animations") or {}
+    property_map = {
+        "fluid": {"density": "fluid_density", "viscosity": "fluid_viscosity"},
+        "temperature": {
+            "dissipation": "temperature_dissipation",
+            "production_rate": "temperature_production_rate",
+            "reference_temperature": "reference_temperature",
+            "buoyancy": "buoyancy",
+            "expansion_rate": "expansion_rate",
+        },
+        "smoke": {
+            "dissipation": "smoke_dissipation",
+            "production_rate": "smoke_production_rate",
+        },
+        "fuel": {
+            "dissipation": "fuel_dissipation",
+            "burn_rate": "fuel_burn_rate",
+            "ignition_temperature": "fuel_ignition_temperature",
+        },
+        "burning": {"scale": "burn_noise_scale", "amplitude": "burn_noise_amplitude"},
+        "extras": {"vorticity": "vorticity"},
+    }
 
-        values[source_idx] = np.asarray(value, dtype=dtype)
+    values = {}
+    for section_name, section_properties in property_map.items():
+        static_section = physics.get(section_name) or {}
+        values[section_name] = {}
+        for value_name, animation_name in section_properties.items():
+            value = static_section.get(value_name, 0.0)
+            animation_values = (animations.get(animation_name) or {}).get(
+                "values"
+            ) or ()
+            sample_count = min(len(animation_times), len(animation_values))
+            if sample_count > 0:
+                nearest_time_idx = min(
+                    range(sample_count),
+                    key=lambda idx: abs(float(animation_times[idx]) - float(t)),
+                )
+                value = animation_values[nearest_time_idx]
+            values[section_name][value_name] = float(value)
 
     return values
 
@@ -437,6 +488,12 @@ def solver(
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
+        with timings.section("solver", "get_simulation_values", gpu=False):
+            physics_values = get_simulation_values(simulation, t)
+        with timings.section("solver", "get_source_values", gpu=False):
+            source_values = get_source_values(simulation, t)
+        reference_temperature = physics_values["temperature"]["reference_temperature"]
+
         # ------------Clear scratch-------------------
         with timings.section("solver", "sparse_managment.reset_pools", gpu=True):
             sparse_managment.reset_pools(
@@ -729,53 +786,6 @@ def solver(
             )
 
         # ------------Source BC-------------------
-        with timings.section("solver", "get_source_values", gpu=False):
-            source_temperature_values = get_source_values(simulation, "temperature", t)
-            source_smoke_values = get_source_values(simulation, "smoke", t)
-            source_fuel_values = get_source_values(simulation, "fuel", t)
-            source_noise_scales = get_source_values(
-                simulation,
-                "noise_scale",
-                t,
-            )
-            source_noise_amplitudes = (
-                get_source_values(
-                    simulation,
-                    "noise_amplitude",
-                    t,
-                )
-                / 100.0
-            )
-            source_noise_seeds = get_source_values(
-                simulation,
-                "noise_seed",
-                t,
-                dtype=np.int32,
-            )
-            source_noise_enabled = get_source_values(
-                simulation, "source_noise", t, dtype=np.bool_
-            )
-            source_noise_amplitudes[~source_noise_enabled] = 0.0
-            source_velocity_x_values = get_source_values(
-                simulation,
-                "velocity",
-                t,
-                0,
-            )
-            source_velocity_y_values = get_source_values(
-                simulation,
-                "velocity",
-                t,
-                1,
-            )
-            source_velocity_z_values = get_source_values(
-                simulation,
-                "velocity",
-                t,
-                2,
-            )
-            source_extra_pressure = get_source_values(simulation, "extra_pressure", t)
-
         for source_idx, source_mask in enumerate(source_masks):
             with timings.section("solver", "source_bc.source_bc", gpu=True):
                 source_bc.source_bc[
@@ -790,15 +800,15 @@ def solver(
                     fuel,
                     tile_map,
                     source_mask,
-                    source_temperature_values[source_idx],
-                    source_smoke_values[source_idx],
-                    source_fuel_values[source_idx],
-                    source_velocity_x_values[source_idx],
-                    source_velocity_y_values[source_idx],
-                    source_velocity_z_values[source_idx],
-                    source_noise_scales[source_idx],
-                    source_noise_amplitudes[source_idx],
-                    source_noise_seeds[source_idx],
+                    source_values["temperature"][source_idx],
+                    source_values["smoke"][source_idx],
+                    source_values["fuel"][source_idx],
+                    source_values["velocity_x"][source_idx],
+                    source_values["velocity_y"][source_idx],
+                    source_values["velocity_z"][source_idx],
+                    source_values["noise_scale"][source_idx],
+                    source_values["noise_amplitude"][source_idx],
+                    source_values["noise_seed"][source_idx],
                     dt,
                 )
 
@@ -811,7 +821,7 @@ def solver(
             )
 
         # ------------Vorticity-------------------
-        if simulation.get("physics").get("extras").get("vorticity") > 0.0:
+        if physics_values["extras"]["vorticity"] > 0.0:
             with timings.section("solver", "vorticity.compute_vorticity", gpu=True):
                 vorticity.compute_vorticity[
                     tile_shape, kernel_config.THREADS_PER_BLOCK_3D
@@ -903,12 +913,12 @@ def solver(
                 v_work,
                 w_work,
                 delta,
-                simulation.get("physics").get("fluid").get("density"),
-                simulation.get("physics").get("fluid").get("viscosity"),
+                physics_values["fluid"]["density"],
+                physics_values["fluid"]["viscosity"],
                 vorticity_magnitude,
-                simulation.get("physics").get("extras").get("vorticity"),
+                physics_values["extras"]["vorticity"],
                 temperature,
-                simulation.get("physics", {}).get("temperature", {}).get("buoyancy"),
+                physics_values["temperature"]["buoyancy"],
                 reference_temperature,
                 tile_map,
                 fx_const,
@@ -948,13 +958,13 @@ def solver(
                 pressure_rhs,
                 dt,
                 source_masks,
-                source_noise_scales,
-                source_noise_amplitudes,
-                source_noise_seeds,
-                source_extra_pressure,
+                source_values["noise_scale"],
+                source_values["noise_amplitude"],
+                source_values["noise_seed"],
+                source_values["extra_pressure"],
                 delta,
-                simulation.get("physics").get("fluid").get("density"),
-                simulation.get("physics").get("temperature").get("expansion_rate"),
+                physics_values["fluid"]["density"],
+                physics_values["temperature"]["expansion_rate"],
                 reference_temperature,
                 tile_map,
                 tile_shape,
@@ -989,7 +999,7 @@ def solver(
                 obstacle_mask,
                 dt,
                 delta,
-                simulation.get("physics").get("fluid").get("density"),
+                physics_values["fluid"]["density"],
                 tile_map,
                 nx,
                 ny,
@@ -1045,15 +1055,15 @@ def solver(
                 fuel_work,
                 flame,
                 delta,
-                simulation.get("physics").get("temperature").get("dissipation"),
-                simulation.get("physics").get("temperature").get("production_rate"),
-                simulation.get("physics").get("smoke").get("dissipation"),
-                simulation.get("physics").get("smoke").get("production_rate"),
-                simulation.get("physics").get("fuel").get("dissipation"),
-                simulation.get("physics").get("fuel").get("burn_rate"),
-                simulation.get("physics").get("fuel").get("ignition_temperature"),
-                simulation.get("physics").get("burning").get("scale"),
-                simulation.get("physics").get("burning").get("amplitude"),
+                physics_values["temperature"]["dissipation"],
+                physics_values["temperature"]["production_rate"],
+                physics_values["smoke"]["dissipation"],
+                physics_values["smoke"]["production_rate"],
+                physics_values["fuel"]["dissipation"],
+                physics_values["fuel"]["burn_rate"],
+                physics_values["fuel"]["ignition_temperature"],
+                physics_values["burning"]["scale"],
+                physics_values["burning"]["amplitude"],
                 reference_temperature,
                 tile_map,
                 u_initial,
