@@ -4,13 +4,13 @@ import sys
 from multiprocessing import shared_memory
 
 
-def _load_writer_config_from_argv(argv):
+def load_writer_config(argv):
     if len(argv) < 2:
         return {}
     return json.loads(argv[1])
 
 
-WRITER_CONFIG = _load_writer_config_from_argv(sys.argv)
+WRITER_CONFIG = load_writer_config(sys.argv)
 
 for _dependency_path in reversed(WRITER_CONFIG.get("parent_sys_path") or ()):
     if _dependency_path and _dependency_path not in sys.path:
@@ -21,10 +21,6 @@ import numba
 import openvdb
 
 VDB_BRICK_TILES = 8
-
-
-def get_writer_config():
-    return WRITER_CONFIG
 
 
 def open_scalar_array(grid_payload):
@@ -200,7 +196,7 @@ def copy_sparse_tiles_into_grid(
 def write_vdb(payload):
     output_vdb_path = payload["output_path"]
 
-    config = get_writer_config()
+    config = WRITER_CONFIG
     simulation = config.get("simulation") or {}
 
     if not isinstance(simulation, dict) or not simulation:

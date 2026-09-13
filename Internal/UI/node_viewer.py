@@ -1,7 +1,7 @@
 from . import sockets
 from . import node_base
 from ..Core import viewer
-from ..Core.solver import solver_worker
+from ..Core.solver.solver_manager import solver_manager
 from bpy.props import BoolProperty
 
 
@@ -43,7 +43,7 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
 
         col.prop(self, "live_preview")
 
-        stats = solver_worker.get_stats()
+        stats = solver_manager.get_stats()
 
         if stats:
             col.separator()

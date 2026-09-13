@@ -165,6 +165,7 @@ class SolverManager:
                 self._ready = True
                 self._starting = False
                 self._last_error = None
+
             elif message_type == "preload_complete":
                 backend = str(message.get("backend") or "").strip().upper()
                 self._preload_in_flight.discard(backend)
@@ -172,13 +173,16 @@ class SolverManager:
                     self._preloaded_backends.add(backend)
                 elif message.get("message"):
                     self._last_error = message.get("message")
+
             elif message_type == "job_started":
                 self._active_job_id = int(message.get("job_id", 0) or 0) or None
+
             elif message_type == "job_finished":
                 job_id = int(message.get("job_id", 0) or 0)
                 self._job_results[job_id] = message
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+
             elif message_type == "error":
                 self._last_error = (
                     message.get("message") or "Unknown solver worker error"
@@ -197,10 +201,12 @@ class SolverManager:
                 else:
                     self._ready = False
                     self._starting = False
+
             elif message_type == "log":
                 log_message = message.get("message")
                 if log_message:
                     print("[Solver]", log_message)
+
             elif message_type == "stats":
                 self._stats = {
                     "frame": int(message.get("frame", 0)),

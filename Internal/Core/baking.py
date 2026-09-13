@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .export import export_config
 from . import load_result
-from .solver import solver_worker
+from .solver.solver_manager import solver_manager
 from .solver import solver_status
 from .writer import writer_manager
 
@@ -193,7 +193,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "TIMER" and self.job_id is not None:
-            job_result = solver_worker.get_job_result(self.job_id)
+            job_result = solver_manager.get_job_result(self.job_id)
             if job_result is not None:
                 self.job_result = job_result
                 self.cleanup()
@@ -320,11 +320,11 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             progress_callback=self.update_bake_progress,
         )
 
-        solver_worker.ensure_worker_running(
+        solver_manager.start(
             wait=True,
             timeout=120.0,
         )
-        self.job_id = solver_worker.start_job(config_dict)
+        self.job_id = solver_manager.start_job(config_dict)
 
 
 # -------------- free bake ----------------
