@@ -127,6 +127,7 @@ def create_writer_slot(writer_context: Any) -> Any:
             "dense_shape": shape,
             "pool_shape": sparse_pool_shape,
             "shm_name": shm.name,
+            "shm": shm,
         }
 
     writer_socket = socket.create_connection(
@@ -153,6 +154,51 @@ def create_writer_slot(writer_context: Any) -> Any:
         "file": writer_file,
         "busy": False,
     }
+
+
+def ensure_writer_slot_capacity(
+    slot: Any,
+    writer_context: Any,
+    required_tile_count: int,
+) -> None:
+    """Grow an idle writer slot's field buffers to match the CPU sparse pool."""
+    fields = slot["fields"]
+    current_capacity = next(iter(fields.values()))["pool_shape"][0] if fields else 0
+    if required_tile_count <= current_capacity:
+        return
+
+    shared_memory_blocks = writer_context["shared_memory_blocks"]
+    tile_size = kernel_config.TILE_SIZE
+    pool_shape = (required_tile_count, tile_size, tile_size, tile_size)
+    pool_nbytes = int(
+        np.prod(pool_shape) * np.dtype(kernel_config.GPU_FIELD_DTYPE).itemsize
+    )
+
+    replacement_fields = {}
+    for field_name in writer_context["output_list"]:
+        old_field = fields[field_name]
+        shm = shared_memory.SharedMemory(create=True, size=pool_nbytes)
+        shared_memory_blocks.append(shm)
+        replacement_fields[field_name] = {
+            "array": np.ndarray(
+                pool_shape,
+                dtype=kernel_config.GPU_FIELD_DTYPE,
+                buffer=shm.buf,
+            ),
+            "dense_shape": old_field["dense_shape"],
+            "pool_shape": pool_shape,
+            "shm_name": shm.name,
+            "shm": shm,
+        }
+
+    for field_name, replacement_field in replacement_fields.items():
+        old_field = fields[field_name]
+        old_shm = old_field["shm"]
+        fields[field_name] = replacement_field
+        del old_field["array"]
+        old_shm.close()
+        old_shm.unlink()
+        shared_memory_blocks.remove(old_shm)
 
 
 def get_enabled_output_names(output_fields: dict[str, Any]) -> Any:
@@ -196,7 +242,6 @@ def enqueue_device_output(
     output_list = get_enabled_output_names(output_fields)
 
     slot = get_writer_slot(writer_state, output_index)
-    fields = slot["fields"]
     tile_map_slot = slot["tile_map"]
     active_tiles_slot = slot["active_tiles"]
 
@@ -204,6 +249,20 @@ def enqueue_device_output(
     tile_map_host = tile_map_slot["array"]
     max_slot_index = int(tile_map_host.max())
     used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
+
+    available_tile_count = int(next(iter(sim_fields.values())).shape[0])
+    if used_tile_count > available_tile_count:
+        raise RuntimeError(
+            "Sparse tile map references a slot outside the CPU field pool: "
+            f"required {used_tile_count}, available {available_tile_count}."
+        )
+
+    ensure_writer_slot_capacity(
+        slot,
+        writer_state["context"],
+        available_tile_count,
+    )
+    fields = slot["fields"]
 
     write_metadata(
         tile_map_host,
