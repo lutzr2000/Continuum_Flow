@@ -324,6 +324,7 @@ def solver(
 
         active_tile_coords = np.empty((total_tile_count, 3), dtype=np.int32)
         active_tile_slots = np.empty(total_tile_count, dtype=np.int32)
+        active_tile_flags = np.empty(total_tile_count, dtype=np.bool_)
 
         if not simulate_sparsely:
             active_tile_coords[:] = np.stack(
@@ -717,6 +718,7 @@ def solver(
                     active_tile_counter,
                     active_tile_coords,
                     active_tile_slots,
+                    active_tile_flags,
                 )
 
             reused_slot_count_host = int(reused_slot_count[0])

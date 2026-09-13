@@ -363,7 +363,7 @@ def release_inactive_tile_slots(
     free_slot_count[0] = stack_index
 
 
-@njit(cache=True)
+@njit(cache=True, parallel=True)
 def activate_tiles_with_reuse(
     base_tile_map: Any,
     tile_map: Any,
@@ -376,6 +376,7 @@ def activate_tiles_with_reuse(
     active_tile_counter: Any,
     active_tile_coords: Any,
     active_tile_slots: Any,
+    active_tile_flags: Any,
 ) -> None:
     """
     Allocate required tiles from freed slots before extending the sparse pool.
@@ -390,36 +391,48 @@ def activate_tiles_with_reuse(
     next_tile_index = int(next_tile_index_counter[0])
     active_count = 0
 
-    for tile_i in range(tiles_x):
-        for tile_j in range(tiles_y):
-            for tile_k in range(tiles_z):
-                if not tile_is_active_in_margin(
-                    base_tile_map,
-                    tile_i,
-                    tile_j,
-                    tile_k,
-                    margin,
-                ):
-                    continue
+    total_tile_count = tiles_x * tiles_y * tiles_z
+    tiles_per_i = tiles_y * tiles_z
 
-                slot_index = tile_map[tile_i, tile_j, tile_k]
+    for tile_flat in prange(total_tile_count):
+        tile_i = tile_flat // tiles_per_i
+        remainder = tile_flat % tiles_per_i
+        tile_j = remainder // tiles_z
+        tile_k = remainder % tiles_z
+        active_tile_flags[tile_flat] = tile_is_active_in_margin(
+            base_tile_map,
+            tile_i,
+            tile_j,
+            tile_k,
+            margin,
+        )
 
-                if slot_index == -1 and free_count > 0:
-                    free_count -= 1
-                    slot_index = free_slot_stack[free_count]
-                    tile_map[tile_i, tile_j, tile_k] = slot_index
-                    reused_slot_stack[reused_count] = slot_index
-                    reused_count += 1
-                elif slot_index == -1:
-                    slot_index = next_tile_index
-                    tile_map[tile_i, tile_j, tile_k] = slot_index
-                    next_tile_index += 1
+    for tile_flat in range(total_tile_count):
+        if not active_tile_flags[tile_flat]:
+            continue
 
-                active_tile_coords[active_count, 0] = tile_i
-                active_tile_coords[active_count, 1] = tile_j
-                active_tile_coords[active_count, 2] = tile_k
-                active_tile_slots[active_count] = slot_index
-                active_count += 1
+        tile_i = tile_flat // tiles_per_i
+        remainder = tile_flat % tiles_per_i
+        tile_j = remainder // tiles_z
+        tile_k = remainder % tiles_z
+        slot_index = tile_map[tile_i, tile_j, tile_k]
+
+        if slot_index == -1 and free_count > 0:
+            free_count -= 1
+            slot_index = free_slot_stack[free_count]
+            tile_map[tile_i, tile_j, tile_k] = slot_index
+            reused_slot_stack[reused_count] = slot_index
+            reused_count += 1
+        elif slot_index == -1:
+            slot_index = next_tile_index
+            tile_map[tile_i, tile_j, tile_k] = slot_index
+            next_tile_index += 1
+
+        active_tile_coords[active_count, 0] = tile_i
+        active_tile_coords[active_count, 1] = tile_j
+        active_tile_coords[active_count, 2] = tile_k
+        active_tile_slots[active_count] = slot_index
+        active_count += 1
 
     free_slot_count[0] = free_count
     reused_slot_count[0] = reused_count
