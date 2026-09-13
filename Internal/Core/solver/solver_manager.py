@@ -22,6 +22,8 @@ class SolverManager:
         self._preload_in_flight = set()
         self._last_error = None
         self._stats = {}
+        self._compiled_backends = set()
+        self._compiling_backend = None
 
     def start(self, wait=True, timeout=120.0):
         with self._condition:
@@ -85,6 +87,16 @@ class SolverManager:
     def start_job(self, config):
         self.start(wait=True, timeout=120.0)
 
+        backend = (
+            str(
+                (((config or {}).get("simulation") or {}).get("settings") or {}).get(
+                    "solver_backend", "CPU"
+                )
+            )
+            .strip()
+            .upper()
+        )
+
         with self._condition:
             if self._active_job_id is not None:
                 raise RuntimeError("Solver is already busy")
@@ -92,6 +104,9 @@ class SolverManager:
             job_id = self._next_job_id
             self._next_job_id += 1
             self._active_job_id = job_id
+            self._compiling_backend = (
+                backend if backend not in self._compiled_backends else None
+            )
 
         self._send(
             {
@@ -110,6 +125,10 @@ class SolverManager:
     def get_stats(self):
         with self._condition:
             return dict(self._stats)
+
+    def is_compiling(self):
+        with self._condition:
+            return self._compiling_backend is not None
 
     def wait_for_job(self, job_id, timeout=None):
         with self._condition:
@@ -182,6 +201,7 @@ class SolverManager:
                 self._job_results[job_id] = message
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+                self._compiling_backend = None
 
             elif message_type == "error":
                 self._last_error = (
@@ -208,6 +228,9 @@ class SolverManager:
                     print("[Solver]", log_message)
 
             elif message_type == "stats":
+                if self._compiling_backend is not None:
+                    self._compiled_backends.add(self._compiling_backend)
+                    self._compiling_backend = None
                 self._stats = {
                     "frame": int(message.get("frame", 0)),
                     "active_tiles": int(message.get("active_tiles", 0)),
@@ -289,6 +312,7 @@ class SolverManager:
         self._active_job_id = None
         self._last_error = None
         self._stats = {}
+        self._compiling_backend = None
         self._preload_in_flight.clear()
 
     def _mark_active_job_failed_locked(self, message):

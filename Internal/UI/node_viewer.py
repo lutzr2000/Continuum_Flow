@@ -45,7 +45,10 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
 
         stats = solver_manager.get_stats()
 
-        if stats:
+        if solver_manager.is_compiling():
+            col.separator()
+            col.label(text="Compiling for the first time, please wait", icon="TIME")
+        elif stats:
             col.separator()
 
             active_cells = int(stats["active_tiles"]) * 64
