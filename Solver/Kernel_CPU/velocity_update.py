@@ -42,37 +42,30 @@ def advect_velocity_semi_lagrangian(
     """
     total_tiles = active_tile_count
 
+    tile_size = kernel_config.TILE_SIZE
+
     for active_tile_n in prange(total_tiles):
+        tile_index = active_tile_slots[active_tile_n]
+
+        if tile_index == -1:
+            continue
+
         tile_i = active_tile_coords[active_tile_n, 0]
         tile_j = active_tile_coords[active_tile_n, 1]
         tile_k = active_tile_coords[active_tile_n, 2]
-        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
-        for local_i in range(kernel_config.TILE_SIZE):
-            for local_j in range(kernel_config.TILE_SIZE):
-                for local_k in range(kernel_config.TILE_SIZE):
-                    (
-                        tile_i,
-                        tile_j,
-                        tile_k,
-                        local_i,
-                        local_j,
-                        local_k,
-                        i,
-                        j,
-                        k,
-                    ) = sparse_managment.tile_to_index(
-                        tile_flat,
-                        local_i,
-                        local_j,
-                        local_k,
-                        tile_map.shape[0],
-                        tile_map.shape[1],
-                        tile_map.shape[2],
-                    )
 
-                    tile_index = active_tile_slots[active_tile_n]
-                    if tile_index == -1:
-                        continue
+        base_i = tile_i * tile_size
+        base_j = tile_j * tile_size
+        base_k = tile_k * tile_size
+
+        for local_i in range(tile_size):
+            i = base_i + local_i
+
+            for local_j in range(tile_size):
+                j = base_j + local_j
+
+                for local_k in range(tile_size):
+                    k = base_k + local_k
 
                     x_depart, y_depart, z_depart = (
                         advection_schemes._backtrace_position_sparse(
@@ -175,37 +168,34 @@ def update_velocity_maccormack(
     """
     total_tiles = active_tile_count
 
+    tile_size = kernel_config.TILE_SIZE
+
+    dt_over_delta = dt / delta
+    diffusion_coeff = nu * dt / (delta * delta)
+    force_coeff = dt / rho
+
     for active_tile_n in prange(total_tiles):
+        tile_index = active_tile_slots[active_tile_n]
+
+        if tile_index == -1:
+            continue
+
         tile_i = active_tile_coords[active_tile_n, 0]
         tile_j = active_tile_coords[active_tile_n, 1]
         tile_k = active_tile_coords[active_tile_n, 2]
-        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
-        for local_i in range(kernel_config.TILE_SIZE):
-            for local_j in range(kernel_config.TILE_SIZE):
-                for local_k in range(kernel_config.TILE_SIZE):
-                    (
-                        tile_i,
-                        tile_j,
-                        tile_k,
-                        local_i,
-                        local_j,
-                        local_k,
-                        i,
-                        j,
-                        k,
-                    ) = sparse_managment.tile_to_index(
-                        tile_flat,
-                        local_i,
-                        local_j,
-                        local_k,
-                        tile_map.shape[0],
-                        tile_map.shape[1],
-                        tile_map.shape[2],
-                    )
 
-                    tile_index = active_tile_slots[active_tile_n]
-                    if tile_index == -1:
-                        continue
+        base_i = tile_i * tile_size
+        base_j = tile_j * tile_size
+        base_k = tile_k * tile_size
+
+        for local_i in range(tile_size):
+            i = base_i + local_i
+
+            for local_j in range(tile_size):
+                j = base_j + local_j
+
+                for local_k in range(tile_size):
+                    k = base_k + local_k
 
                     if (
                         i < 1
@@ -220,10 +210,6 @@ def update_velocity_maccormack(
                     Fx = 0.0
                     Fy = 0.0
                     Fz = 0.0
-
-                    dt_over_delta = dt / delta
-                    diffusion_coeff = nu * dt / (delta * delta)
-                    force_coeff = dt / rho
 
                     u_center = u[tile_index, local_i, local_j, local_k]
                     v_center = v[tile_index, local_i, local_j, local_k]

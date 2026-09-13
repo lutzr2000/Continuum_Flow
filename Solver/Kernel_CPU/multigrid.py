@@ -370,49 +370,40 @@ def rbgs_step_level_0(
     total_tiles = active_tile_count
 
     delta2 = delta * delta
+    tile_size = kernel_config.TILE_SIZE
 
     for active_tile_n in prange(total_tiles):
+        tile_index = active_tile_slots[active_tile_n]
+
+        if tile_index == -1:
+            continue
+
         tile_i = active_tile_coords[active_tile_n, 0]
         tile_j = active_tile_coords[active_tile_n, 1]
         tile_k = active_tile_coords[active_tile_n, 2]
-        tile_flat = (tile_i * tile_map.shape[1] + tile_j) * tile_map.shape[2] + tile_k
-        for local_i in range(kernel_config.TILE_SIZE):
-            for local_j in range(kernel_config.TILE_SIZE):
-                for local_k in range(kernel_config.TILE_SIZE):
-                    (
-                        tile_i,
-                        tile_j,
-                        tile_k,
-                        local_i,
-                        local_j,
-                        local_k,
-                        i,
-                        j,
-                        k,
-                    ) = sparse_managment.tile_to_index(
-                        tile_flat,
-                        local_i,
-                        local_j,
-                        local_k,
-                        tile_map.shape[0],
-                        tile_map.shape[1],
-                        tile_map.shape[2],
-                    )
 
-                    tile_index = active_tile_slots[active_tile_n]
+        base_i = tile_i * tile_size
+        base_j = tile_j * tile_size
+        base_k = tile_k * tile_size
 
-                    if tile_index == -1:
-                        continue
+        for local_i in range(tile_size):
+            i = base_i + local_i
 
-                    if (
-                        i < 1
-                        or j < 1
-                        or k < 1
-                        or i >= nx - 1
-                        or j >= ny - 1
-                        or k >= nz - 1
-                        or ((i + j + k) & 1) != parity
-                    ):
+            if i < 1 or i >= nx - 1:
+                continue
+
+            for local_j in range(tile_size):
+                j = base_j + local_j
+
+                if j < 1 or j >= ny - 1:
+                    continue
+
+                start_local_k = (parity - i - j - base_k) & 1
+
+                for local_k in range(start_local_k, tile_size, 2):
+                    k = base_k + local_k
+
+                    if k < 1 or k >= nz - 1:
                         continue
 
                     center = (
