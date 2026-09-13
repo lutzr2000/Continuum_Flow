@@ -7,5 +7,6 @@ numba==0.65.0
 nvidia-cuda-runtime==13.2.75
 nvidia-nvvm==13.2.78
 packaging==26.0
+psutil==7.2.2
 scipy==1.17.1
 trimesh==4.12.2

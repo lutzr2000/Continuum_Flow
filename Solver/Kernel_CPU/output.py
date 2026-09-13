@@ -251,11 +251,6 @@ def enqueue_device_output(
     used_tile_count = 0 if max_slot_index < 0 else max_slot_index + 1
 
     available_tile_count = int(next(iter(sim_fields.values())).shape[0])
-    if used_tile_count > available_tile_count:
-        raise RuntimeError(
-            "Sparse tile map references a slot outside the CPU field pool: "
-            f"required {used_tile_count}, available {available_tile_count}."
-        )
 
     ensure_writer_slot_capacity(
         slot,

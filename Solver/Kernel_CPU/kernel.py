@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
 
+import psutil
 from Solver.General.main import emit_message
 import Solver.General.forces as forces
 
@@ -30,6 +31,16 @@ import Solver.Kernel_CPU.Boundary_Conditions.source_bc as source_bc
 warnings.filterwarnings("ignore")
 
 CPU_FIELD_DTYPE = kernel_config.CPU_FIELD_DTYPE
+
+
+def get_RAM_usage() -> tuple[float, float]:
+    """Return used and total system RAM, without interrupting the simulation."""
+    try:
+        used = psutil.Process().memory_info().rss
+        total = psutil.virtual_memory().total
+        return used / 1024**2, total / 1024**2
+    except Exception as exc:
+        return 0.0, 0.0
 
 
 def get_source_values(
@@ -1410,6 +1421,8 @@ def solver(
                     t,
                 )
 
+            ram_used_mb, ram_total_mb = get_RAM_usage()
+
             emit_message(
                 {
                     "type": "stats",
@@ -1420,6 +1433,8 @@ def solver(
                         active_tile_counter_host * kernel_config.TILE_SIZE**3
                     ),
                     "total_cells": (total_tile_count * kernel_config.TILE_SIZE**3),
+                    "vram_used_mb": ram_used_mb,
+                    "vram_total_mb": ram_total_mb,
                 }
             )
 
