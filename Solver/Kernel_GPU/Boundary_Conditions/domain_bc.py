@@ -186,37 +186,6 @@ def pressure_poisson_apply_neumann_bcs(
         )
 
 
-@cuda.jit(cache=True)
-def pressure_poisson_apply_neumann_bcs_dense(p: Any) -> None:
-    r"""
-    Apply homogeneous Neumann pressure conditions to a dense multigrid level.
-
-    Each boundary value is copied from its adjacent interior cell, enforcing
-    :math:`\partial p/\partial n = 0` on all six faces.
-    """
-    i, j, k = cuda.grid(3)
-
-    nx, ny, nz = p.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
-
-    if i == 0:
-        p[i, j, k] = p[1, j, k]
-    elif i == nx - 1:
-        p[i, j, k] = p[nx - 2, j, k]
-
-    if j == 0:
-        p[i, j, k] = p[i, 1, k]
-    elif j == ny - 1:
-        p[i, j, k] = p[i, ny - 2, k]
-
-    if k == 0:
-        p[i, j, k] = p[i, j, 1]
-    elif k == nz - 1:
-        p[i, j, k] = p[i, j, nz - 2]
-
-
 @cuda.jit(device=True, cache=True)
 def _apply_face_state(
     u: Any,
