@@ -455,12 +455,20 @@ def solver(
         has_animated_sources = any(animated_sources)
 
         # multigrid levels
-        p_levels, b_levels, delta_levels, zero_levels = (
-            multigrid.create_multigrid_levels(
-                shape,
-                delta,
-                min_size=8,
-            )
+        (
+            p_levels,
+            b_levels,
+            delta_levels,
+            zero_levels,
+            multigrid_tile_maps,
+            multigrid_active_tiles,
+            multigrid_active_tile_counts,
+            multigrid_level_shapes,
+        ) = multigrid.create_multigrid_levels(
+            shape,
+            delta,
+            sparse_tile_capacity,
+            min_size=8,
         )
 
     # ------------output------------------
@@ -682,6 +690,25 @@ def solver(
                     )
 
                 sparse_tile_capacity = next_sparse_tile_capacity
+
+                with timings.section(
+                    "solver", "multigrid.create_multigrid_levels", gpu=True
+                ):
+                    (
+                        p_levels,
+                        b_levels,
+                        delta_levels,
+                        zero_levels,
+                        multigrid_tile_maps,
+                        multigrid_active_tiles,
+                        multigrid_active_tile_counts,
+                        multigrid_level_shapes,
+                    ) = multigrid.create_multigrid_levels(
+                        shape,
+                        delta,
+                        sparse_tile_capacity,
+                        min_size=8,
+                    )
 
             with timings.section(
                 "solver", "active_tile_counter.copy_to_host", gpu=True
@@ -974,11 +1001,15 @@ def solver(
                 p_levels,
                 b_levels,
                 delta_levels,
+                zero_levels,
+                multigrid_tile_maps,
+                multigrid_active_tiles,
+                multigrid_active_tile_counts,
+                multigrid_level_shapes,
                 simulation.get("settings").get("iterations"),
                 rhs_partial_sums,
                 rhs_partial_counts,
                 rhs_mean_buffer,
-                zero_levels,
                 nx,
                 ny,
                 nz,

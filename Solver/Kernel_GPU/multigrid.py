@@ -8,305 +8,309 @@ import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
 GPU_FIELD_DTYPE = kernel_config.GPU_FIELD_DTYPE
 
 
+@cuda.jit(cache=True)
+def build_coarse_tile_level(
+    fine_tile_map: Any,
+    coarse_tile_map: Any,
+    coarse_active_tiles: Any,
+    coarse_active_tile_count: Any,
+) -> None:
+    """
+    Activate a coarse tile when at least one corresponding fine tile is active.
+
+    One coarse tile covers a 2x2x2 group of fine tiles.
+    """
+    coarse_i, coarse_j, coarse_k = cuda.grid(3)
+
+    if (
+        coarse_i >= coarse_tile_map.shape[0]
+        or coarse_j >= coarse_tile_map.shape[1]
+        or coarse_k >= coarse_tile_map.shape[2]
+    ):
+        return
+
+    fine_i_start = coarse_i * 2
+    fine_j_start = coarse_j * 2
+    fine_k_start = coarse_k * 2
+
+    is_active = False
+
+    for offset_i in range(2):
+        fine_i = fine_i_start + offset_i
+
+        if fine_i >= fine_tile_map.shape[0]:
+            continue
+
+        for offset_j in range(2):
+            fine_j = fine_j_start + offset_j
+
+            if fine_j >= fine_tile_map.shape[1]:
+                continue
+
+            for offset_k in range(2):
+                fine_k = fine_k_start + offset_k
+
+                if fine_k >= fine_tile_map.shape[2]:
+                    continue
+
+                if fine_tile_map[fine_i, fine_j, fine_k] != -1:
+                    is_active = True
+                    break
+
+            if is_active:
+                break
+
+        if is_active:
+            break
+
+    if not is_active:
+        return
+
+    pool_index = cuda.atomic.add(
+        coarse_active_tile_count,
+        0,
+        1,
+    )
+
+    coarse_tile_map[
+        coarse_i,
+        coarse_j,
+        coarse_k,
+    ] = pool_index
+
+    coarse_active_tiles[pool_index, 0] = coarse_i
+    coarse_active_tiles[pool_index, 1] = coarse_j
+    coarse_active_tiles[pool_index, 2] = coarse_k
+
+
+@cuda.jit(cache=True)
+def clear_tile_map(tile_map: Any) -> None:
+    """
+    Reset every entry of a tile map to inactive.
+    """
+    tile_i, tile_j, tile_k = cuda.grid(3)
+
+    if (
+        tile_i >= tile_map.shape[0]
+        or tile_j >= tile_map.shape[1]
+        or tile_k >= tile_map.shape[2]
+    ):
+        return
+
+    tile_map[tile_i, tile_j, tile_k] = -1
+
+
+def build_coarse_tile_hierarchy(
+    level_0_tile_map: Any,
+    tile_maps: list[Any],
+    active_tiles: list[Any],
+    active_tile_counts: list[Any],
+) -> list[int]:
+    """
+    Rebuild all coarse tile maps from the current level-0 tile map.
+
+    Return the number of active tiles for every coarse level.
+    """
+    fine_tile_map = level_0_tile_map
+    zero_counter = np.zeros(1, dtype=np.int32)
+
+    for level in range(len(tile_maps)):
+        coarse_tile_map = tile_maps[level]
+        coarse_active_tiles = active_tiles[level]
+        coarse_active_tile_count = active_tile_counts[level]
+
+        coarse_active_tile_count.copy_to_device(zero_counter)
+
+        blocks = kernel_config.volume_blocks_per_grid(
+            coarse_tile_map.shape,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        )
+
+        clear_tile_map[
+            blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            coarse_tile_map,
+        )
+
+        build_coarse_tile_level[
+            blocks,
+            kernel_config.THREADS_PER_BLOCK_3D,
+        ](
+            fine_tile_map,
+            coarse_tile_map,
+            coarse_active_tiles,
+            coarse_active_tile_count,
+        )
+
+        fine_tile_map = coarse_tile_map
+
+    active_tile_counts_host = []
+
+    for active_tile_count in active_tile_counts:
+        count = int(active_tile_count.copy_to_host()[0])
+        active_tile_counts_host.append(count)
+
+    return active_tile_counts_host
+
+
 def create_multigrid_levels(
-    shape: tuple[int, int, int], delta: float, min_size: int = 8
+    shape: tuple[int, int, int],
+    delta: float,
+    level_0_pool_capacity: int,
+    min_size: int = 8,
 ) -> Any:
     """
-    Allocate the dense coarse levels used below the sparse simulation grid.
+    Allocate the sparse coarse levels used below the sparse simulation grid.
 
     Every level halves each dimension with upward rounding and doubles the
-    physical cell spacing. Pressure, right-hand-side, and reusable zero buffers
-    are allocated until any dimension would fall below ``min_size``.
+    physical cell spacing. Pressure, right-hand-side, tile maps, active-tile
+    lists, and reusable zero buffers are allocated until any dimension would
+    fall below ``min_size``.
     """
     p_levels = []
     b_levels = []
     delta_levels = []
     zero_levels = []
 
+    tile_maps = []
+    active_tiles = []
+    active_tile_counts = []
+    level_shapes = []
+
     nx = (shape[0] + 1) // 2
     ny = (shape[1] + 1) // 2
     nz = (shape[2] + 1) // 2
+
     level = 1
+    parent_pool_capacity = level_0_pool_capacity
 
     while nx >= min_size and ny >= min_size and nz >= min_size:
         level_shape = (nx, ny, nz)
 
-        p_levels.append(cuda.device_array(level_shape, dtype=GPU_FIELD_DTYPE))
-        b_levels.append(cuda.device_array(level_shape, dtype=GPU_FIELD_DTYPE))
-        zero_levels.append(cuda.to_device(np.zeros(level_shape, dtype=GPU_FIELD_DTYPE)))
+        tile_shape = (
+            (nx + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
+            (ny + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
+            (nz + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE,
+        )
+
+        total_tile_count = tile_shape[0] * tile_shape[1] * tile_shape[2]
+
+        pool_capacity = min(
+            parent_pool_capacity,
+            total_tile_count,
+        )
+
+        pool_shape = (
+            pool_capacity,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+        )
+
+        p_levels.append(
+            cuda.device_array(
+                pool_shape,
+                dtype=GPU_FIELD_DTYPE,
+            )
+        )
+
+        b_levels.append(
+            cuda.device_array(
+                pool_shape,
+                dtype=GPU_FIELD_DTYPE,
+            )
+        )
+
+        zero_levels.append(
+            cuda.to_device(
+                np.zeros(
+                    pool_shape,
+                    dtype=GPU_FIELD_DTYPE,
+                )
+            )
+        )
+
+        tile_maps.append(
+            cuda.to_device(
+                np.full(
+                    tile_shape,
+                    -1,
+                    dtype=np.int32,
+                )
+            )
+        )
+
+        active_tiles.append(
+            cuda.device_array(
+                (pool_capacity, 3),
+                dtype=np.int32,
+            )
+        )
+
+        active_tile_counts.append(cuda.to_device(np.zeros(1, dtype=np.int32)))
+
+        level_shapes.append(level_shape)
         delta_levels.append(delta * (2**level))
+
+        parent_pool_capacity = pool_capacity
 
         nx = (nx + 1) // 2
         ny = (ny + 1) // 2
         nz = (nz + 1) // 2
         level += 1
 
-    return p_levels, b_levels, delta_levels, zero_levels
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def residual(p: Any, b: Any, delta: float, i: int, j: int, k: int) -> Any:
-    r"""
-    Evaluate the discrete Poisson residual at one dense-grid cell.
-
-    .. math::
-
-        r_{i,j,k} = b_{i,j,k} - (\nabla_h^2 p)_{i,j,k}.
-    """
-    inv_delta2 = 1.0 / (delta * delta)
-
-    laplace = (
-        p[i + 1, j, k]
-        + p[i - 1, j, k]
-        + p[i, j + 1, k]
-        + p[i, j - 1, k]
-        + p[i, j, k + 1]
-        + p[i, j, k - 1]
-        - 6.0 * p[i, j, k]
-    ) * inv_delta2
-
-    return b[i, j, k] - laplace
-
-
-@cuda.jit(device=True, inline=True, cache=True)
-def residual_level_0(
-    p: Any,
-    b: Any,
-    inv_delta2: Any,
-    tile_map: Any,
-    i: int,
-    j: int,
-    k: int,
-) -> Any:
-    r"""
-    Evaluate :math:`r = b - \nabla_h^2 p` on the sparse finest grid.
-    """
-    tile_i = i // kernel_config.TILE_SIZE
-    tile_j = j // kernel_config.TILE_SIZE
-    tile_k = k // kernel_config.TILE_SIZE
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
-
-    if tile_index == -1:
-        return 0.0, False
-
-    local_i = i - tile_i * kernel_config.TILE_SIZE
-    local_j = j - tile_j * kernel_config.TILE_SIZE
-    local_k = k - tile_k * kernel_config.TILE_SIZE
-
-    laplace = (
-        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
-        - 6.0 * sparse_managment.get_pool_value(p, tile_map, i, j, k, 0.0)
-    ) * inv_delta2
-
-    rhs = b[tile_index, local_i, local_j, local_k]
-
-    return rhs - laplace, True
+    return (
+        p_levels,
+        b_levels,
+        delta_levels,
+        zero_levels,
+        tile_maps,
+        active_tiles,
+        active_tile_counts,
+        level_shapes,
+    )
 
 
 @cuda.jit(cache=True)
-def restrict_residual(
-    p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: int, nz: int
-) -> None:
-    r"""
-    Restrict the fine-grid residual to a dense coarse grid by averaging.
-
-    .. math::
-
-        b_H(I,J,K) = \frac{1}{8}\sum_{a,b,c\in\{0,1\}}
-        r_h(2I+a, 2J+b, 2K+c).
-    """
-    I, J, K = cuda.grid(3)
-
-    cnx, cny, cnz = coarse_b.shape
-
-    if I >= cnx or J >= cny or K >= cnz:
-        return
-
-    i0 = 2 * I
-    j0 = 2 * J
-    k0 = 2 * K
-
-    s = 0.0
-    count = 0.0
-
-    for di in range(2):
-        for dj in range(2):
-            for dk in range(2):
-                i = i0 + di
-                j = j0 + dj
-                k = k0 + dk
-
-                if (
-                    i >= 1
-                    and j >= 1
-                    and k >= 1
-                    and i < nx - 1
-                    and j < ny - 1
-                    and k < nz - 1
-                ):
-                    r = residual(p, b, delta, i, j, k)
-
-                    s += r
-                    count += 1.0
-
-    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
-
-
-@cuda.jit(cache=True)
-def restrict_residual_level_0(
+def rbgs_step_sparse(
     p: Any,
     b: Any,
-    coarse_b: Any,
     delta: float,
+    parity: int,
     tile_map: Any,
+    active_tiles: Any,
     nx: int,
     ny: int,
     nz: int,
 ) -> None:
     """
-    Restrict the sparse finest-grid residual to the first dense coarse grid.
+    Perform one red or black Gauss-Seidel sweep over active sparse tiles.
+
+    One CUDA block processes one active tile.
     """
-    I, J, K = cuda.grid(3)
+    active_index = cuda.blockIdx.x
 
-    cnx, cny, cnz = coarse_b.shape
+    local_i = cuda.threadIdx.x
+    local_j = cuda.threadIdx.y
+    local_k = cuda.threadIdx.z
 
-    if I >= cnx or J >= cny or K >= cnz:
+    tile_i = active_tiles[active_index, 0]
+    tile_j = active_tiles[active_index, 1]
+    tile_k = active_tiles[active_index, 2]
+
+    tile_index = tile_map[
+        tile_i,
+        tile_j,
+        tile_k,
+    ]
+
+    if tile_index == -1:
         return
 
-    inv_delta2 = 1.0 / (delta * delta)
-
-    i0 = 2 * I
-    j0 = 2 * J
-    k0 = 2 * K
-
-    s = 0.0
-    count = 0.0
-
-    for di in range(2):
-        for dj in range(2):
-            for dk in range(2):
-                i = i0 + di
-                j = j0 + dj
-                k = k0 + dk
-
-                if (
-                    i >= 1
-                    and j >= 1
-                    and k >= 1
-                    and i < nx - 1
-                    and j < ny - 1
-                    and k < nz - 1
-                ):
-                    r, valid = residual_level_0(
-                        p,
-                        b,
-                        inv_delta2,
-                        tile_map,
-                        i,
-                        j,
-                        k,
-                    )
-
-                    if not valid:
-                        continue
-
-                    s += r
-                    count += 1.0
-
-    coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
-
-
-@cuda.jit(cache=True)
-def prolongate_add_nearest_level_0(
-    coarse_e: Any, fine_p: Any, tile_map: Any, field_shape: tuple[int, int, int]
-) -> None:
-    r"""
-    Prolongate coarse error by nearest-neighbor injection and add it to level 0.
-
-    .. math::
-
-        p_h(i,j,k) \leftarrow p_h(i,j,k)
-        + e_H(\lfloor i/2\rfloor,\lfloor j/2\rfloor,\lfloor k/2\rfloor).
-    """
-    I, J, K = cuda.grid(3)
-    cnx, cny, cnz = coarse_e.shape
-    fnx, fny, fnz = field_shape
-
-    if I >= cnx or J >= cny or K >= cnz:
-        return
-
-    e = 0.25 * coarse_e[I, J, K]
-
-    i0 = 2 * I
-    j0 = 2 * J
-    k0 = 2 * K
-
-    for di in range(2):
-        for dj in range(2):
-            for dk in range(2):
-                i = i0 + di
-                j = j0 + dj
-                k = k0 + dk
-
-                if i < fnx and j < fny and k < fnz:
-                    tile_i = i // kernel_config.TILE_SIZE
-                    tile_j = j // kernel_config.TILE_SIZE
-                    tile_k = k // kernel_config.TILE_SIZE
-                    tile_index = tile_map[tile_i, tile_j, tile_k]
-                    if tile_index == -1:
-                        continue
-                    local_i = i - tile_i * kernel_config.TILE_SIZE
-                    local_j = j - tile_j * kernel_config.TILE_SIZE
-                    local_k = k - tile_k * kernel_config.TILE_SIZE
-                    fine_p[tile_index, local_i, local_j, local_k] += e
-
-
-@cuda.jit(cache=True)
-def prolongate_add_nearest(coarse_e: Any, fine_p: Any) -> None:
-    """
-    Prolongate coarse error by nearest-neighbor injection onto a dense grid.
-    """
-    I, J, K = cuda.grid(3)
-    cnx, cny, cnz = coarse_e.shape
-    fnx, fny, fnz = fine_p.shape
-
-    if I >= cnx or J >= cny or K >= cnz:
-        return
-
-    e = 0.25 * coarse_e[I, J, K]
-
-    i0 = 2 * I
-    j0 = 2 * J
-    k0 = 2 * K
-
-    for di in range(2):
-        for dj in range(2):
-            for dk in range(2):
-                i = i0 + di
-                j = j0 + dj
-                k = k0 + dk
-
-                if i < fnx and j < fny and k < fnz:
-                    fine_p[i, j, k] += e
-
-
-@cuda.jit(cache=True)
-def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
-    """
-    Perform one red or black Gauss-Seidel pressure-smoothing sweep.
-    """
-    i, j, k = cuda.grid(3)
-
-    nx, ny, nz = p.shape
-
-    if i >= nx or j >= ny or k >= nz:
-        return
+    i = tile_i * kernel_config.TILE_SIZE + local_i
+    j = tile_j * kernel_config.TILE_SIZE + local_j
+    k = tile_k * kernel_config.TILE_SIZE + local_k
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
@@ -316,14 +320,25 @@ def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
 
     delta2 = delta * delta
 
-    p[i, j, k] = (
-        p[i + 1, j, k]
-        + p[i - 1, j, k]
-        + p[i, j + 1, k]
-        + p[i, j - 1, k]
-        + p[i, j, k + 1]
-        + p[i, j, k - 1]
-        - delta2 * b[i, j, k]
+    p[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = (
+        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+        - delta2
+        * b[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ]
     ) / 6.0
 
 
@@ -377,57 +392,376 @@ def rbgs_step_level_0(
     p[tile_index, local_i, local_j, local_k] = center
 
 
+@cuda.jit(device=True, inline=True, cache=True)
+def residual_sparse(
+    p: Any,
+    b: Any,
+    inv_delta2: Any,
+    tile_map: Any,
+    i: int,
+    j: int,
+    k: int,
+) -> Any:
+    """
+    Evaluate r = b - laplace(p) at one sparse-grid cell.
+    """
+    tile_i = i // kernel_config.TILE_SIZE
+    tile_j = j // kernel_config.TILE_SIZE
+    tile_k = k // kernel_config.TILE_SIZE
+
+    tile_index = tile_map[
+        tile_i,
+        tile_j,
+        tile_k,
+    ]
+
+    if tile_index == -1:
+        return 0.0, False
+
+    local_i = i - tile_i * kernel_config.TILE_SIZE
+    local_j = j - tile_j * kernel_config.TILE_SIZE
+    local_k = k - tile_k * kernel_config.TILE_SIZE
+
+    laplace = (
+        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+        - 6.0
+        * p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ]
+    ) * inv_delta2
+
+    rhs = b[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
+
+    return rhs - laplace, True
+
+
+@cuda.jit(cache=True)
+def restrict_residual_sparse(
+    fine_p: Any,
+    fine_b: Any,
+    coarse_b: Any,
+    fine_delta: float,
+    fine_tile_map: Any,
+    coarse_tile_map: Any,
+    coarse_active_tiles: Any,
+    fine_nx: int,
+    fine_ny: int,
+    fine_nz: int,
+    coarse_nx: int,
+    coarse_ny: int,
+    coarse_nz: int,
+) -> None:
+    """
+    Restrict the residual of one sparse level to the next sparse level.
+
+    One CUDA block processes one active coarse tile. Threads correspond to
+    cells inside that coarse tile.
+    """
+    coarse_pool_index = cuda.blockIdx.x
+
+    local_i = cuda.threadIdx.x
+    local_j = cuda.threadIdx.y
+    local_k = cuda.threadIdx.z
+
+    coarse_tile_i = coarse_active_tiles[coarse_pool_index, 0]
+    coarse_tile_j = coarse_active_tiles[coarse_pool_index, 1]
+    coarse_tile_k = coarse_active_tiles[coarse_pool_index, 2]
+
+    I = coarse_tile_i * kernel_config.TILE_SIZE + local_i
+    J = coarse_tile_j * kernel_config.TILE_SIZE + local_j
+    K = coarse_tile_k * kernel_config.TILE_SIZE + local_k
+
+    if I >= coarse_nx or J >= coarse_ny or K >= coarse_nz:
+        return
+
+    # Der Index sollte mit blockIdx.x übereinstimmen. Der Zugriff über
+    # die Map macht die Beziehung aber explizit.
+    coarse_tile_index = coarse_tile_map[
+        coarse_tile_i,
+        coarse_tile_j,
+        coarse_tile_k,
+    ]
+
+    if coarse_tile_index == -1:
+        return
+
+    inv_delta2 = 1.0 / (fine_delta * fine_delta)
+
+    fine_i_start = 2 * I
+    fine_j_start = 2 * J
+    fine_k_start = 2 * K
+
+    residual_sum = 0.0
+    residual_count = 0.0
+
+    for offset_i in range(2):
+        for offset_j in range(2):
+            for offset_k in range(2):
+                i = fine_i_start + offset_i
+                j = fine_j_start + offset_j
+                k = fine_k_start + offset_k
+
+                if (
+                    i < 1
+                    or j < 1
+                    or k < 1
+                    or i >= fine_nx - 1
+                    or j >= fine_ny - 1
+                    or k >= fine_nz - 1
+                ):
+                    continue
+
+                residual_value, valid = residual_sparse(
+                    fine_p,
+                    fine_b,
+                    inv_delta2,
+                    fine_tile_map,
+                    i,
+                    j,
+                    k,
+                )
+
+                if not valid:
+                    continue
+
+                residual_sum += residual_value
+                residual_count += 1.0
+
+    if residual_count > 0.0:
+        coarse_b[
+            coarse_tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = (
+            residual_sum / residual_count
+        )
+    else:
+        coarse_b[
+            coarse_tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = 0.0
+
+
+@cuda.jit(cache=True)
+def prolongate_add_nearest_sparse(
+    coarse_e: Any,
+    fine_p: Any,
+    coarse_tile_map: Any,
+    fine_tile_map: Any,
+    coarse_active_tiles: Any,
+    coarse_nx: int,
+    coarse_ny: int,
+    coarse_nz: int,
+    fine_nx: int,
+    fine_ny: int,
+    fine_nz: int,
+) -> None:
+    """
+    Prolongate sparse coarse-grid error by nearest-neighbor injection and add
+    it to the sparse fine-grid pressure.
+
+    One CUDA block processes one active coarse tile.
+    """
+    coarse_pool_index = cuda.blockIdx.x
+
+    local_i = cuda.threadIdx.x
+    local_j = cuda.threadIdx.y
+    local_k = cuda.threadIdx.z
+
+    coarse_tile_i = coarse_active_tiles[coarse_pool_index, 0]
+    coarse_tile_j = coarse_active_tiles[coarse_pool_index, 1]
+    coarse_tile_k = coarse_active_tiles[coarse_pool_index, 2]
+
+    I = coarse_tile_i * kernel_config.TILE_SIZE + local_i
+    J = coarse_tile_j * kernel_config.TILE_SIZE + local_j
+    K = coarse_tile_k * kernel_config.TILE_SIZE + local_k
+
+    if I >= coarse_nx or J >= coarse_ny or K >= coarse_nz:
+        return
+
+    coarse_tile_index = coarse_tile_map[
+        coarse_tile_i,
+        coarse_tile_j,
+        coarse_tile_k,
+    ]
+
+    if coarse_tile_index == -1:
+        return
+
+    error = (
+        0.25
+        * coarse_e[
+            coarse_tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ]
+    )
+
+    fine_i_start = 2 * I
+    fine_j_start = 2 * J
+    fine_k_start = 2 * K
+
+    for offset_i in range(2):
+        for offset_j in range(2):
+            for offset_k in range(2):
+                i = fine_i_start + offset_i
+                j = fine_j_start + offset_j
+                k = fine_k_start + offset_k
+
+                if i >= fine_nx or j >= fine_ny or k >= fine_nz:
+                    continue
+
+                fine_tile_i = i // kernel_config.TILE_SIZE
+                fine_tile_j = j // kernel_config.TILE_SIZE
+                fine_tile_k = k // kernel_config.TILE_SIZE
+
+                fine_tile_index = fine_tile_map[
+                    fine_tile_i,
+                    fine_tile_j,
+                    fine_tile_k,
+                ]
+
+                if fine_tile_index == -1:
+                    continue
+
+                fine_local_i = i - fine_tile_i * kernel_config.TILE_SIZE
+                fine_local_j = j - fine_tile_j * kernel_config.TILE_SIZE
+                fine_local_k = k - fine_tile_k * kernel_config.TILE_SIZE
+
+                fine_p[
+                    fine_tile_index,
+                    fine_local_i,
+                    fine_local_j,
+                    fine_local_k,
+                ] += error
+
+
 def smooth(
     p: Any,
     b: Any,
     delta: float,
     iterations: int,
-    level: int = 0,
-    tile_map: Any = None,
-    nx: int | None = None,
-    ny: int | None = None,
-    nz: int | None = None,
+    tile_map: Any,
+    active_tiles: Any,
+    active_tile_count: int | None,
+    field_shape: tuple[int, int, int],
 ) -> None:
-    r"""
-    Apply smoothing iterations to one multigrid pressure level.
-
-    Level ``0`` is the finest pooled level and uses ``tile_map`` to access the
-    sparse pressure storage. All higher levels are dense coarse grids. The
-    smoother uses red-black Gauss-Seidel and reapplies Neumann boundary
-    conditions after the requested number of iterations.
-
     """
-    if level == 0:
+    Apply red-black Gauss-Seidel smoothing to one sparse multigrid level.
+
+    Level 0 currently has no compact active-tile list and therefore uses the
+    existing level-0 kernel. Coarse levels are dispatched only over their
+    compact active-tile lists.
+    """
+    nx, ny, nz = field_shape
+
+    is_level_0 = active_tiles is None
+
+    if is_level_0:
         blocks = kernel_config.volume_blocks_per_grid(
-            (nx, ny, nz),
-            kernel_config.THREADS_PER_BLOCK_3D,
-        )
-    else:
-        blocks = kernel_config.volume_blocks_per_grid(
-            p.shape,
+            field_shape,
             kernel_config.THREADS_PER_BLOCK_3D,
         )
 
-    for _ in range(iterations):
-        if level == 0:
-            rbgs_step_level_0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 0, tile_map, nx, ny, nz
+        for _ in range(iterations):
+            rbgs_step_level_0[
+                blocks,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                p,
+                b,
+                delta,
+                0,
+                tile_map,
+                nx,
+                ny,
+                nz,
             )
-            rbgs_step_level_0[blocks, kernel_config.THREADS_PER_BLOCK_3D](
-                p, b, delta, 1, tile_map, nx, ny, nz
-            )
-        else:
-            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 0)
-            rbgs_step[blocks, kernel_config.THREADS_PER_BLOCK_3D](p, b, delta, 1)
 
-    if level == 0:
-        BC.pressure_poisson_apply_neumann_bcs[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p, tile_map, nx, ny, nz)
+            rbgs_step_level_0[
+                blocks,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                p,
+                b,
+                delta,
+                1,
+                tile_map,
+                nx,
+                ny,
+                nz,
+            )
+
     else:
-        BC.pressure_poisson_apply_neumann_bcs_dense[
-            blocks, kernel_config.THREADS_PER_BLOCK_3D
-        ](p)
+        if active_tile_count is None:
+            raise ValueError("active_tile_count is required for sparse coarse levels")
+
+        if active_tile_count == 0:
+            return
+
+        for _ in range(iterations):
+            rbgs_step_sparse[
+                active_tile_count,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                p,
+                b,
+                delta,
+                0,
+                tile_map,
+                active_tiles,
+                nx,
+                ny,
+                nz,
+            )
+
+            rbgs_step_sparse[
+                active_tile_count,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                p,
+                b,
+                delta,
+                1,
+                tile_map,
+                active_tiles,
+                nx,
+                ny,
+                nz,
+            )
+
+    boundary_blocks = kernel_config.volume_blocks_per_grid(
+        field_shape,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    )
+
+    BC.pressure_poisson_apply_neumann_bcs[
+        boundary_blocks,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        p,
+        tile_map,
+        nx,
+        ny,
+        nz,
+    )
 
 
 def v_cycle(
@@ -445,7 +779,11 @@ def v_cycle(
     nx: int,
     ny: int,
     nz: int,
-    tile_map: Any = None,
+    tile_map: Any,
+    multigrid_tile_maps: list[Any],
+    multigrid_active_tiles: list[Any],
+    multigrid_active_tile_counts: list[int],
+    multigrid_level_shapes: list[tuple[int, int, int]],
 ) -> None:
     r"""
     Run one multigrid V-cycle for the pressure solve.
@@ -493,22 +831,33 @@ def v_cycle(
         p = p_level0
         b = b_level0
         delta = base_delta
+
+        current_tile_map = tile_map
+        current_active_tiles = None
+        current_active_tile_count = None
+        current_shape = (nx, ny, nz)
+
     else:
-        dense_level = level - 1
-        p = p_levels[dense_level]
-        b = b_levels[dense_level]
-        delta = delta_levels[dense_level]
+        current_level = level - 1
+
+        p = p_levels[current_level]
+        b = b_levels[current_level]
+        delta = delta_levels[current_level]
+
+        current_tile_map = multigrid_tile_maps[current_level]
+        current_active_tiles = multigrid_active_tiles[current_level]
+        current_active_tile_count = multigrid_active_tile_counts[current_level]
+        current_shape = multigrid_level_shapes[current_level]
 
     smooth(
         p,
         b,
         delta,
         pre_smooth,
-        level=level,
-        tile_map=tile_map,
-        nx=nx,
-        ny=ny,
-        nz=nz,
+        tile_map=current_tile_map,
+        active_tiles=current_active_tiles,
+        active_tile_count=current_active_tile_count,
+        field_shape=current_shape,
     )
 
     last_level = len(p_levels)
@@ -519,50 +868,48 @@ def v_cycle(
             b,
             delta,
             coarse_smooth,
-            level=level,
-            tile_map=tile_map,
-            nx=nx,
-            ny=ny,
-            nz=nz,
+            tile_map=current_tile_map,
+            active_tiles=current_active_tiles,
+            active_tile_count=current_active_tile_count,
+            field_shape=current_shape,
         )
         return
 
-    coarse_p = p_levels[level]
-    coarse_b = b_levels[level]
+    coarse_level = level
 
-    coarse_blocks = kernel_config.volume_blocks_per_grid(
-        coarse_p.shape,
-        kernel_config.THREADS_PER_BLOCK_3D,
+    coarse_p = p_levels[coarse_level]
+    coarse_b = b_levels[coarse_level]
+
+    coarse_tile_map = multigrid_tile_maps[coarse_level]
+    coarse_active_tiles = multigrid_active_tiles[coarse_level]
+    coarse_active_tile_count = multigrid_active_tile_counts[coarse_level]
+    coarse_shape = multigrid_level_shapes[coarse_level]
+
+    if coarse_active_tile_count == 0:
+        return
+
+    coarse_p[:coarse_active_tile_count].copy_to_device(
+        zero_levels[coarse_level][:coarse_active_tile_count]
     )
-    coarse_p.copy_to_device(zero_levels[level])
 
-    if level == 0 and tile_map is not None:
-        restrict_residual_level_0[
-            coarse_blocks,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            p,
-            b,
-            coarse_b,
-            delta,
-            tile_map,
-            nx,
-            ny,
-            nz,
-        )
-    else:
-        restrict_residual[
-            coarse_blocks,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            p,
-            b,
-            coarse_b,
-            delta,
-            nx,
-            ny,
-            nz,
-        )
+    coarse_b[:coarse_active_tile_count].copy_to_device(
+        zero_levels[coarse_level][:coarse_active_tile_count]
+    )
+
+    restrict_residual_sparse[
+        coarse_active_tile_count,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        p,
+        b,
+        coarse_b,
+        delta,
+        current_tile_map,
+        coarse_tile_map,
+        coarse_active_tiles,
+        *current_shape,
+        *coarse_shape,
+    )
 
     v_cycle(
         level + 1,
@@ -579,31 +926,33 @@ def v_cycle(
         nx,
         ny,
         nz,
-        tile_map=None,
+        tile_map,
+        multigrid_tile_maps,
+        multigrid_active_tiles,
+        multigrid_active_tile_counts,
+        multigrid_level_shapes,
     )
 
-    if level == 0 and tile_map is not None:
-        prolongate_add_nearest_level_0[
-            coarse_blocks,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](coarse_p, p, tile_map, (nx, ny, nz))
-    else:
-        prolongate_add_nearest[
-            coarse_blocks,
-            kernel_config.THREADS_PER_BLOCK_3D,
-        ](
-            coarse_p,
-            p,
-        )
+    prolongate_add_nearest_sparse[
+        coarse_active_tile_count,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        coarse_p,
+        p,
+        coarse_tile_map,
+        current_tile_map,
+        coarse_active_tiles,
+        *coarse_shape,
+        *current_shape,
+    )
 
     smooth(
         p,
         b,
         delta,
         post_smooth,
-        level=level,
-        tile_map=tile_map,
-        nx=nx,
-        ny=ny,
-        nz=nz,
+        tile_map=current_tile_map,
+        active_tiles=current_active_tiles,
+        active_tile_count=current_active_tile_count,
+        field_shape=current_shape,
     )

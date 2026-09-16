@@ -64,25 +64,29 @@ def convert_bc_config_format(bc_config: dict[str, Any]) -> Any:
 
 @cuda.jit(cache=True)
 def pressure_poisson_apply_neumann_bcs(
-    p: Any, tile_map: Any, nx: int, ny: int, nz: int
+    p: Any,
+    tile_map: Any,
+    nx: int,
+    ny: int,
+    nz: int,
 ) -> None:
-    r"""
-    Apply homogeneous Neumann pressure conditions to the sparse domain faces.
-
-    Zero normal derivative is enforced by copying the adjacent interior value
-    onto each boundary cell:
-
-    .. math::
-
-        \frac{\partial p}{\partial n}=0
-        \quad\Longrightarrow\quad p_{\partial\Omega}=p_{\mathrm{adjacent}}.
+    """
+    Apply homogeneous Neumann pressure conditions to a sparse pressure level.
     """
     i, j, k = cuda.grid(3)
+
+    if i >= nx or j >= ny or k >= nz:
+        return
 
     tile_i = i // tile_size
     tile_j = j // tile_size
     tile_k = k // tile_size
-    tile_index = tile_map[tile_i, tile_j, tile_k]
+
+    tile_index = tile_map[
+        tile_i,
+        tile_j,
+        tile_k,
+    ]
 
     if tile_index == -1:
         return
@@ -92,30 +96,93 @@ def pressure_poisson_apply_neumann_bcs(
     local_k = k - tile_k * tile_size
 
     if i == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, 1, j, k, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            1,
+            j,
+            k,
+            0.0,
         )
+
     elif i == nx - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, nx - 2, j, k, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            nx - 2,
+            j,
+            k,
+            0.0,
         )
 
     if j == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, i, 1, k, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            i,
+            1,
+            k,
+            0.0,
         )
+
     elif j == ny - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, i, ny - 2, k, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            i,
+            ny - 2,
+            k,
+            0.0,
         )
 
     if k == 0:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, i, j, 1, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            i,
+            j,
+            1,
+            0.0,
         )
+
     elif k == nz - 1:
-        p[tile_index, local_i, local_j, local_k] = sparse_managment.get_pool_value(
-            p, tile_map, i, j, nz - 2, 0.0
+        p[
+            tile_index,
+            local_i,
+            local_j,
+            local_k,
+        ] = sparse_managment.get_pool_value(
+            p,
+            tile_map,
+            i,
+            j,
+            nz - 2,
+            0.0,
         )
 
 

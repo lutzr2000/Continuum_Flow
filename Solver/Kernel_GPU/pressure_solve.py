@@ -608,11 +608,15 @@ def pressure_poisson_multigrid(
     p_levels: Any,
     b_levels: Any,
     delta_levels: Any,
+    zero_levels: Any,
+    multigrid_tile_maps: Any,
+    multigrid_active_tiles: Any,
+    multigrid_active_tile_counts: Any,
+    multigrid_level_shapes: Any,
     num_vcycles: Any,
     rhs_partial_sums: Any,
     rhs_partial_counts: Any,
     rhs_mean_buffer: Any,
-    zero_levels: Any,
     nx: int,
     ny: int,
     nz: int,
@@ -699,10 +703,21 @@ def pressure_poisson_multigrid(
             ny,
             nz,
         )
+    with timings.section(
+        "pressure_poisson_multigrid", "build_coarse_tile_hierarchy", gpu=True
+    ):
+        multigrid_active_tile_counts_host = multigrid.build_coarse_tile_hierarchy(
+            tile_map,
+            multigrid_tile_maps,
+            multigrid_active_tiles,
+            multigrid_active_tile_counts,
+        )
 
     for _ in range(num_vcycles):
         with timings.section(
-            "pressure_poisson_multigrid", "multigrid.v_cycle", gpu=True
+            "pressure_poisson_multigrid",
+            "multigrid.v_cycle",
+            gpu=True,
         ):
             multigrid.v_cycle(
                 0,
@@ -720,6 +735,10 @@ def pressure_poisson_multigrid(
                 ny=ny,
                 nz=nz,
                 tile_map=tile_map,
+                multigrid_tile_maps=multigrid_tile_maps,
+                multigrid_active_tiles=multigrid_active_tiles,
+                multigrid_active_tile_counts=multigrid_active_tile_counts_host,
+                multigrid_level_shapes=multigrid_level_shapes,
             )
 
     return p
