@@ -459,7 +459,6 @@ def solver(
             p_levels,
             b_levels,
             delta_levels,
-            zero_levels,
             multigrid_tile_maps,
             multigrid_active_tiles,
             multigrid_active_tile_counts,
@@ -691,6 +690,7 @@ def solver(
 
                 sparse_tile_capacity = next_sparse_tile_capacity
 
+                # needed for growning the coarse capacities simply by recreating them
                 with timings.section(
                     "solver", "multigrid.create_multigrid_levels", gpu=True
                 ):
@@ -698,7 +698,6 @@ def solver(
                         p_levels,
                         b_levels,
                         delta_levels,
-                        zero_levels,
                         multigrid_tile_maps,
                         multigrid_active_tiles,
                         multigrid_active_tile_counts,
@@ -1001,7 +1000,6 @@ def solver(
                 p_levels,
                 b_levels,
                 delta_levels,
-                zero_levels,
                 multigrid_tile_maps,
                 multigrid_active_tiles,
                 multigrid_active_tile_counts,

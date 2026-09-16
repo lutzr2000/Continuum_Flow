@@ -1,6 +1,8 @@
-from numba import cuda
-import numpy as np
 from typing import Any
+
+import numpy as np
+from numba import cuda
+
 import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.Boundary_Conditions.domain_bc as BC
@@ -165,14 +167,11 @@ def create_multigrid_levels(
 
     Every level halves each dimension with upward rounding and doubles the
     physical cell spacing. Pressure, right-hand-side, tile maps, active-tile
-    lists, and reusable zero buffers are allocated until any dimension would
-    fall below ``min_size``.
+    lists are allocated until any dimension would fall below ``min_size``.
     """
     p_levels = []
     b_levels = []
     delta_levels = []
-    zero_levels = []
-
     tile_maps = []
     active_tiles = []
     active_tile_counts = []
@@ -222,15 +221,6 @@ def create_multigrid_levels(
             )
         )
 
-        zero_levels.append(
-            cuda.to_device(
-                np.zeros(
-                    pool_shape,
-                    dtype=GPU_FIELD_DTYPE,
-                )
-            )
-        )
-
         tile_maps.append(
             cuda.to_device(
                 np.full(
@@ -264,7 +254,6 @@ def create_multigrid_levels(
         p_levels,
         b_levels,
         delta_levels,
-        zero_levels,
         tile_maps,
         active_tiles,
         active_tile_counts,
@@ -764,13 +753,38 @@ def smooth(
     )
 
 
+@cuda.jit(cache=True)
+def clear_sparse_fields(
+    p: Any,
+    b: Any,
+) -> None:
+    pool_index = cuda.blockIdx.x
+
+    local_i = cuda.threadIdx.x
+    local_j = cuda.threadIdx.y
+    local_k = cuda.threadIdx.z
+
+    p[
+        pool_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = 0.0
+
+    b[
+        pool_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = 0.0
+
+
 def v_cycle(
     level: int,
     p_levels: list[Any],
     b_levels: list[Any],
     p_level0: Any,
     b_level0: Any,
-    zero_levels: list[Any],
     base_delta: float,
     delta_levels: list[float],
     pre_smooth: int,
@@ -888,12 +902,12 @@ def v_cycle(
     if coarse_active_tile_count == 0:
         return
 
-    coarse_p[:coarse_active_tile_count].copy_to_device(
-        zero_levels[coarse_level][:coarse_active_tile_count]
-    )
-
-    coarse_b[:coarse_active_tile_count].copy_to_device(
-        zero_levels[coarse_level][:coarse_active_tile_count]
+    clear_sparse_fields[
+        coarse_active_tile_count,
+        kernel_config.THREADS_PER_BLOCK_3D,
+    ](
+        coarse_p,
+        coarse_b,
     )
 
     restrict_residual_sparse[
@@ -917,7 +931,6 @@ def v_cycle(
         b_levels,
         p_level0,
         b_level0,
-        zero_levels,
         base_delta,
         delta_levels,
         pre_smooth,
