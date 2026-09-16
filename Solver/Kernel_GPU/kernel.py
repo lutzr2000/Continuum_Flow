@@ -20,6 +20,7 @@ import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.time_step as time_step
 from Solver.Kernel_GPU.timing import profiled_run
 import Solver.Kernel_GPU.update_masks as update_masks
+import Solver.Kernel_GPU.particles as particles
 import Solver.Kernel_GPU.velocity_update as velocity_update
 import Solver.Kernel_GPU.vorticity as vorticity
 import Solver.Kernel_GPU.voxelise_mesh as voxelise_mesh
@@ -326,10 +327,22 @@ def solver(
 
     sources = simulation.get("sources") or []
     obstacles = simulation.get("obstacles") or []
+    has_particle_sources = any(
+        source.get("particle_system_inputs") for source in sources
+    )
+
     # add times
     for entry in sources + obstacles:
         for obj in entry.get("geometry_inputs") or []:
             obj["animation_timeline"] = simulation["animation_timeline"]
+
+    # particles
+    with timings.section("solver", "particles.load_particle_sources", gpu=True):
+        particle_sources = (
+            particles.load_particle_sources(sources, bake_path)
+            if has_particle_sources
+            else [[] for _ in sources]
+        )
 
     with timings.section("solver", "voxelise_mesh.source_masks", gpu=True):
         source_base_masks = []
@@ -444,6 +457,14 @@ def solver(
             source_masks.append(
                 cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
             )
+        geometry_source_masks = (
+            [
+                cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
+                for _ in sources
+            ]
+            if has_particle_sources
+            else source_masks
+        )
 
         source_tile_mask = cuda.to_device(
             np.zeros(tile_shape, dtype=np.bool_)
@@ -452,6 +473,7 @@ def solver(
         obstacle_mask = cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
 
         animated_sources = [is_animated(base_masks) for base_masks in source_base_masks]
+        particle_source_flags = [bool(entries) for entries in particle_sources]
         has_animated_sources = any(animated_sources)
 
         # multigrid levels
@@ -520,6 +542,18 @@ def solver(
                 delta,
                 origin,
             )
+
+        if has_particle_sources:
+            with timings.section(
+                "solver", "particles.update_source_tile_mask", gpu=True
+            ):
+                particles.update_source_tile_mask(
+                    source_tile_mask,
+                    particle_sources,
+                    t,
+                    delta,
+                    origin,
+                )
 
         # ------------Start Active tiles-------------------
         if simulate_sparsely:
@@ -611,6 +645,11 @@ def solver(
                             (vorticity_magnitude, 0.0),
                             (obstacle_mask, False),
                             *[(mask, False) for mask in source_masks],
+                            *(
+                                [(mask, False) for mask in geometry_source_masks]
+                                if has_particle_sources
+                                else []
+                            ),
                         ],
                         reused_slot_stack,
                         reused_slot_count_host,
@@ -658,7 +697,7 @@ def solver(
                         zero_pool,
                         vorticity_magnitude,
                         obstacle_mask,
-                        *source_masks,
+                        *resized_source_masks,
                     ) = sparse_managment.ensure_pool_capacities(
                         [
                             (u, u_initial),
@@ -683,10 +722,23 @@ def solver(
                             (vorticity_magnitude, 0.0),
                             (obstacle_mask, False),
                             *[(mask, False) for mask in source_masks],
+                            *(
+                                [(mask, False) for mask in geometry_source_masks]
+                                if has_particle_sources
+                                else []
+                            ),
                         ],
                         sparse_tile_capacity,
                         next_sparse_tile_capacity,
                     )
+
+                source_count = len(sources)
+                source_masks = resized_source_masks[:source_count]
+                geometry_source_masks = (
+                    resized_source_masks[source_count:]
+                    if has_particle_sources
+                    else source_masks
+                )
 
                 sparse_tile_capacity = next_sparse_tile_capacity
 
@@ -718,12 +770,13 @@ def solver(
             next_tile_index_counter_host = total_tile_count
 
         # ------------Update masks-------------------
-        if time_step_count == 0 or has_animated_sources:
+        update_geometry_sources = time_step_count == 0 or has_animated_sources
+        if update_geometry_sources:
             with timings.section(
                 "solver", "update_masks.update_source_masks", gpu=True
             ):
                 update_masks.update_source_masks(
-                    source_masks,
+                    geometry_source_masks,
                     source_base_masks,
                     animated_sources,
                     time_step_count == 0,
@@ -732,6 +785,35 @@ def solver(
                     origin_x,
                     origin_y,
                     origin_z,
+                    tile_map,
+                )
+
+        if has_particle_sources:
+            source_mask_update_flags = [
+                time_step_count == 0 or animated or has_particles
+                for animated, has_particles in zip(
+                    animated_sources,
+                    particle_source_flags,
+                )
+            ]
+            with timings.section(
+                "solver", "update_masks.copy_geometry_source_masks", gpu=True
+            ):
+                update_masks.copy_geometry_source_masks(
+                    source_masks,
+                    geometry_source_masks,
+                    source_mask_update_flags,
+                )
+
+            with timings.section(
+                "solver", "particles.add_particles_to_source_masks", gpu=True
+            ):
+                particles.add_particles_to_source_masks(
+                    source_masks,
+                    particle_sources,
+                    t,
+                    delta,
+                    origin,
                     tile_map,
                 )
 

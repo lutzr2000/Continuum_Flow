@@ -90,6 +90,23 @@ def update_source_tile_mask(
             )
 
 
+def copy_geometry_source_masks(
+    source_masks: list[Any],
+    geometry_source_masks: list[Any],
+    update_flags: list[bool],
+) -> None:
+    """
+    Reset only changed combined masks from their cached geometry masks.
+    """
+    for source_mask, geometry_mask, update in zip(
+        source_masks,
+        geometry_source_masks,
+        update_flags,
+    ):
+        if update:
+            source_mask.copy_to_device(geometry_mask)
+
+
 @cuda.jit(cache=True)
 def mark_source_tiles(
     source_tile_mask: Any,
