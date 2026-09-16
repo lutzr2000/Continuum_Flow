@@ -31,6 +31,7 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
 
     def _sync_node(self):
         self._ensure_geometry_input()
+        self._ensure_particle_system_input()
         self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Source")
 
     def draw_buttons(self, context, layout):

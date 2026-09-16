@@ -19,12 +19,15 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
     ("CONTINUUM_FLOW_GEOMETRY_NODE", "Geometry"): "geometry",
     ("CONTINUUM_FLOW_SOURCE_NODE", "Geometry"): "geometry",
     ("CONTINUUM_FLOW_OBSTACLE_NODE", "Geometry"): "geometry",
+    ("CONTINUUM_FLOW_PARTICLE_SYSTEM_NODE", "Particle System"): "particle_system",
+    ("CONTINUUM_FLOW_SOURCE_NODE", "Particle Systems"): "particle_system",
 }
 
 _SOCKET_ROLE_BY_SOCKET_IDNAME = {
     "CONTINUUM_FLOW_FORCE_SOCKET": "forces",
     "CONTINUUM_FLOW_RESULT_SOCKET": "result",
     "CONTINUUM_FLOW_GEOMETRY_SOCKET": "geometry",
+    "CONTINUUM_FLOW_PARTICLE_SYSTEM_SOCKET": "particle_system",
 }
 
 
@@ -201,3 +204,26 @@ class ContinuumFlowGeometrySocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.0, 214.0 / 255.0, 163.0 / 255.0, 1.0)
+
+
+class ContinuumFlowParticleSystemSocket(bpy.types.NodeSocket):
+    """
+    Socket used for Continuum Flow particle-system links.
+    """
+
+    bl_idname = "CONTINUUM_FLOW_PARTICLE_SYSTEM_SOCKET"
+    bl_label = "Continuum Flow Particle System"
+
+    def draw(self, context, layout, node, text):
+        """
+        Draw the socket label in the node editor.
+        """
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        """
+        Return the yellow display color of the socket.
+        """
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
+        return (1.0, 0.8, 0.1, 1.0)

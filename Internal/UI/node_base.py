@@ -60,3 +60,14 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         return self._ensure_socket(
             self.inputs, "CONTINUUM_FLOW_GEOMETRY_SOCKET", "Geometry", multi_input=True
         )
+
+    def _ensure_particle_system_input(self):
+        """
+        Ensure that this node exposes the standard multi-input particle-system socket.
+        """
+        return self._ensure_socket(
+            self.inputs,
+            "CONTINUUM_FLOW_PARTICLE_SYSTEM_SOCKET",
+            "Particle Systems",
+            multi_input=True,
+        )

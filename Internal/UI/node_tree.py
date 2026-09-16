@@ -41,6 +41,7 @@ def build_node_categories():
             items=[
                 NodeItem("CONTINUUM_FLOW_DOMAIN_NODE"),
                 NodeItem("CONTINUUM_FLOW_GEOMETRY_NODE"),
+                NodeItem("CONTINUUM_FLOW_PARTICLE_SYSTEM_NODE"),
                 NodeItem("CONTINUUM_FLOW_OUTPUT_NODE"),
                 NodeItem("CONTINUUM_FLOW_PHYSICS_NODE"),
                 NodeItem("CONTINUUM_FLOW_SIMULATION_NODE"),
