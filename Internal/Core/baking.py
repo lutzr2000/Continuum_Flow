@@ -245,8 +245,11 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
             VDBWatcher.stop()
 
-            geometry_directory = Path(self.bake_directory).resolve() / "geometry"
-            shutil.rmtree(geometry_directory)
+            bake_directory = Path(self.bake_directory).resolve()
+            for temporary_directory_name in ("geometry", "particles"):
+                temporary_directory = bake_directory / temporary_directory_name
+                if temporary_directory.is_dir():
+                    shutil.rmtree(temporary_directory)
 
             self.output_node.last_bake_directory = str(self.output_directory)
             set_bake_progress(0, 0)

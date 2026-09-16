@@ -920,6 +920,21 @@ def solver(
                     dt,
                 )
 
+        if has_particle_sources:
+            with timings.section(
+                "solver", "particles.transfer_particle_velocities", gpu=True
+            ):
+                particles.transfer_particle_velocities(
+                    u,
+                    v,
+                    w,
+                    particle_sources,
+                    t,
+                    delta,
+                    origin,
+                    tile_map,
+                )
+
         # ------------Clear scratch-------------------
         with timings.section("solver", "sparse_managment.reset_pools", gpu=True):
             sparse_managment.reset_pools(

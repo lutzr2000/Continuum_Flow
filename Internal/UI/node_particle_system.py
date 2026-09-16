@@ -43,6 +43,13 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
         subtype="DISTANCE",
         description="Radius of the particles in meters",
     )  # type: ignore
+    velocity_transfer: FloatProperty(
+        name="Velocity Transfer",
+        default=1.0,
+        min=-1.0,
+        max=1.0,
+        description="Amount of particle velocity transferred to the fluid, -1 means velocity opposite to movement",
+    )  # type: ignore
 
     def _sync_node(self):
         self._ensure_named_output(
@@ -65,3 +72,4 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
         elif self.source_object is not None:
             layout.label(text="No particle systems", icon="INFO")
         layout.prop(self, "radius")
+        layout.prop(self, "velocity_transfer", slider=True)

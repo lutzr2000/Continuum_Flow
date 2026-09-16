@@ -528,6 +528,9 @@ def build_particle_system_entries(particle_system_nodes):
                 ),
                 "particle_system_name": particle_system_name or None,
                 "radius": float(getattr(particle_node, "radius", 0.0)),
+                "velocity_transfer": float(
+                    getattr(particle_node, "velocity_transfer", 1.0)
+                ),
                 "particle_file": (
                     f"particles/{particle_file_name}"
                     if source_object is not None and particle_system_name
@@ -752,6 +755,7 @@ def get_particle_system_nodes(node_tree):
                     str(getattr(node, "particle_system", "") or "") or None
                 ),
                 "radius": float(getattr(node, "radius", 0.0)),
+                "velocity_transfer": float(getattr(node, "velocity_transfer", 1.0)),
             }
         )
     return entries
