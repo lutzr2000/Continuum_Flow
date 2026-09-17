@@ -4,6 +4,7 @@ from pathlib import Path
 from multiprocessing import shared_memory
 import threading
 
+import time
 import bpy
 import gpu
 import numba
@@ -21,6 +22,8 @@ flame_density = 5.0
 flame_color = (1.0, 0.12, 0.01)
 
 # -------------- vars ----------------
+dense_fields = None
+previous_active_tiles = None
 draw_handler = None
 shader = None
 batch = None
@@ -139,28 +142,47 @@ def set_preview_settings(
 def upload_pending_frame():
     """Assemble and upload the latest captured frame on Blender's main thread."""
     global draw_handler, pending_frame, texture
+
     if not capture_enabled:
         return
 
     with pending_lock:
         next_frame = pending_frame
         pending_frame = None
+
     if next_frame is None:
         return
 
     frame_index, active_tiles, pools, tile_size = next_frame
+
     fields = build_dense_texture(active_tiles, pools, tile_size)
-    buffer = gpu.types.Buffer("FLOAT", fields.size, fields.ravel())
-    next_texture = gpu.types.GPUTexture(grid_shape, format="RG16F", data=buffer)
+
+    buffer = gpu.types.Buffer(
+        "FLOAT",
+        fields.size,
+        fields.ravel(),
+    )
+
+    next_texture = gpu.types.GPUTexture(
+        grid_shape,
+        format="RG16F",
+        data=buffer,
+    )
     next_texture.filter_mode(True)
+
+    texture = next_texture
 
     active_shader = ensure_shader()
     ensure_batch(active_shader)
-    texture = next_texture
+
     if draw_handler is None:
         draw_handler = bpy.types.SpaceView3D.draw_handler_add(
-            draw_volume, (), "WINDOW", "POST_VIEW"
+            draw_volume,
+            (),
+            "WINDOW",
+            "POST_VIEW",
         )
+
     bpy.context.scene.frame_set(frame_index)
     redraw_viewports()
 
@@ -183,38 +205,117 @@ def clear_live_preview():
 
 
 def build_dense_texture(active_tiles, pools, tile_size):
+    global dense_fields, previous_active_tiles
+
     nx, ny, nz = grid_shape
-    fields = np.zeros((nz, ny, nx, 2), dtype=np.float32)
-    empty_pool = np.empty((0, tile_size, tile_size, tile_size), dtype=np.float32)
-    smoke_pool = pools.get("density", empty_pool)
-    flame_pool = pools.get("flame", empty_pool)
-    scatter_sparse_fields(fields, active_tiles, smoke_pool, flame_pool, tile_size)
-    return fields
+
+    if dense_fields is None or dense_fields.shape != (nz, ny, nx, 2):
+        dense_fields = np.zeros(
+            (nz, ny, nx, 2),
+            dtype=np.float32,
+        )
+        previous_active_tiles = None
+
+    smoke_pool = pools.get("density")
+    flame_pool = pools.get("flame")
+
+    if smoke_pool is None:
+        smoke_pool = np.empty(
+            (0, tile_size, tile_size, tile_size),
+            dtype=np.float32,
+        )
+
+    if flame_pool is None:
+        flame_pool = np.empty(
+            (0, tile_size, tile_size, tile_size),
+            dtype=np.float32,
+        )
+
+    if previous_active_tiles is not None:
+        clear_sparse_fields(
+            dense_fields,
+            previous_active_tiles,
+            tile_size,
+        )
+
+    scatter_sparse_fields(
+        dense_fields,
+        active_tiles,
+        smoke_pool,
+        flame_pool,
+        tile_size,
+    )
+
+    previous_active_tiles = active_tiles.copy()
+
+    return dense_fields
 
 
 @numba.njit(cache=True, nogil=True)
-def scatter_sparse_fields(fields, active_tiles, smoke_pool, flame_pool, tile_size):
+def clear_sparse_fields(
+    fields,
+    active_tiles,
+    tile_size,
+):
+    for tile_number in range(active_tiles.shape[0]):
+        start_x = active_tiles[tile_number, 1]
+        start_y = active_tiles[tile_number, 2]
+        start_z = active_tiles[tile_number, 3]
+
+        for local_z in range(tile_size):
+            z = start_z + local_z
+
+            for local_y in range(tile_size):
+                y = start_y + local_y
+
+                for local_x in range(tile_size):
+                    x = start_x + local_x
+
+                    fields[z, y, x, 0] = 0.0
+                    fields[z, y, x, 1] = 0.0
+
+
+@numba.njit(cache=True, nogil=True)
+def scatter_sparse_fields(
+    fields,
+    active_tiles,
+    smoke_pool,
+    flame_pool,
+    tile_size,
+):
     has_smoke = smoke_pool.shape[0] > 0
     has_flame = flame_pool.shape[0] > 0
 
     for tile_number in range(active_tiles.shape[0]):
-        pool_index = int(active_tiles[tile_number, 0])
-        start_x = int(active_tiles[tile_number, 1])
-        start_y = int(active_tiles[tile_number, 2])
-        start_z = int(active_tiles[tile_number, 3])
-        for local_x in range(tile_size):
-            x = start_x + local_x
+        pool_index = active_tiles[tile_number, 0]
+
+        start_x = active_tiles[tile_number, 1]
+        start_y = active_tiles[tile_number, 2]
+        start_z = active_tiles[tile_number, 3]
+
+        for local_z in range(tile_size):
+            z = start_z + local_z
+
             for local_y in range(tile_size):
                 y = start_y + local_y
-                for local_z in range(tile_size):
-                    z = start_z + local_z
+
+                for local_x in range(tile_size):
+                    x = start_x + local_x
+
                     if has_smoke:
                         fields[z, y, x, 0] = smoke_pool[
-                            pool_index, local_x, local_y, local_z
+                            pool_index,
+                            local_x,
+                            local_y,
+                            local_z,
                         ]
+
                     if has_flame:
                         fields[z, y, x, 1] = flame_pool[
-                            pool_index, local_x, local_y, local_z
+                            pool_index,
+                            local_x,
+                            local_y,
+                            local_z,
                         ]
 
 
