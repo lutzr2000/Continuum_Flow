@@ -923,6 +923,26 @@ def solver(
                     dt,
                 )
 
+            if (
+                has_particle_sources
+                and source_values["velocity_x"][source_idx] == 0.0
+                and source_values["velocity_y"][source_idx] == 0.0
+                and source_values["velocity_z"][source_idx] == 0.0
+            ):
+                with timings.section(
+                    "solver", "particles.reset_particle_velocity_base", gpu=True
+                ):
+                    particles.reset_particle_velocity(
+                        u,
+                        v,
+                        w,
+                        particle_sources[source_idx],
+                        t,
+                        delta,
+                        origin,
+                        tile_map,
+                    )
+
         if has_particle_sources:
             with timings.section(
                 "solver", "particles.transfer_particle_velocities", gpu=True

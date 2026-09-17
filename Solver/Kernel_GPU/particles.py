@@ -371,6 +371,115 @@ def rasterize_particle_spheres(
         linear_index += cuda.blockDim.x
 
 
+def reset_particle_velocity(
+    u: Any,
+    v: Any,
+    w: Any,
+    source_entries: list[dict],
+    time_value: float,
+    delta: float,
+    origin: tuple[float, float, float],
+    tile_map: Any,
+) -> None:
+    """Reset particle-covered cells before the unchanged additive transfer."""
+    threads = 128
+    for entry in source_entries:
+        count, next_count, alpha = particle_frame(entry, time_value)
+        if count <= 0:
+            continue
+
+        reset_particle_velocity_kernel[count, threads](
+            u,
+            v,
+            w,
+            tile_map,
+            entry["current_positions_device"],
+            entry["next_positions_device"],
+            count,
+            next_count,
+            np.float32(alpha),
+            entry["radius"],
+            np.float32(delta),
+            np.float32(origin[0]),
+            np.float32(origin[1]),
+            np.float32(origin[2]),
+        )
+
+
+@cuda.jit(cache=True)
+def reset_particle_velocity_kernel(
+    u,
+    v,
+    w,
+    tile_map,
+    current_positions,
+    next_positions,
+    count,
+    next_count,
+    alpha,
+    radius,
+    delta,
+    origin_x,
+    origin_y,
+    origin_z,
+):
+    """Set velocity to zero only in cells covered by particle spheres."""
+    sample_index = cuda.blockIdx.x
+    if sample_index >= count:
+        return
+
+    px, py, pz = interpolated_particle_vector(
+        current_positions, next_positions, sample_index, next_count, alpha
+    )
+    tile_size = kernel_config.TILE_SIZE
+    min_i, min_j, min_k, max_i, max_j, max_k = particle_grid_bounds(
+        px,
+        py,
+        pz,
+        radius,
+        delta,
+        origin_x,
+        origin_y,
+        origin_z,
+        tile_map.shape[0] * tile_size,
+        tile_map.shape[1] * tile_size,
+        tile_map.shape[2] * tile_size,
+    )
+    if min_i > max_i or min_j > max_j or min_k > max_k:
+        return
+
+    radius_squared = radius * radius
+    count_j = max_j - min_j + 1
+    count_k = max_k - min_k + 1
+    cell_count = (max_i - min_i + 1) * count_j * count_k
+
+    linear_index = cuda.threadIdx.x
+    while linear_index < cell_count:
+        i, j, k = linear_to_grid_index(
+            linear_index, min_i, min_j, min_k, count_j, count_k
+        )
+        dx = origin_x + (i + 0.5) * delta - px
+        dy = origin_y + (j + 0.5) * delta - py
+        dz = origin_z + (k + 0.5) * delta - pz
+        if dx * dx + dy * dy + dz * dz <= radius_squared:
+            ti = i // tile_size
+            tj = j // tile_size
+            tk = k // tile_size
+            pool_index = tile_map[ti, tj, tk]
+            if pool_index >= 0:
+                index = (
+                    pool_index,
+                    i - ti * tile_size,
+                    j - tj * tile_size,
+                    k - tk * tile_size,
+                )
+                u[index] = 0.0
+                v[index] = 0.0
+                w[index] = 0.0
+
+        linear_index += cuda.blockDim.x
+
+
 def transfer_particle_velocities(
     u: Any,
     v: Any,

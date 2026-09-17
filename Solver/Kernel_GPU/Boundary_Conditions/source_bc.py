@@ -30,9 +30,10 @@ def source_bc(
     """
     Apply source values with procedural spatial noise.
 
-    Source velocity is added directly. Temperature is assigned, while smoke
-    and fuel are integrated over ``dt`` and clamped to their valid ranges. A
-    seeded spatial noise sample can modulate all injected scalar values.
+    Non-zero source velocity is assigned directly. Temperature is assigned,
+    while smoke and fuel are integrated over ``dt`` and clamped to their valid
+    ranges. A seeded spatial noise sample can modulate all injected scalar
+    values.
     """
     (
         tile_i,
@@ -54,9 +55,10 @@ def source_bc(
     if not source_mask[tile_index, local_i, local_j, local_k]:
         return
 
-    u[tile_index, local_i, local_j, local_k] = velocity_x_value
-    v[tile_index, local_i, local_j, local_k] = velocity_y_value
-    w[tile_index, local_i, local_j, local_k] = velocity_z_value
+    if velocity_x_value != 0.0 or velocity_y_value != 0.0 or velocity_z_value != 0.0:
+        u[tile_index, local_i, local_j, local_k] = velocity_x_value
+        v[tile_index, local_i, local_j, local_k] = velocity_y_value
+        w[tile_index, local_i, local_j, local_k] = velocity_z_value
 
     scalar_multiplier = 1.0
     if noise_amplitude != 0.0:
