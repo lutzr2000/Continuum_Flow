@@ -877,25 +877,6 @@ def solver(
                 nz,
             )
 
-        # ------------Obstacle BC-------------------
-        with timings.section("solver", "obstacle_bc.obstacle_bc", gpu=True):
-            obstacle_bc.obstacle_bc[
-                tile_shape,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            ](
-                u,
-                v,
-                w,
-                smoke,
-                fuel,
-                flame,
-                obstacle_mask,
-                scratch_A,
-                scratch_B,
-                scratch_C,
-                tile_map,
-            )
-
         # ------------Source BC-------------------
         for source_idx, source_mask in enumerate(source_masks):
             with timings.section("solver", "source_bc.source_bc", gpu=True):
@@ -957,6 +938,25 @@ def solver(
                     origin,
                     tile_map,
                 )
+
+        # ------------Obstacle BC-------------------
+        with timings.section("solver", "obstacle_bc.obstacle_bc", gpu=True):
+            obstacle_bc.obstacle_bc[
+                tile_shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                u,
+                v,
+                w,
+                smoke,
+                fuel,
+                flame,
+                obstacle_mask,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                tile_map,
+            )
 
         # ------------Clear scratch-------------------
         with timings.section("solver", "sparse_managment.reset_pools", gpu=True):
