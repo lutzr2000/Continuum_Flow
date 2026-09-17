@@ -43,7 +43,7 @@ from .Core.export.export_config import (
     sync_ui_animation_state,
     continuum_flow_frame_change_post,
 )
-from .Core import forces
+from .Core import forces, volume_renderer
 from .Core.solver.solver_manager import solver_manager
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from .Core.solver import solver_status
@@ -158,6 +158,7 @@ def register():
 
 def unregister():
     solver_manager.shutdown()
+    volume_renderer.clear_live_preview()
     solver_status.gpu_available = False
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):

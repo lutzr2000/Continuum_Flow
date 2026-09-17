@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .export import export_config
 from . import load_result
+from . import volume_renderer
 from .solver.solver_manager import solver_manager
 from .solver import solver_status
 from .writer import writer_manager
@@ -41,6 +42,18 @@ def get_linked_simulation_nodes(output_node):
         ):
             simulation_nodes.append(simulation_node)
     return simulation_nodes
+
+
+def live_preview_enabled(simulation_node):
+    result_socket = simulation_node.outputs.get("Result")
+    if result_socket is None:
+        return False
+
+    return any(
+        getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
+        and bool(getattr(link.to_node, "live_preview", False))
+        for link in result_socket.links
+    )
 
 
 # -------------- progress managment ----------------
@@ -134,6 +147,23 @@ def count_contiguous_vdb_frames(output_directory, start_frame):
     return frame_count
 
 
+def latest_vdb_file(output_directory):
+    if output_directory is None or not output_directory.is_dir():
+        return None
+
+    latest = None
+    latest_index = -1
+    for path in output_directory.glob("frame_*.vdb"):
+        try:
+            frame_index = int(path.stem.removeprefix("frame_"))
+        except ValueError:
+            continue
+        if frame_index > latest_index:
+            latest = path
+            latest_index = frame_index
+    return latest
+
+
 # -------------- bake ----------------
 class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
@@ -152,6 +182,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         self.cleanup_lock = threading.Lock()
         self.event_timer = None
         self.cancel_requested = False
+        self.latest_preview_path = None
 
         solver_status.bake_running = True
         solver_status.active_bake_operator = self
@@ -221,6 +252,8 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             if self.writer_server:
                 self.writer_server.stop()
 
+            volume_renderer.clear_live_preview()
+
             if self.cancel_flag_path:
                 try:
                     self.cancel_flag_path.unlink(missing_ok=True)
@@ -280,6 +313,22 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         )
         set_bake_progress(written_frame_count, solver_status.progress_total_frames)
 
+        if not live_preview_enabled(self.simulation_node):
+            self.latest_preview_path = None
+            volume_renderer.clear_live_preview()
+            return
+
+        latest_path = latest_vdb_file(self.output_directory)
+        if latest_path is None:
+            return
+
+        if latest_path != self.latest_preview_path:
+            try:
+                volume_renderer.show_live_preview(latest_path)
+            except Exception as exc:
+                print(f"Failed to update VDB live preview: {exc}")
+            self.latest_preview_path = latest_path
+
     def run_bake(self, context):
         config_dict = export_config.build_config_dict(
             context=context, simulation_node=self.simulation_node
@@ -308,6 +357,13 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         vdb_output_dir = Path(output_config["output_path"]).resolve()
         self.output_directory = vdb_output_dir
+        volume_renderer.clear_live_preview()
+        domain_config = simulation_config["domain"]
+        grid_config = domain_config["grid"]
+        volume_renderer.configure(
+            (grid_config["nx"], grid_config["ny"], grid_config["nz"]),
+            domain_config["resolution"],
+        )
 
         solver_manager.start(
             wait=True,
