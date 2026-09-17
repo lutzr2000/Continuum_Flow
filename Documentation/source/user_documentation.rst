@@ -146,7 +146,8 @@ This node lets you view the simulation domain in the viewport.
     Shows or hides a viewport wireframe preview of the simulation-domain bounds and one sample grid cell. It does not create or hide simulation geometry.
 
 **Live Preview**
-    When activated, the simulation can be seen in the viewport while simulating.
+    Reserved for a future live preview implementation. This setting currently has no
+    effect; baked VDBs are loaded after the simulation finishes or is cancelled.
 
 
 Output

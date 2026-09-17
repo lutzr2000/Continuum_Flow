@@ -17,7 +17,7 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 420.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
-    live_preview: BoolProperty(name="Live Preview", default=True, description="Show newly written VDB frames in Blender while the bake is still running", options=set())  # type: ignore
+    live_preview: BoolProperty(name="Live Preview", default=True, description="Reserved for a future live preview implementation", options=set())  # type: ignore
 
     def _sync_node(self):
         self._ensure_socket(

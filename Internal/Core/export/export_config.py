@@ -251,15 +251,6 @@ def build_entries(simulation_node):
         ),
     )
 
-    viewer_node = next(
-        (
-            node
-            for node in result_nodes
-            if node.bl_idname == "CONTINUUM_FLOW_VIEWER_NODE"
-        ),
-        None,
-    )
-
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
     simulation_fps = max(1, int(getattr(output_node, "fps", 24)))
@@ -329,7 +320,6 @@ def build_entries(simulation_node):
             for node in force_nodes
         ],
         "outputs": [build_output_node_entries(output_node)],
-        "viewers": [build_viewer_node_entries(viewer_node)],
     }
 
 
@@ -611,15 +601,6 @@ def build_output_node_entries(node):
         },
         "performance": {},
         "output_path": output_path,
-    }
-
-
-def build_viewer_node_entries(node):
-    """
-    Serialize one viewer node.
-    """
-    return {
-        "live_preview": bool(getattr(node, "live_preview", True)),
     }
 
 
