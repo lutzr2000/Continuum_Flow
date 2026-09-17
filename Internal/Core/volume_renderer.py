@@ -15,10 +15,10 @@ SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"
 VERTEX_SHADER_PATH = SHADER_DIRECTORY / "volume_preview.vert"
 FRAGMENT_SHADER_PATH = SHADER_DIRECTORY / "volume_preview.frag"
 
-SMOKE_DENSITY = 10.0
-SMOKE_COLOR = (0.32, 0.34, 0.38)
-FLAME_DENSITY = 5.0
-FLAME_COLOR = (1.0, 0.12, 0.01)
+smoke_density = 10.0
+smoke_color = (0.32, 0.34, 0.38)
+flame_density = 5.0
+flame_color = (1.0, 0.12, 0.01)
 
 # -------------- vars ----------------
 draw_handler = None
@@ -81,7 +81,7 @@ def get_shared_frame(payload):
     with pending_lock:
         if capture_enabled and frame_index > latest_frame:
             latest_frame = frame_index
-            pending_frame = (active_tiles, pools, tile_size)
+            pending_frame = (frame_index, active_tiles, pools, tile_size)
 
 
 def copy_shared_array(shm_name, shape, dtype, leading_count):
@@ -123,6 +123,19 @@ def set_enabled(enabled):
         clear_live_preview()
 
 
+def set_preview_settings(
+    new_smoke_density,
+    new_smoke_color,
+    new_flame_density,
+    new_flame_color,
+):
+    global smoke_density, smoke_color, flame_density, flame_color
+    smoke_density = new_smoke_density
+    smoke_color = tuple(new_smoke_color)
+    flame_density = new_flame_density
+    flame_color = tuple(new_flame_color)
+
+
 def upload_pending_frame():
     """Assemble and upload the latest captured frame on Blender's main thread."""
     global draw_handler, pending_frame, texture
@@ -135,7 +148,8 @@ def upload_pending_frame():
     if next_frame is None:
         return
 
-    fields = build_dense_texture(*next_frame)
+    frame_index, active_tiles, pools, tile_size = next_frame
+    fields = build_dense_texture(active_tiles, pools, tile_size)
     buffer = gpu.types.Buffer("FLOAT", fields.size, fields.ravel())
     next_texture = gpu.types.GPUTexture(grid_shape, format="RG16F", data=buffer)
     next_texture.filter_mode(True)
@@ -147,6 +161,7 @@ def upload_pending_frame():
         draw_handler = bpy.types.SpaceView3D.draw_handler_add(
             draw_volume, (), "WINDOW", "POST_VIEW"
         )
+    bpy.context.scene.frame_set(frame_index)
     redraw_viewports()
 
 
@@ -333,18 +348,18 @@ def update_uniform_buffer(camera_position, step_size):
         bounds_min[0],
         bounds_min[1],
         bounds_min[2],
-        SMOKE_DENSITY,
+        smoke_density,
         bounds_max[0],
         bounds_max[1],
         bounds_max[2],
-        FLAME_DENSITY,
-        SMOKE_COLOR[0],
-        SMOKE_COLOR[1],
-        SMOKE_COLOR[2],
+        flame_density,
+        smoke_color[0],
+        smoke_color[1],
+        smoke_color[2],
         0.0,
-        FLAME_COLOR[0],
-        FLAME_COLOR[1],
-        FLAME_COLOR[2],
+        flame_color[0],
+        flame_color[1],
+        flame_color[2],
         0.0,
     )
     buffer = gpu.types.Buffer("FLOAT", len(values), values)

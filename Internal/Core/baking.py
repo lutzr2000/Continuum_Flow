@@ -44,15 +44,33 @@ def get_linked_simulation_nodes(output_node):
     return simulation_nodes
 
 
-def live_preview_enabled(simulation_node):
+def get_live_preview_node(simulation_node):
     result_socket = simulation_node.outputs.get("Result")
     if result_socket is None:
-        return False
+        return None
 
-    return any(
-        getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
-        and bool(getattr(link.to_node, "live_preview", False))
-        for link in result_socket.links
+    return next(
+        (
+            link.to_node
+            for link in result_socket.links
+            if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
+            and link.to_node.live_preview
+        ),
+        None,
+    )
+
+
+def update_live_preview_settings(simulation_node):
+    viewer_node = get_live_preview_node(simulation_node)
+    volume_renderer.set_enabled(viewer_node is not None)
+    if viewer_node is None:
+        return
+
+    volume_renderer.set_preview_settings(
+        new_smoke_density=viewer_node.preview_smoke_density,
+        new_smoke_color=viewer_node.preview_smoke_color,
+        new_flame_density=viewer_node.preview_flame_density,
+        new_flame_color=viewer_node.preview_flame_color,
     )
 
 
@@ -296,7 +314,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         )
         set_bake_progress(written_frame_count, solver_status.progress_total_frames)
 
-        volume_renderer.set_enabled(live_preview_enabled(self.simulation_node))
+        update_live_preview_settings(self.simulation_node)
         volume_renderer.upload_pending_frame()
 
     def run_bake(self, context):
@@ -334,7 +352,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             (grid_config["nx"], grid_config["ny"], grid_config["nz"]),
             domain_config["resolution"],
         )
-        volume_renderer.set_enabled(live_preview_enabled(self.simulation_node))
+        update_live_preview_settings(self.simulation_node)
 
         solver_manager.start(
             wait=True,

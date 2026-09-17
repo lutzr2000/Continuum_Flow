@@ -149,8 +149,10 @@ This node lets you view the simulation domain in the viewport.
     While baking, copies the newest ``smoke`` and ``flame`` sparse fields directly
     from the writer's shared memory, assembles them on the CPU and raymarches them
     from a temporary GPU texture. Intermediate preview frames are skipped if the
-    preview falls behind. The complete VDB sequence is loaded only after the
-    simulation finishes or is cancelled.
+    preview falls behind, and Blender's timeline follows each displayed frame.
+    Smoke Density, Smoke Color, Flame Density and Flame Color control only the
+    viewport preview. The complete VDB sequence is loaded only after the simulation
+    finishes or is cancelled.
 
 
 Output
