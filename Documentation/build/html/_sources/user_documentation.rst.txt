@@ -38,6 +38,9 @@ This is the core node of every simulation. It controls the frame range for your 
 **Iterations**
     Number of solver iterations. Usually the default of one is sufficient. Fewer iterations result in a faster solve, but this can come at the cost of visual consistency.
 
+**Advection Substeps**
+    Number of integration steps used to trace velocity and scalar fields through the flow. The default is one; higher values improve characteristic tracing at additional computational cost.
+
 **Adaptive Domain**
     Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.
 

@@ -36,6 +36,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
             "Solver",
             (
                 "iterations",
+                "advection_substeps",
                 "simulate_sparsely",
                 "adaptive_domain_threshold",
             ),
@@ -55,6 +56,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set(), update=_update_simulation_end_frame)  # type: ignore
     cfl: FloatProperty(name="CFL", default=10.0, min=0.0, soft_min=0.0, soft_max=10.0, precision=3, description="Maximum CFL number used for adaptive timesteps", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=1, min=1, max=10, soft_min=1, soft_max=10, description="Number of solver itterations", options=set())  # type: ignore
+    advection_substeps: IntProperty(name="Advection Substeps", default=1, min=1, soft_min=1, soft_max=10, description="Number of integration substeps used for advection tracing", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
     adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 

@@ -239,6 +239,9 @@ def solver(
     # ------------time-------------------
     t = 0.0
     cfl = float(simulation.get("settings", {}).get("cfl", 10.0))
+    advection_substeps = max(
+        1, int(simulation.get("settings", {}).get("advection_substeps", 1))
+    )
     t_max = simulation.get("settings").get("simulation_length")
 
     # ------------dimensions------------------
@@ -1009,6 +1012,7 @@ def solver(
                 scratch_C,
                 dt,
                 delta,
+                advection_substeps,
                 tile_map,
                 u_initial,
                 v_initial,
@@ -1037,6 +1041,7 @@ def solver(
                 w_work,
                 delta,
                 physics_values["fluid"]["density"],
+                advection_substeps,
                 physics_values["fluid"]["viscosity"],
                 vorticity_magnitude,
                 physics_values["extras"]["vorticity"],
@@ -1150,6 +1155,7 @@ def solver(
                 scratch_B,
                 scratch_C,
                 delta,
+                advection_substeps,
                 reference_temperature,
                 tile_map,
                 u_initial,
@@ -1181,6 +1187,7 @@ def solver(
                 fuel_work,
                 flame,
                 delta,
+                advection_substeps,
                 physics_values["temperature"]["dissipation"],
                 physics_values["temperature"]["production_rate"],
                 physics_values["smoke"]["dissipation"],

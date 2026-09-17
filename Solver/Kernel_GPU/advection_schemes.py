@@ -192,6 +192,7 @@ def _backtrace_position_sparse(
     y_start: float,
     z_start: float,
     dt_over_delta: float,
+    n_substeps: int,
     nx: int,
     ny: int,
     nz: int,
@@ -212,7 +213,6 @@ def _backtrace_position_sparse(
     The velocity at the evolving position is obtained by trilinear
     interpolation.
     """
-    n_substeps = 1
     substep_dt = dt_over_delta / n_substeps
     x_pos = x_start
     y_pos = y_start
@@ -251,6 +251,7 @@ def _forward_trace_position_sparse(
     y_start: float,
     z_start: float,
     dt_over_delta: float,
+    n_substeps: int,
     nx: int,
     ny: int,
     nz: int,
@@ -275,6 +276,7 @@ def _forward_trace_position_sparse(
         y_start,
         z_start,
         -dt_over_delta,
+        n_substeps,
         nx,
         ny,
         nz,

@@ -278,6 +278,9 @@ def build_entries(simulation_node):
             "simulation_length": simulation_length,
             "cfl": float(getattr(simulation_node, "cfl", 10.0)),
             "iterations": int(simulation_node.iterations),
+            "advection_substeps": int(
+                getattr(simulation_node, "advection_substeps", 1)
+            ),
             "simulate_sparsely": bool(
                 getattr(simulation_node, "simulate_sparsely", True)
             ),

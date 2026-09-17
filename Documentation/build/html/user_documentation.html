@@ -265,6 +265,8 @@
 </dd>
 <dt><strong>Iterations</strong></dt><dd><p>Number of solver iterations. Usually the default of one is sufficient. Fewer iterations result in a faster solve, but this can come at the cost of visual consistency.</p>
 </dd>
+<dt><strong>Advection Substeps</strong></dt><dd><p>Number of integration steps used to trace velocity and scalar fields through the flow. The default is one; higher values improve characteristic tracing at additional computational cost.</p>
+</dd>
 <dt><strong>Adaptive Domain</strong></dt><dd><p>Similar to Blender’s native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.</p>
 </dd>
 <dt><strong>Threshold</strong></dt><dd><p>Threshold for when a cell is considered empty for the adaptive domain.</p>

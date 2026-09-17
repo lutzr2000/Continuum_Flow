@@ -18,6 +18,7 @@ def advect_velocity_semi_lagrangian(
     advected_w: Any,
     dt: float,
     delta: float,
+    n_substeps: int,
     tile_map: Any,
     u_initial: float,
     v_initial: float,
@@ -61,6 +62,7 @@ def advect_velocity_semi_lagrangian(
         float(j),
         float(k),
         dt / delta,
+        n_substeps,
         nx,
         ny,
         nz,
@@ -105,6 +107,7 @@ def update_velocity_maccormack(
     wn: Any,
     delta: float,
     rho: float,
+    n_substeps: int,
     nu: float,
     vorticity_magnitude: Any,
     vorticity_strength: float,
@@ -134,16 +137,25 @@ def update_velocity_maccormack(
     CUDA kernel that updates velocity with a MacCormack-corrected
     semi-Lagrangian advection step on sparse velocity pools.
 
-    The correction uses a reverse trace,
+    Advection:
+        MacCormack-corrected semi-Lagrangian.
 
-    .. math::
+    Forces:
+        Vorticity confinement, swirl, turbulence, constant forces
+        and buoyancy.
 
-        \mathbf{u}^{n+1} = \mathbf{u}^{*}
-        + \frac{1}{2}\left(\mathbf{u}^{n} - \widehat{\mathbf{u}}^{n}\right),
+    Diffusion:
+        Uses one local backward-Euler/Jacobi-style update
 
-    after which viscosity, buoyancy, vorticity confinement, and configured
-    external forces are accumulated explicitly.
+            (I - nu * dt * Laplacian) u_new = rhs
+
+        approximated using the velocity field from the beginning of
+        the timestep for the neighbouring values.
+
+        This removes the explicit diffusion CFL restriction, but is
+        not equivalent to a fully converged implicit diffusion solve.
     """
+
     (
         tile_i,
         tile_j,
@@ -157,18 +169,16 @@ def update_velocity_maccormack(
     ) = sparse_managment.tile_to_index()
 
     tile_index = tile_map[tile_i, tile_j, tile_k]
+
     if tile_index == -1:
         return
 
     if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
         return
 
-    Fx = 0.0
-    Fy = 0.0
-    Fz = 0.0
-
     dt_over_delta = dt / delta
-    diffusion_coeff = nu * dt / (delta * delta)
+    diffusion_alpha = nu * dt / (delta * delta)
+    diffusion_inv_diag = 1.0 / (1.0 + 6.0 * diffusion_alpha)
     force_coeff = dt / rho
 
     u_center = u[tile_index, local_i, local_j, local_k]
@@ -184,6 +194,7 @@ def update_velocity_maccormack(
         float(j),
         float(k),
         dt_over_delta,
+        n_substeps,
         nx,
         ny,
         nz,
@@ -201,6 +212,7 @@ def update_velocity_maccormack(
         y_depart,
         z_depart,
         dt_over_delta,
+        n_substeps,
         nx,
         ny,
         nz,
@@ -209,9 +221,26 @@ def update_velocity_maccormack(
         w_initial,
     )
 
-    advected_u = predictor_u[tile_index, local_i, local_j, local_k]
-    advected_v = predictor_v[tile_index, local_i, local_j, local_k]
-    advected_w = predictor_w[tile_index, local_i, local_j, local_k]
+    advected_u = predictor_u[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
+
+    advected_v = predictor_v[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
+
+    advected_w = predictor_w[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ]
 
     reverse_u, reverse_v, reverse_w = advection_schemes._sample_trilinear_vec3_sparse(
         predictor_u,
@@ -233,75 +262,82 @@ def update_velocity_maccormack(
     corrected_v = advected_v + 0.5 * (v_center - reverse_v)
     corrected_w = advected_w + 0.5 * (w_center - reverse_w)
 
-    x0, y0, z0, x1, y1, z1, _, _, _ = advection_schemes._prepare_trilinear_coords(
-        x_depart, y_depart, z_depart, nx, ny, nz
+    (
+        x0,
+        y0,
+        z0,
+        x1,
+        y1,
+        z1,
+        _,
+        _,
+        _,
+    ) = advection_schemes._prepare_trilinear_coords(
+        x_depart,
+        y_depart,
+        z_depart,
+        nx,
+        ny,
+        nz,
     )
 
     u_lower, u_upper = advection_schemes._sample_cell_extrema_inner_sparse(
-        u, tile_map, x0, y0, z0, x1, y1, z1, u_initial
+        u,
+        tile_map,
+        x0,
+        y0,
+        z0,
+        x1,
+        y1,
+        z1,
+        u_initial,
     )
+
     v_lower, v_upper = advection_schemes._sample_cell_extrema_inner_sparse(
-        v, tile_map, x0, y0, z0, x1, y1, z1, v_initial
+        v,
+        tile_map,
+        x0,
+        y0,
+        z0,
+        x1,
+        y1,
+        z1,
+        v_initial,
     )
+
     w_lower, w_upper = advection_schemes._sample_cell_extrema_inner_sparse(
-        w, tile_map, x0, y0, z0, x1, y1, z1, w_initial
+        w,
+        tile_map,
+        x0,
+        y0,
+        z0,
+        x1,
+        y1,
+        z1,
+        w_initial,
     )
 
-    corrected_u = advection_schemes._clamp(corrected_u, u_lower, u_upper)
-    corrected_v = advection_schemes._clamp(corrected_v, v_lower, v_upper)
-    corrected_w = advection_schemes._clamp(corrected_w, w_lower, w_upper)
+    corrected_u = advection_schemes._clamp(
+        corrected_u,
+        u_lower,
+        u_upper,
+    )
 
-    diffusion_x = diffusion_coeff * (
-        (
-            sparse_managment.get_pool_value(u, tile_map, i + 1, j, k, u_initial)
-            - 2.0 * u_center
-            + sparse_managment.get_pool_value(u, tile_map, i - 1, j, k, u_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(u, tile_map, i, j + 1, k, u_initial)
-            - 2.0 * u_center
-            + sparse_managment.get_pool_value(u, tile_map, i, j - 1, k, u_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(u, tile_map, i, j, k + 1, u_initial)
-            - 2.0 * u_center
-            + sparse_managment.get_pool_value(u, tile_map, i, j, k - 1, u_initial)
-        )
+    corrected_v = advection_schemes._clamp(
+        corrected_v,
+        v_lower,
+        v_upper,
     )
-    diffusion_y = diffusion_coeff * (
-        (
-            sparse_managment.get_pool_value(v, tile_map, i + 1, j, k, v_initial)
-            - 2.0 * v_center
-            + sparse_managment.get_pool_value(v, tile_map, i - 1, j, k, v_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(v, tile_map, i, j + 1, k, v_initial)
-            - 2.0 * v_center
-            + sparse_managment.get_pool_value(v, tile_map, i, j - 1, k, v_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(v, tile_map, i, j, k + 1, v_initial)
-            - 2.0 * v_center
-            + sparse_managment.get_pool_value(v, tile_map, i, j, k - 1, v_initial)
-        )
+
+    corrected_w = advection_schemes._clamp(
+        corrected_w,
+        w_lower,
+        w_upper,
     )
-    diffusion_z = diffusion_coeff * (
-        (
-            sparse_managment.get_pool_value(w, tile_map, i + 1, j, k, w_initial)
-            - 2.0 * w_center
-            + sparse_managment.get_pool_value(w, tile_map, i - 1, j, k, w_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(w, tile_map, i, j + 1, k, w_initial)
-            - 2.0 * w_center
-            + sparse_managment.get_pool_value(w, tile_map, i, j - 1, k, w_initial)
-        )
-        + (
-            sparse_managment.get_pool_value(w, tile_map, i, j, k + 1, w_initial)
-            - 2.0 * w_center
-            + sparse_managment.get_pool_value(w, tile_map, i, j, k - 1, w_initial)
-        )
-    )
+
+    Fx = 0.0
+    Fy = 0.0
+    Fz = 0.0
 
     if vorticity_strength > 0.0:
         Fx, Fy, Fz = apply_vorticity_confinement(
@@ -335,6 +371,7 @@ def update_velocity_maccormack(
             origin_y,
             origin_z,
         )
+
         Fx += swirl_fx
         Fy += swirl_fy
         Fz += swirl_fz
@@ -351,6 +388,7 @@ def update_velocity_maccormack(
             origin_z,
             t,
         )
+
         Fx += turb_fx
         Fy += turb_fy
         Fz += turb_fz
@@ -369,10 +407,197 @@ def update_velocity_maccormack(
         t_reference,
     )
 
-    u_raw = corrected_u + diffusion_x + force_coeff * Fx
-    v_raw = corrected_v + diffusion_y + force_coeff * Fy
-    w_raw = corrected_w + diffusion_z + force_coeff * Fz
+    rhs_u = corrected_u + force_coeff * Fx
+    rhs_v = corrected_v + force_coeff * Fy
+    rhs_w = corrected_w + force_coeff * Fz
 
-    un[tile_index, local_i, local_j, local_k] = u_raw
-    vn[tile_index, local_i, local_j, local_k] = v_raw
-    wn[tile_index, local_i, local_j, local_k] = w_raw
+    u_xp = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i + 1,
+        j,
+        k,
+        u_initial,
+    )
+
+    u_xm = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i - 1,
+        j,
+        k,
+        u_initial,
+    )
+
+    u_yp = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i,
+        j + 1,
+        k,
+        u_initial,
+    )
+
+    u_ym = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i,
+        j - 1,
+        k,
+        u_initial,
+    )
+
+    u_zp = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i,
+        j,
+        k + 1,
+        u_initial,
+    )
+
+    u_zm = sparse_managment.get_pool_value(
+        u,
+        tile_map,
+        i,
+        j,
+        k - 1,
+        u_initial,
+    )
+
+    v_xp = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i + 1,
+        j,
+        k,
+        v_initial,
+    )
+
+    v_xm = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i - 1,
+        j,
+        k,
+        v_initial,
+    )
+
+    v_yp = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i,
+        j + 1,
+        k,
+        v_initial,
+    )
+
+    v_ym = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i,
+        j - 1,
+        k,
+        v_initial,
+    )
+
+    v_zp = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i,
+        j,
+        k + 1,
+        v_initial,
+    )
+
+    v_zm = sparse_managment.get_pool_value(
+        v,
+        tile_map,
+        i,
+        j,
+        k - 1,
+        v_initial,
+    )
+
+    w_xp = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i + 1,
+        j,
+        k,
+        w_initial,
+    )
+
+    w_xm = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i - 1,
+        j,
+        k,
+        w_initial,
+    )
+
+    w_yp = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i,
+        j + 1,
+        k,
+        w_initial,
+    )
+
+    w_ym = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i,
+        j - 1,
+        k,
+        w_initial,
+    )
+
+    w_zp = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i,
+        j,
+        k + 1,
+        w_initial,
+    )
+
+    w_zm = sparse_managment.get_pool_value(
+        w,
+        tile_map,
+        i,
+        j,
+        k - 1,
+        w_initial,
+    )
+
+    u_neighbor_sum = u_xp + u_xm + u_yp + u_ym + u_zp + u_zm
+    v_neighbor_sum = v_xp + v_xm + v_yp + v_ym + v_zp + v_zm
+    w_neighbor_sum = w_xp + w_xm + w_yp + w_ym + w_zp + w_zm
+
+    u_raw = (rhs_u + diffusion_alpha * u_neighbor_sum) * diffusion_inv_diag
+    v_raw = (rhs_v + diffusion_alpha * v_neighbor_sum) * diffusion_inv_diag
+    w_raw = (rhs_w + diffusion_alpha * w_neighbor_sum) * diffusion_inv_diag
+
+    un[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = u_raw
+
+    vn[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = v_raw
+
+    wn[
+        tile_index,
+        local_i,
+        local_j,
+        local_k,
+    ] = w_raw
