@@ -284,7 +284,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         server = writer_manager.HostVDBWriterServer(
             writer_config=writer_config,
-            preview_callback=volume_renderer.capture_shared_frame,
+            preview_callback=volume_renderer.get_shared_frame,
         )
         server.start()
         return server
