@@ -1,9 +1,12 @@
-"""GPU raymarch preview for the newest smoke/flame VDB frame."""
+"""GPU raymarch preview for the newest shared-memory smoke/flame frame."""
 
 from pathlib import Path
+from multiprocessing import shared_memory
+import threading
 
 import bpy
 import gpu
+import numba
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 
@@ -21,12 +24,16 @@ _grid_shape = None
 _resolution = None
 _bounds_min = None
 _bounds_max = None
-_loaded_filepath = None
+_capture_enabled = False
+_latest_captured_index = -1
+_pending_frame = None
+_pending_lock = threading.Lock()
 
 
 def configure(grid_shape, resolution):
     """Set the simulation grid geometry used by the preview."""
     global _grid_shape, _resolution, _bounds_min, _bounds_max, _batch
+    global _latest_captured_index, _pending_frame
 
     _grid_shape = tuple(int(value) for value in grid_shape)
     _resolution = float(resolution)
@@ -38,20 +45,77 @@ def configure(grid_shape, resolution):
         nz * _resolution,
     )
     _batch = None
+    with _pending_lock:
+        _latest_captured_index = -1
+        _pending_frame = None
 
 
-def show_live_preview(filepath):
-    """Upload smoke and flame from one VDB and display them in the viewport."""
-    global _draw_handler, _loaded_filepath, _texture
-
-    filepath = Path(filepath).resolve()
-    normalized_filepath = str(filepath)
-    if not filepath.is_file() or normalized_filepath == _loaded_filepath:
+def set_enabled(enabled):
+    """Enable or disable capture of incoming shared-memory frames."""
+    global _capture_enabled
+    enabled = bool(enabled)
+    if enabled == _capture_enabled:
         return
-    if _grid_shape is None:
-        raise RuntimeError("Volume preview was not configured for a simulation grid.")
+    _capture_enabled = enabled
+    if not enabled:
+        clear_live_preview()
 
-    fields = _read_preview_fields(filepath)
+
+def capture_shared_frame(payload):
+    """Copy the newest sparse fields before the writer reuses their shared memory."""
+    global _latest_captured_index, _pending_frame
+    if not _capture_enabled or _grid_shape is None:
+        return
+
+    frame_index = _frame_index_from_payload(payload)
+    with _pending_lock:
+        if frame_index <= _latest_captured_index:
+            return
+
+    active_info = payload["active_tiles"]
+    active_tiles = _copy_shared_array(
+        active_info["shm_name"],
+        tuple(active_info["shape"]),
+        np.int32,
+        int(active_info["count"]),
+    )
+
+    pools = {}
+    tile_size = 4
+    for grid in payload.get("grids", ()):
+        grid_name = grid.get("name")
+        if grid_name not in {"density", "smoke", "flame"}:
+            continue
+        field_info = next(iter((grid.get("fields") or {}).values()), None)
+        if field_info is None:
+            continue
+        tile_size = int(grid.get("tile_size", tile_size))
+        pools[grid_name] = _copy_shared_array(
+            field_info["shm_name"],
+            tuple(field_info["shape"]),
+            np.float32,
+            int(grid.get("used_tile_count", 0)),
+        )
+
+    with _pending_lock:
+        if _capture_enabled and frame_index > _latest_captured_index:
+            _latest_captured_index = frame_index
+            _pending_frame = (active_tiles, pools, tile_size)
+
+
+def upload_pending_frame():
+    """Assemble and upload the latest captured frame on Blender's main thread."""
+    global _draw_handler, _pending_frame, _texture
+    if not _capture_enabled:
+        return
+
+    with _pending_lock:
+        pending_frame = _pending_frame
+        _pending_frame = None
+    if pending_frame is None:
+        return
+
+    fields = _build_dense_texture(*pending_frame)
     buffer = gpu.types.Buffer("FLOAT", fields.size, fields.ravel())
     texture = gpu.types.GPUTexture(_grid_shape, format="RG16F", data=buffer)
     texture.filter_mode(True)
@@ -59,7 +123,6 @@ def show_live_preview(filepath):
     shader = _ensure_shader()
     _ensure_batch(shader)
     _texture = texture
-    _loaded_filepath = normalized_filepath
     if _draw_handler is None:
         _draw_handler = bpy.types.SpaceView3D.draw_handler_add(
             _draw_volume, (), "WINDOW", "POST_VIEW"
@@ -69,7 +132,7 @@ def show_live_preview(filepath):
 
 def clear_live_preview():
     """Stop drawing and release the temporary GPU texture."""
-    global _draw_handler, _texture, _loaded_filepath
+    global _draw_handler, _texture, _pending_frame
 
     if _draw_handler is not None:
         try:
@@ -79,32 +142,70 @@ def clear_live_preview():
         _draw_handler = None
 
     _texture = None
-    _loaded_filepath = None
+    with _pending_lock:
+        _pending_frame = None
     _redraw_viewports()
 
 
-def _read_preview_fields(filepath):
-    import openvdb
+def _frame_index_from_payload(payload):
+    try:
+        return int(Path(payload.get("output_path", "")).stem.removeprefix("frame_"))
+    except ValueError:
+        return -1
 
+
+def _copy_shared_array(shm_name, shape, dtype, leading_count):
+    shm = shared_memory.SharedMemory(name=shm_name)
+    try:
+        source = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        return source[:leading_count].copy()
+    finally:
+        shm.close()
+
+
+def _build_dense_texture(active_tiles, pools, tile_size):
     nx, ny, nz = _grid_shape
-    smoke = np.zeros((nx, ny, nz), dtype=np.float32)
-    flame = np.zeros((nx, ny, nz), dtype=np.float32)
-    grid_names = {grid.name for grid in openvdb.readAllGridMetadata(str(filepath))}
-
-    smoke_grid_name = next(
-        (name for name in ("density", "smoke") if name in grid_names),
-        None,
-    )
-    if smoke_grid_name is not None:
-        openvdb.read(str(filepath), gridname=smoke_grid_name).copyToArray(smoke)
-    if "flame" in grid_names:
-        openvdb.read(str(filepath), gridname="flame").copyToArray(flame)
-
-    # GPU textures store X as their fastest-changing spatial coordinate.
-    fields = np.empty((nz, ny, nx, 2), dtype=np.float32)
-    fields[:, :, :, 0] = smoke.transpose(2, 1, 0)
-    fields[:, :, :, 1] = flame.transpose(2, 1, 0)
+    fields = np.zeros((nz, ny, nx, 2), dtype=np.float32)
+    empty_pool = np.empty((0, tile_size, tile_size, tile_size), dtype=np.float32)
+    smoke_pool = pools.get("density", pools.get("smoke", empty_pool))
+    flame_pool = pools.get("flame", empty_pool)
+    _scatter_sparse_fields(fields, active_tiles, smoke_pool, flame_pool, tile_size)
     return fields
+
+
+@numba.njit(cache=True, nogil=True)
+def _scatter_sparse_fields(fields, active_tiles, smoke_pool, flame_pool, tile_size):
+    has_smoke = smoke_pool.shape[0] > 0
+    has_flame = flame_pool.shape[0] > 0
+    nz, ny, nx, _channels = fields.shape
+
+    for tile_number in range(active_tiles.shape[0]):
+        pool_index = int(active_tiles[tile_number, 0])
+        start_x = int(active_tiles[tile_number, 1])
+        start_y = int(active_tiles[tile_number, 2])
+        start_z = int(active_tiles[tile_number, 3])
+        if pool_index < 0:
+            continue
+        for local_x in range(tile_size):
+            x = start_x + local_x
+            if x >= nx:
+                continue
+            for local_y in range(tile_size):
+                y = start_y + local_y
+                if y >= ny:
+                    continue
+                for local_z in range(tile_size):
+                    z = start_z + local_z
+                    if z >= nz:
+                        continue
+                    if has_smoke and pool_index < smoke_pool.shape[0]:
+                        fields[z, y, x, 0] = smoke_pool[
+                            pool_index, local_x, local_y, local_z
+                        ]
+                    if has_flame and pool_index < flame_pool.shape[0]:
+                        fields[z, y, x, 1] = flame_pool[
+                            pool_index, local_x, local_y, local_z
+                        ]
 
 
 def _ensure_shader():

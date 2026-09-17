@@ -146,10 +146,11 @@ This node lets you view the simulation domain in the viewport.
     Shows or hides a viewport wireframe preview of the simulation-domain bounds and one sample grid cell. It does not create or hide simulation geometry.
 
 **Live Preview**
-    While baking, reads the ``smoke`` and ``flame`` grids from the newest completed
-    VDB frame into a temporary GPU texture and raymarches it directly in the
-    viewport. It does not import live VDBs as Blender volume objects. The complete
-    sequence is loaded after the simulation finishes or is cancelled.
+    While baking, copies the newest ``smoke`` and ``flame`` sparse fields directly
+    from the writer's shared memory, assembles them on the CPU and raymarches them
+    from a temporary GPU texture. Intermediate preview frames are skipped if the
+    preview falls behind. The complete VDB sequence is loaded only after the
+    simulation finishes or is cancelled.
 
 
 Output
