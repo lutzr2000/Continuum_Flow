@@ -55,6 +55,14 @@ def load_particle_sources(sources: list[dict], bake_path: str) -> list[list[dict
                     "next_velocities_device": cuda.device_array(
                         buffer_shape, dtype=np.float32
                     ),
+                    "previous_sample_positions_device": cuda.device_array(
+                        buffer_shape, dtype=np.float32
+                    ),
+                    "current_sample_positions_device": cuda.device_array(
+                        buffer_shape, dtype=np.float32
+                    ),
+                    "sample_time": None,
+                    "sample_count": 0,
                     "loaded_frame_index": -1,
                     "radius": np.float32(particle_input.get("radius", 0.0)),
                     "velocity_transfer": np.float32(
@@ -114,6 +122,58 @@ def particle_frame(entry: dict, time_value: float) -> tuple[int, int, float]:
     return current_count, next_count, alpha
 
 
+def particle_motion_samples(
+    entry: dict, time_value: float
+) -> tuple[Any, int, Any, int]:
+    """Return particle positions at the previous and current solver times."""
+    count, next_count, alpha = particle_frame(entry, time_value)
+
+    if entry["sample_time"] != time_value:
+        previous_positions = entry["current_sample_positions_device"]
+        current_positions = entry["previous_sample_positions_device"]
+        previous_count = entry["sample_count"]
+
+        if count:
+            sample_interpolated_vectors[(count + 127) // 128, 128](
+                current_positions,
+                entry["current_positions_device"],
+                entry["next_positions_device"],
+                count,
+                next_count,
+                np.float32(alpha),
+            )
+
+        # At the first solver sample there is no path to sweep yet.
+        if entry["sample_time"] is None:
+            previous_positions, current_positions = (
+                current_positions,
+                previous_positions,
+            )
+            if count:
+                sample_interpolated_vectors[(count + 127) // 128, 128](
+                    current_positions,
+                    entry["current_positions_device"],
+                    entry["next_positions_device"],
+                    count,
+                    next_count,
+                    np.float32(alpha),
+                )
+            previous_count = count
+
+        entry["previous_sample_positions_device"] = previous_positions
+        entry["current_sample_positions_device"] = current_positions
+        entry["sample_count"] = count
+        entry["previous_sample_count"] = previous_count
+        entry["sample_time"] = time_value
+
+    return (
+        entry["previous_sample_positions_device"],
+        entry.get("previous_sample_count", entry["sample_count"]),
+        entry["current_sample_positions_device"],
+        entry["sample_count"],
+    )
+
+
 def update_source_tile_mask(
     source_tile_mask: Any,
     particle_sources: list[list[dict]],
@@ -128,17 +188,18 @@ def update_source_tile_mask(
 
     for source_entries in particle_sources:
         for entry in source_entries:
-            count, next_count, alpha = particle_frame(entry, time_value)
+            previous_positions, previous_count, current_positions, count = (
+                particle_motion_samples(entry, time_value)
+            )
             if count <= 0:
                 continue
 
             mark_particle_tiles[count, threads](
                 source_tile_mask,
-                entry["current_positions_device"],
-                entry["next_positions_device"],
+                previous_positions,
+                current_positions,
                 count,
-                next_count,
-                np.float32(alpha),
+                previous_count,
                 entry["radius"],
                 np.float32(delta),
                 np.float32(origin[0]),
@@ -162,18 +223,19 @@ def add_particles_to_source_masks(
 
     for source_mask, source_entries in zip(source_masks, particle_sources):
         for entry in source_entries:
-            count, next_count, alpha = particle_frame(entry, time_value)
+            previous_positions, previous_count, current_positions, count = (
+                particle_motion_samples(entry, time_value)
+            )
             if count <= 0:
                 continue
 
             rasterize_particle_spheres[count, threads](
                 source_mask,
                 tile_map,
-                entry["current_positions_device"],
-                entry["next_positions_device"],
+                previous_positions,
+                current_positions,
                 count,
-                next_count,
-                np.float32(alpha),
+                previous_count,
                 entry["radius"],
                 np.float32(delta),
                 np.float32(origin[0]),
@@ -199,6 +261,42 @@ def interpolated_particle_vector(
         pz += (next_values[sample_index, 2] - pz) * alpha
 
     return px, py, pz
+
+
+@cuda.jit(cache=True)
+def sample_interpolated_vectors(
+    output, current_values, next_values, count, next_count, alpha
+):
+    """Materialize interpolated vectors for one solver-time sample."""
+    sample_index = cuda.grid(1)
+    if sample_index >= count:
+        return
+    x, y, z = interpolated_particle_vector(
+        current_values, next_values, sample_index, next_count, alpha
+    )
+    output[sample_index, 0] = x
+    output[sample_index, 1] = y
+    output[sample_index, 2] = z
+
+
+@cuda.jit(device=True, inline=True, cache=True)
+def point_segment_distance_squared(px, py, pz, ax, ay, az, bx, by, bz):
+    """Squared distance from a point to a finite 3D segment."""
+    abx = bx - ax
+    aby = by - ay
+    abz = bz - az
+    apx = px - ax
+    apy = py - ay
+    apz = pz - az
+    length_squared = abx * abx + aby * aby + abz * abz
+    t = 0.0
+    if length_squared > 0.0:
+        t = (apx * abx + apy * aby + apz * abz) / length_squared
+        t = min(max(t, 0.0), 1.0)
+    dx = px - (ax + t * abx)
+    dy = py - (ay + t * aby)
+    dz = pz - (az + t * abz)
+    return dx * dx + dy * dy + dz * dz
 
 
 @cuda.jit(device=True, inline=True, cache=True)
@@ -233,11 +331,10 @@ def linear_to_grid_index(linear_index, min_i, min_j, min_k, count_j, count_k):
 @cuda.jit(cache=True)
 def mark_particle_tiles(
     tile_mask,
+    previous_positions,
     current_positions,
-    next_positions,
     count,
-    next_count,
-    alpha,
+    previous_count,
     radius,
     delta,
     origin_x,
@@ -245,20 +342,27 @@ def mark_particle_tiles(
     origin_z,
 ):
     """
-    Mark every coarse tile intersected by an interpolated particle sphere.
+    Mark every coarse tile in a particle's swept-sphere bounds.
     """
     sample_index = cuda.blockIdx.x
     if sample_index >= count:
         return
 
-    px, py, pz = interpolated_particle_vector(
-        current_positions, next_positions, sample_index, next_count, alpha
-    )
+    px = current_positions[sample_index, 0]
+    py = current_positions[sample_index, 1]
+    pz = current_positions[sample_index, 2]
+    previous_px = px
+    previous_py = py
+    previous_pz = pz
+    if sample_index < previous_count:
+        previous_px = previous_positions[sample_index, 0]
+        previous_py = previous_positions[sample_index, 1]
+        previous_pz = previous_positions[sample_index, 2]
     tile_world_size = delta * kernel_config.TILE_SIZE
     min_ti, min_tj, min_tk, max_ti, max_tj, max_tk = particle_grid_bounds(
-        px,
-        py,
-        pz,
+        min(px, previous_px),
+        min(py, previous_py),
+        min(pz, previous_pz),
         radius,
         tile_world_size,
         origin_x,
@@ -268,10 +372,25 @@ def mark_particle_tiles(
         tile_mask.shape[1],
         tile_mask.shape[2],
     )
+    _, _, _, path_max_i, path_max_j, path_max_k = particle_grid_bounds(
+        max(px, previous_px),
+        max(py, previous_py),
+        max(pz, previous_pz),
+        radius,
+        tile_world_size,
+        origin_x,
+        origin_y,
+        origin_z,
+        tile_mask.shape[0],
+        tile_mask.shape[1],
+        tile_mask.shape[2],
+    )
+    max_ti = path_max_i
+    max_tj = path_max_j
+    max_tk = path_max_k
     if min_ti > max_ti or min_tj > max_tj or min_tk > max_tk:
         return
 
-    radius_squared = radius * radius
     count_i = max_ti - min_ti + 1
     count_j = max_tj - min_tj + 1
     count_k = max_tk - min_tk + 1
@@ -283,17 +402,26 @@ def mark_particle_tiles(
         ti, tj, tk = linear_to_grid_index(
             linear_index, min_ti, min_tj, min_tk, count_j, count_k
         )
-        tile_min_x = origin_x + ti * tile_world_size
-        tile_min_y = origin_y + tj * tile_world_size
-        tile_min_z = origin_z + tk * tile_world_size
-        closest_x = min(max(px, tile_min_x), tile_min_x + tile_world_size)
-        closest_y = min(max(py, tile_min_y), tile_min_y + tile_world_size)
-        closest_z = min(max(pz, tile_min_z), tile_min_z + tile_world_size)
-        dx = px - closest_x
-        dy = py - closest_y
-        dz = pz - closest_z
-
-        if dx * dx + dy * dy + dz * dz <= radius_squared:
+        tile_center_x = origin_x + (ti + 0.5) * tile_world_size
+        tile_center_y = origin_y + (tj + 0.5) * tile_world_size
+        tile_center_z = origin_z + (tk + 0.5) * tile_world_size
+        # A center-to-segment test enlarged by the tile's half diagonal is a
+        # conservative capsule/AABB intersection and cannot miss needed tiles.
+        tile_reach = radius + 0.8660254037844386 * tile_world_size
+        if (
+            point_segment_distance_squared(
+                tile_center_x,
+                tile_center_y,
+                tile_center_z,
+                previous_px,
+                previous_py,
+                previous_pz,
+                px,
+                py,
+                pz,
+            )
+            <= tile_reach * tile_reach
+        ):
             tile_mask[ti, tj, tk] = True
         linear_index += cuda.blockDim.x
 
@@ -302,11 +430,10 @@ def mark_particle_tiles(
 def rasterize_particle_spheres(
     source_mask,
     tile_map,
+    previous_positions,
     current_positions,
-    next_positions,
     count,
-    next_count,
-    alpha,
+    previous_count,
     radius,
     delta,
     origin_x,
@@ -314,20 +441,27 @@ def rasterize_particle_spheres(
     origin_z,
 ):
     """
-    Union interpolated particle spheres into a sparse source mask.
+    Union particle swept spheres into a sparse source mask.
     """
     sample_index = cuda.blockIdx.x
     if sample_index >= count:
         return
 
-    px, py, pz = interpolated_particle_vector(
-        current_positions, next_positions, sample_index, next_count, alpha
-    )
+    px = current_positions[sample_index, 0]
+    py = current_positions[sample_index, 1]
+    pz = current_positions[sample_index, 2]
+    previous_px = px
+    previous_py = py
+    previous_pz = pz
+    if sample_index < previous_count:
+        previous_px = previous_positions[sample_index, 0]
+        previous_py = previous_positions[sample_index, 1]
+        previous_pz = previous_positions[sample_index, 2]
     tile_size = kernel_config.TILE_SIZE
     min_i, min_j, min_k, max_i, max_j, max_k = particle_grid_bounds(
-        px,
-        py,
-        pz,
+        min(px, previous_px),
+        min(py, previous_py),
+        min(pz, previous_pz),
         radius,
         delta,
         origin_x,
@@ -337,6 +471,22 @@ def rasterize_particle_spheres(
         tile_map.shape[1] * tile_size,
         tile_map.shape[2] * tile_size,
     )
+    _, _, _, path_max_i, path_max_j, path_max_k = particle_grid_bounds(
+        max(px, previous_px),
+        max(py, previous_py),
+        max(pz, previous_pz),
+        radius,
+        delta,
+        origin_x,
+        origin_y,
+        origin_z,
+        tile_map.shape[0] * tile_size,
+        tile_map.shape[1] * tile_size,
+        tile_map.shape[2] * tile_size,
+    )
+    max_i = path_max_i
+    max_j = path_max_j
+    max_k = path_max_k
     if min_i > max_i or min_j > max_j or min_k > max_k:
         return
 
@@ -352,11 +502,24 @@ def rasterize_particle_spheres(
         i, j, k = linear_to_grid_index(
             linear_index, min_i, min_j, min_k, count_j, count_k
         )
-        dx = origin_x + (i + 0.5) * delta - px
-        dy = origin_y + (j + 0.5) * delta - py
-        dz = origin_z + (k + 0.5) * delta - pz
+        cell_x = origin_x + (i + 0.5) * delta
+        cell_y = origin_y + (j + 0.5) * delta
+        cell_z = origin_z + (k + 0.5) * delta
 
-        if dx * dx + dy * dy + dz * dz <= radius_squared:
+        if (
+            point_segment_distance_squared(
+                cell_x,
+                cell_y,
+                cell_z,
+                previous_px,
+                previous_py,
+                previous_pz,
+                px,
+                py,
+                pz,
+            )
+            <= radius_squared
+        ):
             ti = i // tile_size
             tj = j // tile_size
             tk = k // tile_size
