@@ -45,6 +45,8 @@ void main()
 
 
     vec4 accumulated = vec4(0.0);
+    float first_contribution_distance = hit.y;
+    bool has_contribution = false;
 
     vec3 inverse_bounds_size =
         1.0 /
@@ -108,6 +110,11 @@ void main()
             continue;
         }
 
+        if (!has_contribution) {
+            first_contribution_distance = distance_along_ray;
+            has_contribution = true;
+        }
+
         float smoke_alpha =
             1.0 - exp(-smoke * smoke_step_scale);
 
@@ -155,6 +162,22 @@ void main()
             volume_parameters.camera_position_and_step_size.w;
     }
 
+
+    if (!has_contribution) {
+        discard;
+    }
+
+    vec3 first_contribution_position =
+        volume_parameters.camera_position_and_step_size.xyz +
+        ray_direction * first_contribution_distance;
+
+    vec4 first_contribution_clip =
+        view_projection_matrix *
+        vec4(first_contribution_position, 1.0);
+
+    gl_FragDepth =
+        first_contribution_clip.z /
+        first_contribution_clip.w * 0.5 + 0.5;
 
     frag_color = accumulated;
 }
