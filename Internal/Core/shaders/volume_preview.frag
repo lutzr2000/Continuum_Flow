@@ -61,6 +61,11 @@ void main()
         volume_parameters.bounds_max_and_flame_density.w *
         volume_parameters.camera_position_and_step_size.w;
 
+    float ray_entry_distance = distance_along_ray;
+    
+    float ray_segment_length =
+        max(hit.y - ray_entry_distance, 0.0001);
+
 
     for (int sample_index = 0;
          sample_index < 512;
@@ -111,8 +116,21 @@ void main()
             min(flame * flame_step_scale, 1.0);
 
 
+        float normalized_camera_depth =
+            clamp(
+                (distance_along_ray - ray_entry_distance) /
+                ray_segment_length,
+                0.0,
+                1.0
+            );
+
+        float smoke_depth_shading =
+            mix(1.0, 0.1, normalized_camera_depth);
+
+
         vec3 smoke_sample_color =
             volume_parameters.smoke_color.rgb *
+            smoke_depth_shading *
             smoke_alpha;
 
         vec3 flame_sample_color =

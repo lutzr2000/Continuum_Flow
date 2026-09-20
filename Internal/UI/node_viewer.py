@@ -17,8 +17,8 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 420.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
-    live_preview: BoolProperty(name="Live Preview", default=True, description="Show a preview of the simulation", options=set())  # type: ignore
-    preview_smoke_density: FloatProperty(name="Smoke Density", default=10.0, min=0.0, options=set())  # type: ignore
+    live_preview: BoolProperty(name="Live Preview", default=True, description="Show a preview of the simulation, slows down the simulation", options=set())  # type: ignore
+    preview_smoke_density: FloatProperty(name="Smoke Density", default=2.0, min=0.0, options=set())  # type: ignore
     preview_smoke_color: FloatVectorProperty(name="Smoke Color", default=(0.32, 0.34, 0.38), size=3, min=0.0, max=1.0, subtype="COLOR", options=set())  # type: ignore
     preview_flame_density: FloatProperty(name="Flame Density", default=5.0, min=0.0, options=set())  # type: ignore
     preview_flame_color: FloatVectorProperty(name="Flame Color", default=(1.0, 0.12, 0.01), size=3, min=0.0, max=1.0, subtype="COLOR", options=set())  # type: ignore
