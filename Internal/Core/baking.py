@@ -314,6 +314,11 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         )
         set_bake_progress(written_frame_count, solver_status.progress_total_frames)
 
+        if written_frame_count > 0:
+            latest_written_frame = self.start_frame + written_frame_count - 1
+            if bpy.context.scene.frame_current != latest_written_frame:
+                bpy.context.scene.frame_set(latest_written_frame)
+
         update_live_preview_settings(self.simulation_node)
         volume_renderer.upload_pending_frame()
 

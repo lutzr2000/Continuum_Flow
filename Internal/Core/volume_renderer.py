@@ -153,7 +153,7 @@ def upload_pending_frame():
     if next_frame is None:
         return
 
-    frame_index, active_tiles, pools, tile_size = next_frame
+    _frame_index, active_tiles, pools, tile_size = next_frame
 
     fields = build_dense_texture(active_tiles, pools, tile_size)
 
@@ -183,7 +183,6 @@ def upload_pending_frame():
             "POST_VIEW",
         )
 
-    bpy.context.scene.frame_set(frame_index)
     redraw_viewports()
 
 
