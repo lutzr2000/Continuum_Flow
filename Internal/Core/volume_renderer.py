@@ -36,13 +36,14 @@ bounds_max = None
 capture_enabled = False
 latest_frame = -1
 pending_frame = None
+preview_frame_busy = False
 pending_lock = threading.Lock()
 
 
 # -------------- methods ----------------
 def get_shared_frame(payload):
     """Copy the newest sparse fields before the writer reuses their shared memory."""
-    global latest_frame, pending_frame
+    global latest_frame, pending_frame, preview_frame_busy
 
     if not capture_enabled or grid_shape is None:
         return
@@ -59,32 +60,44 @@ def get_shared_frame(payload):
     if not preview_grids:
         return
 
-    active_info = payload["active_tiles"]
-    active_tiles = copy_shared_array(
-        active_info["shm_name"],
-        tuple(active_info["shape"]),
-        np.int32,
-        int(active_info["count"]),
-    )
+    with pending_lock:
+        if frame_index <= latest_frame or preview_frame_busy:
+            return
+        preview_frame_busy = True
 
-    pools = {}
-    tile_size = int(preview_grids[0]["tile_size"])
-
-    for grid in preview_grids:
-        grid_name = grid["name"]
-        field_info = next(iter(grid["fields"].values()))
-
-        pools[grid_name] = copy_shared_array(
-            field_info["shm_name"],
-            tuple(field_info["shape"]),
-            np.float32,
-            int(grid["used_tile_count"]),
+    try:
+        active_info = payload["active_tiles"]
+        active_tiles = copy_shared_array(
+            active_info["shm_name"],
+            tuple(active_info["shape"]),
+            np.int32,
+            int(active_info["count"]),
         )
 
-    with pending_lock:
-        if capture_enabled and frame_index > latest_frame:
-            latest_frame = frame_index
-            pending_frame = (frame_index, active_tiles, pools, tile_size)
+        pools = {}
+        tile_size = int(preview_grids[0]["tile_size"])
+
+        for grid in preview_grids:
+            grid_name = grid["name"]
+            field_info = next(iter(grid["fields"].values()))
+
+            pools[grid_name] = copy_shared_array(
+                field_info["shm_name"],
+                tuple(field_info["shape"]),
+                np.float32,
+                int(grid["used_tile_count"]),
+            )
+
+        with pending_lock:
+            if capture_enabled and frame_index > latest_frame:
+                latest_frame = frame_index
+                pending_frame = (frame_index, active_tiles, pools, tile_size)
+            else:
+                preview_frame_busy = False
+    except Exception:
+        with pending_lock:
+            preview_frame_busy = False
+        raise
 
 
 def copy_shared_array(shm_name, shape, dtype, leading_count):
@@ -99,7 +112,7 @@ def copy_shared_array(shm_name, shape, dtype, leading_count):
 def configure(new_grid_shape, new_resolution):
     """Set the simulation grid geometry used by the preview."""
     global grid_shape, resolution, bounds_min, bounds_max, batch
-    global latest_frame, pending_frame
+    global latest_frame, pending_frame, preview_frame_busy
 
     grid_shape = new_grid_shape
     resolution = new_resolution
@@ -114,6 +127,7 @@ def configure(new_grid_shape, new_resolution):
     with pending_lock:
         latest_frame = -1
         pending_frame = None
+        preview_frame_busy = False
 
 
 def set_enabled(enabled):
@@ -141,7 +155,7 @@ def set_preview_settings(
 
 def upload_pending_frame():
     """Assemble and upload the latest captured frame on Blender's main thread."""
-    global draw_handler, pending_frame, texture
+    global draw_handler, pending_frame, preview_frame_busy, texture
 
     if not capture_enabled:
         return
@@ -153,42 +167,46 @@ def upload_pending_frame():
     if next_frame is None:
         return
 
-    _frame_index, active_tiles, pools, tile_size = next_frame
+    frame_index, active_tiles, pools, tile_size = next_frame
 
-    fields = build_dense_texture(active_tiles, pools, tile_size)
+    try:
+        fields = build_dense_texture(active_tiles, pools, tile_size)
 
-    buffer = gpu.types.Buffer(
-        "FLOAT",
-        fields.size,
-        fields.ravel(),
-    )
-
-    next_texture = gpu.types.GPUTexture(
-        grid_shape,
-        format="RG16F",
-        data=buffer,
-    )
-    next_texture.filter_mode(True)
-
-    texture = next_texture
-
-    active_shader = ensure_shader()
-    ensure_batch(active_shader)
-
-    if draw_handler is None:
-        draw_handler = bpy.types.SpaceView3D.draw_handler_add(
-            draw_volume,
-            (),
-            "WINDOW",
-            "POST_VIEW",
+        buffer = gpu.types.Buffer(
+            "FLOAT",
+            fields.size,
+            fields.ravel(),
         )
 
-    redraw_viewports()
+        next_texture = gpu.types.GPUTexture(
+            grid_shape,
+            format="RG16F",
+            data=buffer,
+        )
+        next_texture.filter_mode(True)
+
+        texture = next_texture
+
+        active_shader = ensure_shader()
+        ensure_batch(active_shader)
+
+        if draw_handler is None:
+            draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+                draw_volume,
+                (),
+                "WINDOW",
+                "POST_VIEW",
+            )
+
+        redraw_viewports()
+    finally:
+        with pending_lock:
+            preview_frame_busy = False
 
 
 def clear_live_preview():
     """Stop drawing and release the temporary GPU texture."""
-    global draw_handler, texture, pending_frame
+    global draw_handler, texture, pending_frame, preview_frame_busy
 
     if draw_handler is not None:
         try:
@@ -200,6 +218,7 @@ def clear_live_preview():
     texture = None
     with pending_lock:
         pending_frame = None
+        preview_frame_busy = False
     redraw_viewports()
 
 
