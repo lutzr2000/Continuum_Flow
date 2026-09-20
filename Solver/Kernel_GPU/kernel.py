@@ -820,22 +820,6 @@ def solver(
                     tile_map,
                 )
 
-        with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
-            if obstacle_base_masks:
-                update_masks.update_obstacle_mask(
-                    obstacle_mask,
-                    obstacle_base_masks,
-                    t,
-                    delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
-                    tile_map,
-                    scratch_A,
-                    scratch_B,
-                    scratch_C,
-                )
-
         # ------------time step-------------------
         with timings.section("solver", "velocity_maxima.copy_to_device", gpu=True):
             velocity_maxima.copy_to_device(np.zeros(3, dtype=GPU_FIELD_DTYPE))
@@ -937,6 +921,23 @@ def solver(
                     delta,
                     origin,
                     tile_map,
+                )
+
+        # ------------Update masks-------------------
+        with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
+            if obstacle_base_masks:
+                update_masks.update_obstacle_mask(
+                    obstacle_mask,
+                    obstacle_base_masks,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    tile_map,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
                 )
 
         # ------------Obstacle BC-------------------
