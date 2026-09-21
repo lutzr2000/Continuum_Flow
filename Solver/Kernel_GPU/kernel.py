@@ -239,6 +239,7 @@ def solver(
     # ------------time-------------------
     t = 0.0
     cfl = float(simulation.get("settings", {}).get("cfl", 10.0))
+    tile_dilate = math.ceil(cfl / kernel_config.TILE_SIZE)
     advection_substeps = max(
         1, int(simulation.get("settings", {}).get("advection_substeps", 1))
     )
@@ -597,7 +598,7 @@ def solver(
                 ](
                     base_tile_map,
                     tile_map,
-                    kernel_config.TILE_DILATE,
+                    tile_dilate,
                     free_slot_stack,
                     free_slot_count,
                 )
@@ -610,7 +611,7 @@ def solver(
                 ](
                     base_tile_map,
                     tile_map,
-                    kernel_config.TILE_DILATE,
+                    tile_dilate,
                     free_slot_stack,
                     free_slot_count,
                     reused_slot_stack,
