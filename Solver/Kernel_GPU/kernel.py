@@ -15,6 +15,7 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.multigrid as multigrid
 import Solver.Kernel_GPU.output as output
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
+import Solver.Kernel_GPU.reference_frame as reference_frame_velocity
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.time_step as time_step
@@ -359,10 +360,19 @@ def solver(
 
     sources = simulation.get("sources") or []
     obstacles = simulation.get("obstacles") or []
+
     reference_frame = simulation.get("reference_frame") or {}
     reference_frame["animation_timeline"] = simulation["animation_timeline"]
     reference_matrix_data = update_masks.prepare_matrix_data(reference_frame)
     has_reference_frame = bool(reference_frame.get("object_name"))
+    reference_velocity_transfer = float(reference_frame.get("velocity_transfer", 0.0))
+    reference_frame_animated = bool(
+        has_reference_frame
+        and len(reference_matrix_data[1]) > 1
+        and np.any(reference_matrix_data[1][1:] != reference_matrix_data[1][0])
+    )
+    previous_reference_velocity_transform = np.zeros((3, 4), dtype=GPU_FIELD_DTYPE)
+
     has_particle_sources = any(
         source.get("particle_system_inputs") for source in sources
     )
@@ -904,6 +914,44 @@ def solver(
                 cfl,
                 output_time_step,
             )
+
+        # ------------Reference Frame Velocity Transfer-------------------
+        if reference_velocity_transfer != 0.0 and reference_frame_animated:
+            reference_matrix, reference_rate = update_masks.get_matrix_data(
+                *reference_matrix_data,
+                t,
+            )
+            current_reference_velocity_transform = (
+                np.linalg.inv(reference_matrix) @ reference_rate
+            )[:3, :].astype(GPU_FIELD_DTYPE)
+            reference_velocity_delta = (
+                current_reference_velocity_transform
+                - previous_reference_velocity_transform
+            ) * np.asarray(reference_velocity_transfer, dtype=GPU_FIELD_DTYPE)
+
+            if np.any(reference_velocity_delta != 0.0):
+                with timings.section(
+                    "solver", "reference_frame.transfer_velocity", gpu=True
+                ):
+                    reference_frame_velocity.transfer_velocity[
+                        tile_shape,
+                        kernel_config.THREADS_PER_BLOCK_3D,
+                    ](
+                        u,
+                        v,
+                        w,
+                        tile_map,
+                        *reference_velocity_delta.ravel(),
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                        delta,
+                        nx,
+                        ny,
+                        nz,
+                    )
+
+            previous_reference_velocity_transform = current_reference_velocity_transform
 
         # ------------BCs-------------------
         # ------------Domain BC-------------------
