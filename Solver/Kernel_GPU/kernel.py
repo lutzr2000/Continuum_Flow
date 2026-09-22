@@ -77,6 +77,13 @@ def get_source_values(
             values[value_name][source_idx] = np.asarray(value, dtype=dtype) * scale
 
     values["noise_amplitude"][~values["noise_enabled"]] = 0.0
+    values["velocity_local"] = np.asarray(
+        [
+            str(source.get("velocity_space", "WORLD")).upper() == "LOCAL"
+            for source in source_entries
+        ],
+        dtype=np.bool_,
+    )
     return values
 
 
@@ -864,6 +871,32 @@ def solver(
 
         # ------------Source BC-------------------
         for source_idx, source_mask in enumerate(source_masks):
+            velocity_local = bool(source_values["velocity_local"][source_idx])
+            if velocity_local:
+                with timings.section(
+                    "solver", "update_masks.update_source_velocity", gpu=True
+                ):
+                    sparse_managment.reset_pools(
+                        (scratch_A, scratch_B, scratch_C),
+                        zero_pool,
+                        next_tile_index_counter_host,
+                    )
+                    update_masks.update_source_velocity(
+                        source_base_masks[source_idx],
+                        t,
+                        delta,
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                        tile_map,
+                        scratch_A,
+                        scratch_B,
+                        scratch_C,
+                        source_values["velocity_x"][source_idx],
+                        source_values["velocity_y"][source_idx],
+                        source_values["velocity_z"][source_idx],
+                    )
+
             with timings.section("solver", "source_bc.source_bc", gpu=True):
                 source_bc.source_bc[
                     tile_shape,
@@ -883,6 +916,10 @@ def solver(
                     source_values["velocity_x"][source_idx],
                     source_values["velocity_y"][source_idx],
                     source_values["velocity_z"][source_idx],
+                    velocity_local,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
                     source_values["noise_scale"][source_idx],
                     source_values["noise_amplitude"][source_idx],
                     source_values["noise_seed"][source_idx],

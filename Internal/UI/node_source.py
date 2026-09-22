@@ -1,6 +1,7 @@
 from . import sockets
 from . import node_base
 from bpy.props import BoolProperty
+from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
 from bpy.props import IntProperty
@@ -27,6 +28,19 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     noise_scale: FloatProperty(name="Scale", default=6.0, min=1.0, soft_min=1.0, soft_max=64.0, precision=2, description="Approximate noise feature size in source voxels", options=set())  # type: ignore
     noise_seed: IntProperty(name="Seed", default=0, description="Random seed used for the source noise pattern", options=set())  # type: ignore
     noise_amplitude: FloatProperty(name="Amplitude", default=25.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How strongly the source noise modulates temperature, smoke, fuel and extra pressure", options=set())  # type: ignore
+    velocity_space: EnumProperty(
+        name="Space",
+        items=(
+            ("WORLD", "World Space", "Interpret velocity in world coordinates"),
+            (
+                "LOCAL",
+                "Local Space",
+                "Interpret velocity in each source object's local coordinates",
+            ),
+        ),
+        default="WORLD",
+        options=set(),
+    )  # type: ignore
     velocity: FloatVectorProperty(name="Velocity", size=3, default=(0.0, 0.0, 0.0), subtype="VELOCITY", description="Source velocity", options={"ANIMATABLE"})  # type: ignore
 
     def _sync_node(self):
@@ -49,4 +63,5 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
 
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
+        velocity_col.prop(self, "velocity_space", text="")
         velocity_col.prop(self, "velocity", text="")

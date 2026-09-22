@@ -426,6 +426,7 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "noise_scale": float(getattr(node, "noise_scale", 1.0)),
         "noise_seed": int(getattr(node, "noise_seed", 0)),
         "noise_amplitude": float(getattr(node, "noise_amplitude", 0.0)),
+        "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": safe_float_vector(node.velocity),
         "animations": animations,
         "animated_values": animated_values,

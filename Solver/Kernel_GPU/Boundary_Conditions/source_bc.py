@@ -22,6 +22,10 @@ def source_bc(
     velocity_x_value: Any,
     velocity_y_value: Any,
     velocity_z_value: Any,
+    velocity_local: Any,
+    velocity_x_field: Any,
+    velocity_y_field: Any,
+    velocity_z_field: Any,
     noise_scale: float,
     noise_amplitude: Any,
     noise_seed: Any,
@@ -30,10 +34,11 @@ def source_bc(
     """
     Apply source values with procedural spatial noise.
 
-    Non-zero source velocity is assigned directly. Temperature is assigned,
-    while smoke and fuel are integrated over ``dt`` and clamped to their valid
-    ranges. A seeded spatial noise sample can modulate all injected scalar
-    values.
+    Non-zero source velocity is assigned directly. World-space velocity uses
+    the scalar values; local-space velocity is read from the per-mesh scratch
+    fields. Temperature is assigned, while smoke and fuel are integrated over
+    ``dt`` and clamped to their valid ranges. A seeded spatial noise sample can
+    modulate all injected scalar values.
     """
     (
         tile_i,
@@ -55,10 +60,19 @@ def source_bc(
     if not source_mask[tile_index, local_i, local_j, local_k]:
         return
 
-    if velocity_x_value != 0.0 or velocity_y_value != 0.0 or velocity_z_value != 0.0:
-        u[tile_index, local_i, local_j, local_k] = velocity_x_value
-        v[tile_index, local_i, local_j, local_k] = velocity_y_value
-        w[tile_index, local_i, local_j, local_k] = velocity_z_value
+    if velocity_local:
+        source_u = velocity_x_field[tile_index, local_i, local_j, local_k]
+        source_v = velocity_y_field[tile_index, local_i, local_j, local_k]
+        source_w = velocity_z_field[tile_index, local_i, local_j, local_k]
+    else:
+        source_u = velocity_x_value
+        source_v = velocity_y_value
+        source_w = velocity_z_value
+
+    if source_u != 0.0 or source_v != 0.0 or source_w != 0.0:
+        u[tile_index, local_i, local_j, local_k] = source_u
+        v[tile_index, local_i, local_j, local_k] = source_v
+        w[tile_index, local_i, local_j, local_k] = source_w
 
     scalar_multiplier = 1.0
     if noise_amplitude != 0.0:
