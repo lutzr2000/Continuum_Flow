@@ -75,6 +75,9 @@ def update_source_tile_mask(
                 np.asarray(source_tile_mask.shape) - 1,
             )
 
+            if np.any(tile_min > tile_max):
+                continue
+
             mark_source_tiles[
                 (
                     int(tile_max[0] - tile_min[0] + 1),
