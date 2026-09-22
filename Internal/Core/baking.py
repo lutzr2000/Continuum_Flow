@@ -264,6 +264,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 VDBResults.load_bake(
                     self.output_directory,
                     start_frame_index=self.start_frame,
+                    simulation_node=self.simulation_node,
                 )
 
             bake_directory = Path(self.bake_directory).resolve()
@@ -356,6 +357,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         volume_renderer.configure(
             (grid_config["nx"], grid_config["ny"], grid_config["nz"]),
             domain_config["resolution"],
+            self.simulation_node,
         )
         update_live_preview_settings(self.simulation_node)
 

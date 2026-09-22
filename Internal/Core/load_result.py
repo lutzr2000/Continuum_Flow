@@ -2,6 +2,9 @@ import re
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
+
+from . import reference_frame
 
 
 def normalize_directory_path(path_value):
@@ -20,11 +23,12 @@ class VDBResultManager:
         self.loaded_output_directory = None
         self.start_frame_index = 1
 
-    def load_bake(self, watch_dir, start_frame_index=1):
+    def load_bake(self, watch_dir, start_frame_index=1, simulation_node=None):
         self.watch_dir = Path(watch_dir).resolve()
         self.volume_object = None
         self.loaded_output_directory = None
         self.start_frame_index = int(start_frame_index)
+        self.reference_object = reference_frame.linked_reference_object(simulation_node)
         ordered_vdbs = self.ordered_vdbs()
         if ordered_vdbs:
             self.load_full_sequence(ordered_vdbs)
@@ -76,7 +80,13 @@ class VDBResultManager:
 
         self.loaded_output_directory = str(self.watch_dir)
 
+        local_matrix = volume_object.matrix_world.copy()
+        local_matrix.translation = (0.0, 0.0, 0.0)
         volume_object.location = (0.0, 0.0, 0.0)
+        if self.reference_object is not None:
+            volume_object.parent = self.reference_object
+            volume_object.matrix_parent_inverse = Matrix.Identity(4)
+            volume_object.matrix_basis = local_matrix
         volume_object["continuum_flow_output_directory"] = self.loaded_output_directory
 
         volume_data = getattr(volume_object, "data", None)

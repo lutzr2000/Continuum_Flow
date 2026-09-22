@@ -10,6 +10,7 @@ import gpu
 import numba
 import numpy as np
 from gpu_extras.batch import batch_for_shader
+from . import reference_frame
 
 # -------------- shaders ----------------
 SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"
@@ -38,6 +39,7 @@ latest_frame = -1
 pending_frame = None
 preview_frame_busy = False
 pending_lock = threading.Lock()
+simulation_reference = None
 
 
 # -------------- methods ----------------
@@ -109,10 +111,11 @@ def copy_shared_array(shm_name, shape, dtype, leading_count):
         shm.close()
 
 
-def configure(new_grid_shape, new_resolution):
+def configure(new_grid_shape, new_resolution, simulation_node=None):
     """Set the simulation grid geometry used by the preview."""
     global grid_shape, resolution, bounds_min, bounds_max, batch
     global latest_frame, pending_frame, preview_frame_busy
+    global simulation_reference
 
     grid_shape = new_grid_shape
     resolution = new_resolution
@@ -124,6 +127,11 @@ def configure(new_grid_shape, new_resolution):
         nz * resolution,
     )
     batch = None
+    node_tree = getattr(simulation_node, "id_data", None)
+    simulation_reference = (
+        str(getattr(node_tree, "name", "")),
+        str(getattr(simulation_node, "name", "")),
+    )
     with pending_lock:
         latest_frame = -1
         pending_frame = None
@@ -352,6 +360,7 @@ def ensure_shader():
     shader_info = gpu.types.GPUShaderCreateInfo()
 
     shader_info.push_constant("MAT4", "view_projection_matrix")
+    shader_info.push_constant("MAT4", "model_matrix")
     shader_info.typedef_source(
         """
         struct VolumeParameters {
@@ -423,7 +432,11 @@ def draw_volume():
 
     active_shader = ensure_shader()
     active_batch = ensure_batch(active_shader)
-    camera_position = region_data.view_matrix.inverted().translation
+    simulation_node = resolve_simulation_node()
+    model_matrix = reference_frame.display_matrix(simulation_node)
+    camera_position = (
+        model_matrix.inverted_safe() @ region_data.view_matrix.inverted().translation
+    )
     diagonal = (
         sum(
             (maximum - minimum) ** 2 for minimum, maximum in zip(bounds_min, bounds_max)
@@ -446,6 +459,7 @@ def draw_volume():
         active_shader.uniform_float(
             "view_projection_matrix", region_data.perspective_matrix
         )
+        active_shader.uniform_float("model_matrix", model_matrix)
         active_shader.uniform_block("volume_parameters", uniform_buffer)
         active_shader.uniform_sampler("volume_texture", texture)
         active_batch.draw(active_shader)
@@ -454,6 +468,15 @@ def draw_volume():
         gpu.state.depth_mask_set(True)
         gpu.state.depth_test_set("NONE")
         gpu.state.blend_set("NONE")
+
+
+def resolve_simulation_node():
+    if not simulation_reference:
+        return None
+    node_tree = bpy.data.node_groups.get(simulation_reference[0])
+    if node_tree is None:
+        return None
+    return node_tree.nodes.get(simulation_reference[1])
 
 
 def update_uniform_buffer(camera_position, step_size):

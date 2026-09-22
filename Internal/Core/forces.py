@@ -1,5 +1,6 @@
 import math
 from . import viewer
+from . import reference_frame
 
 import bpy
 from .domain_grid import dimensions
@@ -142,6 +143,7 @@ def draw_force_preview():
         )
         if not segments:
             return
+        segments = reference_frame.transform_positions(segments, simulation_node)
 
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         gpu.state.blend_set("ALPHA")
@@ -159,6 +161,7 @@ def draw_force_preview():
         segments = build_swirl_force_segments(force_node, simulation_node, domain_node)
         if not segments:
             return
+        segments = reference_frame.transform_positions(segments, simulation_node)
 
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         gpu.state.blend_set("ALPHA")
@@ -181,6 +184,7 @@ def draw_force_preview():
 
         if not positions:
             return
+        positions = reference_frame.transform_positions(positions, simulation_node)
 
         shader = gpu.shader.from_builtin("SMOOTH_COLOR")
         gpu.state.blend_set("ALPHA")
@@ -650,7 +654,7 @@ def build_turbulence_force_plane(
     if scale <= 1.0e-8 or abs(amplitude) <= 1.0e-9:
         return [], [], []
 
-    plane = choose_turbulence_plane(domain_node)
+    plane = choose_turbulence_plane(domain_node, simulation_node)
 
     scene = getattr(bpy.context, "scene", None)
 
@@ -791,7 +795,7 @@ def build_turbulence_force_plane(
     return positions, colors, indices
 
 
-def choose_turbulence_plane(domain_node):
+def choose_turbulence_plane(domain_node, simulation_node=None):
     width, depth, height = domain_dimensions(domain_node)
     center = Vector(domain_center(domain_node))
 
@@ -802,6 +806,10 @@ def choose_turbulence_plane(domain_node):
     else:
         try:
             view_direction = region_data.view_rotation @ Vector((0.0, 0.0, -1.0))
+            view_direction = (
+                reference_frame.display_matrix(simulation_node).inverted_safe().to_3x3()
+                @ view_direction
+            )
         except Exception:
             view_direction = Vector((0.0, 0.0, -1.0))
 

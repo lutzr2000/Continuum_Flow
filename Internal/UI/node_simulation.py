@@ -62,15 +62,23 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
-            sockets.ContinuumFlowForceSocket.bl_idname
-            if name == "Forces"
-            else sockets.ContinuumFlowLinkSocket.bl_idname
+            sockets.ContinuumFlowReferenceFrameSocket.bl_idname
+            if name == "Reference Frame"
+            else (
+                sockets.ContinuumFlowForceSocket.bl_idname
+                if name == "Forces"
+                else sockets.ContinuumFlowLinkSocket.bl_idname
+            )
         )
         return self._ensure_socket(
             self.inputs, socket_type, name, multi_input=multi_input
         )
 
     def _sync_node(self):
+        reference_frame = self._ensure_input_socket("Reference Frame")
+        reference_frame_index = list(self.inputs).index(reference_frame)
+        if reference_frame_index != 0:
+            self.inputs.move(reference_frame_index, 0)
         self._ensure_input_socket("Domain")
         self._ensure_input_socket("Physics")
         self._ensure_input_socket("Obstacles")

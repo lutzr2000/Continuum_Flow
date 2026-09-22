@@ -4,6 +4,8 @@ from bpy.props import IntProperty
 _INVALID_SOCKET_COLOR = (0.95, 0.20, 0.20, 1.0)
 
 _SOCKET_ROLE_BY_NODE_AND_NAME = {
+    ("CONTINUUM_FLOW_REFERENCE_FRAME_NODE", "Reference Frame"): "reference_frame",
+    ("CONTINUUM_FLOW_SIMULATION_NODE", "Reference Frame"): "reference_frame",
     ("CONTINUUM_FLOW_DOMAIN_NODE", "Domain"): "domain",
     ("CONTINUUM_FLOW_PHYSICS_NODE", "Physics"): "physics",
     ("CONTINUUM_FLOW_OBSTACLE_NODE", "Obstacle"): "obstacles",
@@ -24,6 +26,7 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
 }
 
 _SOCKET_ROLE_BY_SOCKET_IDNAME = {
+    "CONTINUUM_FLOW_REFERENCE_FRAME_SOCKET": "reference_frame",
     "CONTINUUM_FLOW_FORCE_SOCKET": "forces",
     "CONTINUUM_FLOW_RESULT_SOCKET": "result",
     "CONTINUUM_FLOW_GEOMETRY_SOCKET": "geometry",
@@ -135,6 +138,21 @@ class ContinuumFlowForceSocket(bpy.types.NodeSocket):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.45, 0.65, 0.95, 1.0)
+
+
+class ContinuumFlowReferenceFrameSocket(bpy.types.NodeSocket):
+    """Socket used to connect a reference frame to a simulation."""
+
+    bl_idname = "CONTINUUM_FLOW_REFERENCE_FRAME_SOCKET"
+    bl_label = "Continuum Flow Reference Frame"
+
+    def draw(self, context, layout, node, text):
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
+        return (1.0, 0.2, 0.65, 1.0)
 
 
 class ContinuumFlowLinkSocket(bpy.types.NodeSocket):

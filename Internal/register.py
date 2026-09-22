@@ -12,6 +12,7 @@ from .UI.node_tree import (
 
 from .UI.sockets import (
     ContinuumFlowIntSocket,
+    ContinuumFlowReferenceFrameSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
@@ -27,6 +28,7 @@ from .UI.node_forces import (
 )
 from .UI.node_geometry import ContinuumFlowGeometryNode
 from .UI.node_particle_system import ContinuumFlowParticleSystemNode
+from .UI.node_reference_frame import ContinuumFlowReferenceFrameNode
 from .UI.node_obstacle import ContinuumFlowObstacleNode
 from .UI.node_output import (
     ContinuumFlowOutputNode,
@@ -52,6 +54,7 @@ classes = (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
     ContinuumFlowIntSocket,
+    ContinuumFlowReferenceFrameSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
@@ -60,6 +63,7 @@ classes = (
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
     ContinuumFlowParticleSystemNode,
+    ContinuumFlowReferenceFrameNode,
     ContinuumFlowOutputNode,
     CONTINUUM_FLOW_OT_output_bake_button,
     CONTINUUM_FLOW_OT_output_free_bake_button,

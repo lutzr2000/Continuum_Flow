@@ -173,6 +173,7 @@ void main()
 
     vec4 first_contribution_clip =
         view_projection_matrix *
+        model_matrix *
         vec4(first_contribution_position, 1.0);
 
     gl_FragDepth =
