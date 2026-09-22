@@ -230,6 +230,37 @@ def get_matrix_data(times: Any, matrices: Any, rates: Any, time_value: float) ->
     return matrix, rate
 
 
+def matrix_rates(times: Any, matrices: Any) -> Any:
+    """Build element-wise interpolation rates for a matrix time series."""
+    if len(matrices) <= 1:
+        return None
+    durations = np.diff(times)
+    rates = np.zeros_like(np.diff(matrices, axis=0))
+    valid = durations > 0
+    rates[valid] = np.diff(matrices, axis=0)[valid] / durations[valid, None, None]
+    return rates
+
+
+def make_matrix_data_relative(
+    times: Any,
+    matrices: Any,
+    reference_times: Any,
+    reference_matrices: Any,
+    reference_rates: Any,
+) -> Any:
+    """Express sampled world matrices in an animated reference-frame space."""
+    relative_matrices = np.empty_like(matrices)
+    for index, (time_value, matrix) in enumerate(zip(times, matrices)):
+        reference_matrix, _ = get_matrix_data(
+            reference_times,
+            reference_matrices,
+            reference_rates,
+            float(time_value),
+        )
+        relative_matrices[index] = np.linalg.inv(reference_matrix) @ matrix
+    return times, relative_matrices, matrix_rates(times, relative_matrices)
+
+
 def get_tile_bounds(
     voxels: Any,
     matrix: Any,

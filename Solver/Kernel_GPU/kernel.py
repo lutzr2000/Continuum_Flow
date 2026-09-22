@@ -135,6 +135,26 @@ def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any
     return values
 
 
+def transform_world_source_velocities(
+    source_values: dict[str, NDArray], inverse_linear: NDArray
+) -> None:
+    """Convert only World Space source velocities into the solver frame."""
+    if source_values["velocity_x"].size == 0:
+        return
+    vectors = np.column_stack(
+        (
+            source_values["velocity_x"],
+            source_values["velocity_y"],
+            source_values["velocity_z"],
+        )
+    )
+    world_mask = ~source_values["velocity_local"]
+    vectors[world_mask] = vectors[world_mask] @ inverse_linear.T
+    source_values["velocity_x"][:] = vectors[:, 0]
+    source_values["velocity_y"][:] = vectors[:, 1]
+    source_values["velocity_z"][:] = vectors[:, 2]
+
+
 def compute_inital_velocity(
     simulation_cfg: dict[str, Any],
 ) -> tuple[float, float, float]:
@@ -183,10 +203,11 @@ def is_animated(base_masks: list[dict[str, Any]]) -> bool:
     as static.
     """
     for entry in base_masks:
-        mesh_object = entry["mesh_object"]
-        animation = mesh_object.get("transform_animation") or {}
-
-        matrices = np.asarray(animation.get("matrices_world", ()))
+        matrices = np.asarray(entry.get("matrix_matrices", ()))
+        if matrices.size == 0:
+            mesh_object = entry["mesh_object"]
+            animation = mesh_object.get("transform_animation") or {}
+            matrices = np.asarray(animation.get("matrices_world", ()))
         if matrices.size == 0:
             continue
         matrices = matrices.reshape(-1, 4, 4)
@@ -338,6 +359,10 @@ def solver(
 
     sources = simulation.get("sources") or []
     obstacles = simulation.get("obstacles") or []
+    reference_frame = simulation.get("reference_frame") or {}
+    reference_frame["animation_timeline"] = simulation["animation_timeline"]
+    reference_matrix_data = update_masks.prepare_matrix_data(reference_frame)
+    has_reference_frame = bool(reference_frame.get("object_name"))
     has_particle_sources = any(
         source.get("particle_system_inputs") for source in sources
     )
@@ -350,7 +375,11 @@ def solver(
     # particles
     with timings.section("solver", "particles.load_particle_sources", gpu=True):
         particle_sources = (
-            particles.load_particle_sources(sources, bake_path)
+            particles.load_particle_sources(
+                sources,
+                bake_path,
+                reference_matrix_data if has_reference_frame else None,
+            )
             if has_particle_sources
             else [[] for _ in sources]
         )
@@ -382,12 +411,24 @@ def solver(
             times, matrices, rates = update_masks.prepare_matrix_data(
                 entry["mesh_object"]
             )
+            if has_reference_frame:
+                times, matrices, rates = update_masks.make_matrix_data_relative(
+                    times,
+                    matrices,
+                    *reference_matrix_data,
+                )
             entry["matrix_times"] = times
             entry["matrix_matrices"] = matrices
             entry["matrix_rates"] = rates
 
     for entry in obstacle_base_masks:
         times, matrices, rates = update_masks.prepare_matrix_data(entry["mesh_object"])
+        if has_reference_frame:
+            times, matrices, rates = update_masks.make_matrix_data_relative(
+                times,
+                matrices,
+                *reference_matrix_data,
+            )
         entry["matrix_times"] = times
         entry["matrix_matrices"] = matrices
         entry["matrix_rates"] = rates
@@ -532,6 +573,25 @@ def solver(
             physics_values = get_simulation_values(simulation, t)
         with timings.section("solver", "get_source_values", gpu=False):
             source_values = get_source_values(simulation, t)
+
+        if has_reference_frame:
+            reference_matrix, _ = update_masks.get_matrix_data(
+                *reference_matrix_data,
+                t,
+            )
+            inverse_reference_linear = np.linalg.inv(reference_matrix)[:3, :3].astype(
+                GPU_FIELD_DTYPE
+            )
+            transform_world_source_velocities(
+                source_values,
+                inverse_reference_linear,
+            )
+        else:
+            inverse_reference_linear = np.eye(3, dtype=GPU_FIELD_DTYPE)
+        gravity = inverse_reference_linear @ np.asarray(
+            (0.0, 0.0, 9.81), dtype=GPU_FIELD_DTYPE
+        )
+
         reference_temperature = physics_values["temperature"]["reference_temperature"]
 
         # ------------Clear scratch-------------------
@@ -1107,6 +1167,9 @@ def solver(
                 temperature,
                 physics_values["temperature"]["buoyancy"],
                 reference_temperature,
+                gravity[0],
+                gravity[1],
+                gravity[2],
                 tile_map,
                 fx_const,
                 fy_const,

@@ -214,6 +214,12 @@ def build_entries(simulation_node):
         "input",
     )
 
+    reference_frame_node = linked_node(
+        simulation_node,
+        "Reference Frame",
+        "input",
+    )
+
     physics_node = linked_node(
         simulation_node,
         "Physics",
@@ -283,6 +289,11 @@ def build_entries(simulation_node):
             "fps": simulation_fps,
             "times": simulation_times,
         },
+        "reference_frame": build_reference_frame_entry(
+            reference_frame_node,
+            start_frame,
+            end_frame,
+        ),
         "domain": build_domain_node_entries(domain_node),
         "physics": (
             build_physics_node_entries(
@@ -320,6 +331,30 @@ def build_entries(simulation_node):
             for node in force_nodes
         ],
         "outputs": [build_output_node_entries(output_node)],
+    }
+
+
+def build_reference_frame_entry(node, start_frame, end_frame):
+    """Serialize the selected reference object and its evaluated world matrices."""
+    if node is None:
+        return {
+            "object_name": None,
+            "velocity_transfer": 0.0,
+            "transform_animation": {},
+        }
+
+    source_object = getattr(node, "source_object", None)
+    object_name = getattr(source_object, "name", None)
+    transform_samples = get_geometry_transforms(
+        [node],
+        start_frame,
+        end_frame,
+    )
+    return {
+        "node_name": node.name,
+        "object_name": object_name,
+        "velocity_transfer": float(getattr(node, "velocity_transfer", 0.0)),
+        "transform_animation": transform_samples.get(object_name, {}),
     }
 
 

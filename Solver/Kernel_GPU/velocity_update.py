@@ -114,6 +114,9 @@ def update_velocity_maccormack(
     temperature: Any,
     buoyancy_factor: float,
     t_reference: float,
+    gravity_x: float,
+    gravity_y: float,
+    gravity_z: float,
     tile_map: Any,
     fx_const: Any,
     fy_const: Any,
@@ -397,7 +400,7 @@ def update_velocity_maccormack(
     Fy += fy_const * 0.1
     Fz += fz_const * 0.1
 
-    Fz += forces.buoyancy_approximation(
+    buoyancy = forces.buoyancy_approximation(
         temperature,
         tile_map,
         i,
@@ -406,6 +409,9 @@ def update_velocity_maccormack(
         buoyancy_factor,
         t_reference,
     )
+    Fx += gravity_x * buoyancy
+    Fy += gravity_y * buoyancy
+    Fz += gravity_z * buoyancy
 
     rhs_u = corrected_u + force_coeff * Fx
     rhs_v = corrected_v + force_coeff * Fy

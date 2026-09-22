@@ -8,7 +8,11 @@ from numba import cuda
 import Solver.Kernel_GPU.kernel_config as kernel_config
 
 
-def load_particle_sources(sources: list[dict], bake_path: str) -> list[list[dict]]:
+def load_particle_sources(
+    sources: list[dict],
+    bake_path: str,
+    reference_matrix_data: tuple[Any, Any, Any] | None = None,
+) -> list[list[dict]]:
     """
     Load the NPZ particle timelines connected to each source.
     """
@@ -31,6 +35,15 @@ def load_particle_sources(sources: list[dict], bake_path: str) -> list[list[dict
                 velocities = np.asarray(
                     archive["velocities"], dtype=np.float32
                 ).reshape(-1, 3)
+
+            if reference_matrix_data is not None:
+                transform_particle_frames_to_reference(
+                    times,
+                    offsets,
+                    positions,
+                    velocities,
+                    reference_matrix_data,
+                )
 
             frame_counts = np.diff(offsets).astype(np.int64, copy=False)
             max_frame_count = int(frame_counts.max()) if frame_counts.size else 0
@@ -73,6 +86,33 @@ def load_particle_sources(sources: list[dict], bake_path: str) -> list[list[dict
         particle_sources.append(source_entries)
 
     return particle_sources
+
+
+def transform_particle_frames_to_reference(
+    times: np.ndarray,
+    offsets: np.ndarray,
+    positions: np.ndarray,
+    velocities: np.ndarray,
+    reference_matrix_data: tuple[Any, Any, Any],
+) -> None:
+    """Convert exported world-space particle samples into reference space."""
+    from Solver.Kernel_GPU.update_masks import get_matrix_data
+
+    reference_times, reference_matrices, reference_rates = reference_matrix_data
+    for frame_index, time_value in enumerate(times):
+        start = int(offsets[frame_index])
+        end = int(offsets[frame_index + 1])
+        if start >= end:
+            continue
+        reference_matrix, _ = get_matrix_data(
+            reference_times,
+            reference_matrices,
+            reference_rates,
+            float(time_value),
+        )
+        inverse = np.linalg.inv(reference_matrix).astype(np.float32)
+        positions[start:end] = positions[start:end] @ inverse[:3, :3].T + inverse[:3, 3]
+        velocities[start:end] = velocities[start:end] @ inverse[:3, :3].T
 
 
 def particle_frame(entry: dict, time_value: float) -> tuple[int, int, float]:
