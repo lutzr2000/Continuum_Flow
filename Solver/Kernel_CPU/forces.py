@@ -17,18 +17,16 @@ def buoyancy_approximation(
     t_reference: float,
 ) -> float:
     r"""
-    Compute the buoyancy acceleration contribution from temperature deviation.
-    Assumes that g is aligned with the global z-axis.
+    Compute the dimensionless thermal buoyancy multiplier. The caller applies
+    the gravity vector expressed in the current simulation reference frame.
 
     The implemented relation is
 
     .. math::
 
-        b = g \, \beta \, (T - T_{\mathrm{ref}}).
+        b = \beta \, (T - T_{\mathrm{ref}}).
 
     """
-    g = 9.81
-
     temperature = sparse_managment.get_pool_value(
         T,
         tile_map,
@@ -38,7 +36,7 @@ def buoyancy_approximation(
         t_reference,
     )
 
-    return g * buoyancy_factor * (temperature - t_reference)
+    return buoyancy_factor * (temperature - t_reference)
 
 
 @njit(inline="always", cache=True)
