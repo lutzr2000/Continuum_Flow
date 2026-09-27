@@ -82,6 +82,15 @@ classes = (
 )
 
 
+def preload_solver_backends():
+    """Start the persistent worker and warm available solver runtimes."""
+    solver_manager.request_preload("CPU")
+    if solver_status.gpu_available:
+        solver_manager.request_preload("GPU")
+
+    return None
+
+
 @persistent
 def initialize_fake_user_state(_scene=None, _depsgraph=None):
     node_groups = getattr(bpy.data, "node_groups", None)
@@ -148,6 +157,9 @@ def register():
     if not bpy.app.timers.is_registered(forces.force_preview_timer):
         bpy.app.timers.register(forces.force_preview_timer, first_interval=0.1)
 
+    if not bpy.app.timers.is_registered(preload_solver_backends):
+        bpy.app.timers.register(preload_solver_backends, first_interval=0.1)
+
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
@@ -161,6 +173,9 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(preload_solver_backends):
+        bpy.app.timers.unregister(preload_solver_backends)
+
     solver_manager.shutdown()
     volume_renderer.clear_live_preview()
     solver_status.gpu_available = False

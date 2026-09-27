@@ -62,7 +62,7 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
         if solver_manager.is_compiling():
             col.separator()
             col.label(
-                text="Compiling for the first time, please wait",
+                text="Launching the solver, please wait. If this is the first launch this might take a while",
                 icon="TIME",
             )
         elif stats:
