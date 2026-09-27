@@ -7,7 +7,7 @@ Requirements
 -------------
 General:
 
-- Blender 5.0.0 (currently only supported version)
+- Blender 5.0.0 or later
 - for GPU: CUDA Toolkit (https://developer.nvidia.com/cuda-downloads)
 
 If you want to use the GPU, it is recommended to install the CUDA Toolkit first.

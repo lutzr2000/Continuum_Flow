@@ -8,11 +8,12 @@ In general, Continuum Flow's workflow is node-based. After installation, there w
 
 The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
-Many simulation settings can be animated with Blender keyframes. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, swirl settings, and turbulence amplitude. Source and obstacle object transformations are animated as well. Values are sampled over the configured simulation frame range during export.
+Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, swirl settings, and turbulence amplitude. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well. 
 
 Nodes
 -----
 To avoid a tedious setup, a node tree preset is provided, which can be found by pressing Shift+A, like all other nodes. This node tree preset contains the minimum number of nodes necessary for a simulation.
+
 
 Simulation
 ~~~~~~~~~~
@@ -30,22 +31,36 @@ This is the core node of every simulation. It controls the frame range for your 
     The frame at which the simulation starts.
 
 **End Frame**
-    Defines the end of the simulation interval. The simulation duration is calculated from ``End Frame - Start Frame``, and exported animation samples use the End Frame as their exclusive upper bound.
+    Defines the end of the simulation interval.
 
 **CFL**
     This setting is very important. It determines how large or small the time steps of your simulation are. The solver has to simulate more substeps than the frames in your scene. Larger CFL values mean bigger time steps, which means the solver is faster. In many cases, going for a high value here is good since it decreases the simulation time. In some situations, the visual quality will suffer under large CFL numbers.
 
 **Iterations**
-    Number of solver iterations. Usually the default of one is sufficient. Fewer iterations result in a faster solve, but this can come at the cost of visual consistency.
+    Number of solver iterations. Usually the default of one is sufficient. 
 
-**Advection Substeps**
-    Number of integration steps used to trace velocity and scalar fields through the flow. The default is one; higher values improve characteristic tracing at additional computational cost.
+**Advection Supsteps**
+    The solver tries to trace the flow through a grid. This value dertermines with how many steps this tracing is done per time step. Usually the default of one is fine. When using large CFL values increasing this can improve results, but also increase simulation time slightly.
 
 **Adaptive Domain**
-    Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance.
+    Similar to Blender's native adaptive domain setting. It only simulates cells containing smoke, fuel, or fire. In many cases this can greatly improve performance and significantly reduce (V)RAM usage.
 
 **Threshold**
     Threshold for when a cell is considered empty for the adaptive domain.
+
+
+Reference Frame
+~~~~~~~~~~~~~~~
+
+.. figure:: ../images/reference_frame.jpg
+   :class: block-image-left
+   :width: 300px
+
+By default the domain is placed at the worlds center. If you want to move the domain you can use this node. The domain will follow the position of the selected objects origin. This is essentially like "parenting".
+
+**Velocity Transfer**
+    If the selected object moves during simulation this determines how much the flow is affected by this. A value of zero means now effect.
+
 
 Domain
 ~~~~~~
@@ -60,18 +75,20 @@ This node controls the size and resolution of your simulation domain. The domain
     The grid size used in the simulation. The grid size is the same in every direction.
 
 **Lx**
-    Requested domain length in x direction, in meters. The exported cell count is rounded up to a complete tile.
+    Requested domain length in x direction, in meters.
 
 **Ly**
-    Requested domain length in y direction, in meters. The exported cell count is rounded up to a complete tile.
+    Requested domain length in y direction, in meters. 
 
 **Lz**
-    Requested domain length in z direction, in meters. The exported cell count is rounded up to a complete tile.
+    Requested domain length in z direction, in meters.
+
+Please Note: Due to some solver constraints the Domain will only approximate the size given by Lx, Ly and Lz. There might be very small deviations between the given size and the true size of the domain!
 
 **Boundary Conditions**
     Lets you choose the boundary conditions for each face of your simulation domain.
-    Outflow: fluid can leave the domain.
-    Inflow: fluid can enter the domain at a given velocity.
+    Outflow: flow can leave the domain.
+    Inflow: flow can enter the domain at a given velocity.
     Slip Wall: frictionless wall.
     Wall: wall with friction.
 
@@ -121,13 +138,13 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
-The following two settings control the procedural variation of combustion:
+The following two settings control the random variation of combustion:
 
 **Scale**
-    Spatial scale of the procedural randomness applied to the combustion process.
+    Spatial scale of the randomness applied to the combustion process.
 
 **Amplitude**
-    Strength of the procedural modulation of the local fuel burn rate. Higher values produce greater spatial variation in combustion.
+    Strength of the random modulation of the local fuel burn rate. Higher values produce greater spatial variation in combustion.
 
 **Vorticity**
     Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
@@ -143,16 +160,22 @@ Viewer
 This node lets you view the simulation domain in the viewport.
 
 **Show/Hide Domain**
-    Shows or hides a viewport wireframe preview of the simulation-domain bounds and one sample grid cell. It does not create or hide simulation geometry.
+    Shows or hides a viewport wireframe preview of the domain.
 
 **Live Preview**
-    While baking, copies the newest ``smoke`` and ``flame`` sparse fields directly
-    from the writer's shared memory, assembles them on the CPU and raymarches them
-    from a temporary GPU texture. Intermediate preview frames are skipped if the
-    preview falls behind, and Blender's timeline follows each displayed frame.
-    Smoke Density, Smoke Color, Flame Density and Flame Color control only the
-    viewport preview. The complete VDB sequence is loaded only after the simulation
-    finishes or is cancelled.
+    If active a live preview of the simulation is shown in the viewport. Please note that this option can reduce the solvers performance.
+
+**Smoke Density**
+    Density of the preview smoke. Only affects the preview not the final output!
+
+**Flame Density**
+    Density of the preview flame. Only affects the preview not the final output!
+
+**Smoke Color**
+    Color of the preview smoke.
+
+**Flame Color**
+    Color of the preview flame.
 
 
 Output
@@ -167,11 +190,6 @@ This node lets you specify the output of your simulation. It is worth paying som
 **FPS**
     The frame rate at which data is saved. Defaults to your scene frame rate.
 
-VDB writer processes start with four workers and scale up automatically whenever the
-solver has only one free writer left. This warms up extra workers before they are
-needed. The maximum adapts to the number of logical CPU cores. It uses at most
-half of them and is limited to a value between 4 and 32.
-
 **Precision**
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
@@ -179,12 +197,12 @@ half of them and is limited to a value between 4 and 32.
     Lets you select which fields to save: velocity, pressure, temperature, density, fuel, and flame. Density and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead.
 
 **Path**
-    Path on your disk where to save the data. You can use the usual Blender file browser.
+    Path on your disk where to save the data.
 
 **Bake/Free Bake**
     Bake: starts the simulation.
     Free Bake: deletes the baked data.
-    Press Esc during an active bake to request a clean cancellation.
+    Press Esc during an active bake to stop.
 
 
 Obstacle
@@ -204,7 +222,7 @@ Source
    :class: block-image-left
    :width: 300px
 
-The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node as input and accepts multiple inputs.
+The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node or a particle node as input and accepts multiple inputs.
 
 **Fuel Emission**
     Amount of fuel emitted within the source over time.
@@ -213,22 +231,25 @@ The Source node defines where fluid, smoke, temperature, pressure and velocity a
     Amount of smoke emitted within the source over time.
 
 **Temperature**
-    Temperature spawned within the source.
+    Temperature present within the source.
 
 **Extra Pressure**
-    Additional pressure spawned.
+    Additional pressure created. Positive values push flow away, negative values suck the flow in.
 
 **Source Noise**
-    Activates procedural spatial variations of temperature, smoke emission, fuel emission, and extra pressure to create more dynamic flow. Source velocity is not affected.
+    Activates random spatial variations of temperature, smoke emission, fuel emission, and extra pressure to create more dynamic flow. Source velocity is not affected.
 
 **Scale**
-    Approximate feature size of the source noise in voxels. Larger values produce broader variations.
+    Scale of the random variation. Larger values produce broader variations.
 
 **Seed**
     Random seed used to produce a repeatable source-noise pattern.
 
 **Amplitude**
     Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.
+
+**World/local Space**
+    In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.
@@ -241,7 +262,23 @@ Geometry
    :class: block-image-left
    :width: 300px
 
-Simple node that lets you pick geometry. It can be plugged into the source or obstacle node.
+Node that lets you pick geometry. It can be plugged into the source or obstacle node.
+
+
+Particle System
+~~~~~~~~~~~~~~~
+
+.. figure:: ../images/particle_system.jpg
+   :class: block-image-left
+   :width: 300px
+
+This node lets you first select an object and then a particle system belonging to that object. The particle system can act as a source for the simulation when plugged into the source node. 
+
+**Radius**
+    Radius aroung each particle in which a voxel is considered a source.
+
+**Velocity Transfer**
+    How much of the particles velocity is transfered to the flow. Zero means no transfer, one means the flow has the same velocity as the particle. Negative one means velocity in the opposite direction.
 
 
 Force-Constant
