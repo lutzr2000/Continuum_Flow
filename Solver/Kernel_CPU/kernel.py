@@ -647,10 +647,14 @@ def solver(
             p_levels,
             b_levels,
             delta_levels,
-            zero_levels,
+            multigrid_tile_maps,
+            multigrid_active_tiles,
+            multigrid_active_tile_counts,
+            multigrid_level_shapes,
         ) = multigrid.create_multigrid_levels(
             shape,
             delta,
+            sparse_tile_capacity,
             min_size=8,
         )
 
@@ -886,6 +890,24 @@ def solver(
                     )
 
                 sparse_tile_capacity = next_sparse_tile_capacity
+
+                # Coarse sparse pools are capacity-bounded by the finest pool.
+                # Recreate them when that pool grows so a scattered active set
+                # can never overflow a coarse active-tile list.
+                (
+                    p_levels,
+                    b_levels,
+                    delta_levels,
+                    multigrid_tile_maps,
+                    multigrid_active_tiles,
+                    multigrid_active_tile_counts,
+                    multigrid_level_shapes,
+                ) = multigrid.create_multigrid_levels(
+                    shape,
+                    delta,
+                    sparse_tile_capacity,
+                    min_size=8,
+                )
 
             active_tile_counter_host = int(active_tile_counter[0])
 
@@ -1247,11 +1269,14 @@ def solver(
                 p_levels,
                 b_levels,
                 delta_levels,
+                multigrid_tile_maps,
+                multigrid_active_tiles,
+                multigrid_active_tile_counts,
+                multigrid_level_shapes,
                 simulation.get("settings").get("iterations"),
                 rhs_partial_sums,
                 rhs_partial_counts,
                 rhs_mean_buffer,
-                zero_levels,
                 nx,
                 ny,
                 nz,

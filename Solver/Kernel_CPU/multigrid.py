@@ -10,351 +10,160 @@ import Solver.Kernel_CPU.Boundary_Conditions.domain_bc as BC
 CPU_FIELD_DTYPE = kernel_config.CPU_FIELD_DTYPE
 
 
-def create_multigrid_levels(
-    shape: tuple[int, int, int], delta: float, min_size: int = 8
-) -> Any:
-    """
-    Allocate the dense coarse levels used below the sparse simulation grid.
+def build_coarse_tile_level(
+    fine_tile_map: Any,
+    coarse_tile_map: Any,
+    coarse_active_tiles: Any,
+    coarse_active_tile_count: Any,
+) -> None:
+    """Activate coarse tiles covering at least one active fine tile."""
+    coarse_tile_map.fill(-1)
+    fine_coords = np.argwhere(fine_tile_map != -1)
+    coarse_active_tile_count[0] = 0
+    if fine_coords.size == 0:
+        return
+    coarse_coords = np.unique(fine_coords // 2, axis=0)
+    count = len(coarse_coords)
+    if count > len(coarse_active_tiles):
+        raise RuntimeError("CPU multigrid sparse tile capacity exceeded")
+    coarse_active_tiles[:count] = coarse_coords
+    for pool_index, (tile_i, tile_j, tile_k) in enumerate(coarse_coords):
+        coarse_tile_map[tile_i, tile_j, tile_k] = pool_index
+    coarse_active_tile_count[0] = count
 
-    Every level halves each dimension with upward rounding and doubles the
-    physical cell spacing. Pressure, right-hand-side, and reusable zero buffers
-    are allocated until any dimension would fall below ``min_size``.
-    """
+
+def clear_tile_map(tile_map: Any) -> None:
+    """Reset every entry of a tile map to inactive."""
+    tile_map.fill(-1)
+
+
+def build_coarse_tile_hierarchy(
+    level_0_tile_map: Any,
+    tile_maps: list[Any],
+    active_tiles: list[Any],
+    active_tile_counts: list[Any],
+) -> list[int]:
+    """Rebuild all coarse tile maps from the current level-0 tile map."""
+    fine_tile_map = level_0_tile_map
+    counts = []
+    for coarse_tile_map, coarse_active_tiles, count_buffer in zip(
+        tile_maps, active_tiles, active_tile_counts
+    ):
+        clear_tile_map(coarse_tile_map)
+        build_coarse_tile_level(
+            fine_tile_map, coarse_tile_map, coarse_active_tiles, count_buffer
+        )
+        counts.append(int(count_buffer[0]))
+        fine_tile_map = coarse_tile_map
+    return counts
+
+
+def create_multigrid_levels(
+    shape: tuple[int, int, int],
+    delta: float,
+    level_0_pool_capacity: int,
+    min_size: int = 8,
+) -> Any:
     p_levels = []
     b_levels = []
     delta_levels = []
-    zero_levels = []
+    tile_maps = []
+    active_tiles = []
+    active_tile_counts = []
+    level_shapes = []
 
-    nx = (shape[0] + 1) // 2
-    ny = (shape[1] + 1) // 2
-    nz = (shape[2] + 1) // 2
+    nx, ny, nz = ((value + 1) // 2 for value in shape)
     level = 1
+    parent_capacity = int(level_0_pool_capacity)
 
     while nx >= min_size and ny >= min_size and nz >= min_size:
         level_shape = (nx, ny, nz)
+        tile_shape = tuple(
+            (value + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+            for value in level_shape
+        )
+        capacity = min(parent_capacity, int(np.prod(tile_shape)))
+        pool_shape = (
+            capacity,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+        )
 
-        p_levels.append(np.empty(level_shape, dtype=CPU_FIELD_DTYPE))
-        b_levels.append(np.empty(level_shape, dtype=CPU_FIELD_DTYPE))
-        zero_levels.append(np.zeros(level_shape, dtype=CPU_FIELD_DTYPE))
+        p_levels.append(np.empty(pool_shape, dtype=CPU_FIELD_DTYPE))
+        b_levels.append(np.empty(pool_shape, dtype=CPU_FIELD_DTYPE))
+        tile_maps.append(np.full(tile_shape, -1, dtype=np.int32))
+        active_tiles.append(np.empty((capacity, 3), dtype=np.int32))
+        active_tile_counts.append(np.zeros(1, dtype=np.int32))
+        level_shapes.append(level_shape)
         delta_levels.append(delta * (2**level))
 
-        nx = (nx + 1) // 2
-        ny = (ny + 1) // 2
-        nz = (nz + 1) // 2
+        parent_capacity = capacity
+        nx, ny, nz = ((value + 1) // 2 for value in level_shape)
         level += 1
 
-    return p_levels, b_levels, delta_levels, zero_levels
-
-
-@njit(inline="always", cache=True)
-def residual(p: Any, b: Any, delta: float, i: int, j: int, k: int) -> Any:
-    r"""
-    Evaluate the discrete Poisson residual at one dense-grid cell.
-
-    .. math::
-
-        r_{i,j,k} = b_{i,j,k} - (\nabla_h^2 p)_{i,j,k}.
-    """
-    inv_delta2 = 1.0 / (delta * delta)
-
-    laplace = (
-        p[i + 1, j, k]
-        + p[i - 1, j, k]
-        + p[i, j + 1, k]
-        + p[i, j - 1, k]
-        + p[i, j, k + 1]
-        + p[i, j, k - 1]
-        - 6.0 * p[i, j, k]
-    ) * inv_delta2
-
-    return b[i, j, k] - laplace
-
-
-@njit(inline="always", cache=True)
-def residual_level_0(
-    p: Any,
-    b: Any,
-    inv_delta2: Any,
-    tile_map: Any,
-    i: int,
-    j: int,
-    k: int,
-) -> Any:
-    r"""
-    Evaluate :math:`r = b - \nabla_h^2 p` on the sparse finest grid.
-    """
-    tile_i = i // kernel_config.TILE_SIZE
-    tile_j = j // kernel_config.TILE_SIZE
-    tile_k = k // kernel_config.TILE_SIZE
-
-    tile_index = tile_map[tile_i, tile_j, tile_k]
-
-    if tile_index == -1:
-        return 0.0, False
-
-    local_i = i - tile_i * kernel_config.TILE_SIZE
-    local_j = j - tile_j * kernel_config.TILE_SIZE
-    local_k = k - tile_k * kernel_config.TILE_SIZE
-
-    laplace = (
-        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
-        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
-        - 6.0 * sparse_managment.get_pool_value(p, tile_map, i, j, k, 0.0)
-    ) * inv_delta2
-
-    rhs = b[tile_index, local_i, local_j, local_k]
-
-    return rhs - laplace, True
+    return (
+        p_levels,
+        b_levels,
+        delta_levels,
+        tile_maps,
+        active_tiles,
+        active_tile_counts,
+        level_shapes,
+    )
 
 
 @njit(cache=True, parallel=True)
-def restrict_residual(
-    p: Any, b: Any, coarse_b: Any, delta: float, nx: int, ny: int, nz: int
-) -> None:
-    r"""
-    Restrict the fine-grid residual to a dense coarse grid by averaging.
-
-    .. math::
-
-        b_H(I,J,K) = \frac{1}{8}\sum_{a,b,c\in\{0,1\}}
-        r_h(2I+a, 2J+b, 2K+c).
-    """
-    # Dense coarse levels use their own dimensions; the solver dimensions
-    # belong only to the sparse finest level.
-    nx, ny, nz = p.shape
-    cnx, cny, cnz = coarse_b.shape
-    total_cells = cnx * cny * cnz
-
-    for flat in prange(total_cells):
-        I = flat // (cny * cnz)
-        remainder = flat % (cny * cnz)
-        J = remainder // cnz
-        K = remainder % cnz
-
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
-
-        s = 0.0
-        count = 0.0
-
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if (
-                        i >= 1
-                        and j >= 1
-                        and k >= 1
-                        and i < nx - 1
-                        and j < ny - 1
-                        and k < nz - 1
-                    ):
-                        r = residual(p, b, delta, i, j, k)
-
-                        s += r
-                        count += 1.0
-
-        coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
-
-
-@njit(cache=True, parallel=True)
-def restrict_residual_level_0(
+def rbgs_step_sparse(
     p: Any,
     b: Any,
-    coarse_b: Any,
     delta: float,
+    parity: int,
     tile_map: Any,
+    active_tiles: Any,
+    active_tile_count: int,
     nx: int,
     ny: int,
     nz: int,
 ) -> None:
-    """
-    Restrict the sparse finest-grid residual to the first dense coarse grid.
-    """
-    cnx, cny, cnz = coarse_b.shape
-    total_cells = cnx * cny * cnz
-
-    inv_delta2 = 1.0 / (delta * delta)
-
-    for flat in prange(total_cells):
-        I = flat // (cny * cnz)
-        remainder = flat % (cny * cnz)
-        J = remainder // cnz
-        K = remainder % cnz
-
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
-
-        s = 0.0
-        count = 0.0
-
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if (
-                        i >= 1
-                        and j >= 1
-                        and k >= 1
-                        and i < nx - 1
-                        and j < ny - 1
-                        and k < nz - 1
-                    ):
-                        r, valid = residual_level_0(
-                            p,
-                            b,
-                            inv_delta2,
-                            tile_map,
-                            i,
-                            j,
-                            k,
-                        )
-
-                        if not valid:
-                            continue
-
-                        s += r
-                        count += 1.0
-
-        coarse_b[I, J, K] = s / count if count > 0.0 else 0.0
-
-
-@njit(cache=True, parallel=True)
-def prolongate_add_nearest_level_0(
-    coarse_e: Any,
-    fine_p: Any,
-    tile_map: Any,
-    field_shape: tuple[int, int, int],
-) -> None:
-    r"""
-    Prolongate coarse error by nearest-neighbor injection and add it to level 0.
-
-    .. math::
-
-        p_h(i,j,k) \leftarrow p_h(i,j,k)
-        + e_H(\lfloor i/2\rfloor,\lfloor j/2\rfloor,\lfloor k/2\rfloor).
-    """
-    cnx, cny, cnz = coarse_e.shape
-    fnx, fny, fnz = field_shape
-    total_cells = cnx * cny * cnz
-
-    for flat in prange(total_cells):
-        I = flat // (cny * cnz)
-        remainder = flat % (cny * cnz)
-        J = remainder // cnz
-        K = remainder % cnz
-
-        e = 0.25 * coarse_e[I, J, K]
-
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
-
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if i < fnx and j < fny and k < fnz:
-                        tile_i = i // kernel_config.TILE_SIZE
-                        tile_j = j // kernel_config.TILE_SIZE
-                        tile_k = k // kernel_config.TILE_SIZE
-                        tile_index = tile_map[tile_i, tile_j, tile_k]
-
-                        if tile_index == -1:
-                            continue
-
-                        local_i = i - tile_i * kernel_config.TILE_SIZE
-                        local_j = j - tile_j * kernel_config.TILE_SIZE
-                        local_k = k - tile_k * kernel_config.TILE_SIZE
-
-                        fine_p[tile_index, local_i, local_j, local_k] += e
-
-
-@njit(cache=True, parallel=True)
-def prolongate_add_nearest(coarse_e: Any, fine_p: Any) -> None:
-    """
-    Prolongate coarse error by nearest-neighbor injection onto a dense grid.
-    """
-    cnx, cny, cnz = coarse_e.shape
-    fnx, fny, fnz = fine_p.shape
-    total_cells = cnx * cny * cnz
-
-    for flat in prange(total_cells):
-        I = flat // (cny * cnz)
-        remainder = flat % (cny * cnz)
-        J = remainder // cnz
-        K = remainder % cnz
-
-        e = 0.25 * coarse_e[I, J, K]
-
-        i0 = 2 * I
-        j0 = 2 * J
-        k0 = 2 * K
-
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    i = i0 + di
-                    j = j0 + dj
-                    k = k0 + dk
-
-                    if i < fnx and j < fny and k < fnz:
-                        fine_p[i, j, k] += e
-
-
-@njit(cache=True, parallel=True)
-def rbgs_step(p: Any, b: Any, delta: float, parity: int) -> None:
-    """
-    Perform one red or black Gauss-Seidel pressure-smoothing sweep.
-    """
-    nx, ny, nz = p.shape
-    total_cells = nx * ny * nz
-
+    tile_size = kernel_config.TILE_SIZE
     delta2 = delta * delta
 
-    for flat in prange(total_cells):
-        i = flat // (ny * nz)
-        remainder = flat % (ny * nz)
-        j = remainder // nz
-        k = remainder % nz
-
-        if i < 1 or j < 1 or k < 1 or i >= nx - 1 or j >= ny - 1 or k >= nz - 1:
+    for active_index in prange(active_tile_count):
+        tile_i, tile_j, tile_k = active_tiles[active_index]
+        pool_index = tile_map[tile_i, tile_j, tile_k]
+        if pool_index == -1:
             continue
 
-        if ((i + j + k) & 1) != parity:
-            continue
-
-        p[i, j, k] = (
-            p[i + 1, j, k]
-            + p[i - 1, j, k]
-            + p[i, j + 1, k]
-            + p[i, j - 1, k]
-            + p[i, j, k + 1]
-            + p[i, j, k - 1]
-            - delta2 * b[i, j, k]
-        ) / 6.0
+        for local_i in range(tile_size):
+            i = tile_i * tile_size + local_i
+            for local_j in range(tile_size):
+                j = tile_j * tile_size + local_j
+                for local_k in range(tile_size):
+                    k = tile_k * tile_size + local_k
+                    if (
+                        i < 1
+                        or j < 1
+                        or k < 1
+                        or i >= nx - 1
+                        or j >= ny - 1
+                        or k >= nz - 1
+                        or ((i + j + k) & 1) != parity
+                    ):
+                        continue
+                    p[pool_index, local_i, local_j, local_k] = (
+                        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+                        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+                        - delta2 * b[pool_index, local_i, local_j, local_k]
+                    ) / 6.0
 
 
 @njit(cache=True, parallel=True)
 def rbgs_step_level_0(
-    active_tile_coords,
-    active_tile_slots,
-    active_tile_count,
     p: Any,
     b: Any,
     delta: float,
@@ -364,138 +173,238 @@ def rbgs_step_level_0(
     ny: int,
     nz: int,
 ) -> None:
-    """
-    Perform one red or black Gauss-Seidel sweep on the sparse finest grid.
-    """
-    total_tiles = active_tile_count
-
-    delta2 = delta * delta
+    """Perform one red or black sweep on the sparse finest grid."""
     tile_size = kernel_config.TILE_SIZE
-
-    for active_tile_n in prange(total_tiles):
-        tile_index = active_tile_slots[active_tile_n]
-
-        if tile_index == -1:
+    delta2 = delta * delta
+    for flat in prange(nx * ny * nz):
+        i = flat // (ny * nz)
+        remainder = flat % (ny * nz)
+        j = remainder // nz
+        k = remainder % nz
+        if (
+            i < 1
+            or j < 1
+            or k < 1
+            or i >= nx - 1
+            or j >= ny - 1
+            or k >= nz - 1
+            or ((i + j + k) & 1) != parity
+        ):
             continue
+        tile_i, tile_j, tile_k = i // tile_size, j // tile_size, k // tile_size
+        pool_index = tile_map[tile_i, tile_j, tile_k]
+        if pool_index == -1:
+            continue
+        local_i, local_j, local_k = i % tile_size, j % tile_size, k % tile_size
+        p[pool_index, local_i, local_j, local_k] = (
+            sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+            + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+            + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+            + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+            + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+            + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+            - delta2 * b[pool_index, local_i, local_j, local_k]
+        ) / 6.0
 
-        tile_i = active_tile_coords[active_tile_n, 0]
-        tile_j = active_tile_coords[active_tile_n, 1]
-        tile_k = active_tile_coords[active_tile_n, 2]
 
-        base_i = tile_i * tile_size
-        base_j = tile_j * tile_size
-        base_k = tile_k * tile_size
+@njit(inline="always", cache=True)
+def residual_sparse(
+    p: Any,
+    b: Any,
+    inv_delta2: float,
+    tile_map: Any,
+    i: int,
+    j: int,
+    k: int,
+) -> Any:
+    """Evaluate the residual at one cell of a sparse level."""
+    tile_size = kernel_config.TILE_SIZE
+    pool_index = tile_map[i // tile_size, j // tile_size, k // tile_size]
+    if pool_index == -1:
+        return 0.0, False
+    laplace = (
+        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
+        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
+        - 6.0 * sparse_managment.get_pool_value(p, tile_map, i, j, k, 0.0)
+    ) * inv_delta2
+    rhs = sparse_managment.get_pool_value(b, tile_map, i, j, k, 0.0)
+    return rhs - laplace, True
 
+
+@njit(cache=True, parallel=True)
+def restrict_residual_sparse(
+    fine_p: Any,
+    fine_b: Any,
+    coarse_b: Any,
+    fine_delta: float,
+    fine_tile_map: Any,
+    coarse_tile_map: Any,
+    coarse_active_tiles: Any,
+    coarse_active_tile_count: int,
+    fine_nx: int,
+    fine_ny: int,
+    fine_nz: int,
+    coarse_nx: int,
+    coarse_ny: int,
+    coarse_nz: int,
+) -> None:
+    tile_size = kernel_config.TILE_SIZE
+    inv_delta2 = 1.0 / (fine_delta * fine_delta)
+
+    for coarse_pool_index in prange(coarse_active_tile_count):
+        tile_i, tile_j, tile_k = coarse_active_tiles[coarse_pool_index]
         for local_i in range(tile_size):
-            i = base_i + local_i
-
-            if i < 1 or i >= nx - 1:
-                continue
-
+            I = tile_i * tile_size + local_i
             for local_j in range(tile_size):
-                j = base_j + local_j
-
-                if j < 1 or j >= ny - 1:
-                    continue
-
-                start_local_k = (parity - i - j - base_k) & 1
-
-                for local_k in range(start_local_k, tile_size, 2):
-                    k = base_k + local_k
-
-                    if k < 1 or k >= nz - 1:
+                J = tile_j * tile_size + local_j
+                for local_k in range(tile_size):
+                    K = tile_k * tile_size + local_k
+                    if I >= coarse_nx or J >= coarse_ny or K >= coarse_nz:
                         continue
 
-                    center = (
-                        sparse_managment.get_pool_value(p, tile_map, i + 1, j, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i - 1, j, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j + 1, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j - 1, k, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j, k + 1, 0.0)
-                        + sparse_managment.get_pool_value(p, tile_map, i, j, k - 1, 0.0)
-                        - delta2
-                        * sparse_managment.get_pool_value(b, tile_map, i, j, k, 0.0)
-                    ) / 6.0
+                    residual_sum = 0.0
+                    residual_count = 0
+                    for di in range(2):
+                        i = 2 * I + di
+                        for dj in range(2):
+                            j = 2 * J + dj
+                            for dk in range(2):
+                                k = 2 * K + dk
+                                if (
+                                    i < 1
+                                    or j < 1
+                                    or k < 1
+                                    or i >= fine_nx - 1
+                                    or j >= fine_ny - 1
+                                    or k >= fine_nz - 1
+                                ):
+                                    continue
+                                residual_value, valid = residual_sparse(
+                                    fine_p,
+                                    fine_b,
+                                    inv_delta2,
+                                    fine_tile_map,
+                                    i,
+                                    j,
+                                    k,
+                                )
+                                if not valid:
+                                    continue
+                                residual_sum += residual_value
+                                residual_count += 1
+                    coarse_b[coarse_pool_index, local_i, local_j, local_k] = (
+                        residual_sum / residual_count if residual_count else 0.0
+                    )
 
-                    p[tile_index, local_i, local_j, local_k] = center
+
+@njit(cache=True, parallel=True)
+def prolongate_add_nearest_sparse(
+    coarse_e: Any,
+    fine_p: Any,
+    coarse_active_tiles: Any,
+    coarse_active_tile_count: int,
+    fine_tile_map: Any,
+    coarse_nx: int,
+    coarse_ny: int,
+    coarse_nz: int,
+    fine_nx: int,
+    fine_ny: int,
+    fine_nz: int,
+) -> None:
+    tile_size = kernel_config.TILE_SIZE
+    for coarse_pool_index in prange(coarse_active_tile_count):
+        tile_i, tile_j, tile_k = coarse_active_tiles[coarse_pool_index]
+        for local_i in range(tile_size):
+            I = tile_i * tile_size + local_i
+            for local_j in range(tile_size):
+                J = tile_j * tile_size + local_j
+                for local_k in range(tile_size):
+                    K = tile_k * tile_size + local_k
+                    if I >= coarse_nx or J >= coarse_ny or K >= coarse_nz:
+                        continue
+                    error = (
+                        0.25 * coarse_e[coarse_pool_index, local_i, local_j, local_k]
+                    )
+                    for di in range(2):
+                        i = 2 * I + di
+                        for dj in range(2):
+                            j = 2 * J + dj
+                            for dk in range(2):
+                                k = 2 * K + dk
+                                if i >= fine_nx or j >= fine_ny or k >= fine_nz:
+                                    continue
+                                fine_pool = fine_tile_map[
+                                    i // tile_size, j // tile_size, k // tile_size
+                                ]
+                                if fine_pool != -1:
+                                    fine_p[
+                                        fine_pool,
+                                        i % tile_size,
+                                        j % tile_size,
+                                        k % tile_size,
+                                    ] += error
 
 
 def smooth(
-    active_tile_coords,
-    active_tile_slots,
-    active_tile_count,
     p: Any,
     b: Any,
     delta: float,
     iterations: int,
-    level: int = 0,
-    tile_map: Any = None,
-    nx: int | None = None,
-    ny: int | None = None,
-    nz: int | None = None,
+    tile_map: Any,
+    active_tiles: Any,
+    active_tile_count: int | None,
+    field_shape: tuple[int, int, int],
 ) -> None:
-    r"""
-    Apply smoothing iterations to one multigrid pressure level.
-
-    Level ``0`` is the finest pooled level and uses ``tile_map`` to access the
-    sparse pressure storage. All higher levels are dense coarse grids. The
-    smoother uses red-black Gauss-Seidel and reapplies Neumann boundary
-    conditions after the requested number of iterations.
-    """
+    nx, ny, nz = field_shape
     for _ in range(iterations):
-        if level == 0:
-            rbgs_step_level_0(
-                active_tile_coords,
-                active_tile_slots,
-                active_tile_count,
+        if active_tiles is None:
+            rbgs_step_level_0(p, b, delta, 0, tile_map, nx, ny, nz)
+            rbgs_step_level_0(p, b, delta, 1, tile_map, nx, ny, nz)
+        else:
+            rbgs_step_sparse(
                 p,
                 b,
                 delta,
                 0,
                 tile_map,
+                active_tiles,
+                active_tile_count,
                 nx,
                 ny,
                 nz,
             )
-            rbgs_step_level_0(
-                active_tile_coords,
-                active_tile_slots,
-                active_tile_count,
+            rbgs_step_sparse(
                 p,
                 b,
                 delta,
                 1,
                 tile_map,
+                active_tiles,
+                active_tile_count,
                 nx,
                 ny,
                 nz,
             )
-        else:
-            rbgs_step(p, b, delta, 0)
-            rbgs_step(p, b, delta, 1)
+    BC.pressure_poisson_apply_neumann_bcs(p, tile_map, nx, ny, nz)
 
-    if level == 0:
-        BC.pressure_poisson_apply_neumann_bcs(
-            p,
-            tile_map,
-            nx,
-            ny,
-            nz,
-        )
-    else:
-        BC.pressure_poisson_apply_neumann_bcs_dense(p)
+
+@njit(cache=True, parallel=True)
+def clear_sparse_fields(p: Any, b: Any, active_tile_count: int) -> None:
+    for pool_index in prange(active_tile_count):
+        p[pool_index].fill(0.0)
+        b[pool_index].fill(0.0)
 
 
 def v_cycle(
-    active_tile_coords,
-    active_tile_slots,
-    active_tile_count,
     level: int,
     p_levels: list[Any],
     b_levels: list[Any],
     p_level0: Any,
     b_level0: Any,
-    zero_levels: list[Any],
     base_delta: float,
     delta_levels: list[float],
     pre_smooth: int,
@@ -504,130 +413,76 @@ def v_cycle(
     nx: int,
     ny: int,
     nz: int,
-    tile_map: Any = None,
+    tile_map: Any,
+    multigrid_tile_maps: list[Any],
+    multigrid_active_tiles: list[Any],
+    multigrid_active_tile_counts: list[int],
+    multigrid_level_shapes: list[tuple[int, int, int]],
 ) -> None:
-    r"""
-    Run one multigrid V-cycle for the pressure solve.
-
-    Level ``0`` is the finest level stored in ``p_level0`` and
-    ``b_level0``. All entries in ``p_levels`` and ``b_levels`` represent
-    coarser dense levels starting at half resolution. The cycle performs
-    pre-smoothing, residual restriction to the next coarser level, recursive
-    coarse-grid correction, prolongation back to the current level, and
-    post-smoothing.
-
-    Mathematically, the cycle operates on the linear system
-
-    .. math::
-
-        A p = b.
-
-    First, smoothing reduces high-frequency error on the current level. Then
-    the residual is computed and restricted to the next coarser grid:
-
-    .. math::
-
-        r = b - A p.
-
-    On the coarse grid, the error equation is solved approximately:
-
-    .. math::
-
-        A e = r.
-
-    The resulting coarse-grid error estimate is prolongated back to the finer
-    level and added to the current pressure iterate:
-
-    .. math::
-
-        p \leftarrow p + e.
-
-    A final post-smoothing step then damps the remaining high-frequency error.
-
-    Level 0 uses ``tile_map`` to access the pooled tile storage,
-    while all coarser levels operate on dense arrays.
-    """
     if level == 0:
-        p = p_level0
-        b = b_level0
-        delta = base_delta
+        p, b, delta = p_level0, b_level0, base_delta
+        current_map = tile_map
+        current_tiles = None
+        current_count = None
+        current_shape = (nx, ny, nz)
     else:
-        dense_level = level - 1
-        p = p_levels[dense_level]
-        b = b_levels[dense_level]
-        delta = delta_levels[dense_level]
+        current = level - 1
+        p, b, delta = p_levels[current], b_levels[current], delta_levels[current]
+        current_map = multigrid_tile_maps[current]
+        current_tiles = multigrid_active_tiles[current]
+        current_count = multigrid_active_tile_counts[current]
+        current_shape = multigrid_level_shapes[current]
 
     smooth(
-        active_tile_coords,
-        active_tile_slots,
-        active_tile_count,
         p,
         b,
         delta,
         pre_smooth,
-        level=level,
-        tile_map=tile_map,
-        nx=nx,
-        ny=ny,
-        nz=nz,
+        current_map,
+        current_tiles,
+        current_count,
+        current_shape,
     )
-
-    last_level = len(p_levels)
-
-    if level == last_level:
+    if level == len(p_levels):
         smooth(
-            active_tile_coords,
-            active_tile_slots,
-            active_tile_count,
             p,
             b,
             delta,
             coarse_smooth,
-            level=level,
-            tile_map=tile_map,
-            nx=nx,
-            ny=ny,
-            nz=nz,
+            current_map,
+            current_tiles,
+            current_count,
+            current_shape,
         )
         return
 
-    coarse_p = p_levels[level]
-    coarse_b = b_levels[level]
-
-    coarse_p[:] = zero_levels[level]
-
-    if level == 0 and tile_map is not None:
-        restrict_residual_level_0(
-            p,
-            b,
-            coarse_b,
-            delta,
-            tile_map,
-            nx,
-            ny,
-            nz,
-        )
-    else:
-        restrict_residual(
-            p,
-            b,
-            coarse_b,
-            delta,
-            nx,
-            ny,
-            nz,
-        )
-
+    coarse = level
+    coarse_count = multigrid_active_tile_counts[coarse]
+    if coarse_count == 0:
+        return
+    coarse_p, coarse_b = p_levels[coarse], b_levels[coarse]
+    coarse_map = multigrid_tile_maps[coarse]
+    coarse_tiles = multigrid_active_tiles[coarse]
+    coarse_shape = multigrid_level_shapes[coarse]
+    clear_sparse_fields(coarse_p, coarse_b, coarse_count)
+    restrict_residual_sparse(
+        p,
+        b,
+        coarse_b,
+        delta,
+        current_map,
+        coarse_map,
+        coarse_tiles,
+        coarse_count,
+        *current_shape,
+        *coarse_shape,
+    )
     v_cycle(
-        active_tile_coords,
-        active_tile_slots,
-        active_tile_count,
         level + 1,
         p_levels,
         b_levels,
         p_level0,
         b_level0,
-        zero_levels,
         base_delta,
         delta_levels,
         pre_smooth,
@@ -636,33 +491,28 @@ def v_cycle(
         nx,
         ny,
         nz,
-        tile_map=None,
+        tile_map,
+        multigrid_tile_maps,
+        multigrid_active_tiles,
+        multigrid_active_tile_counts,
+        multigrid_level_shapes,
     )
-
-    if level == 0 and tile_map is not None:
-        prolongate_add_nearest_level_0(
-            coarse_p,
-            p,
-            tile_map,
-            (nx, ny, nz),
-        )
-    else:
-        prolongate_add_nearest(
-            coarse_p,
-            p,
-        )
-
+    prolongate_add_nearest_sparse(
+        coarse_p,
+        p,
+        coarse_tiles,
+        coarse_count,
+        current_map,
+        *coarse_shape,
+        *current_shape,
+    )
     smooth(
-        active_tile_coords,
-        active_tile_slots,
-        active_tile_count,
         p,
         b,
         delta,
         post_smooth,
-        level=level,
-        tile_map=tile_map,
-        nx=nx,
-        ny=ny,
-        nz=nz,
+        current_map,
+        current_tiles,
+        current_count,
+        current_shape,
     )

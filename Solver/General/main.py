@@ -136,8 +136,6 @@ def preload_backend(backend: str) -> None:
         cuda.current_context()
         return
 
-    raise ValueError(f"Unknown solver backend: {backend}")
-
 
 def run_worker() -> None:
     """

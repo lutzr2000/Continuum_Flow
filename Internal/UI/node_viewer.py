@@ -15,7 +15,7 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_icon = "HIDE_OFF"
     bl_width_default = 260.0
     bl_width_min = 240.0
-    bl_width_max = 420.0
+    bl_width_max = 520.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
     live_preview: BoolProperty(name="Live Preview", default=True, description="Show a preview of the simulation, slows down the simulation", options=set())  # type: ignore
     preview_smoke_density: FloatProperty(name="Smoke Density", default=2.0, min=0.0, options=set())  # type: ignore
