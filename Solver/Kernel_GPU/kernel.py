@@ -563,6 +563,7 @@ def solver(
             simulation,
             shape,
             tile_shape,
+            sparse_tile_capacity,
         )
 
     # ------------time loop------------------

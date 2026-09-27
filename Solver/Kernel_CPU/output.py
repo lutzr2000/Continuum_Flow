@@ -17,6 +17,7 @@ def setup_output(
     simulations: dict[str, Any],
     shape: tuple[int, int, int],
     tile_shape: tuple[int, int, int],
+    sparse_tile_capacity: int,
 ) -> Any:
     """
     Initialize asynchronous frame-output state and its first writer slots.
@@ -37,6 +38,7 @@ def setup_output(
         "output_list": output_list,
         "shape": tuple(shape),
         "tile_shape": tuple(tile_shape),
+        "initial_tile_capacity": max(1, int(sparse_tile_capacity)),
         "shared_memory_blocks": shared_memory_blocks,
     }
 
@@ -64,6 +66,7 @@ def create_writer_slot(writer_context: Any) -> Any:
     shape = writer_context["shape"]
 
     tile_shape = writer_context["tile_shape"]
+    initial_tile_capacity = writer_context["initial_tile_capacity"]
     shared_memory_blocks = writer_context["shared_memory_blocks"]
 
     active_tile_count_max = int(np.prod(tile_shape))
@@ -74,7 +77,7 @@ def create_writer_slot(writer_context: Any) -> Any:
     )
 
     sparse_pool_shape = (
-        int(np.prod(tile_shape)),
+        initial_tile_capacity,
         kernel_config.TILE_SIZE,
         kernel_config.TILE_SIZE,
         kernel_config.TILE_SIZE,
@@ -163,7 +166,9 @@ def ensure_writer_slot_capacity(
 ) -> None:
     """Grow an idle writer slot's field buffers to match the CPU sparse pool."""
     fields = slot["fields"]
-    current_capacity = next(iter(fields.values()))["pool_shape"][0] if fields else 0
+    current_capacity = (
+        min(field["pool_shape"][0] for field in fields.values()) if fields else 0
+    )
     if required_tile_count <= current_capacity:
         return
 
@@ -174,12 +179,14 @@ def ensure_writer_slot_capacity(
         np.prod(pool_shape) * np.dtype(kernel_config.GPU_FIELD_DTYPE).itemsize
     )
 
-    replacement_fields = {}
     for field_name in writer_context["output_list"]:
         old_field = fields[field_name]
+        if old_field["pool_shape"][0] >= required_tile_count:
+            continue
+
         shm = shared_memory.SharedMemory(create=True, size=pool_nbytes)
         shared_memory_blocks.append(shm)
-        replacement_fields[field_name] = {
+        replacement_field = {
             "array": np.ndarray(
                 pool_shape,
                 dtype=kernel_config.GPU_FIELD_DTYPE,
@@ -190,9 +197,6 @@ def ensure_writer_slot_capacity(
             "shm_name": shm.name,
             "shm": shm,
         }
-
-    for field_name, replacement_field in replacement_fields.items():
-        old_field = fields[field_name]
         old_shm = old_field["shm"]
         fields[field_name] = replacement_field
         del old_field["array"]
