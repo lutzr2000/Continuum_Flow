@@ -22,6 +22,7 @@ def advect_velocity_semi_lagrangian(
     advected_w: Any,
     dt: float,
     delta: float,
+    n_substeps: int,
     tile_map: Any,
     u_initial: float,
     v_initial: float,
@@ -77,6 +78,7 @@ def advect_velocity_semi_lagrangian(
                             float(j),
                             float(k),
                             dt / delta,
+                            n_substeps,
                             nx,
                             ny,
                             nz,
@@ -127,12 +129,16 @@ def update_velocity_maccormack(
     wn: Any,
     delta: float,
     rho: float,
+    n_substeps: int,
     nu: float,
     vorticity_magnitude: Any,
     vorticity_strength: float,
     temperature: Any,
     buoyancy_factor: float,
     t_reference: float,
+    gravity_x: float,
+    gravity_y: float,
+    gravity_z: float,
     tile_map: Any,
     fx_const: Any,
     fy_const: Any,
@@ -225,6 +231,7 @@ def update_velocity_maccormack(
                             float(j),
                             float(k),
                             dt_over_delta,
+                            n_substeps,
                             nx,
                             ny,
                             nz,
@@ -244,6 +251,7 @@ def update_velocity_maccormack(
                             y_depart,
                             z_depart,
                             dt_over_delta,
+                            n_substeps,
                             nx,
                             ny,
                             nz,
@@ -455,7 +463,7 @@ def update_velocity_maccormack(
                     Fy += fy_const * 0.1
                     Fz += fz_const * 0.1
 
-                    Fz += forces.buoyancy_approximation(
+                    buoyancy = forces.buoyancy_approximation(
                         temperature,
                         tile_map,
                         i,
@@ -464,6 +472,9 @@ def update_velocity_maccormack(
                         buoyancy_factor,
                         t_reference,
                     )
+                    Fx += gravity_x * buoyancy
+                    Fy += gravity_y * buoyancy
+                    Fz += gravity_z * buoyancy
 
                     u_raw = corrected_u + diffusion_x + force_coeff * Fx
                     v_raw = corrected_v + diffusion_y + force_coeff * Fy

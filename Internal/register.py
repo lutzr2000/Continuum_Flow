@@ -12,10 +12,12 @@ from .UI.node_tree import (
 
 from .UI.sockets import (
     ContinuumFlowIntSocket,
+    ContinuumFlowReferenceFrameSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
     ContinuumFlowGeometrySocket,
+    ContinuumFlowParticleSystemSocket,
 )
 
 from .UI.node_domain import ContinuumFlowDomainNode
@@ -25,6 +27,8 @@ from .UI.node_forces import (
     ContinuumFlowForceTurbulenceNode,
 )
 from .UI.node_geometry import ContinuumFlowGeometryNode
+from .UI.node_particle_system import ContinuumFlowParticleSystemNode
+from .UI.node_reference_frame import ContinuumFlowReferenceFrameNode
 from .UI.node_obstacle import ContinuumFlowObstacleNode
 from .UI.node_output import (
     ContinuumFlowOutputNode,
@@ -41,7 +45,7 @@ from .Core.export.export_config import (
     sync_ui_animation_state,
     continuum_flow_frame_change_post,
 )
-from .Core import forces
+from .Core import forces, volume_renderer
 from .Core.solver.solver_manager import solver_manager
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from .Core.solver import solver_status
@@ -50,12 +54,16 @@ classes = (
     ContinuumFlowNodeTree,
     CONTINUUM_FLOW_OT_reload,
     ContinuumFlowIntSocket,
+    ContinuumFlowReferenceFrameSocket,
     ContinuumFlowForceSocket,
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
     ContinuumFlowGeometrySocket,
+    ContinuumFlowParticleSystemSocket,
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
+    ContinuumFlowParticleSystemNode,
+    ContinuumFlowReferenceFrameNode,
     ContinuumFlowOutputNode,
     CONTINUUM_FLOW_OT_output_bake_button,
     CONTINUUM_FLOW_OT_output_free_bake_button,
@@ -72,6 +80,15 @@ classes = (
     CONTINUUM_FLOW_OT_free_bake,
     CONTINUUM_FLOW_OT_bake,
 )
+
+
+def preload_solver_backends():
+    """Start the persistent worker and warm available solver runtimes."""
+    solver_manager.request_preload("CPU")
+    if solver_status.gpu_available:
+        solver_manager.request_preload("GPU")
+
+    return None
 
 
 @persistent
@@ -140,6 +157,9 @@ def register():
     if not bpy.app.timers.is_registered(forces.force_preview_timer):
         bpy.app.timers.register(forces.force_preview_timer, first_interval=0.1)
 
+    if not bpy.app.timers.is_registered(preload_solver_backends):
+        bpy.app.timers.register(preload_solver_backends, first_interval=0.1)
+
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
@@ -153,7 +173,11 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(preload_solver_backends):
+        bpy.app.timers.unregister(preload_solver_backends)
+
     solver_manager.shutdown()
+    volume_renderer.clear_live_preview()
     solver_status.gpu_available = False
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):

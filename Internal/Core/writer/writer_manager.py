@@ -158,6 +158,9 @@ class _VDBWriteRequestHandler(socketserver.StreamRequestHandler):
 
                 try:
                     payload = json.loads(line)
+                    capture_preview = getattr(self.server, "capture_preview", None)
+                    if capture_preview is not None:
+                        capture_preview(payload)
                     self.server.write_vdb(payload)
                     response = {"status": "ok"}
                 except Exception as exc:
@@ -179,6 +182,7 @@ class HostVDBWriterServer:
         host="127.0.0.1",
         writer_process_count=None,
         writer_config=None,
+        preview_callback=None,
     ):
         self.host = host
         self._writer_process_count = int(
@@ -190,6 +194,7 @@ class HostVDBWriterServer:
         )
         self._server = _ThreadingTCPServer((host, 0), _VDBWriteRequestHandler)
         self._server.write_vdb = self._writer_pool.write
+        self._server.capture_preview = preview_callback
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property

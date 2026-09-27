@@ -224,6 +224,34 @@ def get_matrix_data(
     return matrix, rate
 
 
+def matrix_rates(times: Any, matrices: Any) -> Any:
+    """Build element-wise interpolation rates for a matrix time series."""
+    if len(matrices) <= 1:
+        return None
+    durations = np.diff(times)
+    rates = np.zeros_like(np.diff(matrices, axis=0))
+    valid = durations > 0
+    rates[valid] = np.diff(matrices, axis=0)[valid] / durations[valid, None, None]
+    return rates
+
+
+def make_matrix_data_relative(
+    times: Any,
+    matrices: Any,
+    reference_times: Any,
+    reference_matrices: Any,
+    reference_rates: Any,
+) -> Any:
+    """Express sampled world matrices in an animated reference-frame space."""
+    relative_matrices = np.empty_like(matrices)
+    for index, (time_value, matrix) in enumerate(zip(times, matrices)):
+        reference_matrix, _ = get_matrix_data(
+            reference_times, reference_matrices, reference_rates, float(time_value)
+        )
+        relative_matrices[index] = np.linalg.inv(reference_matrix) @ matrix
+    return times, relative_matrices, matrix_rates(times, relative_matrices)
+
+
 def get_tile_bounds(
     voxels: Any,
     matrix: Any,
@@ -670,6 +698,138 @@ def update_obstacle_mask(
 
 
 @njit(cache=True, parallel=True)
+def update_source_velocity(
+    base_masks: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    local_velocity_x: float,
+    local_velocity_y: float,
+    local_velocity_z: float,
+) -> None:
+    """Write one source's per-mesh local velocity into shared scratch fields."""
+    local_velocity = np.asarray(
+        (local_velocity_x, local_velocity_y, local_velocity_z), dtype=np.float32
+    )
+    for entry in base_masks:
+        voxels = entry["voxels"]
+        matrix, _ = get_matrix_data(
+            entry["matrix_times"],
+            entry["matrix_matrices"],
+            entry["matrix_rates"],
+            t,
+        )
+        inv = np.linalg.inv(matrix).astype(np.float32)
+        linear = np.asarray(matrix[:3, :3], dtype=np.float32)
+        axis_lengths = np.linalg.norm(linear, axis=0)
+        rotation = linear.copy()
+        for axis in range(3):
+            if axis_lengths[axis] > 1.0e-8:
+                rotation[:, axis] /= axis_lengths[axis]
+        world_velocity = rotation @ local_velocity
+        transform = prepare_cell_transform(
+            inv,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            np.asarray(voxels["origin"], dtype=np.float32),
+        )
+        tile_min, tile_max = get_tile_bounds(
+            voxels,
+            matrix,
+            delta,
+            np.asarray((origin_x, origin_y, origin_z), dtype=np.float32),
+            tile_map.shape,
+        )
+        if np.any(tile_min > tile_max):
+            continue
+        update_source_velocity_cpu(
+            velocity_x,
+            velocity_y,
+            velocity_z,
+            tile_map,
+            voxels["mask"],
+            *transform,
+            np.float32(world_velocity[0]),
+            np.float32(world_velocity[1]),
+            np.float32(world_velocity[2]),
+            int(tile_min[0]),
+            int(tile_min[1]),
+            int(tile_min[2]),
+            int(tile_max[0]),
+            int(tile_max[1]),
+            int(tile_max[2]),
+        )
+
+
+@njit(cache=True, parallel=True)
+def update_source_velocity_cpu(
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    tile_map: Any,
+    local_mask: Any,
+    c0: Any,
+    c1: Any,
+    c2: Any,
+    a00: Any,
+    a01: Any,
+    a02: Any,
+    a10: Any,
+    a11: Any,
+    a12: Any,
+    a20: Any,
+    a21: Any,
+    a22: Any,
+    source_u: Any,
+    source_v: Any,
+    source_w: Any,
+    offset_i: Any,
+    offset_j: Any,
+    offset_k: Any,
+    max_i: Any,
+    max_j: Any,
+    max_k: Any,
+) -> None:
+    """Rasterize a mesh's transformed local source velocity into scratch."""
+    tile_size = kernel_config.TILE_SIZE
+    count_j = max_j - offset_j + 1
+    count_k = max_k - offset_k + 1
+    for flat in prange((max_i - offset_i + 1) * count_j * count_k):
+        ti = flat // (count_j * count_k) + offset_i
+        remainder = flat % (count_j * count_k)
+        tj = remainder // count_k + offset_j
+        tk = remainder % count_k + offset_k
+        tile = tile_map[ti, tj, tk]
+        if tile < 0:
+            continue
+        for i in range(tile_size):
+            gi = ti * tile_size + i
+            for j in range(tile_size):
+                gj = tj * tile_size + j
+                for k in range(tile_size):
+                    gk = tk * tile_size + k
+                    bi = int(math.floor(a00 * gi + a01 * gj + a02 * gk + c0 + 0.5))
+                    bj = int(math.floor(a10 * gi + a11 * gj + a12 * gk + c1 + 0.5))
+                    bk = int(math.floor(a20 * gi + a21 * gj + a22 * gk + c2 + 0.5))
+                    if (
+                        0 <= bi < local_mask.shape[0]
+                        and 0 <= bj < local_mask.shape[1]
+                        and 0 <= bk < local_mask.shape[2]
+                        and local_mask[bi, bj, bk]
+                    ):
+                        velocity_x[tile, i, j, k] = source_u
+                        velocity_y[tile, i, j, k] = source_v
+                        velocity_z[tile, i, j, k] = source_w
+
+
 def update_source_masks_cpu(
     mask: Any,
     tile_map: Any,

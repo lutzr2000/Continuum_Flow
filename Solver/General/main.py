@@ -119,6 +119,24 @@ def prepare_cuda_libraries() -> None:
             return
 
 
+def preload_backend(backend: str) -> None:
+    """Load a solver backend and initialize its process-local runtime."""
+    backend = str(backend or "").strip().upper()
+
+    if backend == "CPU":
+        import Solver.Kernel_CPU.kernel
+
+        return
+
+    if backend == "GPU":
+        prepare_cuda_libraries()
+        from numba import cuda
+        import Solver.Kernel_GPU.kernel
+
+        cuda.current_context()
+        return
+
+
 def run_worker() -> None:
     """
     Serve newline-delimited JSON solver commands on standard input.
@@ -140,6 +158,31 @@ def run_worker() -> None:
 
         if command == "shutdown":
             break
+
+        if command == "preload":
+            backend = str(message.get("backend") or "").strip().upper()
+
+            try:
+                preload_backend(backend)
+                emit_message(
+                    {
+                        "type": "preload_complete",
+                        "backend": backend,
+                        "success": True,
+                    }
+                )
+            except Exception as exc:
+                emit_message(
+                    {
+                        "type": "preload_complete",
+                        "backend": backend,
+                        "success": False,
+                        "message": f"Failed to preload {backend} backend: {exc}",
+                        "traceback": traceback.format_exc(),
+                    }
+                )
+
+            continue
 
         if command == "run_job":
             job_id = int(message.get("job_id", 0) or 0)

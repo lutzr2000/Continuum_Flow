@@ -15,11 +15,13 @@ import Solver.Kernel_GPU.kernel_config as kernel_config
 import Solver.Kernel_GPU.multigrid as multigrid
 import Solver.Kernel_GPU.output as output
 import Solver.Kernel_GPU.pressure_solve as pressure_solve
+import Solver.Kernel_GPU.reference_frame as reference_frame_velocity
 import Solver.Kernel_GPU.scalar_update as scalar_update
 import Solver.Kernel_GPU.sparse_managment as sparse_managment
 import Solver.Kernel_GPU.time_step as time_step
 from Solver.Kernel_GPU.timing import profiled_run
 import Solver.Kernel_GPU.update_masks as update_masks
+import Solver.Kernel_GPU.particles as particles
 import Solver.Kernel_GPU.velocity_update as velocity_update
 import Solver.Kernel_GPU.vorticity as vorticity
 import Solver.Kernel_GPU.voxelise_mesh as voxelise_mesh
@@ -76,6 +78,13 @@ def get_source_values(
             values[value_name][source_idx] = np.asarray(value, dtype=dtype) * scale
 
     values["noise_amplitude"][~values["noise_enabled"]] = 0.0
+    values["velocity_local"] = np.asarray(
+        [
+            str(source.get("velocity_space", "WORLD")).upper() == "LOCAL"
+            for source in source_entries
+        ],
+        dtype=np.bool_,
+    )
     return values
 
 
@@ -127,6 +136,26 @@ def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any
     return values
 
 
+def transform_world_source_velocities(
+    source_values: dict[str, NDArray], inverse_linear: NDArray
+) -> None:
+    """Convert only World Space source velocities into the solver frame."""
+    if source_values["velocity_x"].size == 0:
+        return
+    vectors = np.column_stack(
+        (
+            source_values["velocity_x"],
+            source_values["velocity_y"],
+            source_values["velocity_z"],
+        )
+    )
+    world_mask = ~source_values["velocity_local"]
+    vectors[world_mask] = vectors[world_mask] @ inverse_linear.T
+    source_values["velocity_x"][:] = vectors[:, 0]
+    source_values["velocity_y"][:] = vectors[:, 1]
+    source_values["velocity_z"][:] = vectors[:, 2]
+
+
 def compute_inital_velocity(
     simulation_cfg: dict[str, Any],
 ) -> tuple[float, float, float]:
@@ -175,10 +204,11 @@ def is_animated(base_masks: list[dict[str, Any]]) -> bool:
     as static.
     """
     for entry in base_masks:
-        mesh_object = entry["mesh_object"]
-        animation = mesh_object.get("transform_animation") or {}
-
-        matrices = np.asarray(animation.get("matrices_world", ()))
+        matrices = np.asarray(entry.get("matrix_matrices", ()))
+        if matrices.size == 0:
+            mesh_object = entry["mesh_object"]
+            animation = mesh_object.get("transform_animation") or {}
+            matrices = np.asarray(animation.get("matrices_world", ()))
         if matrices.size == 0:
             continue
         matrices = matrices.reshape(-1, 4, 4)
@@ -238,6 +268,10 @@ def solver(
     # ------------time-------------------
     t = 0.0
     cfl = float(simulation.get("settings", {}).get("cfl", 10.0))
+    tile_dilate = math.ceil(cfl / kernel_config.TILE_SIZE)
+    advection_substeps = max(
+        1, int(simulation.get("settings", {}).get("advection_substeps", 1))
+    )
     t_max = simulation.get("settings").get("simulation_length")
 
     # ------------dimensions------------------
@@ -326,10 +360,39 @@ def solver(
 
     sources = simulation.get("sources") or []
     obstacles = simulation.get("obstacles") or []
+
+    reference_frame = simulation.get("reference_frame") or {}
+    reference_frame["animation_timeline"] = simulation["animation_timeline"]
+    reference_matrix_data = update_masks.prepare_matrix_data(reference_frame)
+    has_reference_frame = bool(reference_frame.get("object_name"))
+    reference_velocity_transfer = float(reference_frame.get("velocity_transfer", 0.0))
+    reference_frame_animated = bool(
+        has_reference_frame
+        and len(reference_matrix_data[1]) > 1
+        and np.any(reference_matrix_data[1][1:] != reference_matrix_data[1][0])
+    )
+    previous_reference_velocity_transform = np.zeros((3, 4), dtype=GPU_FIELD_DTYPE)
+
+    has_particle_sources = any(
+        source.get("particle_system_inputs") for source in sources
+    )
+
     # add times
     for entry in sources + obstacles:
         for obj in entry.get("geometry_inputs") or []:
             obj["animation_timeline"] = simulation["animation_timeline"]
+
+    # particles
+    with timings.section("solver", "particles.load_particle_sources", gpu=True):
+        particle_sources = (
+            particles.load_particle_sources(
+                sources,
+                bake_path,
+                reference_matrix_data if has_reference_frame else None,
+            )
+            if has_particle_sources
+            else [[] for _ in sources]
+        )
 
     with timings.section("solver", "voxelise_mesh.source_masks", gpu=True):
         source_base_masks = []
@@ -358,12 +421,24 @@ def solver(
             times, matrices, rates = update_masks.prepare_matrix_data(
                 entry["mesh_object"]
             )
+            if has_reference_frame:
+                times, matrices, rates = update_masks.make_matrix_data_relative(
+                    times,
+                    matrices,
+                    *reference_matrix_data,
+                )
             entry["matrix_times"] = times
             entry["matrix_matrices"] = matrices
             entry["matrix_rates"] = rates
 
     for entry in obstacle_base_masks:
         times, matrices, rates = update_masks.prepare_matrix_data(entry["mesh_object"])
+        if has_reference_frame:
+            times, matrices, rates = update_masks.make_matrix_data_relative(
+                times,
+                matrices,
+                *reference_matrix_data,
+            )
         entry["matrix_times"] = times
         entry["matrix_matrices"] = matrices
         entry["matrix_rates"] = rates
@@ -444,6 +519,14 @@ def solver(
             source_masks.append(
                 cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
             )
+        geometry_source_masks = (
+            [
+                cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
+                for _ in sources
+            ]
+            if has_particle_sources
+            else source_masks
+        )
 
         source_tile_mask = cuda.to_device(
             np.zeros(tile_shape, dtype=np.bool_)
@@ -452,15 +535,23 @@ def solver(
         obstacle_mask = cuda.to_device(np.zeros(sparse_pool_shape, dtype=np.bool_))
 
         animated_sources = [is_animated(base_masks) for base_masks in source_base_masks]
+        particle_source_flags = [bool(entries) for entries in particle_sources]
         has_animated_sources = any(animated_sources)
 
         # multigrid levels
-        p_levels, b_levels, delta_levels, zero_levels = (
-            multigrid.create_multigrid_levels(
-                shape,
-                delta,
-                min_size=8,
-            )
+        (
+            p_levels,
+            b_levels,
+            delta_levels,
+            multigrid_tile_maps,
+            multigrid_active_tiles,
+            multigrid_active_tile_counts,
+            multigrid_level_shapes,
+        ) = multigrid.create_multigrid_levels(
+            shape,
+            delta,
+            sparse_tile_capacity,
+            min_size=8,
         )
 
     # ------------output------------------
@@ -492,6 +583,25 @@ def solver(
             physics_values = get_simulation_values(simulation, t)
         with timings.section("solver", "get_source_values", gpu=False):
             source_values = get_source_values(simulation, t)
+
+        if has_reference_frame:
+            reference_matrix, _ = update_masks.get_matrix_data(
+                *reference_matrix_data,
+                t,
+            )
+            inverse_reference_linear = np.linalg.inv(reference_matrix)[:3, :3].astype(
+                GPU_FIELD_DTYPE
+            )
+            transform_world_source_velocities(
+                source_values,
+                inverse_reference_linear,
+            )
+        else:
+            inverse_reference_linear = np.eye(3, dtype=GPU_FIELD_DTYPE)
+        gravity = inverse_reference_linear @ np.asarray(
+            (0.0, 0.0, 9.81), dtype=GPU_FIELD_DTYPE
+        )
+
         reference_temperature = physics_values["temperature"]["reference_temperature"]
 
         # ------------Clear scratch-------------------
@@ -513,6 +623,18 @@ def solver(
                 delta,
                 origin,
             )
+
+        if has_particle_sources:
+            with timings.section(
+                "solver", "particles.update_source_tile_mask", gpu=True
+            ):
+                particles.update_source_tile_mask(
+                    source_tile_mask,
+                    particle_sources,
+                    t,
+                    delta,
+                    origin,
+                )
 
         # ------------Start Active tiles-------------------
         if simulate_sparsely:
@@ -553,7 +675,7 @@ def solver(
                 ](
                     base_tile_map,
                     tile_map,
-                    kernel_config.TILE_DILATE,
+                    tile_dilate,
                     free_slot_stack,
                     free_slot_count,
                 )
@@ -566,7 +688,7 @@ def solver(
                 ](
                     base_tile_map,
                     tile_map,
-                    kernel_config.TILE_DILATE,
+                    tile_dilate,
                     free_slot_stack,
                     free_slot_count,
                     reused_slot_stack,
@@ -604,6 +726,11 @@ def solver(
                             (vorticity_magnitude, 0.0),
                             (obstacle_mask, False),
                             *[(mask, False) for mask in source_masks],
+                            *(
+                                [(mask, False) for mask in geometry_source_masks]
+                                if has_particle_sources
+                                else []
+                            ),
                         ],
                         reused_slot_stack,
                         reused_slot_count_host,
@@ -651,7 +778,7 @@ def solver(
                         zero_pool,
                         vorticity_magnitude,
                         obstacle_mask,
-                        *source_masks,
+                        *resized_source_masks,
                     ) = sparse_managment.ensure_pool_capacities(
                         [
                             (u, u_initial),
@@ -676,12 +803,44 @@ def solver(
                             (vorticity_magnitude, 0.0),
                             (obstacle_mask, False),
                             *[(mask, False) for mask in source_masks],
+                            *(
+                                [(mask, False) for mask in geometry_source_masks]
+                                if has_particle_sources
+                                else []
+                            ),
                         ],
                         sparse_tile_capacity,
                         next_sparse_tile_capacity,
                     )
 
+                source_count = len(sources)
+                source_masks = resized_source_masks[:source_count]
+                geometry_source_masks = (
+                    resized_source_masks[source_count:]
+                    if has_particle_sources
+                    else source_masks
+                )
+
                 sparse_tile_capacity = next_sparse_tile_capacity
+
+                # needed for growning the coarse capacities simply by recreating them
+                with timings.section(
+                    "solver", "multigrid.create_multigrid_levels", gpu=True
+                ):
+                    (
+                        p_levels,
+                        b_levels,
+                        delta_levels,
+                        multigrid_tile_maps,
+                        multigrid_active_tiles,
+                        multigrid_active_tile_counts,
+                        multigrid_level_shapes,
+                    ) = multigrid.create_multigrid_levels(
+                        shape,
+                        delta,
+                        sparse_tile_capacity,
+                        min_size=8,
+                    )
 
             with timings.section(
                 "solver", "active_tile_counter.copy_to_host", gpu=True
@@ -692,12 +851,13 @@ def solver(
             next_tile_index_counter_host = total_tile_count
 
         # ------------Update masks-------------------
-        if time_step_count == 0 or has_animated_sources:
+        update_geometry_sources = time_step_count == 0 or has_animated_sources
+        if update_geometry_sources:
             with timings.section(
                 "solver", "update_masks.update_source_masks", gpu=True
             ):
                 update_masks.update_source_masks(
-                    source_masks,
+                    geometry_source_masks,
                     source_base_masks,
                     animated_sources,
                     time_step_count == 0,
@@ -709,20 +869,33 @@ def solver(
                     tile_map,
                 )
 
-        with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
-            if obstacle_base_masks:
-                update_masks.update_obstacle_mask(
-                    obstacle_mask,
-                    obstacle_base_masks,
+        if has_particle_sources:
+            source_mask_update_flags = [
+                time_step_count == 0 or animated or has_particles
+                for animated, has_particles in zip(
+                    animated_sources,
+                    particle_source_flags,
+                )
+            ]
+            with timings.section(
+                "solver", "update_masks.copy_geometry_source_masks", gpu=True
+            ):
+                update_masks.copy_geometry_source_masks(
+                    source_masks,
+                    geometry_source_masks,
+                    source_mask_update_flags,
+                )
+
+            with timings.section(
+                "solver", "particles.add_particles_to_source_masks", gpu=True
+            ):
+                particles.add_particles_to_source_masks(
+                    source_masks,
+                    particle_sources,
                     t,
                     delta,
-                    origin_x,
-                    origin_y,
-                    origin_z,
+                    origin,
                     tile_map,
-                    scratch_A,
-                    scratch_B,
-                    scratch_C,
                 )
 
         # ------------time step-------------------
@@ -741,6 +914,44 @@ def solver(
                 cfl,
                 output_time_step,
             )
+
+        # ------------Reference Frame Velocity Transfer-------------------
+        if reference_velocity_transfer != 0.0 and reference_frame_animated:
+            reference_matrix, reference_rate = update_masks.get_matrix_data(
+                *reference_matrix_data,
+                t,
+            )
+            current_reference_velocity_transform = (
+                np.linalg.inv(reference_matrix) @ reference_rate
+            )[:3, :].astype(GPU_FIELD_DTYPE)
+            reference_velocity_delta = (
+                current_reference_velocity_transform
+                - previous_reference_velocity_transform
+            ) * np.asarray(reference_velocity_transfer, dtype=GPU_FIELD_DTYPE)
+
+            if np.any(reference_velocity_delta != 0.0):
+                with timings.section(
+                    "solver", "reference_frame.transfer_velocity", gpu=True
+                ):
+                    reference_frame_velocity.transfer_velocity[
+                        tile_shape,
+                        kernel_config.THREADS_PER_BLOCK_3D,
+                    ](
+                        u,
+                        v,
+                        w,
+                        tile_map,
+                        *reference_velocity_delta.ravel(),
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                        delta,
+                        nx,
+                        ny,
+                        nz,
+                    )
+
+            previous_reference_velocity_transform = current_reference_velocity_transform
 
         # ------------BCs-------------------
         # ------------Domain BC-------------------
@@ -766,27 +977,34 @@ def solver(
                 nz,
             )
 
-        # ------------Obstacle BC-------------------
-        with timings.section("solver", "obstacle_bc.obstacle_bc", gpu=True):
-            obstacle_bc.obstacle_bc[
-                tile_shape,
-                kernel_config.THREADS_PER_BLOCK_3D,
-            ](
-                u,
-                v,
-                w,
-                smoke,
-                fuel,
-                flame,
-                obstacle_mask,
-                scratch_A,
-                scratch_B,
-                scratch_C,
-                tile_map,
-            )
-
         # ------------Source BC-------------------
         for source_idx, source_mask in enumerate(source_masks):
+            velocity_local = bool(source_values["velocity_local"][source_idx])
+            if velocity_local:
+                with timings.section(
+                    "solver", "update_masks.update_source_velocity", gpu=True
+                ):
+                    sparse_managment.reset_pools(
+                        (scratch_A, scratch_B, scratch_C),
+                        zero_pool,
+                        next_tile_index_counter_host,
+                    )
+                    update_masks.update_source_velocity(
+                        source_base_masks[source_idx],
+                        t,
+                        delta,
+                        origin_x,
+                        origin_y,
+                        origin_z,
+                        tile_map,
+                        scratch_A,
+                        scratch_B,
+                        scratch_C,
+                        source_values["velocity_x"][source_idx],
+                        source_values["velocity_y"][source_idx],
+                        source_values["velocity_z"][source_idx],
+                    )
+
             with timings.section("solver", "source_bc.source_bc", gpu=True):
                 source_bc.source_bc[
                     tile_shape,
@@ -806,11 +1024,86 @@ def solver(
                     source_values["velocity_x"][source_idx],
                     source_values["velocity_y"][source_idx],
                     source_values["velocity_z"][source_idx],
+                    velocity_local,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
                     source_values["noise_scale"][source_idx],
                     source_values["noise_amplitude"][source_idx],
                     source_values["noise_seed"][source_idx],
                     dt,
                 )
+
+            if (
+                has_particle_sources
+                and source_values["velocity_x"][source_idx] == 0.0
+                and source_values["velocity_y"][source_idx] == 0.0
+                and source_values["velocity_z"][source_idx] == 0.0
+            ):
+                with timings.section(
+                    "solver", "particles.reset_particle_velocity_base", gpu=True
+                ):
+                    particles.reset_particle_velocity(
+                        u,
+                        v,
+                        w,
+                        particle_sources[source_idx],
+                        t,
+                        delta,
+                        origin,
+                        tile_map,
+                    )
+
+        if has_particle_sources:
+            with timings.section(
+                "solver", "particles.transfer_particle_velocities", gpu=True
+            ):
+                particles.transfer_particle_velocities(
+                    u,
+                    v,
+                    w,
+                    particle_sources,
+                    t,
+                    delta,
+                    origin,
+                    tile_map,
+                )
+
+        # ------------Update masks-------------------
+        with timings.section("solver", "update_masks.update_obstacle_mask", gpu=True):
+            if obstacle_base_masks:
+                update_masks.update_obstacle_mask(
+                    obstacle_mask,
+                    obstacle_base_masks,
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    tile_map,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                )
+
+        # ------------Obstacle BC-------------------
+        with timings.section("solver", "obstacle_bc.obstacle_bc", gpu=True):
+            obstacle_bc.obstacle_bc[
+                tile_shape,
+                kernel_config.THREADS_PER_BLOCK_3D,
+            ](
+                u,
+                v,
+                w,
+                smoke,
+                fuel,
+                flame,
+                obstacle_mask,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                tile_map,
+            )
 
         # ------------Clear scratch-------------------
         with timings.section("solver", "sparse_managment.reset_pools", gpu=True):
@@ -886,6 +1179,7 @@ def solver(
                 scratch_C,
                 dt,
                 delta,
+                advection_substeps,
                 tile_map,
                 u_initial,
                 v_initial,
@@ -914,12 +1208,16 @@ def solver(
                 w_work,
                 delta,
                 physics_values["fluid"]["density"],
+                advection_substeps,
                 physics_values["fluid"]["viscosity"],
                 vorticity_magnitude,
                 physics_values["extras"]["vorticity"],
                 temperature,
                 physics_values["temperature"]["buoyancy"],
                 reference_temperature,
+                gravity[0],
+                gravity[1],
+                gravity[2],
                 tile_map,
                 fx_const,
                 fy_const,
@@ -974,11 +1272,14 @@ def solver(
                 p_levels,
                 b_levels,
                 delta_levels,
+                multigrid_tile_maps,
+                multigrid_active_tiles,
+                multigrid_active_tile_counts,
+                multigrid_level_shapes,
                 simulation.get("settings").get("iterations"),
                 rhs_partial_sums,
                 rhs_partial_counts,
                 rhs_mean_buffer,
-                zero_levels,
                 nx,
                 ny,
                 nz,
@@ -1024,6 +1325,7 @@ def solver(
                 scratch_B,
                 scratch_C,
                 delta,
+                advection_substeps,
                 reference_temperature,
                 tile_map,
                 u_initial,
@@ -1055,6 +1357,7 @@ def solver(
                 fuel_work,
                 flame,
                 delta,
+                advection_substeps,
                 physics_values["temperature"]["dissipation"],
                 physics_values["temperature"]["production_rate"],
                 physics_values["smoke"]["dissipation"],

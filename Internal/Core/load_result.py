@@ -2,6 +2,9 @@ import re
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
+
+from . import reference_frame
 
 
 def normalize_directory_path(path_value):
@@ -14,95 +17,21 @@ def normalize_directory_path(path_value):
         return None
 
 
-class VDBWatcher:
+class VDBResultManager:
     def __init__(self):
-        self.watch_dir = None
-        self.running = False
         self.volume_object = None
-        self.sequence_files = []
-        self.progress_callback = None
         self.loaded_output_directory = None
-        self.live_preview_enabled = False
         self.start_frame_index = 1
 
-    # -------------- start ----------------
-    def start(
-        self,
-        watch_dir,
-        start_frame_index=1,
-        live_preview_enabled=False,
-        progress_callback=None,
-    ):
+    def load_bake(self, watch_dir, start_frame_index=1, simulation_node=None):
         self.watch_dir = Path(watch_dir).resolve()
         self.volume_object = None
         self.loaded_output_directory = None
-        self.sequence_files.clear()
-        self.progress_callback = progress_callback
-        self.live_preview_enabled = bool(live_preview_enabled)
         self.start_frame_index = int(start_frame_index)
-        self.running = True
-
-        bpy.app.timers.register(self.timer, first_interval=0.5)
-
-    # -------------- running ----------------
-    def timer(self):
-        if not self.running:
-            return None
-
-        fps = bpy.context.scene.render.fps or 24
-        interval = 1.0 / fps
-
-        if not self.watch_dir or not self.watch_dir.exists():
-            return interval
-
+        self.reference_object = reference_frame.linked_reference_object(simulation_node)
         ordered_vdbs = self.ordered_vdbs()
-
-        contiguous_vdbs = []
-        expected_index = self.start_frame_index
-
-        for path in ordered_vdbs:
-            frame_index = self.get_frame_index(path)
-
-            if frame_index is None:
-                continue
-            if frame_index < expected_index:
-                continue
-            if frame_index != expected_index:
-                break
-
-            contiguous_vdbs.append(path)
-            expected_index += 1
-
-        self.sequence_files = contiguous_vdbs
-
-        if contiguous_vdbs:
-            latest_vdb = contiguous_vdbs[-1]
-
-            if self.live_preview_enabled:
-                needs_reload = (
-                    not self.vdb_is_valid()
-                    or getattr(self.volume_object.data, "filepath", "")
-                    != str(contiguous_vdbs[0])
-                    or not bool(getattr(self.volume_object.data, "is_sequence", False))
-                    or int(getattr(self.volume_object.data, "frame_duration", 0))
-                    != len(contiguous_vdbs)
-                )
-
-                if needs_reload:
-                    self.load_full_sequence(contiguous_vdbs)
-                else:
-                    bpy.context.scene.frame_set(
-                        self.get_frame_index(latest_vdb) or self.start_frame_index
-                    )
-            else:
-                bpy.context.scene.frame_set(
-                    self.get_frame_index(latest_vdb) or self.start_frame_index
-                )
-
-        if self.progress_callback is not None:
-            self.progress_callback(len(contiguous_vdbs))
-
-        return interval
+        if ordered_vdbs:
+            self.load_full_sequence(ordered_vdbs)
 
     def ordered_vdbs(self):
         ordered = []
@@ -123,17 +52,6 @@ class VDBWatcher:
             return None
         return int(match.group(1))
 
-    def vdb_is_valid(self):
-        volume_object = self.volume_object
-        if volume_object is None:
-            return False
-
-        try:
-            volume_data = getattr(volume_object, "data", None)
-            return volume_data is not None
-        except Exception:
-            return False
-
     def load_full_sequence(self, ordered_vdbs):
         first_vdb = ordered_vdbs[0]
         volume = self.load_volume_data(first_vdb)
@@ -152,9 +70,8 @@ class VDBWatcher:
             bpy.context.scene.frame_set(last_frame_index)
 
     def load_volume_data(self, filepath):
-        if not self.vdb_is_valid():
-            bpy.ops.object.volume_import(filepath=str(filepath))
-            self.volume_object = bpy.context.object
+        bpy.ops.object.volume_import(filepath=str(filepath))
+        self.volume_object = bpy.context.object
 
         volume_object = self.volume_object
 
@@ -163,7 +80,13 @@ class VDBWatcher:
 
         self.loaded_output_directory = str(self.watch_dir)
 
+        local_matrix = volume_object.matrix_world.copy()
+        local_matrix.translation = (0.0, 0.0, 0.0)
         volume_object.location = (0.0, 0.0, 0.0)
+        if self.reference_object is not None:
+            volume_object.parent = self.reference_object
+            volume_object.matrix_parent_inverse = Matrix.Identity(4)
+            volume_object.matrix_basis = local_matrix
         volume_object["continuum_flow_output_directory"] = self.loaded_output_directory
 
         volume_data = getattr(volume_object, "data", None)
@@ -174,22 +97,6 @@ class VDBWatcher:
             )
 
         return volume_data
-
-    # -------------- stop ----------------
-    def stop(self):
-        self.running = False
-        self.progress_callback = None
-
-    # -------------- finish ----------------
-    def finish_bake(self):
-        ordered_vdbs = self.ordered_vdbs()
-        self.sequence_files = ordered_vdbs
-
-        if ordered_vdbs:
-            self.load_full_sequence(ordered_vdbs)
-
-        if self.progress_callback is not None:
-            self.progress_callback(len(ordered_vdbs))
 
     # -------------- clearing ----------------
     def clear_vdb_data(self, output_directory):
@@ -205,7 +112,6 @@ class VDBWatcher:
 
         if self.loaded_output_directory == normalized_output_directory:
             self.volume_object = None
-            self.sequence_files.clear()
             self.loaded_output_directory = None
 
     def remove_vdbs(self, volume_object):

@@ -1,5 +1,6 @@
 import bpy
 from .domain_grid import dimensions
+from . import reference_frame
 import gpu
 from gpu_extras.batch import batch_for_shader
 
@@ -19,6 +20,7 @@ class ContinuumFlow_OT_viewer_toggle_domain(bpy.types.Operator):
     def execute(self, context):
         node = getattr(context, "node")
 
+        simulation_node = get_linked_simulation_node(node)
         domain_node = get_linked_domain_node(node)
         node_tree = getattr(domain_node, "id_data", None)
         if domain_node is None:
@@ -29,7 +31,7 @@ class ContinuumFlow_OT_viewer_toggle_domain(bpy.types.Operator):
             disable_domain_preview()
             self.report({"INFO"}, "Domain preview disabled.")
         else:
-            enable_domain_preview(domain_node, node_tree)
+            enable_domain_preview(domain_node, simulation_node, node_tree)
             self.report({"INFO"}, "Domain preview enabled.")
         return {"FINISHED"}
 
@@ -53,7 +55,21 @@ def get_linked_domain_node(node):
                 return domain_node
 
 
-def enable_domain_preview(domain_node, node_tree):
+def get_linked_simulation_node(node):
+    result_socket = node.inputs.get("Result")
+    if result_socket is None:
+        return None
+    for link in result_socket.links:
+        simulation_node = getattr(link, "from_node", None)
+        if (
+            getattr(simulation_node, "bl_idname", "")
+            == "CONTINUUM_FLOW_SIMULATION_NODE"
+        ):
+            return simulation_node
+    return None
+
+
+def enable_domain_preview(domain_node, simulation_node, node_tree):
     """
     Enable the preview for the given domain node.
     """
@@ -62,6 +78,7 @@ def enable_domain_preview(domain_node, node_tree):
     current_drawn_domain = {
         "node_tree_name": str(getattr(node_tree, "name", "")),
         "node_name": str(getattr(domain_node, "name", "")),
+        "simulation_node_name": str(getattr(simulation_node, "name", "")),
     }
 
     if draw_handler is None:
@@ -117,14 +134,26 @@ def draw_preview():
     """
     Draw the active domain preview in the 3D viewport.
     """
+    if not current_drawn_domain:
+        return
     node_tree = bpy.data.node_groups.get(current_drawn_domain.get("node_tree_name", ""))
+    if node_tree is None:
+        disable_domain_preview()
+        return
     active_domain = node_tree.nodes.get(current_drawn_domain.get("node_name", ""))
+    simulation_node = node_tree.nodes.get(
+        current_drawn_domain.get("simulation_node_name", "")
+    )
 
     if not overlay_enabeld():
         return
 
     try:
         domain_lines, cell_lines = build_segments(active_domain)
+        domain_lines = reference_frame.transform_positions(
+            domain_lines, simulation_node
+        )
+        cell_lines = reference_frame.transform_positions(cell_lines, simulation_node)
     except Exception:
         disable_domain_preview()
         return

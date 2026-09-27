@@ -36,6 +36,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
             "Solver",
             (
                 "iterations",
+                "advection_substeps",
                 "simulate_sparsely",
                 "adaptive_domain_threshold",
             ),
@@ -53,22 +54,31 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     )  # type: ignore
     start_frame: IntProperty(name="Start Frame", default=1, min=0, description="Starting frame of the simulation", options=set(), update=_update_simulation_start_frame)  # type: ignore
     end_frame: IntProperty(name="End Frame", default=250, min=2, description="End frame of the simulation", options=set(), update=_update_simulation_end_frame)  # type: ignore
-    cfl: FloatProperty(name="CFL", default=10.0, min=0.0, soft_min=0.0, soft_max=10.0, precision=3, description="Maximum CFL number used for adaptive timesteps", options=set())  # type: ignore
+    cfl: FloatProperty(name="CFL", default=10.0, min=0.1, soft_min=0.1, soft_max=30.0, precision=3, description="Maximum CFL number used for adaptive timesteps", options=set())  # type: ignore
     iterations: IntProperty(name="Iterations", default=1, min=1, max=10, soft_min=1, soft_max=10, description="Number of solver itterations", options=set())  # type: ignore
+    advection_substeps: IntProperty(name="Advection Substeps", default=1, min=1, soft_min=1, soft_max=10, description="Number of integration substeps used for advection tracing", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
     adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.001, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
-            sockets.ContinuumFlowForceSocket.bl_idname
-            if name == "Forces"
-            else sockets.ContinuumFlowLinkSocket.bl_idname
+            sockets.ContinuumFlowReferenceFrameSocket.bl_idname
+            if name == "Reference Frame"
+            else (
+                sockets.ContinuumFlowForceSocket.bl_idname
+                if name == "Forces"
+                else sockets.ContinuumFlowLinkSocket.bl_idname
+            )
         )
         return self._ensure_socket(
             self.inputs, socket_type, name, multi_input=multi_input
         )
 
     def _sync_node(self):
+        reference_frame = self._ensure_input_socket("Reference Frame")
+        reference_frame_index = list(self.inputs).index(reference_frame)
+        if reference_frame_index != 0:
+            self.inputs.move(reference_frame_index, 0)
         self._ensure_input_socket("Domain")
         self._ensure_input_socket("Physics")
         self._ensure_input_socket("Obstacles")

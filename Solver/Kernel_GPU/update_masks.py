@@ -75,6 +75,9 @@ def update_source_tile_mask(
                 np.asarray(source_tile_mask.shape) - 1,
             )
 
+            if np.any(tile_min > tile_max):
+                continue
+
             mark_source_tiles[
                 (
                     int(tile_max[0] - tile_min[0] + 1),
@@ -88,6 +91,23 @@ def update_source_tile_mask(
                 int(tile_min[1]),
                 int(tile_min[2]),
             )
+
+
+def copy_geometry_source_masks(
+    source_masks: list[Any],
+    geometry_source_masks: list[Any],
+    update_flags: list[bool],
+) -> None:
+    """
+    Reset only changed combined masks from their cached geometry masks.
+    """
+    for source_mask, geometry_mask, update in zip(
+        source_masks,
+        geometry_source_masks,
+        update_flags,
+    ):
+        if update:
+            source_mask.copy_to_device(geometry_mask)
 
 
 @cuda.jit(cache=True)
@@ -208,6 +228,37 @@ def get_matrix_data(times: Any, matrices: Any, rates: Any, time_value: float) ->
     matrix = matrices[idx] + rate * ((times[idx + 1] - times[idx]) * alpha)
 
     return matrix, rate
+
+
+def matrix_rates(times: Any, matrices: Any) -> Any:
+    """Build element-wise interpolation rates for a matrix time series."""
+    if len(matrices) <= 1:
+        return None
+    durations = np.diff(times)
+    rates = np.zeros_like(np.diff(matrices, axis=0))
+    valid = durations > 0
+    rates[valid] = np.diff(matrices, axis=0)[valid] / durations[valid, None, None]
+    return rates
+
+
+def make_matrix_data_relative(
+    times: Any,
+    matrices: Any,
+    reference_times: Any,
+    reference_matrices: Any,
+    reference_rates: Any,
+) -> Any:
+    """Express sampled world matrices in an animated reference-frame space."""
+    relative_matrices = np.empty_like(matrices)
+    for index, (time_value, matrix) in enumerate(zip(times, matrices)):
+        reference_matrix, _ = get_matrix_data(
+            reference_times,
+            reference_matrices,
+            reference_rates,
+            float(time_value),
+        )
+        relative_matrices[index] = np.linalg.inv(reference_matrix) @ matrix
+    return times, relative_matrices, matrix_rates(times, relative_matrices)
 
 
 def get_tile_bounds(
@@ -671,6 +722,139 @@ def update_obstacle_mask(
             int(tile_min[1]),
             int(tile_min[2]),
         )
+
+
+def update_source_velocity(
+    base_masks: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    local_velocity_x: float,
+    local_velocity_y: float,
+    local_velocity_z: float,
+) -> None:
+    """Write one source's per-mesh local velocity into shared scratch fields."""
+    local_velocity = np.asarray(
+        (local_velocity_x, local_velocity_y, local_velocity_z), dtype=np.float32
+    )
+
+    for entry in base_masks:
+        voxels = entry["voxels"]
+        matrix, _ = get_matrix_data(
+            entry["matrix_times"],
+            entry["matrix_matrices"],
+            entry["matrix_rates"],
+            t,
+        )
+        inv = np.linalg.inv(matrix).astype(np.float32)
+        linear = np.asarray(matrix[:3, :3], dtype=np.float32)
+        axis_lengths = np.linalg.norm(linear, axis=0)
+        rotation = linear.copy()
+        for axis in range(3):
+            if axis_lengths[axis] > 1.0e-8:
+                rotation[:, axis] /= axis_lengths[axis]
+        world_velocity = rotation @ local_velocity
+
+        transform = prepare_cell_transform(
+            inv,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            np.asarray(voxels["origin"], dtype=np.float32),
+        )
+        tile_min, tile_max = get_tile_bounds(
+            voxels,
+            matrix,
+            delta,
+            np.asarray((origin_x, origin_y, origin_z), dtype=np.float32),
+            tile_map.shape,
+        )
+        if np.any(tile_min > tile_max):
+            continue
+
+        blocks = tuple(int(tile_max[i] - tile_min[i] + 1) for i in range(3))
+        update_source_velocity_gpu[blocks, kernel_config.THREADS_PER_BLOCK_3D](
+            velocity_x,
+            velocity_y,
+            velocity_z,
+            tile_map,
+            voxels["mask"],
+            *transform,
+            np.float32(world_velocity[0]),
+            np.float32(world_velocity[1]),
+            np.float32(world_velocity[2]),
+            int(tile_min[0]),
+            int(tile_min[1]),
+            int(tile_min[2]),
+        )
+
+
+@cuda.jit(cache=True)
+def update_source_velocity_gpu(
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    tile_map: Any,
+    local_mask: Any,
+    c0: Any,
+    c1: Any,
+    c2: Any,
+    a00: Any,
+    a01: Any,
+    a02: Any,
+    a10: Any,
+    a11: Any,
+    a12: Any,
+    a20: Any,
+    a21: Any,
+    a22: Any,
+    source_u: Any,
+    source_v: Any,
+    source_w: Any,
+    offset_i: Any,
+    offset_j: Any,
+    offset_k: Any,
+) -> None:
+    """Rasterize a mesh's transformed local source velocity into scratch."""
+    ti = cuda.blockIdx.x + offset_i
+    tj = cuda.blockIdx.y + offset_j
+    tk = cuda.blockIdx.z + offset_k
+    k = cuda.threadIdx.x
+    j = cuda.threadIdx.y
+    i = cuda.threadIdx.z
+
+    if ti >= tile_map.shape[0] or tj >= tile_map.shape[1] or tk >= tile_map.shape[2]:
+        return
+    tile = tile_map[ti, tj, tk]
+    if tile < 0:
+        return
+
+    tile_size = kernel_config.TILE_SIZE
+    if i >= tile_size or j >= tile_size or k >= tile_size:
+        return
+    gi = ti * tile_size + i
+    gj = tj * tile_size + j
+    gk = tk * tile_size + k
+    bi = int(math.floor(a00 * gi + a01 * gj + a02 * gk + c0 + 0.5))
+    bj = int(math.floor(a10 * gi + a11 * gj + a12 * gk + c1 + 0.5))
+    bk = int(math.floor(a20 * gi + a21 * gj + a22 * gk + c2 + 0.5))
+
+    if (
+        0 <= bi < local_mask.shape[0]
+        and 0 <= bj < local_mask.shape[1]
+        and 0 <= bk < local_mask.shape[2]
+        and local_mask[bi, bj, bk]
+    ):
+        velocity_x[tile, i, j, k] = source_u
+        velocity_y[tile, i, j, k] = source_v
+        velocity_z[tile, i, j, k] = source_w
 
 
 @cuda.jit(cache=True)

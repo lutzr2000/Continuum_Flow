@@ -42,4 +42,10 @@ A drifting car.
    :class: block-image-left
    :width: 600px
 
+06 flame thrower
+----------------
+An example for a flamethrower. This uses the particle system node. It is best to bake the particle system first.
 
+.. figure:: ../images/06_flame_thrower.jpg
+   :class: block-image-left
+   :width: 600px

@@ -1,8 +1,8 @@
 from pathlib import Path
 import bpy
-import json
+import re
 from datetime import datetime, timezone
-from . import export_geometry
+from . import export_geometry, export_particles
 from .. import viewer
 from ..domain_grid import grid_shape
 from bpy.app.handlers import persistent
@@ -80,6 +80,7 @@ def export_config_dict(config_dict):
     export_directory = create_bake_subdirectory(export_root_directory, config_dict)
     set_subdirectory_paths(config_dict, export_directory)
     export_geomtry_stls(config_dict, export_directory)
+    export_particle_system_npzs(config_dict, export_directory)
 
     return export_directory, config_dict
 
@@ -140,6 +141,50 @@ def export_geomtry_stls(config_dict, export_directory):
                 )
 
 
+def export_particle_system_npzs(config_dict, export_directory):
+    """
+    Export every particle system linked to a source as an uncompressed NPZ file.
+    """
+    simulation = config_dict["simulation"]
+    settings = simulation.get("settings") or {}
+    timeline = simulation.get("animation_timeline") or {}
+    start_frame = int(settings.get("start_frame", 1))
+    end_frame = int(settings.get("end_frame", start_frame))
+    fps = max(1, int(timeline.get("fps", 24)))
+    particle_dir = Path(export_directory) / "particles"
+    seen = set()
+
+    for source in simulation.get("sources", []):
+        for particle_input in source.get("particle_system_inputs", []):
+            object_name = particle_input.get("object_name")
+            particle_system_name = particle_input.get("particle_system_name")
+            particle_file = particle_input.get("particle_file")
+            key = (object_name, particle_system_name, particle_file)
+
+            if (
+                not object_name
+                or not particle_system_name
+                or not particle_file
+                or key in seen
+            ):
+                continue
+
+            seen.add(key)
+            source_object = bpy.data.objects.get(object_name)
+            if source_object is None:
+                continue
+
+            particle_dir.mkdir(parents=True, exist_ok=True)
+            export_particles.export_particle_system_as_npz(
+                source_object=source_object,
+                particle_system_name=particle_system_name,
+                file_path=Path(export_directory) / particle_file,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                fps=fps,
+            )
+
+
 # -------------- build ----------------
 def build_config_dict(context, simulation_node):
     """
@@ -154,6 +199,7 @@ def build_config_dict(context, simulation_node):
         },
         "simulation": build_entries(simulation_node),
         "geometry_nodes": get_geometry_nodes(node_tree),
+        "particle_system_nodes": get_particle_system_nodes(node_tree),
     }
     return config_dict
 
@@ -165,6 +211,12 @@ def build_entries(simulation_node):
     domain_node = linked_node(
         simulation_node,
         "Domain",
+        "input",
+    )
+
+    reference_frame_node = linked_node(
+        simulation_node,
+        "Reference Frame",
         "input",
     )
 
@@ -205,15 +257,6 @@ def build_entries(simulation_node):
         ),
     )
 
-    viewer_node = next(
-        (
-            node
-            for node in result_nodes
-            if node.bl_idname == "CONTINUUM_FLOW_VIEWER_NODE"
-        ),
-        None,
-    )
-
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
     simulation_fps = max(1, int(getattr(output_node, "fps", 24)))
@@ -232,6 +275,9 @@ def build_entries(simulation_node):
             "simulation_length": simulation_length,
             "cfl": float(getattr(simulation_node, "cfl", 10.0)),
             "iterations": int(simulation_node.iterations),
+            "advection_substeps": int(
+                getattr(simulation_node, "advection_substeps", 1)
+            ),
             "simulate_sparsely": bool(
                 getattr(simulation_node, "simulate_sparsely", True)
             ),
@@ -243,6 +289,11 @@ def build_entries(simulation_node):
             "fps": simulation_fps,
             "times": simulation_times,
         },
+        "reference_frame": build_reference_frame_entry(
+            reference_frame_node,
+            start_frame,
+            end_frame,
+        ),
         "domain": build_domain_node_entries(domain_node),
         "physics": (
             build_physics_node_entries(
@@ -280,7 +331,30 @@ def build_entries(simulation_node):
             for node in force_nodes
         ],
         "outputs": [build_output_node_entries(output_node)],
-        "viewers": [build_viewer_node_entries(viewer_node)],
+    }
+
+
+def build_reference_frame_entry(node, start_frame, end_frame):
+    """Serialize the selected reference object and its evaluated world matrices."""
+    if node is None:
+        return {
+            "object_name": None,
+            "velocity_transfer": 0.0,
+            "transform_animation": {},
+        }
+
+    source_object = getattr(node, "source_object", None)
+    object_name = getattr(source_object, "name", None)
+    transform_samples = get_geometry_transforms(
+        [node],
+        start_frame,
+        end_frame,
+    )
+    return {
+        "node_name": node.name,
+        "object_name": object_name,
+        "velocity_transfer": float(getattr(node, "velocity_transfer", 0.0)),
+        "transform_animation": transform_samples.get(object_name, {}),
     }
 
 
@@ -371,6 +445,11 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "Geometry",
         direction="input",
     )
+    particle_system_nodes = multiple_linked_nodes(
+        node,
+        "Particle Systems",
+        direction="input",
+    )
 
     return {
         "node_name": node.name,
@@ -382,6 +461,7 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "noise_scale": float(getattr(node, "noise_scale", 1.0)),
         "noise_seed": int(getattr(node, "noise_seed", 0)),
         "noise_amplitude": float(getattr(node, "noise_amplitude", 0.0)),
+        "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": safe_float_vector(node.velocity),
         "animations": animations,
         "animated_values": animated_values,
@@ -390,6 +470,9 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
             start_frame,
             end_frame,
             fps,
+        ),
+        "particle_system_inputs": build_particle_system_entries(
+            particle_system_nodes,
         ),
     }
 
@@ -446,6 +529,47 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
         "geometry_inputs": geometry_inputs,
         "shape": "mesh" if geometry_inputs else "empty",
     }
+
+
+def build_particle_system_entries(particle_system_nodes):
+    """
+    Serialize particle-system node references for a source
+    and generate filesystem-safe NPZ filenames.
+    """
+    entries = []
+
+    for particle_node in particle_system_nodes:
+        source_object = getattr(particle_node, "source_object", None)
+
+        particle_system_name = str(getattr(particle_node, "particle_system", "") or "")
+
+        node_name = particle_node.name
+
+        safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(node_name)).strip(". ")
+
+        particle_file_name = f"{safe_name or 'particle_system'}.npz"
+
+        entries.append(
+            {
+                "node_name": node_name,
+                "object_name": (
+                    source_object.name if source_object is not None else None
+                ),
+                "particle_system_name": particle_system_name or None,
+                "radius": float(getattr(particle_node, "radius", 0.0)),
+                "velocity_transfer": float(
+                    getattr(particle_node, "velocity_transfer", 1.0)
+                ),
+                "particle_file": (
+                    f"particles/{particle_file_name}"
+                    if source_object is not None and particle_system_name
+                    else None
+                ),
+                "particle_format": "npz",
+            }
+        )
+
+    return entries
 
 
 def build_force_entries(node, start_frame, end_frame, fps):
@@ -513,15 +637,6 @@ def build_output_node_entries(node):
         },
         "performance": {},
         "output_path": output_path,
-    }
-
-
-def build_viewer_node_entries(node):
-    """
-    Serialize one viewer node.
-    """
-    return {
-        "live_preview": bool(getattr(node, "live_preview", True)),
     }
 
 
@@ -639,6 +754,31 @@ def get_geometry_nodes(node_tree):
             }
         )
     return geometry_entries
+
+
+def get_particle_system_nodes(node_tree):
+    """
+    Collect all particle-system nodes for visibility in the exported JSON.
+    """
+    entries = []
+    for node in node_tree.nodes:
+        if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_PARTICLE_SYSTEM_NODE":
+            continue
+        source_object = getattr(node, "source_object", None)
+        entries.append(
+            {
+                "node_name": node.name,
+                "object_name": (
+                    source_object.name if source_object is not None else None
+                ),
+                "particle_system_name": (
+                    str(getattr(node, "particle_system", "") or "") or None
+                ),
+                "radius": float(getattr(node, "radius", 0.0)),
+                "velocity_transfer": float(getattr(node, "velocity_transfer", 1.0)),
+            }
+        )
+    return entries
 
 
 # -------------- animation data ----------------

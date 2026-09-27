@@ -1,17 +1,17 @@
 import bpy
 import shutil
 import threading
-import time
 import sys
 from pathlib import Path
 
 from .export import export_config
 from . import load_result
+from . import volume_renderer
 from .solver.solver_manager import solver_manager
 from .solver import solver_status
 from .writer import writer_manager
 
-VDBWatcher = load_result.VDBWatcher()
+VDBResults = load_result.VDBResultManager()
 status_workspace = None
 
 
@@ -44,17 +44,34 @@ def get_linked_simulation_nodes(output_node):
     return simulation_nodes
 
 
-def get_linked_viewer_node(simulation_node):
+def get_live_preview_node(simulation_node):
     result_socket = simulation_node.outputs.get("Result")
-    if result_socket is None or not result_socket.is_linked:
-        return []
+    if result_socket is None:
+        return None
 
-    viewer_nodes = []
-    for link in result_socket.links:
-        viewer_node = getattr(link, "to_node", None)
-        if getattr(viewer_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE":
-            viewer_nodes.append(viewer_node)
-    return viewer_nodes
+    return next(
+        (
+            link.to_node
+            for link in result_socket.links
+            if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
+            and link.to_node.live_preview
+        ),
+        None,
+    )
+
+
+def update_live_preview_settings(simulation_node):
+    viewer_node = get_live_preview_node(simulation_node)
+    volume_renderer.set_enabled(viewer_node is not None)
+    if viewer_node is None:
+        return
+
+    volume_renderer.set_preview_settings(
+        new_smoke_density=viewer_node.preview_smoke_density,
+        new_smoke_color=viewer_node.preview_smoke_color,
+        new_flame_density=viewer_node.preview_flame_density,
+        new_flame_color=viewer_node.preview_flame_color,
+    )
 
 
 # -------------- progress managment ----------------
@@ -136,16 +153,19 @@ def output_directory_has_vdbs(output_directory):
     )
 
 
+def count_contiguous_vdb_frames(output_directory, start_frame):
+    if output_directory is None or not output_directory.is_dir():
+        return 0
+
+    frame_count = 0
+    frame_index = int(start_frame)
+    while (output_directory / f"frame_{frame_index:06d}.vdb").is_file():
+        frame_count += 1
+        frame_index += 1
+    return frame_count
+
+
 # -------------- bake ----------------
-def is_live_preview_enabled(simulation_node):
-    viewer_nodes = get_linked_viewer_node(simulation_node)
-    if not viewer_nodes:
-        return False
-    return any(
-        bool(getattr(viewer_node, "live_preview", True)) for viewer_node in viewer_nodes
-    )
-
-
 class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
     bl_label = "Bake"
@@ -193,6 +213,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "TIMER" and self.job_id is not None:
+            self.update_bake_progress()
             job_result = solver_manager.get_job_result(self.job_id)
             if job_result is not None:
                 self.job_result = job_result
@@ -225,14 +246,13 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 bpy.context.window_manager.event_timer_remove(self.event_timer)
                 self.event_timer = None
             self.event_timer = None
-            bake_completed_successfully = (
-                not self.cancel_requested
-                and bool(self.job_result)
-                and bool(self.job_result.get("success", False))
+            should_load_result = self.cancel_requested or (
+                bool(self.job_result) and bool(self.job_result.get("success", False))
             )
-
             if self.writer_server:
                 self.writer_server.stop()
+
+            volume_renderer.set_enabled(False)
 
             if self.cancel_flag_path:
                 try:
@@ -240,13 +260,18 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 except OSError:
                     pass
 
-            if bake_completed_successfully:
-                VDBWatcher.finish_bake()
+            if should_load_result and self.output_directory is not None:
+                VDBResults.load_bake(
+                    self.output_directory,
+                    start_frame_index=self.start_frame,
+                    simulation_node=self.simulation_node,
+                )
 
-            VDBWatcher.stop()
-
-            geometry_directory = Path(self.bake_directory).resolve() / "geometry"
-            shutil.rmtree(geometry_directory)
+            bake_directory = Path(self.bake_directory).resolve()
+            for temporary_directory_name in ("geometry", "particles"):
+                temporary_directory = bake_directory / temporary_directory_name
+                if temporary_directory.is_dir():
+                    shutil.rmtree(temporary_directory)
 
             self.output_node.last_bake_directory = str(self.output_directory)
             set_bake_progress(0, 0)
@@ -278,12 +303,25 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         server = writer_manager.HostVDBWriterServer(
             writer_config=writer_config,
+            preview_callback=volume_renderer.get_shared_frame,
         )
         server.start()
         return server
 
-    def update_bake_progress(self, loaded_frame_count):
-        set_bake_progress(loaded_frame_count, solver_status.progress_total_frames)
+    def update_bake_progress(self):
+        written_frame_count = count_contiguous_vdb_frames(
+            self.output_directory,
+            self.start_frame,
+        )
+        set_bake_progress(written_frame_count, solver_status.progress_total_frames)
+
+        if written_frame_count > 0:
+            latest_written_frame = self.start_frame + written_frame_count - 1
+            if bpy.context.scene.frame_current != latest_written_frame:
+                bpy.context.scene.frame_set(latest_written_frame)
+
+        update_live_preview_settings(self.simulation_node)
+        volume_renderer.upload_pending_frame()
 
     def run_bake(self, context):
         config_dict = export_config.build_config_dict(
@@ -306,19 +344,22 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         output_config = simulation_config["outputs"][0]
         simulation_settings = simulation_config.get("settings") or {}
         start_frame = int(simulation_settings.get("start_frame", 1))
+        self.start_frame = start_frame
         end_frame = int(simulation_settings.get("end_frame", start_frame))
         total_frames = max(1, end_frame - start_frame)
         set_bake_progress(0, total_frames)
 
         vdb_output_dir = Path(output_config["output_path"]).resolve()
         self.output_directory = vdb_output_dir
-
-        VDBWatcher.start(
-            vdb_output_dir,
-            start_frame_index=start_frame,
-            live_preview_enabled=is_live_preview_enabled(self.simulation_node),
-            progress_callback=self.update_bake_progress,
+        volume_renderer.clear_live_preview()
+        domain_config = simulation_config["domain"]
+        grid_config = domain_config["grid"]
+        volume_renderer.configure(
+            (grid_config["nx"], grid_config["ny"], grid_config["nz"]),
+            domain_config["resolution"],
+            self.simulation_node,
         )
+        update_live_preview_settings(self.simulation_node)
 
         solver_manager.start(
             wait=True,
@@ -397,7 +438,7 @@ def clear_bake_directory(output_directory):
 
 def free_bake_output(output_node):
     output_directory = get_bake_directory(output_node, persist=False)
-    VDBWatcher.clear_vdb_data(output_directory)
+    VDBResults.clear_vdb_data(output_directory)
     deleted_count = clear_bake_directory(output_directory)
     output_node.last_bake_directory = str(output_directory)
     return deleted_count
