@@ -53,13 +53,21 @@ def main(config: dict[str, Any]) -> None:
             .upper()
         )
 
-        if solver_backend == "CPU":
-            import Solver.Kernel_CPU.kernel as solver_kernel_module
+        # if solver_backend == "CPU":
+        #     import Solver.Kernel_CPU.kernel as solver_kernel_module
 
-            return solver_kernel_module.solver(config)
+        #     return solver_kernel_module.solver(config)
+
+        # elif solver_backend == "GPU":
+        #     import Solver.Kernel_GPU.kernel as solver_kernel_module
+
+        #     return solver_kernel_module.solver(config)
+
+        if solver_backend == "CPU":
+            print("Not implemented")
 
         elif solver_backend == "GPU":
-            import Solver.Kernel_GPU.kernel as solver_kernel_module
+            import Solver.Kernel.solver as solver_kernel_module
 
             return solver_kernel_module.solver(config)
 

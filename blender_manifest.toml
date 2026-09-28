@@ -31,7 +31,10 @@ wheels = [
     "./wheels/packaging-26.0-py3-none-any.whl",
     "./wheels/psutil-7.2.2-cp37-abi3-win_amd64.whl",
     "./wheels/scipy-1.17.1-cp313-cp313-win_amd64.whl",
-    "./wheels/trimesh-4.12.2-py3-none-any.whl"
+    "./wheels/trimesh-4.12.2-py3-none-any.whl",
+    "./wheels/pyopencl-2026.1.4-cp313-cp313-win_amd64.whl",
+    "./wheels/pytools-2026.1.1-py3-none-any.whl",
+    "./wheels/siphash24-1.9-cp313-cp313-win_amd64.whl"
 ]
 
 [permissions]
