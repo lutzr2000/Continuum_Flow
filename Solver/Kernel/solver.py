@@ -7,38 +7,10 @@ from Solver.General.main import emit_message
 
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.update_masks as update_masks
+import Solver.Kernel.voxelise_mesh as voxelise_mesh
+import Solver.Kernel.helper as helper
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
-
-mf = cl.mem_flags
-
-
-def to_device(context, array):
-    """NumPy-Array copy to OpenCL-Buffer."""
-    return cl.Buffer(
-        context,
-        mf.READ_WRITE | mf.COPY_HOST_PTR,
-        hostbuf=array,
-    )
-
-
-def device_array(context, shape, dtype):
-    """Allocate uninitialized OpenCL buffer."""
-    size = int(np.prod(shape)) * np.dtype(dtype).itemsize
-
-    return cl.Buffer(
-        context,
-        mf.READ_WRITE,
-        size=size,
-    )
-
-
-def zeros_device(context, shape, dtype=FIELD_DTYPE):
-    return to_device(context, np.zeros(shape, dtype=dtype))
-
-
-def full_device(context, shape, value, dtype=FIELD_DTYPE):
-    return to_device(context, np.full(shape, value, dtype=dtype))
 
 
 def is_animated(base_masks: list[dict[str, Any]]) -> bool:
@@ -121,6 +93,11 @@ def solver(config: dict):
     context = cl.Context([device])
     queue = cl.CommandQueue(context)
 
+    kernel_path = Path(__file__).parent / "OpenCL" / "voxelise_mesh.cl"
+
+    with kernel_path.open("r", encoding="utf-8") as f:
+        voxelise_mesh_program = cl.Program(context, f.read()).build()
+
     print("################################################################")
     print(f"Running on: {device.name}")
 
@@ -201,22 +178,24 @@ def solver(config: dict):
         initial_active_tile_count = total_tile_count
 
     # controls the indexing in which slot a tile is
-    tile_map = to_device(context, tile_map_values)
+    tile_map = helper.to_device(context, tile_map_values)
     # controls which tile is active
-    base_tile_map = to_device(context, base_tile_map_values)
+    base_tile_map = helper.to_device(context, base_tile_map_values)
 
-    free_slot_stack = to_device(context, np.full(total_tile_count, -1, dtype=np.int32))
-    free_slot_count = to_device(context, np.zeros(1, dtype=np.int32))
-
-    reused_slot_stack = to_device(
+    free_slot_stack = helper.to_device(
         context, np.full(total_tile_count, -1, dtype=np.int32)
     )
-    reused_slot_count = to_device(context, np.zeros(1, dtype=np.int32))
+    free_slot_count = helper.to_device(context, np.zeros(1, dtype=np.int32))
 
-    next_tile_index_counter = to_device(
+    reused_slot_stack = helper.to_device(
+        context, np.full(total_tile_count, -1, dtype=np.int32)
+    )
+    reused_slot_count = helper.to_device(context, np.zeros(1, dtype=np.int32))
+
+    next_tile_index_counter = helper.to_device(
         context, np.asarray([initial_next_tile_index], dtype=np.int32)
     )
-    active_tile_counter = to_device(
+    active_tile_counter = helper.to_device(
         context, np.asarray([initial_active_tile_count], dtype=np.int32)
     )
 
@@ -242,48 +221,52 @@ def solver(config: dict):
         kernel_config.TILE_SIZE,
     )
 
-    zero_pool = zeros_device(context, sparse_pool_shape)
+    zero_pool = helper.zeros_device(context, sparse_pool_shape)
 
     # velocity
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
-    u = full_device(context, sparse_pool_shape, u_initial)
-    v = full_device(context, sparse_pool_shape, v_initial)
-    w = full_device(context, sparse_pool_shape, w_initial)
+    u = helper.full_device(context, sparse_pool_shape, u_initial)
+    v = helper.full_device(context, sparse_pool_shape, v_initial)
+    w = helper.full_device(context, sparse_pool_shape, w_initial)
 
-    u_work = full_device(context, sparse_pool_shape, u_initial)
-    v_work = full_device(context, sparse_pool_shape, v_initial)
-    w_work = full_device(context, sparse_pool_shape, w_initial)
+    u_work = helper.full_device(context, sparse_pool_shape, u_initial)
+    v_work = helper.full_device(context, sparse_pool_shape, v_initial)
+    w_work = helper.full_device(context, sparse_pool_shape, w_initial)
 
-    velocity_maxima = zeros_device(context, 3)
+    velocity_maxima = helper.zeros_device(context, 3)
 
     # scalars
-    temperature = full_device(context, sparse_pool_shape, reference_temperature)
-    smoke = zeros_device(context, sparse_pool_shape)
-    fuel = zeros_device(context, sparse_pool_shape)
+    temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
+    smoke = helper.zeros_device(context, sparse_pool_shape)
+    fuel = helper.zeros_device(context, sparse_pool_shape)
 
-    temperature_work = full_device(context, sparse_pool_shape, reference_temperature)
-    smoke_work = zeros_device(context, sparse_pool_shape)
-    fuel_work = zeros_device(context, sparse_pool_shape)
+    temperature_work = helper.full_device(
+        context, sparse_pool_shape, reference_temperature
+    )
+    smoke_work = helper.zeros_device(context, sparse_pool_shape)
+    fuel_work = helper.zeros_device(context, sparse_pool_shape)
 
     # flame
-    flame = zeros_device(context, sparse_pool_shape)
+    flame = helper.zeros_device(context, sparse_pool_shape)
 
     # vorticity
-    vorticity_magnitude = zeros_device(context, sparse_pool_shape)
+    vorticity_magnitude = helper.zeros_device(context, sparse_pool_shape)
 
     # scratch
-    scratch_A = full_device(context, sparse_pool_shape, reference_temperature)
-    scratch_B = zeros_device(context, sparse_pool_shape)
-    scratch_C = zeros_device(context, sparse_pool_shape)
+    scratch_A = helper.full_device(context, sparse_pool_shape, reference_temperature)
+    scratch_B = helper.zeros_device(context, sparse_pool_shape)
+    scratch_C = helper.zeros_device(context, sparse_pool_shape)
 
     # pressure
-    p = zeros_device(context, sparse_pool_shape)
-    pressure_rhs = zeros_device(context, sparse_pool_shape)
+    p = helper.zeros_device(context, sparse_pool_shape)
+    pressure_rhs = helper.zeros_device(context, sparse_pool_shape)
 
-    rhs_partial_sums = zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
-    rhs_partial_counts = zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
-    rhs_mean_buffer = zeros_device(context, 1)
+    rhs_partial_sums = helper.zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
+    rhs_partial_counts = helper.zeros_device(
+        context, kernel_config.MAX_REDUCTION_BLOCKS
+    )
+    rhs_mean_buffer = helper.zeros_device(context, 1)
 
     # ------------reference frame------------------
     reference_frame = simulation.get("reference_frame") or {}
@@ -306,11 +289,13 @@ def solver(config: dict):
 
     source_base_masks = []
     source_masks = []
-    geometry_source_masks = []
 
     for source in sources:
         # voxelise source meshes
         base_masks = voxelise_mesh.voxelise_all_meshes(
+            context,
+            queue,
+            voxelise_mesh_program,
             delta,
             source.get("geometry_inputs"),
             bake_path,
@@ -335,40 +320,40 @@ def solver(config: dict):
 
         source_base_masks.append(base_masks)
 
-        # source masks
-        source_mask = zeros_device(context, sparse_pool_shape, dtype=np.bool_)
-        source_masks.append(source_mask)
-
-        geometry_source_masks.append(
-            zeros_device(context, sparse_pool_shape, dtype=np.bool_)
-            if has_particle_sources
-            else source_mask
+        # geometry source mask
+        source_masks.append(
+            helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
         )
 
     has_animated_sources = any(
         is_animated(base_masks) for base_masks in source_base_masks
     )
 
-    source_tile_mask = zeros_device(
+    source_tile_mask = helper.zeros_device(
         context, tile_shape, dtype=np.bool_
     )  # determines which tiles are active due to source activity
 
     # ------------source particles------------------
-    has_particle_sources = any(
-        source.get("particle_system_inputs") for source in sources
-    )
+    # particle_source_masks = [
+    #     helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+    #     for _ in sources
+    # ]
 
-    particle_sources = (
-        particles.load_particle_sources(
-            sources,
-            bake_path,
-            reference_matrix_data if has_reference_frame else None,
-        )
-        if has_particle_sources
-        else [[] for _ in sources]
-    )
+    # has_particle_sources = any(
+    #     source.get("particle_system_inputs") for source in sources
+    # )
 
-    particle_source_flags = [bool(entries) for entries in particle_sources]
+    # particle_sources = (
+    #     particles.load_particle_sources(
+    #         sources,
+    #         bake_path,
+    #         reference_matrix_data if has_reference_frame else None,
+    #     )
+    #     if has_particle_sources
+    #     else [[] for _ in sources]
+    # )
+
+    # particle_source_flags = [bool(entries) for entries in particle_sources]
 
     # ------------obstacle meshes------------------
     obstacles = simulation.get("obstacles") or []
@@ -377,6 +362,9 @@ def solver(config: dict):
 
     for obstacle in obstacles:
         base_masks = voxelise_mesh.voxelise_all_meshes(
+            context,
+            queue,
+            voxelise_mesh_program,
             delta,
             obstacle.get("geometry_inputs"),
             bake_path,
@@ -400,7 +388,7 @@ def solver(config: dict):
 
         obstacle_base_masks.extend(base_masks)
 
-    obstacle_mask = zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+    obstacle_mask = helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
 
     # add times
     for entry in sources + obstacles:
