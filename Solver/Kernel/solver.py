@@ -6,6 +6,7 @@ from pathlib import Path
 from Solver.General.main import emit_message
 
 import Solver.Kernel.kernel_config as kernel_config
+import Solver.Kernel.update_masks as update_masks
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -38,6 +39,32 @@ def zeros_device(context, shape, dtype=FIELD_DTYPE):
 
 def full_device(context, shape, value, dtype=FIELD_DTYPE):
     return to_device(context, np.full(shape, value, dtype=dtype))
+
+
+def is_animated(base_masks: list[dict[str, Any]]) -> bool:
+    """
+    Determine whether any mesh represented by the base masks is animated.
+
+    A mesh is considered animated when its transform animation contains
+    multiple world matrices and at least one matrix differs from the first
+    sample. Repeated samples of an identical transform are therefore treated
+    as static.
+    """
+    for entry in base_masks:
+        matrices = np.asarray(entry.get("matrix_matrices", ()))
+        if matrices.size == 0:
+            mesh_object = entry["mesh_object"]
+            animation = mesh_object.get("transform_animation") or {}
+            matrices = np.asarray(animation.get("matrices_world", ()))
+        if matrices.size == 0:
+            continue
+        matrices = matrices.reshape(-1, 4, 4)
+
+        # Repeated samples of the same transform are static.
+        if len(matrices) > 1 and np.any(matrices[1:] != matrices[0]):
+            return True
+
+    return False
 
 
 def compute_inital_velocity(
@@ -103,6 +130,8 @@ def solver(config: dict):
         (config.get("meta") or {}).get("cancel_flag_path") or ""
     ).strip()
     cancel_requested = False
+
+    bake_path = simulation["outputs"][0]["output_path"]
 
     # ------------time-------------------
     t = 0.0
@@ -203,7 +232,6 @@ def solver(config: dict):
     print("Maximum number of cells: ", total_tile_count * kernel_config.TILE_SIZE**3)
 
     # ------------fields------------------
-    # --------------- sparse -------------------#
     sparse_tile_capacity = (
         total_tile_count if not simulate_sparsely else max(1, tile_growth_size)
     )
@@ -256,6 +284,128 @@ def solver(config: dict):
     rhs_partial_sums = zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
     rhs_partial_counts = zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
     rhs_mean_buffer = zeros_device(context, 1)
+
+    # ------------reference frame------------------
+    reference_frame = simulation.get("reference_frame") or {}
+
+    has_reference_frame = bool(reference_frame.get("object_name"))
+
+    reference_frame["animation_timeline"] = simulation["animation_timeline"]
+    reference_matrix_data = update_masks.prepare_matrix_data(reference_frame)
+    reference_velocity_transfer = float(reference_frame.get("velocity_transfer", 0.0))
+
+    reference_frame_animated = bool(
+        has_reference_frame
+        and len(reference_matrix_data[1]) > 1
+        and np.any(reference_matrix_data[1][1:] != reference_matrix_data[1][0])
+    )
+    previous_reference_velocity_transform = np.zeros((3, 4), dtype=FIELD_DTYPE)
+
+    # ------------source meshes------------------
+    sources = simulation.get("sources") or []
+
+    source_base_masks = []
+    source_masks = []
+    geometry_source_masks = []
+
+    for source in sources:
+        # voxelise source meshes
+        base_masks = voxelise_mesh.voxelise_all_meshes(
+            delta,
+            source.get("geometry_inputs"),
+            bake_path,
+        )
+
+        # prepare source transforms
+        for entry in base_masks:
+            times, matrices, rates = update_masks.prepare_matrix_data(
+                entry["mesh_object"]
+            )
+
+            if has_reference_frame:
+                times, matrices, rates = update_masks.make_matrix_data_relative(
+                    times,
+                    matrices,
+                    *reference_matrix_data,
+                )
+
+            entry["matrix_times"] = times
+            entry["matrix_matrices"] = matrices
+            entry["matrix_rates"] = rates
+
+        source_base_masks.append(base_masks)
+
+        # source masks
+        source_mask = zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+        source_masks.append(source_mask)
+
+        geometry_source_masks.append(
+            zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+            if has_particle_sources
+            else source_mask
+        )
+
+    has_animated_sources = any(
+        is_animated(base_masks) for base_masks in source_base_masks
+    )
+
+    source_tile_mask = zeros_device(
+        context, tile_shape, dtype=np.bool_
+    )  # determines which tiles are active due to source activity
+
+    # ------------source particles------------------
+    has_particle_sources = any(
+        source.get("particle_system_inputs") for source in sources
+    )
+
+    particle_sources = (
+        particles.load_particle_sources(
+            sources,
+            bake_path,
+            reference_matrix_data if has_reference_frame else None,
+        )
+        if has_particle_sources
+        else [[] for _ in sources]
+    )
+
+    particle_source_flags = [bool(entries) for entries in particle_sources]
+
+    # ------------obstacle meshes------------------
+    obstacles = simulation.get("obstacles") or []
+
+    obstacle_base_masks = []
+
+    for obstacle in obstacles:
+        base_masks = voxelise_mesh.voxelise_all_meshes(
+            delta,
+            obstacle.get("geometry_inputs"),
+            bake_path,
+        )
+
+        for entry in base_masks:
+            times, matrices, rates = update_masks.prepare_matrix_data(
+                entry["mesh_object"]
+            )
+
+            if has_reference_frame:
+                times, matrices, rates = update_masks.make_matrix_data_relative(
+                    times,
+                    matrices,
+                    *reference_matrix_data,
+                )
+
+            entry["matrix_times"] = times
+            entry["matrix_matrices"] = matrices
+            entry["matrix_rates"] = rates
+
+        obstacle_base_masks.extend(base_masks)
+
+    obstacle_mask = zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+
+    # add times
+    for entry in sources + obstacles:
+        for obj in entry.get("geometry_inputs") or []:
+            obj["animation_timeline"] = simulation["animation_timeline"]
 
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
