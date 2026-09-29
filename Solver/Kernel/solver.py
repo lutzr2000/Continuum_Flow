@@ -769,11 +769,7 @@ def solver(config: dict):
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
-                        *(
-                            [(mask, False, np.bool_) for mask in particle_source_masks]
-                            if has_particle_sources
-                            else []
-                        ),
+                        *[(mask, False, np.bool_) for mask in particle_source_masks],
                     ],
                     reused_slot_stack,
                     reused_slot_count_host,
@@ -839,11 +835,7 @@ def solver(config: dict):
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
-                        *(
-                            [(mask, False, np.bool_) for mask in particle_source_masks]
-                            if has_particle_sources
-                            else []
-                        ),
+                        *[(mask, False, np.bool_) for mask in particle_source_masks],
                     ],
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
@@ -851,11 +843,7 @@ def solver(config: dict):
 
                 source_count = len(sources)
                 geometry_source_masks = resized_source_masks[:source_count]
-                particle_source_masks = (
-                    resized_source_masks[source_count:]
-                    if has_particle_sources
-                    else particle_source_masks
-                )
+                particle_source_masks = resized_source_masks[source_count:]
 
                 sparse_tile_capacity = next_sparse_tile_capacity
 

@@ -3,7 +3,7 @@
 #endif
 
 #include "sparse_managment.cl"
-
+#include "noise.cl"
 
 __kernel void project_velocity_kernel(
     __global float *u,
@@ -688,4 +688,121 @@ __kernel void subtract_rhs_mean_kernel(
         * TILE_SIZE + local_k;
 
     b[index] -= rhs_mean[0];
+}
+
+
+__kernel void add_artifical_divergence(
+    __global const float *T,
+    __global const uchar *source_mask,
+    const float source_extra_pressure,
+    const float noise_scale,
+    const float noise_amplitude,
+    const float noise_seed,
+    const float expansion_rate,
+    const float t_reference,
+    __global float *b,
+    __global const int *tile_map,
+    const float rho,
+    const float delta,
+    const int nx,
+    const int ny,
+    const int nz,
+    const float dt,
+    const int tiles_x,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int tile_i = get_group_id(0);
+    const int tile_j = get_group_id(1);
+    const int tile_k = get_group_id(2);
+
+    const int local_i = get_local_id(0);
+    const int local_j = get_local_id(1);
+    const int local_k = get_local_id(2);
+
+    if (
+        tile_i >= tiles_x ||
+        tile_j >= tiles_y ||
+        tile_k >= tiles_z
+    )
+        return;
+
+    const int tile_map_index =
+        (tile_i * tiles_y + tile_j)
+        * tiles_z + tile_k;
+
+    const int tile_index =
+        tile_map[tile_map_index];
+
+    if (tile_index == -1)
+        return;
+
+    const int i =
+        tile_i * TILE_SIZE + local_i;
+
+    const int j =
+        tile_j * TILE_SIZE + local_j;
+
+    const int k =
+        tile_k * TILE_SIZE + local_k;
+
+    if (
+        i < 1 ||
+        j < 1 ||
+        k < 1 ||
+        i >= nx - 1 ||
+        j >= ny - 1 ||
+        k >= nz - 1
+    )
+        return;
+
+    const int index =
+        ((tile_index * TILE_SIZE + local_i)
+        * TILE_SIZE + local_j)
+        * TILE_SIZE + local_k;
+
+    const float thermal_divergence =
+        expansion_rate
+        * (T[index] - t_reference);
+
+    float extra_pressure_term = 0.0f;
+
+    if (source_mask[index])
+    {
+        float scalar_multiplier = 1.0f;
+
+        if (noise_amplitude != 0.0f)
+        {
+            const float scale =
+                fmax(noise_scale, 1.0e-6f);
+
+            const float noise_value =
+                value_noise_3d(
+                    (float)i / scale,
+                    (float)j / scale,
+                    (float)k / scale,
+                    noise_seed
+                );
+
+            scalar_multiplier =
+                fmax(
+                    1.0f
+                    + noise_value * noise_amplitude,
+                    0.0f
+                );
+        }
+
+        extra_pressure_term =
+            (1.0f / dt)
+            * source_extra_pressure
+            * scalar_multiplier;
+    }
+
+    b[index] -=
+        (rho / delta)
+        * (
+            thermal_divergence
+            + extra_pressure_term
+        );
 }
