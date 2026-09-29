@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Any
 from pathlib import Path
+from time import perf_counter
 from Solver.General.main import emit_message
 import Solver.General.forces as forces
 
@@ -18,6 +19,7 @@ import Solver.Kernel.sparse_managment as sparse_managment
 import Solver.Kernel.domain_bc as domain_bc
 import Solver.Kernel.output as output
 import Solver.Kernel.pressure_solve as pressure_solve
+from Solver.Kernel.timing import profiled_run
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -187,7 +189,8 @@ def compute_inital_velocity(
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-def solver(config: dict):
+@profiled_run
+def solver(config: dict, timings: Any = None):
 
     # ------------device-------------------
     device = None
@@ -201,7 +204,11 @@ def solver(config: dict):
 
     # ------------context-------------------
     context = cl.Context([device])
-    queue = cl.CommandQueue(context)
+    queue = cl.CommandQueue(
+        context,
+        properties=cl.command_queue_properties.PROFILING_ENABLE,
+    )
+    timings.set_queue(queue)
 
     kernel_path = Path(__file__).parent / "OpenCL"
 
@@ -279,6 +286,25 @@ def solver(config: dict):
         context,
         kernel_path / "multigrid.cl",
     )
+
+    for group, kernels in (
+        ("voxelise_mesh", voxelise_mesh_kernels),
+        ("update_masks", update_masks_kernels),
+        ("particles", particles_kernels),
+        ("sparse_managment", sparse_managment_kernels),
+        ("time_step", time_step_kernels),
+        ("reference_frame", reference_frame_kernels),
+        ("domain_bc", domain_bc_kernels),
+        ("source_bc", source_bc_kernels),
+        ("output", output_kernels),
+        ("obstacle_bc", obstacle_bc_kernels),
+        ("vorticity", vorticity_kernels),
+        ("velocity_update", velocity_update_kernels),
+        ("scalar_update", scalar_update_kernels),
+        ("pressure_solve", pressure_solve_kernels),
+        ("multigrid", multigrid_kernels),
+    ):
+        timings.instrument_kernels(kernels, group)
 
     print("################################################################")
     print(f"Running on: {device.name}")
@@ -622,6 +648,8 @@ def solver(config: dict):
     next_tile_index_counter_host = initial_next_tile_index
 
     while t < t_max:
+        iteration_cpu_started = perf_counter()
+
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
@@ -651,6 +679,8 @@ def solver(config: dict):
         gravity = inverse_reference_linear @ np.asarray(
             (0.0, 0.0, 9.81), dtype=FIELD_DTYPE
         )
+
+        sparse_cpu_started = perf_counter()
 
         # ------------Clear scratch-------------------
         sparse_managment.reset_pools(
@@ -869,7 +899,10 @@ def solver(config: dict):
             active_tile_counter_host = total_tile_count
             next_tile_index_counter_host = total_tile_count
 
+        timings.record_cpu("sparse_activity_and_resize", sparse_cpu_started)
+
         # ------------Update geometry source masks-------------------
+        masks_cpu_started = perf_counter()
         update_geometry_sources = time_step_count == 0 or has_animated_sources
 
         if update_geometry_sources:
@@ -904,7 +937,10 @@ def solver(config: dict):
                 tile_shape,
             )
 
+        timings.record_cpu("update_source_masks", masks_cpu_started)
+
         # ------------time step-------------------
+        timestep_cpu_started = perf_counter()
         dt = time_step.compute_new_timestep(
             queue,
             time_step_kernels,
@@ -920,6 +956,11 @@ def solver(config: dict):
             cfl,
             output_time_step,
         )
+        timings.record_cpu("compute_new_timestep", timestep_cpu_started)
+
+        # The CFL readback above already waits for all earlier commands. Collect
+        # their profiling events here without adding another synchronization.
+        timings.collect_completed()
 
         # ------------Reference Frame Velocity Transfer-------------------
         if reference_velocity_transfer != 0.0 and reference_frame_animated:
@@ -1199,6 +1240,7 @@ def solver(config: dict):
             )
 
         # ------------force params-------------------
+        forces_cpu_started = perf_counter()
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
@@ -1225,6 +1267,7 @@ def solver(config: dict):
 
         swirl_count = len(swirl_config)
         turbulence_count = len(turbulence_config)
+        timings.record_cpu("prepare_force_buffers", forces_cpu_started)
 
         # ------------Velocity update-------------------
         sparse_managment.copy_pools(
@@ -1320,6 +1363,7 @@ def solver(config: dict):
         w, w_work = w_work, w
 
         # ------------Pressure solve-------------------
+        pressure_cpu_started = perf_counter()
         p = pressure_solve.pressure_poisson_multigrid(
             pressure_solve_kernels,
             multigrid_kernels,
@@ -1363,6 +1407,7 @@ def solver(config: dict):
             ny,
             nz,
         )
+        timings.record_cpu("pressure_poisson_multigrid", pressure_cpu_started)
 
         # ------------Velocity projection-------------------
         pressure_solve_kernels["project_velocity_kernel"](
@@ -1480,6 +1525,7 @@ def solver(config: dict):
         }
 
         while t >= next_output_time:
+            output_cpu_started = perf_counter()
             output.enqueue_device_output(
                 queue,
                 output_kernels,
@@ -1494,6 +1540,7 @@ def solver(config: dict):
                 output_index,
                 t,
             )
+            timings.record_cpu("output.enqueue_device_output", output_cpu_started)
 
             buffers = {
                 id(obj): obj for obj in locals().values() if isinstance(obj, cl.Buffer)
@@ -1521,8 +1568,12 @@ def solver(config: dict):
             output_index += 1
             next_output_time += output_time_step
 
+        timings.record_cpu("simulation_iteration", iteration_cpu_started)
+
     # ------------Shutdown output-------------------
+    shutdown_cpu_started = perf_counter()
     output.shutdown_output(shared_memory_blocks, writer_slots)
+    timings.record_cpu("output.shutdown_output", shutdown_cpu_started)
 
     # ------------Conclusion-------------------
     if cancel_requested:

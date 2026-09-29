@@ -688,7 +688,7 @@ def update_obstacle_mask(
             group_count[2] * local_work_size[2],
         )
 
-        obstacle_kernels["update_obstacle_mask_gpu"](
+        obstacle_kernels["update_obstacle_mask"](
             queue,
             global_work_size,
             local_work_size,
