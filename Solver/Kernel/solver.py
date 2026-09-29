@@ -9,6 +9,8 @@ from Solver.General.main import emit_message
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.voxelise_mesh as voxelise_mesh
 import Solver.Kernel.multigrid as multigrid
+import Solver.Kernel.particles as particles
+import Solver.Kernel.update_masks as update_masks
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
 
@@ -196,10 +198,22 @@ def solver(config: dict):
     context = cl.Context([device])
     queue = cl.CommandQueue(context)
 
-    kernel_path = Path(__file__).parent / "OpenCL" / "voxelise_mesh.cl"
+    kernel_path = Path(__file__).parent / "OpenCL"
 
-    with kernel_path.open("r", encoding="utf-8") as f:
-        voxelise_mesh_program = cl.Program(context, f.read()).build()
+    voxelise_mesh_program = helper.load_program(
+        context,
+        kernel_path / "voxelise_mesh.cl",
+    )
+
+    update_masks_program = helper.load_program(
+        context,
+        kernel_path / "update_masks.cl",
+    )
+
+    particles_program, particles_kernels = helper.load_program(
+        context,
+        kernel_path / "particles.cl",
+    )
 
     print("################################################################")
     print(f"Running on: {device.name}")
@@ -435,26 +449,26 @@ def solver(config: dict):
     )  # determines which tiles are active due to source activity
 
     # ------------source particles------------------
-    # particle_source_masks = [
-    #     helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
-    #     for _ in sources
-    # ]
+    particle_source_masks = [
+        helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_) for _ in sources
+    ]
 
-    # has_particle_sources = any(
-    #     source.get("particle_system_inputs") for source in sources
-    # )
+    has_particle_sources = any(
+        source.get("particle_system_inputs") for source in sources
+    )
 
-    # particle_sources = (
-    #     particles.load_particle_sources(
-    #         sources,
-    #         bake_path,
-    #         reference_matrix_data if has_reference_frame else None,
-    #     )
-    #     if has_particle_sources
-    #     else [[] for _ in sources]
-    # )
+    particle_sources = (
+        particles.load_particle_sources(
+            context,
+            sources,
+            bake_path,
+            reference_matrix_data if has_reference_frame else None,
+        )
+        if has_particle_sources
+        else [[] for _ in sources]
+    )
 
-    # particle_source_flags = [bool(entries) for entries in particle_sources]
+    particle_source_flags = [bool(entries) for entries in particle_sources]
 
     # ------------obstacle meshes------------------
     obstacles = simulation.get("obstacles") or []
@@ -561,6 +575,30 @@ def solver(config: dict):
             (scratch_A, scratch_B, scratch_C),
             zero_pool,
         )
+
+        # ------------Update source tile mask-------------------
+        update_masks.update_source_tile_mask(
+            queue,
+            update_masks_program,
+            source_tile_mask,
+            source_base_masks,
+            tile_shape,
+            t,
+            delta,
+            origin,
+        )
+
+        if has_particle_sources:
+            particles.update_source_tile_mask(
+                queue,
+                particles_kernels,
+                source_tile_mask,
+                particle_sources,
+                tile_shape,
+                t,
+                delta,
+                origin,
+            )
 
         # ------------time step-------------------
         dt = output_time_step  # !!!!!!!!!!!!!!!!!!!!

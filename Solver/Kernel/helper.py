@@ -1,5 +1,6 @@
 import numpy as np
 import pyopencl as cl
+from pathlib import Path
 from typing import Any
 from numpy.typing import NDArray
 
@@ -10,6 +11,25 @@ mf = cl.mem_flags
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 IDENTITY_4 = np.eye(4)
 ZERO_4 = np.zeros((4, 4))
+
+
+def load_program(
+    context: cl.Context,
+    path: Path,
+) -> tuple[cl.Program, dict[str, cl.Kernel]]:
+    with path.open("r", encoding="utf-8") as f:
+        program = cl.Program(
+            context,
+            f.read(),
+        ).build(
+            options=[
+                f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
+            ]
+        )
+
+    kernels = {kernel.function_name: kernel for kernel in program.all_kernels()}
+
+    return program, kernels
 
 
 def to_device(context, array):
