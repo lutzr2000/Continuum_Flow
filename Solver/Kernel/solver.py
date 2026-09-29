@@ -17,6 +17,7 @@ import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
 import Solver.Kernel.domain_bc as domain_bc
 import Solver.Kernel.output as output
+import Solver.Kernel.pressure_solve as pressure_solve
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -267,6 +268,16 @@ def solver(config: dict):
     scalar_update_kernels = helper.load_program(
         context,
         kernel_path / "scalar_update.cl",
+    )
+
+    pressure_solve_kernels = helper.load_program(
+        context,
+        kernel_path / "pressure_solve.cl",
+    )
+
+    multigrid_kernels = helper.load_program(
+        context,
+        kernel_path / "multigrid.cl",
     )
 
     print("################################################################")
@@ -1286,6 +1297,73 @@ def solver(config: dict):
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
+
+        # ------------Pressure solve-------------------
+        p = pressure_solve.pressure_poisson_multigrid(
+            pressure_solve_kernels,
+            multigrid_kernels,
+            queue,
+            global_work_size,
+            local_work_size,
+            u,
+            v,
+            w,
+            p,
+            temperature,
+            pressure_rhs,
+            dt,
+            geometry_source_masks,
+            particle_source_masks,
+            source_values["noise_scale"],
+            source_values["noise_amplitude"],
+            source_values["noise_seed"],
+            source_values["extra_pressure"],
+            delta,
+            physics_values["fluid"]["density"],
+            physics_values["temperature"]["expansion_rate"],
+            reference_temperature,
+            tile_map,
+            tile_shape,
+            u_initial,
+            v_initial,
+            w_initial,
+            p_levels,
+            b_levels,
+            delta_levels,
+            multigrid_tile_maps,
+            multigrid_active_tiles,
+            multigrid_active_tile_counts,
+            multigrid_level_shapes,
+            simulation.get("settings").get("iterations"),
+            rhs_partial_sums,
+            rhs_partial_counts,
+            rhs_mean_buffer,
+            nx,
+            ny,
+            nz,
+        )
+
+        # ------------Velocity projection-------------------
+        pressure_solve_kernels["project_velocity_kernel"](
+            queue,
+            global_work_size,
+            local_work_size,
+            u,
+            v,
+            w,
+            p,
+            obstacle_mask,
+            np.float32(dt),
+            np.float32(delta),
+            np.float32(physics_values["fluid"]["density"]),
+            tile_map,
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
 
         # ------------Scalar update-------------------
         scalar_update_kernels["predict_scalar_fields_semi_lagrangian"](

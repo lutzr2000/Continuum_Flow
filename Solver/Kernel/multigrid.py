@@ -119,3 +119,481 @@ def create_multigrid_levels(
         active_tile_counts,
         level_shapes,
     )
+
+
+def build_coarse_tile_hierarchy(
+    queue: cl.CommandQueue,
+    multigrid_kernels: dict[str, cl.Kernel],
+    level_0_tile_map: Any,
+    level_0_tile_shape: tuple[int, int, int],
+    tile_maps: list[Any],
+    level_shapes: list[tuple[int, int, int]],
+    active_tiles: list[Any],
+    active_tile_counts: list[Any],
+) -> list[int]:
+    """
+    Rebuild all coarse tile maps from the current level-0 tile map.
+
+    Return the number of active tiles for every coarse level.
+    """
+    fine_tile_map = level_0_tile_map
+    fine_tile_shape = level_0_tile_shape
+
+    active_tile_counts_host = []
+
+    for level in range(len(tile_maps)):
+        coarse_tile_map = tile_maps[level]
+        coarse_active_tiles = active_tiles[level]
+        coarse_active_tile_count = active_tile_counts[level]
+
+        coarse_tile_shape = tuple(
+            (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+            for size in level_shapes[level]
+        )
+
+        helper.fill_device(
+            queue,
+            coarse_active_tile_count,
+            0,
+            dtype=np.int32,
+        )
+
+        helper.fill_device(
+            queue,
+            coarse_tile_map,
+            -1,
+            dtype=np.int32,
+        )
+
+        coarse_active_tile_capacity = coarse_active_tiles.size // (
+            3 * np.dtype(np.int32).itemsize
+        )
+
+        multigrid_kernels["build_coarse_tile_level"](
+            queue,
+            coarse_tile_shape,
+            None,
+            fine_tile_map,
+            coarse_tile_map,
+            coarse_active_tiles,
+            coarse_active_tile_count,
+            np.int32(coarse_active_tile_capacity),
+            np.int32(fine_tile_shape[0]),
+            np.int32(fine_tile_shape[1]),
+            np.int32(fine_tile_shape[2]),
+            np.int32(coarse_tile_shape[0]),
+            np.int32(coarse_tile_shape[1]),
+            np.int32(coarse_tile_shape[2]),
+        )
+
+        count = helper.read_int32(
+            queue,
+            coarse_active_tile_count,
+        )
+
+        if count > coarse_active_tile_capacity:
+            raise RuntimeError(
+                f"Multigrid level {level}: "
+                f"active tile count {count} exceeds capacity "
+                f"{coarse_active_tile_capacity}."
+            )
+
+        active_tile_counts_host.append(count)
+
+        fine_tile_map = coarse_tile_map
+        fine_tile_shape = coarse_tile_shape
+
+    return active_tile_counts_host
+
+
+def v_cycle(
+    multigrid_kernels: dict[str, cl.Kernel],
+    queue: cl.CommandQueue,
+    level: int,
+    p_levels: list[Any],
+    b_levels: list[Any],
+    p_level0: Any,
+    b_level0: Any,
+    base_delta: float,
+    delta_levels: list[float],
+    pre_smooth: int,
+    post_smooth: int,
+    coarse_smooth: int,
+    nx: int,
+    ny: int,
+    nz: int,
+    tile_map: Any,
+    multigrid_tile_maps: list[Any],
+    multigrid_active_tiles: list[Any],
+    multigrid_active_tile_counts: list[int],
+    multigrid_level_shapes: list[tuple[int, int, int]],
+) -> None:
+    r"""
+    Run one multigrid V-cycle for the pressure solve.
+
+    Level ``0`` is the finest level stored in ``p_level0`` and
+    ``b_level0``. All entries in ``p_levels`` and ``b_levels`` represent
+    coarser dense levels starting at half resolution. The cycle performs
+    pre-smoothing, residual restriction to the next coarser level, recursive
+    coarse-grid correction, prolongation back to the current level, and
+    post-smoothing.
+
+    Mathematically, the cycle operates on the linear system
+
+    .. math::
+
+        A p = b.
+
+    First, smoothing reduces high-frequency error on the current level. Then
+    the residual is computed and restricted to the next coarser grid:
+
+    .. math::
+
+        r = b - A p.
+
+    On the coarse grid, the error equation is solved approximately:
+
+    .. math::
+
+        A e = r.
+
+    The resulting coarse-grid error estimate is prolongated back to the finer
+    level and added to the current pressure iterate:
+
+    .. math::
+
+        p \leftarrow p + e.
+
+    A final post-smoothing step then damps the remaining high-frequency error.
+
+    Level 0 uses ``tile_map`` to access the pooled tile storage,
+    while all coarser levels operate on dense arrays.
+
+    """
+    if level == 0:
+        p = p_level0
+        b = b_level0
+        delta = base_delta
+
+        current_tile_map = tile_map
+        current_active_tiles = None
+        current_active_tile_count = None
+        current_shape = (nx, ny, nz)
+
+    else:
+        current_level = level - 1
+
+        p = p_levels[current_level]
+        b = b_levels[current_level]
+        delta = delta_levels[current_level]
+
+        current_tile_map = multigrid_tile_maps[current_level]
+        current_active_tiles = multigrid_active_tiles[current_level]
+        current_active_tile_count = multigrid_active_tile_counts[current_level]
+        current_shape = multigrid_level_shapes[current_level]
+
+    smooth(
+        multigrid_kernels,
+        queue,
+        p,
+        b,
+        delta,
+        pre_smooth,
+        tile_map=current_tile_map,
+        active_tiles=current_active_tiles,
+        active_tile_count=current_active_tile_count,
+        field_shape=current_shape,
+    )
+
+    last_level = len(p_levels)
+
+    if level == last_level:
+        smooth(
+            multigrid_kernels,
+            queue,
+            p,
+            b,
+            delta,
+            coarse_smooth,
+            tile_map=current_tile_map,
+            active_tiles=current_active_tiles,
+            active_tile_count=current_active_tile_count,
+            field_shape=current_shape,
+        )
+        return
+
+    coarse_level = level
+
+    coarse_p = p_levels[coarse_level]
+    coarse_b = b_levels[coarse_level]
+
+    coarse_tile_map = multigrid_tile_maps[coarse_level]
+    coarse_active_tiles = multigrid_active_tiles[coarse_level]
+    coarse_active_tile_count = multigrid_active_tile_counts[coarse_level]
+    coarse_shape = multigrid_level_shapes[coarse_level]
+
+    if coarse_active_tile_count == 0:
+        return
+
+    fill_size = (
+        coarse_active_tile_count
+        * kernel_config.TILE_SIZE**3
+        * np.dtype(FIELD_DTYPE).itemsize
+    )
+
+    zero = np.asarray(0, dtype=FIELD_DTYPE)
+
+    cl.enqueue_fill_buffer(
+        queue,
+        coarse_p,
+        zero,
+        0,
+        fill_size,
+    )
+
+    cl.enqueue_fill_buffer(
+        queue,
+        coarse_b,
+        zero,
+        0,
+        fill_size,
+    )
+
+    current_tile_shape = tuple(
+        (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+        for size in current_shape
+    )
+
+    coarse_tile_shape = tuple(
+        (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+        for size in coarse_shape
+    )
+
+    local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+
+    global_work_size = (
+        coarse_active_tile_count * local_work_size[0],
+        local_work_size[1],
+        local_work_size[2],
+    )
+
+    multigrid_kernels["restrict_residual_sparse"](
+        queue,
+        global_work_size,
+        local_work_size,
+        p,
+        b,
+        coarse_b,
+        np.float32(delta),
+        current_tile_map,
+        coarse_tile_map,
+        coarse_active_tiles,
+        np.int32(coarse_active_tile_count),
+        np.int32(current_shape[0]),
+        np.int32(current_shape[1]),
+        np.int32(current_shape[2]),
+        np.int32(coarse_shape[0]),
+        np.int32(coarse_shape[1]),
+        np.int32(coarse_shape[2]),
+        np.int32(current_tile_shape[1]),
+        np.int32(current_tile_shape[2]),
+        np.int32(coarse_tile_shape[1]),
+        np.int32(coarse_tile_shape[2]),
+    )
+
+    v_cycle(
+        multigrid_kernels,
+        queue,
+        level + 1,
+        p_levels,
+        b_levels,
+        p_level0,
+        b_level0,
+        base_delta,
+        delta_levels,
+        pre_smooth,
+        post_smooth,
+        coarse_smooth,
+        nx,
+        ny,
+        nz,
+        tile_map,
+        multigrid_tile_maps,
+        multigrid_active_tiles,
+        multigrid_active_tile_counts,
+        multigrid_level_shapes,
+    )
+
+    multigrid_kernels["prolongate_add_nearest_sparse"](
+        queue,
+        global_work_size,
+        local_work_size,
+        coarse_p,
+        p,
+        coarse_tile_map,
+        current_tile_map,
+        coarse_active_tiles,
+        np.int32(coarse_active_tile_count),
+        np.int32(coarse_shape[0]),
+        np.int32(coarse_shape[1]),
+        np.int32(coarse_shape[2]),
+        np.int32(current_shape[0]),
+        np.int32(current_shape[1]),
+        np.int32(current_shape[2]),
+        np.int32(coarse_tile_shape[1]),
+        np.int32(coarse_tile_shape[2]),
+        np.int32(current_tile_shape[1]),
+        np.int32(current_tile_shape[2]),
+    )
+
+    smooth(
+        multigrid_kernels,
+        queue,
+        p,
+        b,
+        delta,
+        post_smooth,
+        tile_map=current_tile_map,
+        active_tiles=current_active_tiles,
+        active_tile_count=current_active_tile_count,
+        field_shape=current_shape,
+    )
+
+
+def smooth(
+    multigrid_kernels: dict[str, cl.Kernel],
+    queue: cl.CommandQueue,
+    p: Any,
+    b: Any,
+    delta: float,
+    iterations: int,
+    tile_map: Any,
+    active_tiles: Any,
+    active_tile_count: int | None,
+    field_shape: tuple[int, int, int],
+) -> None:
+    """
+    Apply red-black Gauss-Seidel smoothing to one sparse multigrid level.
+    """
+    nx, ny, nz = field_shape
+
+    tile_shape = tuple(
+        (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+        for size in field_shape
+    )
+
+    local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+
+    is_level_0 = active_tiles is None
+
+    if is_level_0:
+        global_work_size = (
+            tile_shape[0] * local_work_size[0],
+            tile_shape[1] * local_work_size[1],
+            tile_shape[2] * local_work_size[2],
+        )
+
+        for _ in range(iterations):
+            multigrid_kernels["rbgs_step_level_0"](
+                queue,
+                global_work_size,
+                local_work_size,
+                p,
+                b,
+                np.float32(delta),
+                np.int32(0),
+                tile_map,
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+            multigrid_kernels["rbgs_step_level_0"](
+                queue,
+                global_work_size,
+                local_work_size,
+                p,
+                b,
+                np.float32(delta),
+                np.int32(1),
+                tile_map,
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+    else:
+        if active_tile_count is None:
+            raise ValueError("active_tile_count is required for sparse coarse levels")
+
+        if active_tile_count == 0:
+            return
+
+        global_work_size = (
+            active_tile_count * local_work_size[0],
+            local_work_size[1],
+            local_work_size[2],
+        )
+
+        for _ in range(iterations):
+            multigrid_kernels["rbgs_step_sparse"](
+                queue,
+                global_work_size,
+                local_work_size,
+                p,
+                b,
+                np.float32(delta),
+                np.int32(0),
+                tile_map,
+                active_tiles,
+                np.int32(active_tile_count),
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+            multigrid_kernels["rbgs_step_sparse"](
+                queue,
+                global_work_size,
+                local_work_size,
+                p,
+                b,
+                np.float32(delta),
+                np.int32(1),
+                tile_map,
+                active_tiles,
+                np.int32(active_tile_count),
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+    boundary_global_work_size = (
+        tile_shape[0] * local_work_size[0],
+        tile_shape[1] * local_work_size[1],
+        tile_shape[2] * local_work_size[2],
+    )
+
+    multigrid_kernels["pressure_poisson_apply_neumann_bcs"](
+        queue,
+        boundary_global_work_size,
+        local_work_size,
+        p,
+        tile_map,
+        np.int32(nx),
+        np.int32(ny),
+        np.int32(nz),
+        np.int32(tile_shape[0]),
+        np.int32(tile_shape[1]),
+        np.int32(tile_shape[2]),
+    )
