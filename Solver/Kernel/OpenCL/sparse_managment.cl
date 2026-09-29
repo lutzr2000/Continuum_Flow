@@ -1,3 +1,6 @@
+#ifndef SPARSE_MANAGMENT_CL
+#define SPARSE_MANAGMENT_CL
+
 #ifndef TILE_SIZE
 #define TILE_SIZE 4
 #endif
@@ -412,3 +415,5 @@ __kernel void release_inactive_tile_slots(
     free_slot_stack[stack_index] =
         released_slot;
 }
+#endif // SPARSE_MANAGMENT_CL
+

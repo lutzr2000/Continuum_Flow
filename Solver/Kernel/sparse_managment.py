@@ -155,3 +155,26 @@ def ensure_pool_capacities(
         resized_pools.append(new_pool_tile_buffer)
 
     return resized_pools
+
+
+def copy_pools(
+    queue: cl.CommandQueue,
+    dst_src_pairs: Any,
+    active_tile_count: int,
+) -> None:
+    """
+    Copy the allocated portion of several sparse GPU pools.
+    """
+    if active_tile_count <= 0:
+        return
+
+    cells_per_tile = kernel_config.TILE_SIZE**3
+    copy_size = active_tile_count * cells_per_tile * np.dtype(FIELD_DTYPE).itemsize
+
+    for dst_pool, src_pool in dst_src_pairs:
+        cl.enqueue_copy(
+            queue,
+            dst_pool,
+            src_pool,
+            byte_count=copy_size,
+        )

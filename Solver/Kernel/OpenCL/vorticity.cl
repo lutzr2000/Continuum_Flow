@@ -251,3 +251,371 @@ __kernel void compute_vorticity(
             wz * wz
         );
 }
+
+
+inline void apply_vorticity_confinement(
+    __global const float *u,
+    __global const float *v,
+    __global const float *w,
+    __global const uchar *obstacle_mask,
+    __global const float *omega_magnitude,
+    const int i,
+    const int j,
+    const int k,
+    const float delta,
+    const float vorticity_strength,
+    __global const int *tile_map,
+    const float u_initial,
+    const float v_initial,
+    const float w_initial,
+    const int nx,
+    const int ny,
+    const int nz,
+    const int tiles_y,
+    const int tiles_z,
+    float *fx,
+    float *fy,
+    float *fz
+)
+{
+    const int tile_i =
+        i / TILE_SIZE;
+
+    const int tile_j =
+        j / TILE_SIZE;
+
+    const int tile_k =
+        k / TILE_SIZE;
+
+    const int local_i =
+        i - tile_i * TILE_SIZE;
+
+    const int local_j =
+        j - tile_j * TILE_SIZE;
+
+    const int local_k =
+        k - tile_k * TILE_SIZE;
+
+    const int tile_map_index =
+        (tile_i * tiles_y + tile_j)
+        * tiles_z + tile_k;
+
+    const int tile_index =
+        tile_map[tile_map_index];
+
+    if (tile_index == -1)
+    {
+        *fx = 0.0f;
+        *fy = 0.0f;
+        *fz = 0.0f;
+        return;
+    }
+
+    const int index =
+        ((tile_index * TILE_SIZE + local_i)
+        * TILE_SIZE + local_j)
+        * TILE_SIZE + local_k;
+
+    if (
+        i < 2 ||
+        j < 2 ||
+        k < 2 ||
+        i >= nx - 2 ||
+        j >= ny - 2 ||
+        k >= nz - 2 ||
+        obstacle_mask[index]
+    )
+    {
+        *fx = 0.0f;
+        *fy = 0.0f;
+        *fz = 0.0f;
+        return;
+    }
+
+    const float half_inv_delta =
+        0.5f / delta;
+
+    const float grad_x =
+        (
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i + 1,
+                j,
+                k,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i - 1,
+                j,
+                k,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float grad_y =
+        (
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i,
+                j + 1,
+                k,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i,
+                j - 1,
+                k,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float grad_z =
+        (
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i,
+                j,
+                k + 1,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                omega_magnitude,
+                tile_map,
+                i,
+                j,
+                k - 1,
+                0.0f,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float grad_length =
+        sqrt(
+            grad_x * grad_x +
+            grad_y * grad_y +
+            grad_z * grad_z
+        );
+
+    if (grad_length <= 1.0e-12f)
+    {
+        *fx = 0.0f;
+        *fy = 0.0f;
+        *fz = 0.0f;
+        return;
+    }
+
+    const float nx_dir =
+        grad_x / grad_length;
+
+    const float ny_dir =
+        grad_y / grad_length;
+
+    const float nz_dir =
+        grad_z / grad_length;
+
+
+    const float du_dy =
+        (
+            get_pool_value(
+                u,
+                tile_map,
+                i,
+                j + 1,
+                k,
+                u_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                u,
+                tile_map,
+                i,
+                j - 1,
+                k,
+                u_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float du_dz =
+        (
+            get_pool_value(
+                u,
+                tile_map,
+                i,
+                j,
+                k + 1,
+                u_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                u,
+                tile_map,
+                i,
+                j,
+                k - 1,
+                u_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+
+    const float dv_dx =
+        (
+            get_pool_value(
+                v,
+                tile_map,
+                i + 1,
+                j,
+                k,
+                v_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                v,
+                tile_map,
+                i - 1,
+                j,
+                k,
+                v_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float dv_dz =
+        (
+            get_pool_value(
+                v,
+                tile_map,
+                i,
+                j,
+                k + 1,
+                v_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                v,
+                tile_map,
+                i,
+                j,
+                k - 1,
+                v_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+
+    const float dw_dx =
+        (
+            get_pool_value(
+                w,
+                tile_map,
+                i + 1,
+                j,
+                k,
+                w_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                w,
+                tile_map,
+                i - 1,
+                j,
+                k,
+                w_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+    const float dw_dy =
+        (
+            get_pool_value(
+                w,
+                tile_map,
+                i,
+                j + 1,
+                k,
+                w_initial,
+                tiles_y,
+                tiles_z
+            )
+            -
+            get_pool_value(
+                w,
+                tile_map,
+                i,
+                j - 1,
+                k,
+                w_initial,
+                tiles_y,
+                tiles_z
+            )
+        )
+        * half_inv_delta;
+
+
+    const float wx =
+        dw_dy - dv_dz;
+
+    const float wy =
+        du_dz - dw_dx;
+
+    const float wz =
+        dv_dx - du_dy;
+
+
+    *fx =
+        vorticity_strength
+        * (ny_dir * wz - nz_dir * wy);
+
+    *fy =
+        vorticity_strength
+        * (nz_dir * wx - nx_dir * wz);
+
+    *fz =
+        vorticity_strength
+        * (nx_dir * wy - ny_dir * wx);
+}

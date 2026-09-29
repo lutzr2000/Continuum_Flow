@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 from typing import Any
 from pathlib import Path
 from Solver.General.main import emit_message
+import Solver.General.forces as forces
 
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.voxelise_mesh as voxelise_mesh
@@ -256,6 +257,11 @@ def solver(config: dict):
     vorticity_kernels = helper.load_program(
         context,
         kernel_path / "vorticity.cl",
+    )
+
+    velocity_update_kernels = helper.load_program(
+        context,
+        kernel_path / "velocity_update.cl",
     )
 
     print("################################################################")
@@ -1154,6 +1160,127 @@ def solver(config: dict):
                 np.int32(tile_shape[1]),
                 np.int32(tile_shape[2]),
             )
+
+        # ------------force params-------------------
+        fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
+        swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
+        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
+
+        swirl_config_device = helper.to_device(
+            context,
+            np.ascontiguousarray(
+                np.asarray(
+                    swirl_config,
+                    dtype=FIELD_DTYPE,
+                ).reshape((-1, 8))
+            ),
+        )
+
+        turbulence_config_device = helper.to_device(
+            context,
+            np.ascontiguousarray(
+                np.asarray(
+                    turbulence_config,
+                    dtype=FIELD_DTYPE,
+                ).reshape((-1, 4))
+            ),
+        )
+
+        swirl_count = len(swirl_config)
+        turbulence_count = len(turbulence_config)
+
+        # ------------Velocity update-------------------
+        sparse_managment.copy_pools(
+            queue,
+            (
+                (u_work, u),
+                (v_work, v),
+                (w_work, w),
+            ),
+            next_tile_index_counter_host,
+        )
+
+        velocity_update_kernels["advect_velocity_semi_lagrangian"](
+            queue,
+            global_work_size,
+            local_work_size,
+            u,
+            v,
+            w,
+            scratch_A,
+            scratch_B,
+            scratch_C,
+            np.float32(dt),
+            np.float32(delta),
+            np.int32(advection_substeps),
+            tile_map,
+            np.float32(u_initial),
+            np.float32(v_initial),
+            np.float32(w_initial),
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        velocity_update_kernels["update_velocity_maccormack"](
+            queue,
+            global_work_size,
+            local_work_size,
+            u,
+            v,
+            w,
+            obstacle_mask,
+            scratch_A,
+            scratch_B,
+            scratch_C,
+            np.float32(dt),
+            u_work,
+            v_work,
+            w_work,
+            np.float32(delta),
+            np.float32(physics_values["fluid"]["density"]),
+            np.int32(advection_substeps),
+            np.float32(physics_values["fluid"]["viscosity"]),
+            vorticity_magnitude,
+            np.float32(physics_values["extras"]["vorticity"]),
+            temperature,
+            np.float32(physics_values["temperature"]["buoyancy"]),
+            np.float32(reference_temperature),
+            np.float32(gravity[0]),
+            np.float32(gravity[1]),
+            np.float32(gravity[2]),
+            tile_map,
+            np.float32(fx_const),
+            np.float32(fy_const),
+            np.float32(fz_const),
+            np.int32(has_swirl_nodes),
+            swirl_config_device,
+            np.int32(swirl_count),
+            np.float32(origin_x),
+            np.float32(origin_y),
+            np.float32(origin_z),
+            np.int32(has_turbulence_nodes),
+            turbulence_config_device,
+            np.int32(turbulence_count),
+            np.float32(t),
+            np.float32(u_initial),
+            np.float32(v_initial),
+            np.float32(w_initial),
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        # ------------Velocity swap-------------------
+        u, u_work = u_work, u
+        v, v_work = v_work, v
+        w, w_work = w_work, w
 
         # ------------time update-------------------
         t = t + dt

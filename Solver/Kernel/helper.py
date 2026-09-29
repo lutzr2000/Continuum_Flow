@@ -52,7 +52,15 @@ def load_program(
 
 
 def to_device(context, array):
-    """NumPy-Array copy to OpenCL-Buffer."""
+    array = np.ascontiguousarray(array)
+
+    if array.nbytes == 0:
+        return cl.Buffer(
+            context,
+            mf.READ_WRITE,
+            size=max(1, array.dtype.itemsize),
+        )
+
     return cl.Buffer(
         context,
         mf.READ_WRITE | mf.COPY_HOST_PTR,
