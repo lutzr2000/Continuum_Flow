@@ -398,3 +398,132 @@ def prepare_cell_transform(
         a21,
         a22,
     )
+
+
+def update_source_velocity(
+    queue: cl.CommandQueue,
+    source_velocity_kernels: dict[str, cl.Kernel],
+    base_masks: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+    local_velocity_x: float,
+    local_velocity_y: float,
+    local_velocity_z: float,
+) -> None:
+    """Write one source's per-mesh local velocity into shared scratch fields."""
+    local_velocity = np.asarray(
+        (
+            local_velocity_x,
+            local_velocity_y,
+            local_velocity_z,
+        ),
+        dtype=np.float32,
+    )
+
+    for entry in base_masks:
+        voxels = entry["voxels"]
+
+        matrix, _ = helper.get_matrix_data(
+            entry["matrix_times"],
+            entry["matrix_matrices"],
+            entry["matrix_rates"],
+            t,
+        )
+
+        inv = np.linalg.inv(matrix).astype(np.float32)
+
+        linear = np.asarray(
+            matrix[:3, :3],
+            dtype=np.float32,
+        )
+
+        axis_lengths = np.linalg.norm(
+            linear,
+            axis=0,
+        )
+
+        rotation = linear.copy()
+
+        for axis in range(3):
+            if axis_lengths[axis] > 1.0e-8:
+                rotation[:, axis] /= axis_lengths[axis]
+
+        world_velocity = rotation @ local_velocity
+
+        transform = prepare_cell_transform(
+            inv,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            np.asarray(
+                voxels["origin"],
+                dtype=np.float32,
+            ),
+        )
+
+        tile_min, tile_max = get_tile_bounds(
+            voxels,
+            matrix,
+            delta,
+            np.asarray(
+                (
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                ),
+                dtype=np.float32,
+            ),
+            tile_shape,
+        )
+
+        if np.any(tile_min > tile_max):
+            continue
+
+        local_mask_shape = voxels["shape"]
+
+        local_work_size = (
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+        )
+
+        group_count = tuple(int(tile_max[i] - tile_min[i] + 1) for i in range(3))
+
+        global_work_size = (
+            group_count[0] * local_work_size[0],
+            group_count[1] * local_work_size[1],
+            group_count[2] * local_work_size[2],
+        )
+
+        source_velocity_kernels["update_source_velocity"](
+            queue,
+            global_work_size,
+            local_work_size,
+            velocity_x,
+            velocity_y,
+            velocity_z,
+            tile_map,
+            voxels["mask"],
+            *[np.float32(value) for value in transform],
+            np.float32(world_velocity[0]),
+            np.float32(world_velocity[1]),
+            np.float32(world_velocity[2]),
+            np.int32(tile_min[0]),
+            np.int32(tile_min[1]),
+            np.int32(tile_min[2]),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+            np.int32(local_mask_shape[0]),
+            np.int32(local_mask_shape[1]),
+            np.int32(local_mask_shape[2]),
+        )

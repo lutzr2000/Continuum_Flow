@@ -14,7 +14,7 @@ import Solver.Kernel.update_masks as update_masks
 import Solver.Kernel.time_step as time_step
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
-import Solver.Kernel.boundary_conditions.domain_bc as domain_bc
+import Solver.Kernel.domain_bc as domain_bc
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -235,6 +235,11 @@ def solver(config: dict):
     domain_bc_kernels = helper.load_program(
         context,
         kernel_path / "domain_bc.cl",
+    )
+
+    source_bc_kernels = helper.load_program(
+        context,
+        kernel_path / "source_bc.cl",
     )
 
     print("################################################################")
@@ -949,6 +954,76 @@ def solver(config: dict):
             ny,
             nz,
         )
+
+        # ------------Source BC-------------------
+        for source_idx, source_mask in enumerate(geometry_source_masks):
+            velocity_local = bool(source_values["velocity_local"][source_idx])
+            if velocity_local:
+                sparse_managment.reset_pools(
+                    (scratch_A, scratch_B, scratch_C),
+                    zero_pool,
+                    next_tile_index_counter_host,
+                )
+
+                update_masks.update_source_velocity(
+                    queue,
+                    update_masks_kernels,
+                    source_base_masks[source_idx],
+                    t,
+                    delta,
+                    origin_x,
+                    origin_y,
+                    origin_z,
+                    tile_map,
+                    tile_shape,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                    source_values["velocity_x"][source_idx],
+                    source_values["velocity_y"][source_idx],
+                    source_values["velocity_z"][source_idx],
+                )
+
+            local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+
+            global_work_size = (
+                tile_shape[0] * local_work_size[0],
+                tile_shape[1] * local_work_size[1],
+                tile_shape[2] * local_work_size[2],
+            )
+
+            source_bc_kernels["source_bc"](
+                queue,
+                global_work_size,
+                local_work_size,
+                u,
+                v,
+                w,
+                temperature,
+                smoke,
+                fuel,
+                tile_map,
+                source_mask,
+                np.float32(source_values["temperature"][source_idx]),
+                np.float32(source_values["smoke"][source_idx]),
+                np.float32(source_values["fuel"][source_idx]),
+                np.float32(source_values["velocity_x"][source_idx]),
+                np.float32(source_values["velocity_y"][source_idx]),
+                np.float32(source_values["velocity_z"][source_idx]),
+                np.int32(velocity_local),
+                scratch_A,
+                scratch_B,
+                scratch_C,
+                np.float32(source_values["noise_scale"][source_idx]),
+                np.float32(source_values["noise_amplitude"][source_idx]),
+                np.int32(source_values["noise_seed"][source_idx]),
+                np.float32(dt),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+        # ------------Particle BC-------------------
 
         # ------------time updated-------------------
         t = t + dt

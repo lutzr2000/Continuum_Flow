@@ -41,6 +41,7 @@ def load_program(
     ).build(
         options=[
             f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
+            f"-I{path.parent}",
         ],
         cache_dir=str(OPENCL_CACHE_DIR),
     )
