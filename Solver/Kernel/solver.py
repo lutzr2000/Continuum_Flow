@@ -14,6 +14,7 @@ import Solver.Kernel.update_masks as update_masks
 import Solver.Kernel.time_step as time_step
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
+import Solver.Kernel.boundary_conditions.domain_bc as domain_bc
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -224,6 +225,16 @@ def solver(config: dict):
     time_step_kernels = helper.load_program(
         context,
         kernel_path / "time_step.cl",
+    )
+
+    reference_frame_kernels = helper.load_program(
+        context,
+        kernel_path / "reference_frame.cl",
+    )
+
+    domain_bc_kernels = helper.load_program(
+        context,
+        kernel_path / "domain_bc.cl",
     )
 
     print("################################################################")
@@ -861,6 +872,82 @@ def solver(config: dict):
             delta,
             cfl,
             output_time_step,
+        )
+
+        # ------------Reference Frame Velocity Transfer-------------------
+        if reference_velocity_transfer != 0.0 and reference_frame_animated:
+            reference_matrix, reference_rate = update_masks.get_matrix_data(
+                *reference_matrix_data, t
+            )
+
+            current_reference_velocity_transform = (
+                np.linalg.inv(reference_matrix) @ reference_rate
+            )[:3, :].astype(FIELD_DTYPE)
+
+            reference_velocity_delta = (
+                current_reference_velocity_transform
+                - previous_reference_velocity_transform
+            ) * np.asarray(reference_velocity_transfer, dtype=FIELD_DTYPE)
+
+            if np.any(reference_velocity_delta != 0.0):
+                local_work_size = (
+                    kernel_config.TILE_SIZE,
+                    kernel_config.TILE_SIZE,
+                    kernel_config.TILE_SIZE,
+                )
+
+                global_work_size = (
+                    tile_shape[0] * kernel_config.TILE_SIZE,
+                    tile_shape[1] * kernel_config.TILE_SIZE,
+                    tile_shape[2] * kernel_config.TILE_SIZE,
+                )
+
+                reference_frame_kernels["transfer_velocity"](
+                    queue,
+                    global_work_size,
+                    local_work_size,
+                    u,
+                    v,
+                    w,
+                    tile_map,
+                    *[np.float32(value) for value in reference_velocity_delta.ravel()],
+                    np.float32(origin_x),
+                    np.float32(origin_y),
+                    np.float32(origin_z),
+                    np.float32(delta),
+                    np.int32(nx),
+                    np.int32(ny),
+                    np.int32(nz),
+                    np.int32(tile_shape[1]),
+                    np.int32(tile_shape[2]),
+                )
+
+            previous_reference_velocity_transform = current_reference_velocity_transform
+
+        # ------------BCs-------------------
+        # ------------Domain BC-------------------
+        bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
+
+        u, v, w, p, temperature, smoke, fuel = domain_bc.domain_bc(
+            queue,
+            domain_bc_kernels,
+            u,
+            v,
+            w,
+            p,
+            temperature,
+            smoke,
+            fuel,
+            bc_config,
+            tile_map,
+            tile_shape,
+            reference_temperature,
+            u_initial,
+            v_initial,
+            w_initial,
+            nx,
+            ny,
+            nz,
         )
 
         # ------------time updated-------------------
