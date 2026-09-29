@@ -15,6 +15,7 @@ import Solver.Kernel.time_step as time_step
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
 import Solver.Kernel.domain_bc as domain_bc
+import Solver.Kernel.output as output
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -240,6 +241,11 @@ def solver(config: dict):
     source_bc_kernels = helper.load_program(
         context,
         kernel_path / "source_bc.cl",
+    )
+
+    output_kernels = helper.load_program(
+        context,
+        kernel_path / "output.cl",
     )
 
     print("################################################################")
@@ -558,7 +564,14 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    # Stuff missing!!!!!!!!!!!!!!!!
+
+    shared_memory_blocks, writer_slots = output.setup_output(
+        context,
+        simulation,
+        shape,
+        tile_shape,
+        sparse_tile_capacity,
+    )
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1030,7 +1043,32 @@ def solver(config: dict):
         time_step_count += 1
 
         # ------------Output-------------------
+        device_fields = {
+            "u": u,
+            "v": v,
+            "w": w,
+            "pressure": p,
+            "temperature": temperature,
+            "smoke": smoke,
+            "fuel": fuel,
+            "flame": flame,
+        }
+
         while t >= next_output_time:
+            output.enqueue_device_output(
+                queue,
+                output_kernels,
+                simulation,
+                writer_slots,
+                device_fields,
+                tile_map,
+                tile_shape,
+                kernel_config.TILE_SIZE,
+                active_tile_counter_host,
+                next_tile_index_counter_host,
+                output_index,
+                t,
+            )
 
             buffers = {
                 id(obj): obj for obj in locals().values() if isinstance(obj, cl.Buffer)
@@ -1057,6 +1095,9 @@ def solver(config: dict):
 
             output_index += 1
             next_output_time += output_time_step
+
+    # ------------Shutdown output-------------------
+    output.shutdown_output(shared_memory_blocks, writer_slots)
 
     # ------------Conclusion-------------------
     if cancel_requested:
