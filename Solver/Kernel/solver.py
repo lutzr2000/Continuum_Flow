@@ -264,6 +264,11 @@ def solver(config: dict):
         kernel_path / "velocity_update.cl",
     )
 
+    scalar_update_kernels = helper.load_program(
+        context,
+        kernel_path / "scalar_update.cl",
+    )
+
     print("################################################################")
     print(f"Running on: {device.name}")
 
@@ -1281,6 +1286,83 @@ def solver(config: dict):
         u, u_work = u_work, u
         v, v_work = v_work, v
         w, w_work = w_work, w
+
+        # ------------Scalar update-------------------
+        scalar_update_kernels["predict_scalar_fields_semi_lagrangian"](
+            queue,
+            global_work_size,
+            local_work_size,
+            temperature,
+            smoke,
+            fuel,
+            u,
+            v,
+            w,
+            np.float32(dt),
+            scratch_A,
+            scratch_B,
+            scratch_C,
+            np.float32(delta),
+            np.int32(advection_substeps),
+            np.float32(reference_temperature),
+            tile_map,
+            np.float32(u_initial),
+            np.float32(v_initial),
+            np.float32(w_initial),
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        scalar_update_kernels["update_scalar_fields_maccormack"](
+            queue,
+            global_work_size,
+            local_work_size,
+            temperature,
+            smoke,
+            fuel,
+            scratch_A,
+            scratch_B,
+            scratch_C,
+            u,
+            v,
+            w,
+            np.float32(dt),
+            temperature_work,
+            smoke_work,
+            fuel_work,
+            flame,
+            np.float32(delta),
+            np.int32(advection_substeps),
+            np.float32(physics_values["temperature"]["dissipation"]),
+            np.float32(physics_values["temperature"]["production_rate"]),
+            np.float32(physics_values["smoke"]["dissipation"]),
+            np.float32(physics_values["smoke"]["production_rate"]),
+            np.float32(physics_values["fuel"]["dissipation"]),
+            np.float32(physics_values["fuel"]["burn_rate"]),
+            np.float32(physics_values["fuel"]["ignition_temperature"]),
+            np.float32(physics_values["burning"]["scale"]),
+            np.float32(physics_values["burning"]["amplitude"]),
+            np.float32(reference_temperature),
+            tile_map,
+            np.float32(u_initial),
+            np.float32(v_initial),
+            np.float32(w_initial),
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        # ------------Swap-------------------
+        temperature, temperature_work = temperature_work, temperature
+        smoke, smoke_work = smoke_work, smoke
+        fuel, fuel_work = fuel_work, fuel
 
         # ------------time update-------------------
         t = t + dt

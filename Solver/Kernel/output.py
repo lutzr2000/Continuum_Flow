@@ -355,7 +355,7 @@ def ensure_writer_slot_capacity(
         replacement_field = {
             "array": np.ndarray(
                 pool_shape,
-                dtype=kernel_config.GPU_FIELD_DTYPE,
+                dtype=kernel_config.FIELD_DTYPE,
                 buffer=shm.buf,
             ),
             "dense_shape": old_field["dense_shape"],
