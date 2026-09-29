@@ -11,6 +11,7 @@ import Solver.Kernel.voxelise_mesh as voxelise_mesh
 import Solver.Kernel.multigrid as multigrid
 import Solver.Kernel.particles as particles
 import Solver.Kernel.update_masks as update_masks
+import Solver.Kernel.time_step as time_step
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
 
@@ -220,6 +221,11 @@ def solver(config: dict):
         kernel_path / "sparse_managment.cl",
     )
 
+    time_step_kernels = helper.load_program(
+        context,
+        kernel_path / "time_step.cl",
+    )
+
     print("################################################################")
     print(f"Running on: {device.name}")
 
@@ -357,6 +363,10 @@ def solver(config: dict):
     w_work = helper.full_device(context, sparse_pool_shape, w_initial)
 
     velocity_maxima = helper.zeros_device(context, 3)
+
+    partial_velocity_maxima = helper.device_array(
+        context, (kernel_config.REDUCTION_THREADS_PER_BLOCK, 3), FIELD_DTYPE
+    )
 
     # scalars
     temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
@@ -822,11 +832,36 @@ def solver(config: dict):
                 tile_shape,
             )
 
-        # if has_particle_sources:
-        #     particles.update_particle_source_masks()
+        if has_particle_sources:
+            particles.update_particle_source_masks(
+                queue,
+                particles_kernels["rasterize_particle_spheres"],
+                particles_kernels["sample_interpolated_vectors"],
+                particle_source_masks,
+                particle_sources,
+                t,
+                delta,
+                origin,
+                tile_map,
+                tile_shape,
+            )
 
         # ------------time step-------------------
-        dt = output_time_step  # !!!!!!!!!!!!!!!!!!!!
+        dt = time_step.compute_new_timestep(
+            queue,
+            time_step_kernels,
+            u,
+            v,
+            w,
+            tile_map,
+            tile_shape,
+            active_tile_counter_host,
+            velocity_maxima,
+            partial_velocity_maxima,
+            delta,
+            cfl,
+            output_time_step,
+        )
 
         # ------------time updated-------------------
         t = t + dt

@@ -218,6 +218,67 @@ def update_source_tile_mask(
             )
 
 
+def update_particle_source_masks(
+    queue: cl.CommandQueue,
+    rasterize_particle_spheres_kernel: cl.Kernel,
+    sample_interpolated_vectors_kernel: cl.Kernel,
+    particle_source_masks: list[Any],
+    particle_sources: list[list[dict]],
+    time_value: float,
+    delta: float,
+    origin: tuple[float, float, float],
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+) -> None:
+    """Rebuild the particle-only sparse source masks for one solver step."""
+    threads = 128
+
+    for particle_source_mask, source_entries in zip(
+        particle_source_masks,
+        particle_sources,
+    ):
+        cl.enqueue_fill_buffer(
+            queue,
+            particle_source_mask,
+            np.uint8(0),
+            0,
+            particle_source_mask.size,
+        )
+
+        for entry in source_entries:
+            previous_positions, previous_count, current_positions, count = (
+                particle_motion_samples(
+                    queue,
+                    sample_interpolated_vectors_kernel,
+                    entry,
+                    time_value,
+                )
+            )
+
+            if count <= 0:
+                continue
+
+            rasterize_particle_spheres_kernel(
+                queue,
+                (count * threads,),
+                (threads,),
+                particle_source_mask,
+                tile_map,
+                previous_positions,
+                current_positions,
+                np.int32(count),
+                np.int32(previous_count),
+                entry["radius"],
+                np.float32(delta),
+                np.float32(origin[0]),
+                np.float32(origin[1]),
+                np.float32(origin[2]),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+
 def particle_motion_samples(
     queue: cl.CommandQueue,
     sample_interpolated_vectors_kernel: cl.Kernel,

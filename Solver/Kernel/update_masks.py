@@ -223,7 +223,7 @@ def update_source_masks(
                 group_count[2] * kernel_config.TILE_SIZE,
             )
 
-            update_masks_kernels["update_source_masks_gpu"](
+            update_masks_kernels["update_source_masks"](
                 queue,
                 global_work_size,
                 local_work_size,
