@@ -447,3 +447,112 @@ def particle_frame(
         next_count,
         alpha,
     )
+
+
+def reset_particle_velocity(
+    queue: cl.CommandQueue,
+    reset_particle_velocity_kernel: cl.Kernel,
+    u: Any,
+    v: Any,
+    w: Any,
+    source_entries: list[dict],
+    time_value: float,
+    delta: float,
+    origin: tuple[float, float, float],
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+) -> None:
+    """Reset particle-covered cells before additive velocity transfer."""
+    threads = 128
+
+    for entry in source_entries:
+        count, next_count, alpha = particle_frame(
+            queue,
+            entry,
+            time_value,
+        )
+
+        if count <= 0:
+            continue
+
+        reset_particle_velocity_kernel(
+            queue,
+            (count * threads,),
+            (threads,),
+            u,
+            v,
+            w,
+            tile_map,
+            entry["current_positions_device"],
+            entry["next_positions_device"],
+            np.int32(count),
+            np.int32(next_count),
+            np.float32(alpha),
+            entry["radius"],
+            np.float32(delta),
+            np.float32(origin[0]),
+            np.float32(origin[1]),
+            np.float32(origin[2]),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+
+def transfer_particle_velocities(
+    queue: cl.CommandQueue,
+    transfer_particle_velocities_kernel: cl.Kernel,
+    u: Any,
+    v: Any,
+    w: Any,
+    particle_sources: list[list[dict]],
+    time_value: float,
+    delta: float,
+    origin: tuple[float, float, float],
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+) -> None:
+    """Add interpolated particle velocities inside each particle sphere."""
+    threads = 128
+
+    for source_entries in particle_sources:
+        for entry in source_entries:
+            velocity_transfer = entry["velocity_transfer"]
+
+            if velocity_transfer == 0.0:
+                continue
+
+            count, next_count, alpha = particle_frame(
+                queue,
+                entry,
+                time_value,
+            )
+
+            if count <= 0:
+                continue
+
+            transfer_particle_velocities_kernel(
+                queue,
+                (count * threads,),
+                (threads,),
+                u,
+                v,
+                w,
+                tile_map,
+                entry["current_positions_device"],
+                entry["next_positions_device"],
+                entry["current_velocities_device"],
+                entry["next_velocities_device"],
+                np.int32(count),
+                np.int32(next_count),
+                np.float32(alpha),
+                entry["radius"],
+                velocity_transfer,
+                np.float32(delta),
+                np.float32(origin[0]),
+                np.float32(origin[1]),
+                np.float32(origin[2]),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )

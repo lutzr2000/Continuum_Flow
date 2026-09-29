@@ -1094,6 +1094,39 @@ def solver(config: dict):
                     np.int32(tile_shape[2]),
                 )
 
+                if (
+                    source_values["velocity_x"][source_idx] == 0.0
+                    and source_values["velocity_y"][source_idx] == 0.0
+                    and source_values["velocity_z"][source_idx] == 0.0
+                ):
+                    particles.reset_particle_velocity(
+                        queue,
+                        particles_kernels["reset_particle_velocity_kernel"],
+                        u,
+                        v,
+                        w,
+                        particle_sources[source_idx],
+                        t,
+                        delta,
+                        origin,
+                        tile_map,
+                        tile_shape,
+                    )
+
+            particles.transfer_particle_velocities(
+                queue,
+                particles_kernels["transfer_particle_velocities"],
+                u,
+                v,
+                w,
+                particle_sources,
+                t,
+                delta,
+                origin,
+                tile_map,
+                tile_shape,
+            )
+
         # ------------Update obstacle masks-------------------
         if obstacle_base_masks:
             update_masks.update_obstacle_mask(
