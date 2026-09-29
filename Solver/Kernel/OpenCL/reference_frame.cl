@@ -2,6 +2,8 @@
 #define TILE_SIZE 4
 #endif
 
+#include "sparse_managment.cl"
+
 __kernel void transfer_velocity(
     __global float *u,
     __global float *v,
@@ -80,19 +82,49 @@ __kernel void transfer_velocity(
         * TILE_SIZE + local_j)
         * TILE_SIZE + local_k;
 
-    u[index] +=
+    u[index] =
+        get_pool_value(
+            u,
+            tile_map,
+            i,
+            j,
+            k,
+            0.0f,
+            tiles_y,
+            tiles_z
+        ) +
         a00 * x +
         a01 * y +
         a02 * z +
         a03;
 
-    v[index] +=
+    v[index] =
+        get_pool_value(
+            v,
+            tile_map,
+            i,
+            j,
+            k,
+            0.0f,
+            tiles_y,
+            tiles_z
+        ) +
         a10 * x +
         a11 * y +
         a12 * z +
         a13;
 
-    w[index] +=
+    w[index] =
+        get_pool_value(
+            w,
+            tile_map,
+            i,
+            j,
+            k,
+            0.0f,
+            tiles_y,
+            tiles_z
+        ) +
         a20 * x +
         a21 * y +
         a22 * z +

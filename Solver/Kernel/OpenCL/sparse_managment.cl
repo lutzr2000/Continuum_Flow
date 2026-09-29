@@ -2,6 +2,53 @@
 #define TILE_SIZE 4
 #endif
 
+inline float get_pool_value(
+    __global const float *field,
+    __global const int *tile_map,
+    const int i,
+    const int j,
+    const int k,
+    const float default_value,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int tile_i =
+        i / TILE_SIZE;
+
+    const int tile_j =
+        j / TILE_SIZE;
+
+    const int tile_k =
+        k / TILE_SIZE;
+
+    const int tile_map_index =
+        (tile_i * tiles_y + tile_j)
+        * tiles_z + tile_k;
+
+    const int tile_index =
+        tile_map[tile_map_index];
+
+    if (tile_index == -1)
+        return default_value;
+
+    const int local_i =
+        i - tile_i * TILE_SIZE;
+
+    const int local_j =
+        j - tile_j * TILE_SIZE;
+
+    const int local_k =
+        k - tile_k * TILE_SIZE;
+
+    const int index =
+        ((tile_index * TILE_SIZE + local_i)
+        * TILE_SIZE + local_j)
+        * TILE_SIZE + local_k;
+
+    return field[index];
+}
+
 __kernel void build_activity_mask(
     __global const float *smoke,
     __global const float *fuel,

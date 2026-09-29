@@ -248,6 +248,16 @@ def solver(config: dict):
         kernel_path / "output.cl",
     )
 
+    obstacle_bc_kernels = helper.load_program(
+        context,
+        kernel_path / "obstacle_bc.cl",
+    )
+
+    vorticity_kernels = helper.load_program(
+        context,
+        kernel_path / "vorticity.cl",
+    )
+
     print("################################################################")
     print(f"Running on: {device.name}")
 
@@ -354,6 +364,14 @@ def solver(config: dict):
         math.ceil(
             total_tile_count * (float(kernel_config.SPARSE_TILE_GROWTH_PERCENT) / 100.0)
         ),
+    )
+
+    local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+
+    global_work_size = (
+        tile_shape[0] * local_work_size[0],
+        tile_shape[1] * local_work_size[1],
+        tile_shape[2] * local_work_size[2],
     )
 
     print("Initialise")
@@ -974,9 +992,9 @@ def solver(config: dict):
             velocity_local = bool(source_values["velocity_local"][source_idx])
             if velocity_local:
                 sparse_managment.reset_pools(
+                    queue,
                     (scratch_A, scratch_B, scratch_C),
                     zero_pool,
-                    next_tile_index_counter_host,
                 )
 
                 update_masks.update_source_velocity(
@@ -997,14 +1015,6 @@ def solver(config: dict):
                     source_values["velocity_y"][source_idx],
                     source_values["velocity_z"][source_idx],
                 )
-
-            local_work_size = kernel_config.THREADS_PER_BLOCK_3D
-
-            global_work_size = (
-                tile_shape[0] * local_work_size[0],
-                tile_shape[1] * local_work_size[1],
-                tile_shape[2] * local_work_size[2],
-            )
 
             source_bc_kernels["source_bc"](
                 queue,
@@ -1042,14 +1052,6 @@ def solver(config: dict):
             for source_idx, particle_source_mask in enumerate(particle_source_masks):
                 if not particle_source_flags[source_idx]:
                     continue
-
-                local_work_size = kernel_config.THREADS_PER_BLOCK_3D
-
-                global_work_size = (
-                    tile_shape[0] * local_work_size[0],
-                    tile_shape[1] * local_work_size[1],
-                    tile_shape[2] * local_work_size[2],
-                )
 
                 source_bc_kernels["source_bc"](
                     queue,
@@ -1099,6 +1101,58 @@ def solver(config: dict):
                 scratch_A,
                 scratch_B,
                 scratch_C,
+            )
+
+        # ------------Obstacle BC-------------------
+        obstacle_bc_kernels["obstacle_bc"](
+            queue,
+            global_work_size,
+            local_work_size,
+            u,
+            v,
+            w,
+            smoke,
+            fuel,
+            flame,
+            obstacle_mask,
+            scratch_A,
+            scratch_B,
+            scratch_C,
+            tile_map,
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        # ------------Clear scratch-------------------
+        sparse_managment.reset_pools(
+            queue,
+            (scratch_A, scratch_B, scratch_C),
+            zero_pool,
+        )
+
+        # ------------Vorticity-------------------
+        if physics_values["extras"]["vorticity"] > 0.0:
+            vorticity_kernels["compute_vorticity"](
+                queue,
+                global_work_size,
+                local_work_size,
+                u,
+                v,
+                w,
+                np.float32(u_initial),
+                np.float32(v_initial),
+                np.float32(w_initial),
+                obstacle_mask,
+                vorticity_magnitude,
+                np.float32(delta),
+                tile_map,
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
             )
 
         # ------------time update-------------------

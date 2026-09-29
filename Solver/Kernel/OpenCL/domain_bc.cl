@@ -2,6 +2,8 @@
 #define TILE_SIZE 4
 #endif
 
+#include "sparse_managment.cl"
+
 inline void apply_face_state(
     __global float *u,
     __global float *v,
@@ -52,7 +54,6 @@ inline void apply_face_state(
     float neighbor_u;
     float neighbor_v;
     float neighbor_w;
-    float neighbor_p;
     float neighbor_T;
     float neighbor_smoke;
     float neighbor_fuel;
@@ -62,7 +63,6 @@ inline void apply_face_state(
         neighbor_u = u_initial;
         neighbor_v = v_initial;
         neighbor_w = w_initial;
-        neighbor_p = 0.0f;
 
         neighbor_T =
             use_temp ? temp_value : ref_temp;
@@ -89,7 +89,6 @@ inline void apply_face_state(
         neighbor_u = u[src_index];
         neighbor_v = v[src_index];
         neighbor_w = w[src_index];
-        neighbor_p = p[src_index];
 
         neighbor_T = T[src_index];
         neighbor_smoke = smoke[src_index];
@@ -181,7 +180,16 @@ inline void apply_face_state(
             axis == 2 ? 0.0f : neighbor_w;
     }
 
-    p[dst_index] = neighbor_p;
+    p[dst_index] = get_pool_value(
+        p,
+        tile_map,
+        src_i,
+        src_j,
+        src_k,
+        0.0f,
+        tiles_y,
+        tiles_z
+    );
 
     T[dst_index] =
         use_temp ? temp_value : neighbor_T;
