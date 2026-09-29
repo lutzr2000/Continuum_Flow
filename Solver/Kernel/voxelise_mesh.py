@@ -106,6 +106,7 @@ def voxelize_triangles(
 
     return {
         "mask": mask,
+        "shape": shape,
         "origin": origin,
         "bounds_min": origin,
         "bounds_max": np.asarray(

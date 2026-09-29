@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pyopencl as cl
 from pathlib import Path
@@ -12,22 +13,41 @@ FIELD_DTYPE = kernel_config.FIELD_DTYPE
 IDENTITY_4 = np.eye(4)
 ZERO_4 = np.zeros((4, 4))
 
+OPENCL_CACHE_DIR = (
+    Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cache"))
+    / "ContinuumFlow"
+    / "OpenCL"
+)
+
+PROGRAM_CACHE: dict[tuple[int, Path], dict[str, cl.Kernel]] = {}
+
 
 def load_program(
     context: cl.Context,
     path: Path,
 ) -> dict[str, cl.Kernel]:
-    with path.open("r", encoding="utf-8") as f:
-        program = cl.Program(
-            context,
-            f.read(),
-        ).build(
-            options=[
-                f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
-            ]
-        )
+    path = path.resolve()
+    cache_key = (int(context.int_ptr), path)
 
-    return {kernel.function_name: kernel for kernel in program.all_kernels()}
+    cached_kernels = PROGRAM_CACHE.get(cache_key)
+    if cached_kernels is not None:
+        return cached_kernels
+
+    OPENCL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    program = cl.Program(
+        context,
+        path.read_text(encoding="utf-8"),
+    ).build(
+        options=[
+            f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
+        ],
+        cache_dir=str(OPENCL_CACHE_DIR),
+    )
+
+    kernels = {kernel.function_name: kernel for kernel in program.all_kernels()}
+    PROGRAM_CACHE[cache_key] = kernels
+    return kernels
 
 
 def to_device(context, array):

@@ -445,9 +445,8 @@ def solver(config: dict):
             helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
         )
 
-    has_animated_sources = any(
-        is_animated(base_masks) for base_masks in source_base_masks
-    )
+    animated_sources = [is_animated(base_masks) for base_masks in source_base_masks]
+    has_animated_sources = any(animated_sources)
 
     source_tile_mask = helper.zeros_device(
         context, tile_shape, dtype=np.bool_
@@ -802,6 +801,29 @@ def solver(config: dict):
         else:
             active_tile_counter_host = total_tile_count
             next_tile_index_counter_host = total_tile_count
+
+        # ------------Update masks-------------------
+        update_geometry_sources = time_step_count == 0 or has_animated_sources
+
+        if update_geometry_sources:
+            update_masks.update_source_masks(
+                queue,
+                update_masks_kernels,
+                geometry_source_masks,
+                source_base_masks,
+                animated_sources,
+                time_step_count == 0,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                tile_map,
+                tile_shape,
+            )
+
+        # if has_particle_sources:
+        #     particles.update_particle_source_masks()
 
         # ------------time step-------------------
         dt = output_time_step  # !!!!!!!!!!!!!!!!!!!!
