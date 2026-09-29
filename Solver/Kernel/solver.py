@@ -841,7 +841,7 @@ def solver(config: dict):
             active_tile_counter_host = total_tile_count
             next_tile_index_counter_host = total_tile_count
 
-        # ------------Update masks-------------------
+        # ------------Update geometry source masks-------------------
         update_geometry_sources = time_step_count == 0 or has_animated_sources
 
         if update_geometry_sources:
@@ -861,6 +861,7 @@ def solver(config: dict):
                 tile_shape,
             )
 
+        # ------------Update particle source masks-------------------
         if has_particle_sources:
             particles.update_particle_source_masks(
                 queue,
@@ -1036,9 +1037,71 @@ def solver(config: dict):
                 np.int32(tile_shape[2]),
             )
 
-        # ------------Particle BC-------------------
+        # ------------Particle Source BC-------------------
+        if has_particle_sources:
+            for source_idx, particle_source_mask in enumerate(particle_source_masks):
+                if not particle_source_flags[source_idx]:
+                    continue
 
-        # ------------time updated-------------------
+                local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+
+                global_work_size = (
+                    tile_shape[0] * local_work_size[0],
+                    tile_shape[1] * local_work_size[1],
+                    tile_shape[2] * local_work_size[2],
+                )
+
+                source_bc_kernels["source_bc"](
+                    queue,
+                    global_work_size,
+                    local_work_size,
+                    u,
+                    v,
+                    w,
+                    temperature,
+                    smoke,
+                    fuel,
+                    tile_map,
+                    particle_source_mask,
+                    np.float32(source_values["temperature"][source_idx]),
+                    np.float32(source_values["smoke"][source_idx]),
+                    np.float32(source_values["fuel"][source_idx]),
+                    np.float32(source_values["velocity_x"][source_idx]),
+                    np.float32(source_values["velocity_y"][source_idx]),
+                    np.float32(source_values["velocity_z"][source_idx]),
+                    np.int32(0),
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                    np.float32(source_values["noise_scale"][source_idx]),
+                    np.float32(source_values["noise_amplitude"][source_idx]),
+                    np.int32(source_values["noise_seed"][source_idx]),
+                    np.float32(dt),
+                    np.int32(tile_shape[0]),
+                    np.int32(tile_shape[1]),
+                    np.int32(tile_shape[2]),
+                )
+
+        # ------------Update obstacle masks-------------------
+        if obstacle_base_masks:
+            update_masks.update_obstacle_mask(
+                queue,
+                update_masks_kernels,
+                obstacle_mask,
+                obstacle_base_masks,
+                t,
+                delta,
+                origin_x,
+                origin_y,
+                origin_z,
+                tile_map,
+                tile_shape,
+                scratch_A,
+                scratch_B,
+                scratch_C,
+            )
+
+        # ------------time update-------------------
         t = t + dt
         time_step_count += 1
 

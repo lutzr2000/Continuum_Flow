@@ -402,7 +402,7 @@ def prepare_cell_transform(
 
 def update_source_velocity(
     queue: cl.CommandQueue,
-    source_velocity_kernels: dict[str, cl.Kernel],
+    update_masks_kernels: dict[str, cl.Kernel],
     base_masks: Any,
     t: float,
     delta: float,
@@ -504,7 +504,7 @@ def update_source_velocity(
             group_count[2] * local_work_size[2],
         )
 
-        source_velocity_kernels["update_source_velocity"](
+        update_masks_kernels["update_source_velocity"](
             queue,
             global_work_size,
             local_work_size,
@@ -517,6 +517,211 @@ def update_source_velocity(
             np.float32(world_velocity[0]),
             np.float32(world_velocity[1]),
             np.float32(world_velocity[2]),
+            np.int32(tile_min[0]),
+            np.int32(tile_min[1]),
+            np.int32(tile_min[2]),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+            np.int32(local_mask_shape[0]),
+            np.int32(local_mask_shape[1]),
+            np.int32(local_mask_shape[2]),
+        )
+
+
+def update_obstacle_mask(
+    queue: cl.CommandQueue,
+    obstacle_kernels: dict[str, cl.Kernel],
+    obstacle_mask: Any,
+    obstacle_base_masks: Any,
+    t: float,
+    delta: float,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    tile_map: Any,
+    tile_shape: tuple[int, int, int],
+    velocity_x: Any,
+    velocity_y: Any,
+    velocity_z: Any,
+) -> None:
+    """
+    Rebuild the sparse obstacle mask from all transformed obstacle meshes.
+
+    The mask is cleared before each update, then every mesh is evaluated over
+    conservative tile bounds and unioned into the device field.
+    """
+    helper.fill_device(
+        queue,
+        obstacle_mask,
+        0,
+        dtype=np.bool_,
+    )
+
+    for entry in obstacle_base_masks:
+        voxels = entry["voxels"]
+
+        matrix, rate = helper.get_matrix_data(
+            entry["matrix_times"],
+            entry["matrix_matrices"],
+            entry["matrix_rates"],
+            t,
+        )
+
+        inv = np.linalg.inv(matrix).astype(np.float32)
+
+        rate = np.asarray(
+            rate,
+            dtype=np.float32,
+        )
+
+        local_mask = voxels["mask"]
+
+        local_origin = np.asarray(
+            voxels["origin"],
+            dtype=np.float32,
+        )
+
+        (
+            c0,
+            c1,
+            c2,
+            a00,
+            a01,
+            a02,
+            a10,
+            a11,
+            a12,
+            a20,
+            a21,
+            a22,
+        ) = prepare_cell_transform(
+            inv,
+            delta,
+            origin_x,
+            origin_y,
+            origin_z,
+            local_origin,
+        )
+
+        origin = np.asarray(
+            (
+                origin_x,
+                origin_y,
+                origin_z,
+            ),
+            dtype=np.float32,
+        )
+
+        tile_min, tile_max = get_tile_bounds(
+            voxels,
+            matrix,
+            delta,
+            origin,
+            tile_shape,
+        )
+
+        velocity_transform = rate @ inv
+
+        d = np.float32(delta)
+        ox = np.float32(origin_x)
+        oy = np.float32(origin_y)
+        oz = np.float32(origin_z)
+
+        vx_i = np.float32(velocity_transform[0, 0] * d)
+        vx_j = np.float32(velocity_transform[0, 1] * d)
+        vx_k = np.float32(velocity_transform[0, 2] * d)
+
+        vx_c = np.float32(
+            velocity_transform[0, 0] * ox
+            + velocity_transform[0, 1] * oy
+            + velocity_transform[0, 2] * oz
+            + velocity_transform[0, 3]
+        )
+
+        vy_i = np.float32(velocity_transform[1, 0] * d)
+        vy_j = np.float32(velocity_transform[1, 1] * d)
+        vy_k = np.float32(velocity_transform[1, 2] * d)
+
+        vy_c = np.float32(
+            velocity_transform[1, 0] * ox
+            + velocity_transform[1, 1] * oy
+            + velocity_transform[1, 2] * oz
+            + velocity_transform[1, 3]
+        )
+
+        vz_i = np.float32(velocity_transform[2, 0] * d)
+        vz_j = np.float32(velocity_transform[2, 1] * d)
+        vz_k = np.float32(velocity_transform[2, 2] * d)
+
+        vz_c = np.float32(
+            velocity_transform[2, 0] * ox
+            + velocity_transform[2, 1] * oy
+            + velocity_transform[2, 2] * oz
+            + velocity_transform[2, 3]
+        )
+
+        if (
+            tile_min[0] > tile_max[0]
+            or tile_min[1] > tile_max[1]
+            or tile_min[2] > tile_max[2]
+        ):
+            continue
+
+        local_mask_shape = voxels["shape"]
+
+        local_work_size = (
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+            kernel_config.TILE_SIZE,
+        )
+
+        group_count = (
+            int(tile_max[0] - tile_min[0] + 1),
+            int(tile_max[1] - tile_min[1] + 1),
+            int(tile_max[2] - tile_min[2] + 1),
+        )
+
+        global_work_size = (
+            group_count[0] * local_work_size[0],
+            group_count[1] * local_work_size[1],
+            group_count[2] * local_work_size[2],
+        )
+
+        obstacle_kernels["update_obstacle_mask_gpu"](
+            queue,
+            global_work_size,
+            local_work_size,
+            obstacle_mask,
+            velocity_x,
+            velocity_y,
+            velocity_z,
+            tile_map,
+            local_mask,
+            np.float32(c0),
+            np.float32(c1),
+            np.float32(c2),
+            np.float32(a00),
+            np.float32(a01),
+            np.float32(a02),
+            np.float32(a10),
+            np.float32(a11),
+            np.float32(a12),
+            np.float32(a20),
+            np.float32(a21),
+            np.float32(a22),
+            vx_i,
+            vx_j,
+            vx_k,
+            vx_c,
+            vy_i,
+            vy_j,
+            vy_k,
+            vy_c,
+            vz_i,
+            vz_j,
+            vz_k,
+            vz_c,
             np.int32(tile_min[0]),
             np.int32(tile_min[1]),
             np.int32(tile_min[2]),
