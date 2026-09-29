@@ -11,7 +11,7 @@ import Solver.Kernel.helper as helper
 def voxelise_all_meshes(
     context: cl.Context,
     queue: cl.CommandQueue,
-    program: cl.Program,
+    surface_kernel: cl.Kernel,
     delta: float,
     geometry_inputs: list[dict[str, Any]] | None,
     bake_path: str,
@@ -35,7 +35,7 @@ def voxelise_all_meshes(
         voxels = voxelize_triangles(
             context,
             queue,
-            program,
+            surface_kernel,
             triangles,
             delta,
         )
@@ -54,7 +54,7 @@ def voxelise_all_meshes(
 def voxelize_triangles(
     context: cl.Context,
     queue: cl.CommandQueue,
-    program: cl.Program,
+    surface_kernel: cl.Kernel,
     triangles: np.ndarray,
     delta: float,
 ) -> dict[str, Any] | None:
@@ -88,7 +88,7 @@ def voxelize_triangles(
         dtype=np.uint8,
     )
 
-    program.surface(
+    surface_kernel(
         queue,
         shape,
         None,

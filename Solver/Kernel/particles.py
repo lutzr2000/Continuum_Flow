@@ -170,7 +170,8 @@ def transform_particle_frames_to_reference(
 
 def update_source_tile_mask(
     queue: cl.CommandQueue,
-    particles_kernels: dict[str, cl.Kernel],
+    mark_particle_tiles_kernel: cl.Kernel,
+    sample_interpolated_vectors_kernel: cl.Kernel,
     source_tile_mask: Any,
     particle_sources: list[list[dict]],
     tile_shape: tuple[int, int, int],
@@ -188,7 +189,7 @@ def update_source_tile_mask(
             previous_positions, previous_count, current_positions, count = (
                 particle_motion_samples(
                     queue,
-                    particles_kernels,
+                    sample_interpolated_vectors_kernel,
                     entry,
                     time_value,
                 )
@@ -197,7 +198,7 @@ def update_source_tile_mask(
             if count <= 0:
                 continue
 
-            particles_kernels["mark_particle_tiles"](
+            mark_particle_tiles_kernel(
                 queue,
                 (count * threads,),
                 (threads,),
@@ -219,7 +220,7 @@ def update_source_tile_mask(
 
 def particle_motion_samples(
     queue: cl.CommandQueue,
-    particles_kernels: dict[str, cl.Kernel],
+    sample_interpolated_vectors_kernel: cl.Kernel,
     entry: dict,
     time_value: float,
 ) -> tuple[Any, int, Any, int]:
@@ -240,7 +241,7 @@ def particle_motion_samples(
         previous_count = entry["sample_count"]
 
         if count:
-            particles_kernels["sample_interpolated_vectors"](
+            sample_interpolated_vectors_kernel(
                 queue,
                 (count,),
                 None,
@@ -260,7 +261,7 @@ def particle_motion_samples(
             )
 
             if count:
-                particles_kernels["sample_interpolated_vectors"](
+                sample_interpolated_vectors_kernel(
                     queue,
                     (count,),
                     None,

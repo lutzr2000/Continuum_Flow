@@ -8,7 +8,7 @@ import Solver.Kernel.helper as helper
 
 def update_source_tile_mask(
     queue: cl.CommandQueue,
-    sources_program: cl.Program,
+    mark_source_tiles_kernel: cl.Kernel,
     source_tile_mask: Any,
     source_base_masks: Any,
     tile_shape: tuple[int, int, int],
@@ -82,7 +82,7 @@ def update_source_tile_mask(
             if np.any(tile_min > tile_max):
                 continue
 
-            sources_program.mark_source_tiles(
+            mark_source_tiles_kernel(
                 queue,
                 (
                     int(tile_max[0] - tile_min[0] + 1),

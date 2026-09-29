@@ -16,7 +16,7 @@ ZERO_4 = np.zeros((4, 4))
 def load_program(
     context: cl.Context,
     path: Path,
-) -> tuple[cl.Program, dict[str, cl.Kernel]]:
+) -> dict[str, cl.Kernel]:
     with path.open("r", encoding="utf-8") as f:
         program = cl.Program(
             context,
@@ -27,9 +27,7 @@ def load_program(
             ]
         )
 
-    kernels = {kernel.function_name: kernel for kernel in program.all_kernels()}
-
-    return program, kernels
+    return {kernel.function_name: kernel for kernel in program.all_kernels()}
 
 
 def to_device(context, array):
@@ -50,6 +48,28 @@ def device_array(context, shape, dtype):
         mf.READ_WRITE,
         size=size,
     )
+
+
+def fill_device(queue, buffer, value, dtype=FIELD_DTYPE):
+    cl.enqueue_fill_buffer(
+        queue,
+        buffer,
+        np.asarray(value, dtype=dtype),
+        0,
+        buffer.size,
+    )
+
+
+def read_int32(queue, buffer):
+    value = np.empty(1, dtype=np.int32)
+
+    cl.enqueue_copy(
+        queue,
+        value,
+        buffer,
+    ).wait()
+
+    return int(value[0])
 
 
 def zeros_device(context, shape, dtype=FIELD_DTYPE):

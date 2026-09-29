@@ -200,19 +200,24 @@ def solver(config: dict):
 
     kernel_path = Path(__file__).parent / "OpenCL"
 
-    voxelise_mesh_program = helper.load_program(
+    voxelise_mesh_kernels = helper.load_program(
         context,
         kernel_path / "voxelise_mesh.cl",
     )
 
-    update_masks_program = helper.load_program(
+    update_masks_kernels = helper.load_program(
         context,
         kernel_path / "update_masks.cl",
     )
 
-    particles_program, particles_kernels = helper.load_program(
+    particles_kernels = helper.load_program(
         context,
         kernel_path / "particles.cl",
+    )
+
+    sparse_managment_kernels = helper.load_program(
+        context,
+        kernel_path / "sparse_managment.cl",
     )
 
     print("################################################################")
@@ -405,14 +410,14 @@ def solver(config: dict):
     sources = simulation.get("sources") or []
 
     source_base_masks = []
-    source_masks = []
+    geometry_source_masks = []
 
     for source in sources:
         # voxelise source meshes
         base_masks = voxelise_mesh.voxelise_all_meshes(
             context,
             queue,
-            voxelise_mesh_program,
+            voxelise_mesh_kernels["surface"],
             delta,
             source.get("geometry_inputs"),
             bake_path,
@@ -436,7 +441,7 @@ def solver(config: dict):
         source_base_masks.append(base_masks)
 
         # geometry source mask
-        source_masks.append(
+        geometry_source_masks.append(
             helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
         )
 
@@ -479,7 +484,7 @@ def solver(config: dict):
         base_masks = voxelise_mesh.voxelise_all_meshes(
             context,
             queue,
-            voxelise_mesh_program,
+            voxelise_mesh_kernels["surface"],
             delta,
             obstacle.get("geometry_inputs"),
             bake_path,
@@ -579,7 +584,7 @@ def solver(config: dict):
         # ------------Update source tile mask-------------------
         update_masks.update_source_tile_mask(
             queue,
-            update_masks_program,
+            update_masks_kernels["mark_source_tiles"],
             source_tile_mask,
             source_base_masks,
             tile_shape,
@@ -591,7 +596,8 @@ def solver(config: dict):
         if has_particle_sources:
             particles.update_source_tile_mask(
                 queue,
-                particles_kernels,
+                particles_kernels["mark_particle_tiles"],
+                particles_kernels["sample_interpolated_vectors"],
                 source_tile_mask,
                 particle_sources,
                 tile_shape,
@@ -599,6 +605,203 @@ def solver(config: dict):
                 delta,
                 origin,
             )
+
+        # ------------Start Active tiles-------------------
+        if simulate_sparsely:
+            sparse_managment_kernels["build_activity_mask"](
+                queue,
+                tile_shape,
+                None,
+                smoke,
+                fuel,
+                flame,
+                tile_map,
+                source_tile_mask,
+                base_tile_map,
+                np.float32(sparse_threshold),
+                np.int32(nx),
+                np.int32(ny),
+                np.int32(nz),
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+            helper.fill_device(queue, active_tile_counter, 0, dtype=np.int32)
+            helper.fill_device(queue, free_slot_count, 0, dtype=np.int32)
+            helper.fill_device(queue, reused_slot_count, 0, dtype=np.int32)
+
+            sparse_managment_kernels["release_inactive_tile_slots"](
+                queue,
+                tile_shape,
+                None,
+                base_tile_map,
+                tile_map,
+                np.int32(tile_dilate),
+                free_slot_stack,
+                free_slot_count,
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+            sparse_managment_kernels["activate_tiles_with_reuse"](
+                queue,
+                tile_shape,
+                None,
+                base_tile_map,
+                tile_map,
+                np.int32(tile_dilate),
+                free_slot_stack,
+                free_slot_count,
+                reused_slot_stack,
+                reused_slot_count,
+                next_tile_index_counter,
+                active_tile_counter,
+                np.int32(tile_shape[0]),
+                np.int32(tile_shape[1]),
+                np.int32(tile_shape[2]),
+            )
+
+            reused_slot_count_host = helper.read_int32(queue, reused_slot_count)
+
+            if reused_slot_count_host > 0:
+                sparse_managment.reset_reused_pool_slots(
+                    queue,
+                    sparse_managment_kernels,
+                    [
+                        (u, u_initial, FIELD_DTYPE),
+                        (v, v_initial, FIELD_DTYPE),
+                        (w, w_initial, FIELD_DTYPE),
+                        (u_work, u_initial, FIELD_DTYPE),
+                        (v_work, v_initial, FIELD_DTYPE),
+                        (w_work, w_initial, FIELD_DTYPE),
+                        (scratch_A, reference_temperature, FIELD_DTYPE),
+                        (scratch_B, 0.0, FIELD_DTYPE),
+                        (scratch_C, 0.0, FIELD_DTYPE),
+                        (p, 0.0, FIELD_DTYPE),
+                        (pressure_rhs, 0.0, FIELD_DTYPE),
+                        (temperature, reference_temperature, FIELD_DTYPE),
+                        (smoke, 0.0, FIELD_DTYPE),
+                        (fuel, 0.0, FIELD_DTYPE),
+                        (temperature_work, reference_temperature, FIELD_DTYPE),
+                        (smoke_work, 0.0, FIELD_DTYPE),
+                        (fuel_work, 0.0, FIELD_DTYPE),
+                        (flame, 0.0, FIELD_DTYPE),
+                        (vorticity_magnitude, 0.0, FIELD_DTYPE),
+                        (obstacle_mask, False, np.bool_),
+                        *[(mask, False, np.bool_) for mask in geometry_source_masks],
+                        *(
+                            [(mask, False, np.bool_) for mask in particle_source_masks]
+                            if has_particle_sources
+                            else []
+                        ),
+                    ],
+                    reused_slot_stack,
+                    reused_slot_count_host,
+                )
+
+            next_tile_index_counter_host = helper.read_int32(
+                queue, next_tile_index_counter
+            )
+
+            if next_tile_index_counter_host > sparse_tile_capacity:
+                next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
+                    sparse_tile_capacity,
+                    next_tile_index_counter_host,
+                    tile_growth_size,
+                )
+
+                (
+                    u,
+                    v,
+                    w,
+                    u_work,
+                    v_work,
+                    w_work,
+                    scratch_A,
+                    scratch_B,
+                    scratch_C,
+                    p,
+                    pressure_rhs,
+                    temperature,
+                    smoke,
+                    fuel,
+                    temperature_work,
+                    smoke_work,
+                    fuel_work,
+                    flame,
+                    zero_pool,
+                    vorticity_magnitude,
+                    obstacle_mask,
+                    *resized_source_masks,
+                ) = sparse_managment.ensure_pool_capacities(
+                    context,
+                    queue,
+                    [
+                        (u, u_initial, FIELD_DTYPE),
+                        (v, v_initial, FIELD_DTYPE),
+                        (w, w_initial, FIELD_DTYPE),
+                        (u_work, u_initial, FIELD_DTYPE),
+                        (v_work, v_initial, FIELD_DTYPE),
+                        (w_work, w_initial, FIELD_DTYPE),
+                        (scratch_A, reference_temperature, FIELD_DTYPE),
+                        (scratch_B, 0.0, FIELD_DTYPE),
+                        (scratch_C, 0.0, FIELD_DTYPE),
+                        (p, 0.0, FIELD_DTYPE),
+                        (pressure_rhs, 0.0, FIELD_DTYPE),
+                        (temperature, reference_temperature, FIELD_DTYPE),
+                        (smoke, 0.0, FIELD_DTYPE),
+                        (fuel, 0.0, FIELD_DTYPE),
+                        (temperature_work, reference_temperature, FIELD_DTYPE),
+                        (smoke_work, 0.0, FIELD_DTYPE),
+                        (fuel_work, 0.0, FIELD_DTYPE),
+                        (flame, 0.0, FIELD_DTYPE),
+                        (zero_pool, 0.0, FIELD_DTYPE),
+                        (vorticity_magnitude, 0.0, FIELD_DTYPE),
+                        (obstacle_mask, False, np.bool_),
+                        *[(mask, False, np.bool_) for mask in geometry_source_masks],
+                        *(
+                            [(mask, False, np.bool_) for mask in particle_source_masks]
+                            if has_particle_sources
+                            else []
+                        ),
+                    ],
+                    sparse_tile_capacity,
+                    next_sparse_tile_capacity,
+                )
+
+                source_count = len(sources)
+                geometry_source_masks = resized_source_masks[:source_count]
+                particle_source_masks = (
+                    resized_source_masks[source_count:]
+                    if has_particle_sources
+                    else particle_source_masks
+                )
+
+                sparse_tile_capacity = next_sparse_tile_capacity
+
+                # needed for growning the coarse capacities simply by recreating them
+                (
+                    p_levels,
+                    b_levels,
+                    delta_levels,
+                    multigrid_tile_maps,
+                    multigrid_active_tiles,
+                    multigrid_active_tile_counts,
+                    multigrid_level_shapes,
+                ) = multigrid.create_multigrid_levels(
+                    context,
+                    shape,
+                    delta,
+                    sparse_tile_capacity,
+                    min_size=8,
+                )
+
+            active_tile_counter_host = helper.read_int32(queue, active_tile_counter)
+        else:
+            active_tile_counter_host = total_tile_count
+            next_tile_index_counter_host = total_tile_count
 
         # ------------time step-------------------
         dt = output_time_step  # !!!!!!!!!!!!!!!!!!!!
