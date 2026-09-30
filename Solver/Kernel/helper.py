@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pyopencl as cl
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from numpy.typing import NDArray
@@ -20,6 +21,45 @@ OPENCL_CACHE_DIR = (
 )
 
 PROGRAM_CACHE: dict[tuple[int, Path], dict[str, cl.Kernel]] = {}
+
+
+def opencl_buffer_bytes(*roots: Any) -> int:
+    """Return the size of unique OpenCL buffers reachable through containers.
+
+    Solver buffers are stored both as direct local variables and inside nested
+    lists, tuples, sets and dictionaries.  Only those container types are
+    traversed deliberately: arbitrary Python objects and OpenCL driver
+    overhead are outside the scope of this lightweight solver-memory estimate.
+    """
+    seen_containers: set[int] = set()
+    seen_buffers: set[int] = set()
+    total = 0
+    pending = list(roots)
+
+    while pending:
+        value = pending.pop()
+
+        if isinstance(value, cl.Buffer):
+            buffer_id = int(value.int_ptr)
+            if buffer_id not in seen_buffers:
+                seen_buffers.add(buffer_id)
+                total += int(value.size)
+            continue
+
+        if isinstance(value, Mapping):
+            container_id = id(value)
+            if container_id not in seen_containers:
+                seen_containers.add(container_id)
+                pending.extend(value.values())
+            continue
+
+        if isinstance(value, (list, tuple, set, frozenset)):
+            container_id = id(value)
+            if container_id not in seen_containers:
+                seen_containers.add(container_id)
+                pending.extend(value)
+
+    return total
 
 
 def load_program(

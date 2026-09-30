@@ -1565,14 +1565,9 @@ def solver(config: dict, timings: Any = None):
             next_output_time += output_time_step
 
             # ------------(V)RAM Track-------------------
-            buffers = {
-                id(obj): obj for obj in locals().values() if isinstance(obj, cl.Buffer)
-            }
-
-            allocated_vram = sum(buffer.size for buffer in buffers.values())
+            allocated_vram = helper.opencl_buffer_bytes(*locals().values())
 
             total_vram = device.global_mem_size
-            free_vram = total_vram - allocated_vram
 
             emit_message(
                 {
@@ -1583,7 +1578,7 @@ def solver(config: dict, timings: Any = None):
                     "active_cells": active_tile_counter_host
                     * kernel_config.TILE_SIZE**3,
                     "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
-                    "vram_used_mb": (total_vram - free_vram) / 1024**2,
+                    "vram_used_mb": allocated_vram / 1024**2,
                     "vram_total_mb": total_vram / 1024**2,
                 }
             )

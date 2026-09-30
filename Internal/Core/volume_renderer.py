@@ -436,7 +436,7 @@ def draw_volume():
         )
         ** 0.5
     )
-    step_size = max(resolution * 0.75, diagonal / 128.0)
+    step_size = max(resolution * 0.75, diagonal / 256.0)
     camera_inside = all(
         minimum <= coordinate <= maximum
         for coordinate, minimum, maximum in zip(camera_position, bounds_min, bounds_max)
