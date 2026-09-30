@@ -252,11 +252,6 @@ def solver(config: dict, timings: Any = None):
         kernel_path / "source_bc.cl",
     )
 
-    output_kernels = helper.load_program(
-        context,
-        kernel_path / "output.cl",
-    )
-
     obstacle_bc_kernels = helper.load_program(
         context,
         kernel_path / "obstacle_bc.cl",
@@ -296,7 +291,6 @@ def solver(config: dict, timings: Any = None):
         ("reference_frame", reference_frame_kernels),
         ("domain_bc", domain_bc_kernels),
         ("source_bc", source_bc_kernels),
-        ("output", output_kernels),
         ("obstacle_bc", obstacle_bc_kernels),
         ("vorticity", vorticity_kernels),
         ("velocity_update", velocity_update_kernels),
@@ -629,13 +623,27 @@ def solver(config: dict, timings: Any = None):
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    shared_memory_blocks, writer_slots = output.setup_output(
-        context,
-        simulation,
-        shape,
-        tile_shape,
-        sparse_tile_capacity,
-    )
+    field_mapping = {
+        "smoke": {"density": smoke},
+        "temperature": {"temperature": temperature},
+        "fuel": {"fuel": fuel},
+        "flame": {"flame": flame},
+        "pressure": {"pressure": p},
+        "velocity": {
+            "velocity_x": u,
+            "velocity_y": v,
+            "velocity_z": w,
+        },
+    }
+
+    output_fields = output_cfg.get("fields") or {}
+
+    fields = {
+        name: value
+        for key, values in field_mapping.items()
+        if (output_fields.get(key) or {}).get("enabled", False)
+        for name, value in values.items()
+    }
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1511,34 +1519,26 @@ def solver(config: dict, timings: Any = None):
         time_step_count += 1
 
         # ------------Output-------------------
-        device_fields = {
-            "u": u,
-            "v": v,
-            "w": w,
-            "pressure": p,
-            "temperature": temperature,
-            "smoke": smoke,
-            "fuel": fuel,
-            "flame": flame,
-        }
-
         while t >= next_output_time:
+
             output_cpu_started = perf_counter()
-            output.enqueue_device_output(
-                queue,
-                output_kernels,
-                simulation,
-                writer_slots,
-                device_fields,
-                tile_map,
-                tile_shape,
-                kernel_config.TILE_SIZE,
-                active_tile_counter_host,
-                next_tile_index_counter_host,
-                output_index,
-                t,
+
+            output_data = output.output(
+                context=context,
+                queue=queue,
+                fields=fields,
+                tile_map=tile_map,
+                tile_shape=tile_shape,
+                tile_size=kernel_config.TILE_SIZE,
+                slot_count=sparse_tile_capacity,
+                dtype=FIELD_DTYPE,
             )
-            timings.record_cpu("output.enqueue_device_output", output_cpu_started)
+
+            cl.wait_for_events(output_data["events"])
+
+            timings.record_cpu("output_download", output_cpu_started)
+
+            output.release(queue, output_data)
 
             buffers = {
                 id(obj): obj for obj in locals().values() if isinstance(obj, cl.Buffer)
@@ -1567,11 +1567,6 @@ def solver(config: dict, timings: Any = None):
             next_output_time += output_time_step
 
         timings.record_cpu("simulation_iteration", iteration_cpu_started)
-
-    # ------------Shutdown output-------------------
-    shutdown_cpu_started = perf_counter()
-    output.shutdown_output(shared_memory_blocks, writer_slots)
-    timings.record_cpu("output.shutdown_output", shutdown_cpu_started)
 
     # ------------Conclusion-------------------
     if cancel_requested:
