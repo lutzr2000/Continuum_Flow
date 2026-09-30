@@ -57,7 +57,17 @@ def _finish_slot(slot):
         slot["busy"] = False
 
 
-def write(writer, output_data, output_path, tile_size, delta, nx, ny, precision):
+def write(
+    writer,
+    output_data,
+    output_path,
+    tile_size,
+    delta,
+    nx,
+    ny,
+    precision,
+    frame_index,
+):
     slots = writer["slots"]
     slot_index = writer["next_slot"]
     slot = slots[slot_index]
@@ -107,6 +117,24 @@ def write(writer, output_data, output_path, tile_size, delta, nx, ny, precision)
             payload["fields"][name] = share_array(array)
 
         payload["tile_map"] = share_array(output_data["tile_map"])
+
+        preview_fields = {
+            name: payload["fields"][name]
+            for name in ("density", "flame")
+            if name in payload["fields"]
+        }
+        if preview_fields:
+            from Solver.General.main import emit_message
+
+            emit_message(
+                {
+                    "type": "preview_frame",
+                    "frame": int(frame_index),
+                    "tile_size": int(tile_size),
+                    "fields": preview_fields,
+                    "tile_map": payload["tile_map"],
+                }
+            )
 
         process.stdin.write(json.dumps(payload) + "\n")
         process.stdin.flush()

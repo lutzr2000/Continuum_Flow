@@ -70,7 +70,7 @@ void main()
 
 
     for (int sample_index = 0;
-         sample_index < 512;
+         sample_index < 128;
          ++sample_index)
     {
 

@@ -179,6 +179,15 @@ class SolverManager:
     def _handle_message(self, message):
         message_type = str(message.get("type") or "").strip().lower()
 
+        if message_type == "preview_frame":
+            from .. import volume_renderer
+
+            try:
+                volume_renderer.get_shared_frame(message)
+            except (FileNotFoundError, OSError) as exc:
+                print(f"[Solver] Preview frame was no longer available: {exc}")
+            return
+
         with self._condition:
             if message_type == "ready":
                 self._ready = True

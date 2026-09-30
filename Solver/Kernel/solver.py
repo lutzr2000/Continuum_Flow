@@ -626,7 +626,11 @@ def solver(config: dict, timings: Any = None):
 
     output_fields = output_cfg.get("fields") or {}
 
-    writer = writer_manager.start_writer()
+    write_output = any(
+        (field_config or {}).get("enabled", False)
+        for field_config in output_fields.values()
+    )
+    writer = writer_manager.start_writer() if write_output else None
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1524,38 +1528,38 @@ def solver(config: dict, timings: Any = None):
                 for name, value in values.items()
             }
 
-            output_data = output.output(
-                context=context,
-                queue=queue,
-                fields=fields,
-                tile_map=tile_map,
-                tile_shape=tile_shape,
-                tile_size=kernel_config.TILE_SIZE,
-                slot_count=next_tile_index_counter_host,
-                dtype=FIELD_DTYPE,
-            )
-
-            cl.wait_for_events(output_data["events"])
-
-            timings.record_cpu("output_download", download_started)
-
-            write_started = perf_counter()
-
-            try:
-                writer_manager.write(
-                    writer=writer,
-                    output_data=output_data,
-                    output_path=Path(bake_path) / f"frame_{output_index:06d}.vdb",
+            if fields:
+                output_data = output.output(
+                    context=context,
+                    queue=queue,
+                    fields=fields,
+                    tile_map=tile_map,
+                    tile_shape=tile_shape,
                     tile_size=kernel_config.TILE_SIZE,
-                    delta=delta,
-                    nx=nx,
-                    ny=ny,
-                    precision=output_cfg.get("precision", "float32"),
+                    slot_count=next_tile_index_counter_host,
+                    dtype=FIELD_DTYPE,
                 )
-            finally:
-                output.release(queue, output_data)
 
-            timings.record_cpu("output_write", write_started)
+                cl.wait_for_events(output_data["events"])
+                timings.record_cpu("output_download", download_started)
+                write_started = perf_counter()
+
+                try:
+                    writer_manager.write(
+                        writer=writer,
+                        output_data=output_data,
+                        output_path=Path(bake_path) / f"frame_{output_index:06d}.vdb",
+                        tile_size=kernel_config.TILE_SIZE,
+                        delta=delta,
+                        nx=nx,
+                        ny=ny,
+                        precision=output_cfg.get("precision", "float32"),
+                        frame_index=output_index,
+                    )
+                finally:
+                    output.release(queue, output_data)
+
+                timings.record_cpu("output_write", write_started)
 
             output_index += 1
             next_output_time += output_time_step
@@ -1586,7 +1590,8 @@ def solver(config: dict, timings: Any = None):
 
         timings.record_cpu("simulation_iteration", iteration_cpu_started)
 
-    writer_manager.stop_writer(writer)
+    if writer is not None:
+        writer_manager.stop_writer(writer)
 
     # ------------Conclusion-------------------
     if cancel_requested:

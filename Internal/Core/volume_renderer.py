@@ -44,22 +44,20 @@ simulation_reference = None
 
 # -------------- methods ----------------
 def get_shared_frame(payload):
-    """Copy the newest sparse fields before the writer reuses their shared memory."""
+    """Copy selected smoke/flame output while the writer owns its shared memory."""
     global latest_frame, pending_frame, preview_frame_busy
 
     if not capture_enabled or grid_shape is None:
         return
 
-    frame_index = int(Path(payload["output_path"]).stem.removeprefix("frame_"))
+    frame_index = int(payload["frame"])
 
     with pending_lock:
         if frame_index <= latest_frame:
             return
 
-    preview_grids = [
-        grid for grid in payload["grids"] if grid["name"] in {"density", "flame"}
-    ]
-    if not preview_grids:
+    preview_fields = payload.get("fields") or {}
+    if not preview_fields:
         return
 
     with pending_lock:
@@ -68,27 +66,18 @@ def get_shared_frame(payload):
         preview_frame_busy = True
 
     try:
-        active_info = payload["active_tiles"]
-        active_tiles = copy_shared_array(
-            active_info["shm_name"],
-            tuple(active_info["shape"]),
-            np.int32,
-            int(active_info["count"]),
-        )
+        tile_map_info = payload["tile_map"]
+        tile_map = copy_shared_array(tile_map_info)
+        active_coordinates = np.argwhere(tile_map >= 0)
+        active_tiles = np.empty((len(active_coordinates), 4), dtype=np.int32)
+        active_tiles[:, 0] = tile_map[tuple(active_coordinates.T)]
 
         pools = {}
-        tile_size = int(preview_grids[0]["tile_size"])
+        tile_size = int(payload["tile_size"])
+        active_tiles[:, 1:] = active_coordinates * tile_size
 
-        for grid in preview_grids:
-            grid_name = grid["name"]
-            field_info = next(iter(grid["fields"].values()))
-
-            pools[grid_name] = copy_shared_array(
-                field_info["shm_name"],
-                tuple(field_info["shape"]),
-                np.float32,
-                int(grid["used_tile_count"]),
-            )
+        for field_name, field_info in preview_fields.items():
+            pools[field_name] = copy_shared_array(field_info)
 
         with pending_lock:
             if capture_enabled and frame_index > latest_frame:
@@ -102,11 +91,15 @@ def get_shared_frame(payload):
         raise
 
 
-def copy_shared_array(shm_name, shape, dtype, leading_count):
-    shm = shared_memory.SharedMemory(name=shm_name)
+def copy_shared_array(info):
+    shm = shared_memory.SharedMemory(name=info["shm_name"])
     try:
-        source = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
-        return source[:leading_count].copy()
+        source = np.ndarray(
+            tuple(info["shape"]),
+            dtype=np.dtype(info["dtype"]),
+            buffer=shm.buf,
+        )
+        return source.copy()
     finally:
         shm.close()
 
@@ -443,7 +436,7 @@ def draw_volume():
         )
         ** 0.5
     )
-    step_size = max(resolution * 0.75, diagonal / 512.0)
+    step_size = max(resolution * 0.75, diagonal / 128.0)
     camera_inside = all(
         minimum <= coordinate <= maximum
         for coordinate, minimum, maximum in zip(camera_position, bounds_min, bounds_max)
