@@ -6,7 +6,6 @@ from typing import Any
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.helper as helper
 
-TILE_SIZE = kernel_config.TILE_SIZE
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
 

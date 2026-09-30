@@ -5,8 +5,6 @@ from typing import Any
 
 import Solver.Kernel.kernel_config as kernel_config
 
-tile_size = kernel_config.TILE_SIZE
-
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall
 

@@ -129,18 +129,6 @@ def fill_device(queue, buffer, value, dtype=FIELD_DTYPE):
     )
 
 
-def read_int32(queue, buffer):
-    value = np.empty(1, dtype=np.int32)
-
-    cl.enqueue_copy(
-        queue,
-        value,
-        buffer,
-    ).wait()
-
-    return int(value[0])
-
-
 def zeros_device(context, shape, dtype=FIELD_DTYPE):
     return to_device(context, np.zeros(shape, dtype=dtype))
 

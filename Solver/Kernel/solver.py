@@ -384,6 +384,8 @@ def solver(config: dict, timings: Any = None):
     tile_map = helper.to_device(context, tile_map_values)
     # controls which tile is active
     base_tile_map = helper.to_device(context, base_tile_map_values)
+    dilated_tile_map_a = helper.device_array(context, tile_shape, np.int32)
+    dilated_tile_map_b = helper.device_array(context, tile_shape, np.int32)
 
     free_slot_stack = helper.to_device(
         context, np.full(total_tile_count, -1, dtype=np.int32)
@@ -401,6 +403,8 @@ def solver(config: dict, timings: Any = None):
     active_tile_counter = helper.to_device(
         context, np.asarray([initial_active_tile_count], dtype=np.int32)
     )
+    sparse_counters_device = helper.zeros_device(context, 3, dtype=np.int32)
+    sparse_counters_host = np.empty(3, dtype=np.int32)
 
     tile_growth_size = max(
         1,
@@ -728,6 +732,23 @@ def solver(config: dict, timings: Any = None):
                 np.int32(tile_shape[2]),
             )
 
+            for kernel_name, src_map, dst_map in (
+                ("dilate_activity_x", base_tile_map, dilated_tile_map_a),
+                ("dilate_activity_y", dilated_tile_map_a, dilated_tile_map_b),
+                ("dilate_activity_z", dilated_tile_map_b, dilated_tile_map_a),
+            ):
+                sparse_managment_kernels[kernel_name](
+                    queue,
+                    tile_shape,
+                    None,
+                    src_map,
+                    dst_map,
+                    np.int32(tile_dilate),
+                    np.int32(tile_shape[0]),
+                    np.int32(tile_shape[1]),
+                    np.int32(tile_shape[2]),
+                )
+
             helper.fill_device(queue, active_tile_counter, 0, dtype=np.int32)
             helper.fill_device(queue, free_slot_count, 0, dtype=np.int32)
             helper.fill_device(queue, reused_slot_count, 0, dtype=np.int32)
@@ -736,9 +757,8 @@ def solver(config: dict, timings: Any = None):
                 queue,
                 tile_shape,
                 None,
-                base_tile_map,
+                dilated_tile_map_a,
                 tile_map,
-                np.int32(tile_dilate),
                 free_slot_stack,
                 free_slot_count,
                 np.int32(tile_shape[0]),
@@ -750,9 +770,8 @@ def solver(config: dict, timings: Any = None):
                 queue,
                 tile_shape,
                 None,
-                base_tile_map,
+                dilated_tile_map_a,
                 tile_map,
-                np.int32(tile_dilate),
                 free_slot_stack,
                 free_slot_count,
                 reused_slot_stack,
@@ -764,7 +783,24 @@ def solver(config: dict, timings: Any = None):
                 np.int32(tile_shape[2]),
             )
 
-            reused_slot_count_host = helper.read_int32(queue, reused_slot_count)
+            sparse_managment_kernels["pack_sparse_counters"](
+                queue,
+                (1,),
+                None,
+                reused_slot_count,
+                next_tile_index_counter,
+                active_tile_counter,
+                sparse_counters_device,
+            )
+            cl.enqueue_copy(
+                queue,
+                sparse_counters_host,
+                sparse_counters_device,
+                is_blocking=True,
+            )
+            reused_slot_count_host = int(sparse_counters_host[0])
+            next_tile_index_counter_host = int(sparse_counters_host[1])
+            active_tile_counter_host = int(sparse_counters_host[2])
 
             if reused_slot_count_host > 0:
                 sparse_managment.reset_reused_pool_slots(
@@ -797,10 +833,6 @@ def solver(config: dict, timings: Any = None):
                     reused_slot_stack,
                     reused_slot_count_host,
                 )
-
-            next_tile_index_counter_host = helper.read_int32(
-                queue, next_tile_index_counter
-            )
 
             if next_tile_index_counter_host > sparse_tile_capacity:
                 next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
@@ -887,7 +919,6 @@ def solver(config: dict, timings: Any = None):
                     min_size=8,
                 )
 
-            active_tile_counter_host = helper.read_int32(queue, active_tile_counter)
         else:
             active_tile_counter_host = total_tile_count
             next_tile_index_counter_host = total_tile_count

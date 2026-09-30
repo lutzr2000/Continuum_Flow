@@ -141,48 +141,108 @@ __kernel void build_activity_mask(
 }
 
 
-inline int tile_is_active_in_margin(
-    __global const int *base_tile_map,
-    const int tile_i,
-    const int tile_j,
-    const int tile_k,
+__kernel void dilate_activity_x(
+    __global const int *src,
+    __global int *dst,
     const int margin,
     const int tiles_x,
     const int tiles_y,
     const int tiles_z
 )
 {
-    const int min_i = max(tile_i - margin, 0);
-    const int min_j = max(tile_j - margin, 0);
-    const int min_k = max(tile_k - margin, 0);
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
+    const int z = get_global_id(2);
 
-    const int max_i = min(tile_i + margin, tiles_x - 1);
-    const int max_j = min(tile_j + margin, tiles_y - 1);
-    const int max_k = min(tile_k + margin, tiles_z - 1);
+    if (x >= tiles_x || y >= tiles_y || z >= tiles_z)
+        return;
 
-    for (int i = min_i; i <= max_i; ++i)
+    int active = 0;
+    for (int sample_x = max(x - margin, 0);
+         sample_x <= min(x + margin, tiles_x - 1);
+         ++sample_x)
     {
-        for (int j = min_j; j <= max_j; ++j)
+        const int index = (sample_x * tiles_y + y) * tiles_z + z;
+        if (src[index] != -1)
         {
-            for (int k = min_k; k <= max_k; ++k)
-            {
-                const int index =
-                    (i * tiles_y + j) * tiles_z + k;
-
-                if (base_tile_map[index] != -1)
-                    return 1;
-            }
+            active = 1;
+            break;
         }
     }
 
-    return 0;
+    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
+}
+
+
+__kernel void dilate_activity_y(
+    __global const int *src,
+    __global int *dst,
+    const int margin,
+    const int tiles_x,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
+    const int z = get_global_id(2);
+
+    if (x >= tiles_x || y >= tiles_y || z >= tiles_z)
+        return;
+
+    int active = 0;
+    for (int sample_y = max(y - margin, 0);
+         sample_y <= min(y + margin, tiles_y - 1);
+         ++sample_y)
+    {
+        const int index = (x * tiles_y + sample_y) * tiles_z + z;
+        if (src[index] != -1)
+        {
+            active = 1;
+            break;
+        }
+    }
+
+    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
+}
+
+
+__kernel void dilate_activity_z(
+    __global const int *src,
+    __global int *dst,
+    const int margin,
+    const int tiles_x,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
+    const int z = get_global_id(2);
+
+    if (x >= tiles_x || y >= tiles_y || z >= tiles_z)
+        return;
+
+    int active = 0;
+    for (int sample_z = max(z - margin, 0);
+         sample_z <= min(z + margin, tiles_z - 1);
+         ++sample_z)
+    {
+        const int index = (x * tiles_y + y) * tiles_z + sample_z;
+        if (src[index] != -1)
+        {
+            active = 1;
+            break;
+        }
+    }
+
+    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
 }
 
 
 __kernel void activate_tiles_with_reuse(
-    __global const int *base_tile_map,
+    __global const int *activity_map,
     __global int *tile_map,
-    const int margin,
     __global const int *free_slot_stack,
     volatile __global int *free_slot_count,
     __global int *reused_slot_stack,
@@ -205,27 +265,16 @@ __kernel void activate_tiles_with_reuse(
     )
         return;
 
-    if (
-        !tile_is_active_in_margin(
-            base_tile_map,
-            tile_i,
-            tile_j,
-            tile_k,
-            margin,
-            tiles_x,
-            tiles_y,
-            tiles_z
-        )
-    )
+    const int tile_index =
+        (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+
+    if (activity_map[tile_index] == -1)
         return;
 
     atomic_add(
         active_tile_counter,
         1
     );
-
-    const int tile_index =
-        (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
     if (tile_map[tile_index] != -1)
         return;
@@ -361,9 +410,8 @@ __kernel void fill_sparse_tile_slots_uchar(
 
 
 __kernel void release_inactive_tile_slots(
-    __global const int *base_tile_map,
+    __global const int *activity_map,
     __global int *tile_map,
-    const int margin,
     __global int *free_slot_stack,
     volatile __global int *free_slot_count,
     const int tiles_x,
@@ -388,18 +436,7 @@ __kernel void release_inactive_tile_slots(
     if (tile_map[tile_index] == -1)
         return;
 
-    if (
-        tile_is_active_in_margin(
-            base_tile_map,
-            tile_i,
-            tile_j,
-            tile_k,
-            margin,
-            tiles_x,
-            tiles_y,
-            tiles_z
-        )
-    )
+    if (activity_map[tile_index] != -1)
         return;
 
     const int released_slot =
@@ -414,6 +451,22 @@ __kernel void release_inactive_tile_slots(
 
     free_slot_stack[stack_index] =
         released_slot;
+}
+
+
+__kernel void pack_sparse_counters(
+    __global const int *reused_slot_count,
+    __global const int *next_tile_index_counter,
+    __global const int *active_tile_counter,
+    __global int *packed_counters
+)
+{
+    if (get_global_id(0) != 0)
+        return;
+
+    packed_counters[0] = reused_slot_count[0];
+    packed_counters[1] = next_tile_index_counter[0];
+    packed_counters[2] = active_tile_counter[0];
 }
 #endif // SPARSE_MANAGMENT_CL
 

@@ -34,7 +34,6 @@ def update_source_tile_mask(
 
     for base_masks in source_base_masks:
         for entry in base_masks:
-            mesh_object = entry["mesh_object"]
             voxels = entry["voxels"]
 
             matrix, _ = helper.get_matrix_data(

@@ -6,7 +6,6 @@ import numpy.typing as npt
 import openvdb
 
 from multiprocessing import shared_memory
-from time import perf_counter
 from typing import Any, TypeAlias, TypedDict
 
 BRICK_TILES = 32
