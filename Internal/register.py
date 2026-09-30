@@ -87,6 +87,8 @@ def preload_solver_backends():
     solver_manager.request_preload("CPU")
     if solver_status.gpu_available:
         solver_manager.request_preload("GPU")
+    if solver_status.opencl_available:
+        solver_manager.request_preload("OPENCL")
 
     return None
 
@@ -135,6 +137,7 @@ def safe_register_class(cls):
 
 def register():
     solver_status.gpu_available = solver_status.detect_gpu_available()
+    solver_status.opencl_available = solver_status.detect_opencl_available()
 
     for cls in classes:
         safe_register_class(cls)
@@ -179,6 +182,7 @@ def unregister():
     solver_manager.shutdown()
     volume_renderer.clear_live_preview()
     solver_status.gpu_available = False
+    solver_status.opencl_available = False
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):
         del bpy.types.WindowManager.continuum_flow_bake_progress

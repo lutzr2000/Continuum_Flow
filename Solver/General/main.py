@@ -28,10 +28,8 @@ def main(config: dict[str, Any]) -> None:
     Configure the runtime environment and execute the requested solver backend.
 
     Parent-process import paths from the job metadata are prepended to
-    ``sys.path`` before CUDA runtime libraries are discovered. The configured
-    backend is then normalized and dispatched; currently only the GPU solver
-    is implemented, while selecting the CPU backend raises
-    ``NotImplementedError``.
+    ``sys.path`` before the configured CPU, CUDA GPU, or OpenCL backend is
+    normalized and dispatched.
 
     Total bake time is printed from a ``finally`` block, so timing information
     is emitted after both successful runs and failures.
@@ -44,8 +42,6 @@ def main(config: dict[str, Any]) -> None:
             if path and path not in sys.path:
                 sys.path.insert(0, path)
 
-        prepare_cuda_libraries()
-
         simulation_cfg = config.get("simulation") or {}
         solver_backend = (
             str((simulation_cfg.get("settings") or {}).get("solver_backend", "GPU"))
@@ -53,23 +49,23 @@ def main(config: dict[str, Any]) -> None:
             .upper()
         )
 
-        # if solver_backend == "CPU":
-        #     import Solver.Kernel_CPU.kernel as solver_kernel_module
-
-        #     return solver_kernel_module.solver(config)
-
-        # elif solver_backend == "GPU":
-        #     import Solver.Kernel_GPU.kernel as solver_kernel_module
-
-        #     return solver_kernel_module.solver(config)
-
         if solver_backend == "CPU":
-            print("Not implemented")
+            import Solver.Kernel_CPU.kernel as solver_kernel_module
+
+            return solver_kernel_module.solver(config)
 
         elif solver_backend == "GPU":
+            prepare_cuda_libraries()
+            import Solver.Kernel_GPU.kernel as solver_kernel_module
+
+            return solver_kernel_module.solver(config)
+
+        elif solver_backend == "OPENCL":
             import Solver.Kernel.solver as solver_kernel_module
 
             return solver_kernel_module.solver(config)
+
+        raise ValueError(f"Unsupported solver backend: {solver_backend}")
 
     finally:
         total_runtime = perf_counter() - total_start_time
@@ -143,6 +139,16 @@ def preload_backend(backend: str) -> None:
 
         cuda.current_context()
         return
+
+    if backend == "OPENCL":
+        import pyopencl as cl
+        import Solver.Kernel.solver
+
+        if not any(platform.get_devices() for platform in cl.get_platforms()):
+            raise RuntimeError("No OpenCL compute device is available")
+        return
+
+    raise ValueError(f"Unsupported solver backend: {backend}")
 
 
 def run_worker() -> None:
