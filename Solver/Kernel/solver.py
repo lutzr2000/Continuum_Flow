@@ -19,6 +19,7 @@ import Solver.Kernel.sparse_managment as sparse_managment
 import Solver.Kernel.domain_bc as domain_bc
 import Solver.Kernel.output as output
 import Solver.Kernel.pressure_solve as pressure_solve
+import Solver.Kernel.writer_manager as writer_manager
 from Solver.Kernel.timing import profiled_run
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
@@ -623,27 +624,9 @@ def solver(config: dict, timings: Any = None):
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
 
-    field_mapping = {
-        "smoke": {"density": smoke},
-        "temperature": {"temperature": temperature},
-        "fuel": {"fuel": fuel},
-        "flame": {"flame": flame},
-        "pressure": {"pressure": p},
-        "velocity": {
-            "velocity_x": u,
-            "velocity_y": v,
-            "velocity_z": w,
-        },
-    }
-
     output_fields = output_cfg.get("fields") or {}
 
-    fields = {
-        name: value
-        for key, values in field_mapping.items()
-        if (output_fields.get(key) or {}).get("enabled", False)
-        for name, value in values.items()
-    }
+    writer = writer_manager.start_writer()
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1520,8 +1503,26 @@ def solver(config: dict, timings: Any = None):
 
         # ------------Output-------------------
         while t >= next_output_time:
+            download_started = perf_counter()
 
-            output_cpu_started = perf_counter()
+            field_mapping = {
+                "smoke": {"density": smoke},
+                "temperature": {"temperature": temperature},
+                "fuel": {"fuel": fuel},
+                "flame": {"flame": flame},
+                "pressure": {"pressure": p},
+                "velocity": {
+                    "velocity_x": u,
+                    "velocity_y": v,
+                    "velocity_z": w,
+                },
+            }
+            fields = {
+                name: value
+                for key, values in field_mapping.items()
+                if (output_fields.get(key) or {}).get("enabled", False)
+                for name, value in values.items()
+            }
 
             output_data = output.output(
                 context=context,
@@ -1530,16 +1531,35 @@ def solver(config: dict, timings: Any = None):
                 tile_map=tile_map,
                 tile_shape=tile_shape,
                 tile_size=kernel_config.TILE_SIZE,
-                slot_count=sparse_tile_capacity,
+                slot_count=next_tile_index_counter_host,
                 dtype=FIELD_DTYPE,
             )
 
             cl.wait_for_events(output_data["events"])
 
-            timings.record_cpu("output_download", output_cpu_started)
+            timings.record_cpu("output_download", download_started)
 
-            output.release(queue, output_data)
+            write_started = perf_counter()
 
+            try:
+                writer_manager.write(
+                    writer=writer,
+                    output_data=output_data,
+                    output_path=Path(bake_path) / f"frame_{output_index:06d}.vdb",
+                    tile_size=kernel_config.TILE_SIZE,
+                    delta=delta,
+                    nx=nx,
+                    ny=ny,
+                )
+            finally:
+                output.release(queue, output_data)
+
+            timings.record_cpu("output_write", write_started)
+
+            output_index += 1
+            next_output_time += output_time_step
+
+            # ------------(V)RAM Track-------------------
             buffers = {
                 id(obj): obj for obj in locals().values() if isinstance(obj, cl.Buffer)
             }
@@ -1562,9 +1582,6 @@ def solver(config: dict, timings: Any = None):
                     "vram_total_mb": total_vram / 1024**2,
                 }
             )
-
-            output_index += 1
-            next_output_time += output_time_step
 
         timings.record_cpu("simulation_iteration", iteration_cpu_started)
 

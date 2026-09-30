@@ -13,36 +13,17 @@ def output(
     dtype=np.float32,
 ):
     """
-    Download sparse OpenCL fields into host memory.
-
-    fields:
-        dict[str, cl.Buffer]
-
-    Returns:
-        dict containing mapped numpy arrays,
-        OpenCL host buffers and transfer events.
+    Download sparse OpenCL fields and the complete tile_map.
     """
-
     dtype = np.dtype(dtype)
-
-    cells_per_tile = tile_size**3
-    bytes_per_tile = cells_per_tile * dtype.itemsize
+    slot_count = int(slot_count)
+    tile_size = int(tile_size)
 
     if fields:
         field_sizes = {name: buffer.size for name, buffer in fields.items()}
-        unique_field_sizes = set(field_sizes.values())
-        if len(unique_field_sizes) != 1:
-            raise ValueError(f"Output field buffer sizes differ: {field_sizes}")
-
-        pool_nbytes = unique_field_sizes.pop()
-        if pool_nbytes % bytes_per_tile != 0:
-            raise ValueError(
-                f"Output pool size {pool_nbytes} is not divisible by "
-                f"the tile size {bytes_per_tile}"
-            )
+        bytes_per_tile = tile_size**3 * dtype.itemsize
+        pool_nbytes = next(iter(field_sizes.values()))
         slot_count = pool_nbytes // bytes_per_tile
-
-    cell_count = slot_count * cells_per_tile
 
     result = {
         "fields": {},
@@ -54,7 +35,6 @@ def output(
     }
 
     def copy_to_host(gpu_buffer, shape, data_type):
-
         data_type = np.dtype(data_type)
         nbytes = int(np.prod(shape)) * data_type.itemsize
 
@@ -88,18 +68,14 @@ def output(
 
         return array
 
-    # Download field data
-    if cell_count > 0:
-
+    if slot_count > 0:
         for name, gpu_buffer in fields.items():
-
             result["fields"][name] = copy_to_host(
                 gpu_buffer,
                 (slot_count, tile_size, tile_size, tile_size),
                 dtype,
             )
 
-    # Download tile map
     result["tile_map"] = copy_to_host(
         tile_map,
         tile_shape,
@@ -110,7 +86,8 @@ def output(
 
 
 def release(queue, output_data):
-    cl.wait_for_events(output_data["events"])
+    if output_data["events"]:
+        cl.wait_for_events(output_data["events"])
 
     unmap_events = []
 

@@ -9,7 +9,6 @@ from . import load_result
 from . import volume_renderer
 from .solver.solver_manager import solver_manager
 from .solver import solver_status
-from .writer import writer_manager
 
 VDBResults = load_result.VDBResultManager()
 status_workspace = None
@@ -175,7 +174,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         self.simulation_node = get_connected_simulation_node(self.output_node)
         self.job_id = None
         self.job_result = None
-        self.writer_server = None
         self.bake_directory = None
         self.output_directory = None
         self.cancel_flag_path = None
@@ -249,9 +247,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             should_load_result = self.cancel_requested or (
                 bool(self.job_result) and bool(self.job_result.get("success", False))
             )
-            if self.writer_server:
-                self.writer_server.stop()
-
             volume_renderer.set_enabled(False)
 
             if self.cancel_flag_path:
@@ -286,28 +281,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             except OSError:
                 pass
 
-    def launch_writer_manager(self, config_dict):
-        simulation_config = config_dict.get("simulation") or {}
-        output_config = (simulation_config.get("outputs") or [{}])[0]
-        writer_config = {
-            "simulation": {
-                "domain": simulation_config.get("domain") or {},
-                "outputs": [
-                    {
-                        "precision": output_config.get("precision", "float32"),
-                        "output_path": output_config.get("output_path", ""),
-                    }
-                ],
-            },
-        }
-
-        server = writer_manager.HostVDBWriterServer(
-            writer_config=writer_config,
-            preview_callback=volume_renderer.get_shared_frame,
-        )
-        server.start()
-        return server
-
     def update_bake_progress(self):
         written_frame_count = count_contiguous_vdb_frames(
             self.output_directory,
@@ -329,10 +302,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         )
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 
-        writer_server = self.launch_writer_manager(config_dict)
-        self.writer_server = writer_server
         simulation_config = config_dict["simulation"]
-        simulation_config["outputs"][0]["host_vdb_writer"] = writer_server.endpoint()
         self.bake_directory = Path(bake_directory).resolve()
         self.cancel_flag_path = self.bake_directory / "cancel_requested.flag"
         config_dict["bake_directory"] = str(self.bake_directory)
