@@ -459,45 +459,22 @@ def smooth(
             tile_shape[2] * local_work_size[2],
         )
 
-        for _ in range(iterations):
-            multigrid_kernels["rbgs_step_level_0"](
-                queue,
-                global_work_size,
-                local_work_size,
-                p,
-                b,
-                np.float32(delta),
-                np.int32(0),
-                tile_map,
-                np.int32(nx),
-                np.int32(ny),
-                np.int32(nz),
-                np.int32(tile_shape[0]),
-                np.int32(tile_shape[1]),
-                np.int32(tile_shape[2]),
-            )
+        kernel_name = "rbgs_step_level_0"
 
-            multigrid_kernels["rbgs_step_level_0"](
-                queue,
-                global_work_size,
-                local_work_size,
-                p,
-                b,
-                np.float32(delta),
-                np.int32(1),
-                tile_map,
-                np.int32(nx),
-                np.int32(ny),
-                np.int32(nz),
-                np.int32(tile_shape[0]),
-                np.int32(tile_shape[1]),
-                np.int32(tile_shape[2]),
-            )
+        kernel_args = (
+            p,
+            b,
+            np.float32(delta),
+            tile_map,
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[0]),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
 
     else:
-        if active_tile_count is None:
-            raise ValueError("active_tile_count is required for sparse coarse levels")
-
         active_tile_capacity = active_tiles.size // (3 * np.dtype(np.int32).itemsize)
 
         global_work_size = (
@@ -506,53 +483,71 @@ def smooth(
             local_work_size[2],
         )
 
-        for _ in range(iterations):
-            multigrid_kernels["rbgs_step_sparse"](
-                queue,
-                global_work_size,
-                local_work_size,
-                p,
-                b,
-                np.float32(delta),
-                np.int32(0),
-                tile_map,
-                active_tiles,
-                active_tile_count,
-                np.int32(nx),
-                np.int32(ny),
-                np.int32(nz),
-                np.int32(tile_shape[1]),
-                np.int32(tile_shape[2]),
-            )
+        kernel_name = "rbgs_step_sparse"
 
-            multigrid_kernels["rbgs_step_sparse"](
-                queue,
-                global_work_size,
-                local_work_size,
-                p,
-                b,
-                np.float32(delta),
-                np.int32(1),
-                tile_map,
-                active_tiles,
-                active_tile_count,
-                np.int32(nx),
-                np.int32(ny),
-                np.int32(nz),
-                np.int32(tile_shape[1]),
-                np.int32(tile_shape[2]),
-            )
+        kernel_args = (
+            p,
+            b,
+            np.float32(delta),
+            tile_map,
+            active_tiles,
+            active_tile_count,
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
 
+    profiled_kernel = multigrid_kernels[kernel_name]
+
+    raw_kernel = profiled_kernel.kernel
+
+    program = raw_kernel.program
+
+    red_kernel = cl.Kernel(program, kernel_name)
+    black_kernel = cl.Kernel(program, kernel_name)
+
+    red_kernel.set_args(
+        *kernel_args[:3],
+        np.int32(0),
+        *kernel_args[3:],
+    )
+
+    black_kernel.set_args(
+        *kernel_args[:3],
+        np.int32(1),
+        *kernel_args[3:],
+    )
+
+    for _ in range(iterations):
+        red_event = cl.enqueue_nd_range_kernel(
+            queue,
+            red_kernel,
+            global_work_size,
+            local_work_size,
+        )
+        profiled_kernel.record_event(red_event)
+
+        black_event = cl.enqueue_nd_range_kernel(
+            queue,
+            black_kernel,
+            global_work_size,
+            local_work_size,
+        )
+        profiled_kernel.record_event(black_event)
+
+    # Neumann boundary conditions
     boundary_global_work_size = (
         tile_shape[0] * local_work_size[0],
         tile_shape[1] * local_work_size[1],
         tile_shape[2] * local_work_size[2],
     )
 
-    multigrid_kernels["pressure_poisson_apply_neumann_bcs"](
-        queue,
-        boundary_global_work_size,
-        local_work_size,
+    profiled_boundary_kernel = multigrid_kernels["pressure_poisson_apply_neumann_bcs"]
+    boundary_kernel = profiled_boundary_kernel.kernel
+
+    boundary_kernel.set_args(
         p,
         tile_map,
         np.int32(nx),
@@ -562,3 +557,11 @@ def smooth(
         np.int32(tile_shape[1]),
         np.int32(tile_shape[2]),
     )
+
+    boundary_event = cl.enqueue_nd_range_kernel(
+        queue,
+        boundary_kernel,
+        boundary_global_work_size,
+        local_work_size,
+    )
+    profiled_boundary_kernel.record_event(boundary_event)

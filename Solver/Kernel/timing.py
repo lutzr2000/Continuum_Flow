@@ -16,12 +16,21 @@ class ProfiledKernel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> cl.Event:
         event = self._kernel(*args, **kwargs)
+        self.record_event(event)
+        return event
+
+    @property
+    def kernel(self) -> cl.Kernel:
+        """Expose the wrapped kernel for prepared-argument enqueue paths."""
+        return self._kernel
+
+    def record_event(self, event: cl.Event) -> None:
+        """Include an event created by a direct OpenCL enqueue in timings."""
         self._timings.record_event(
             self._group,
             self._kernel.function_name,
             event,
         )
-        return event
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._kernel, name)
