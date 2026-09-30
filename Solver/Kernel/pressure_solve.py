@@ -236,7 +236,7 @@ def pressure_poisson_multigrid(
         nz,
     )
 
-    multigrid_active_tile_counts_host = multigrid.build_coarse_tile_hierarchy(
+    multigrid_active_tile_count_buffers = multigrid.build_coarse_tile_hierarchy(
         queue,
         multigrid_kernels,
         tile_map,
@@ -267,7 +267,7 @@ def pressure_poisson_multigrid(
             tile_map=tile_map,
             multigrid_tile_maps=multigrid_tile_maps,
             multigrid_active_tiles=multigrid_active_tiles,
-            multigrid_active_tile_counts=multigrid_active_tile_counts_host,
+            multigrid_active_tile_counts=multigrid_active_tile_count_buffers,
             multigrid_level_shapes=multigrid_level_shapes,
         )
 

@@ -130,16 +130,18 @@ def build_coarse_tile_hierarchy(
     level_shapes: list[tuple[int, int, int]],
     active_tiles: list[Any],
     active_tile_counts: list[Any],
-) -> list[int]:
+) -> list[Any]:
     """
     Rebuild all coarse tile maps from the current level-0 tile map.
 
-    Return the number of active tiles for every coarse level.
+    Return the device-side active-tile count buffer for every coarse level.
+
+    Counts deliberately remain on the device. Later kernels dispatch over the
+    allocated tile capacity and reject workgroups beyond the device count,
+    avoiding a blocking device-to-host readback for every multigrid level.
     """
     fine_tile_map = level_0_tile_map
     fine_tile_shape = level_0_tile_shape
-
-    active_tile_counts_host = []
 
     for level in range(len(tile_maps)):
         coarse_tile_map = tile_maps[level]
@@ -186,24 +188,10 @@ def build_coarse_tile_hierarchy(
             np.int32(coarse_tile_shape[2]),
         )
 
-        count = helper.read_int32(
-            queue,
-            coarse_active_tile_count,
-        )
-
-        if count > coarse_active_tile_capacity:
-            raise RuntimeError(
-                f"Multigrid level {level}: "
-                f"active tile count {count} exceeds capacity "
-                f"{coarse_active_tile_capacity}."
-            )
-
-        active_tile_counts_host.append(count)
-
         fine_tile_map = coarse_tile_map
         fine_tile_shape = coarse_tile_shape
 
-    return active_tile_counts_host
+    return active_tile_counts
 
 
 def v_cycle(
@@ -225,7 +213,7 @@ def v_cycle(
     tile_map: Any,
     multigrid_tile_maps: list[Any],
     multigrid_active_tiles: list[Any],
-    multigrid_active_tile_counts: list[int],
+    multigrid_active_tile_counts: list[Any],
     multigrid_level_shapes: list[tuple[int, int, int]],
 ) -> None:
     r"""
@@ -332,33 +320,6 @@ def v_cycle(
     coarse_active_tile_count = multigrid_active_tile_counts[coarse_level]
     coarse_shape = multigrid_level_shapes[coarse_level]
 
-    if coarse_active_tile_count == 0:
-        return
-
-    fill_size = (
-        coarse_active_tile_count
-        * kernel_config.TILE_SIZE**3
-        * np.dtype(FIELD_DTYPE).itemsize
-    )
-
-    zero = np.asarray(0, dtype=FIELD_DTYPE)
-
-    cl.enqueue_fill_buffer(
-        queue,
-        coarse_p,
-        zero,
-        0,
-        fill_size,
-    )
-
-    cl.enqueue_fill_buffer(
-        queue,
-        coarse_b,
-        zero,
-        0,
-        fill_size,
-    )
-
     current_tile_shape = tuple(
         (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
         for size in current_shape
@@ -371,8 +332,12 @@ def v_cycle(
 
     local_work_size = kernel_config.THREADS_PER_BLOCK_3D
 
+    coarse_active_tile_capacity = coarse_active_tiles.size // (
+        3 * np.dtype(np.int32).itemsize
+    )
+
     global_work_size = (
-        coarse_active_tile_count * local_work_size[0],
+        coarse_active_tile_capacity * local_work_size[0],
         local_work_size[1],
         local_work_size[2],
     )
@@ -383,12 +348,13 @@ def v_cycle(
         local_work_size,
         p,
         b,
+        coarse_p,
         coarse_b,
         np.float32(delta),
         current_tile_map,
         coarse_tile_map,
         coarse_active_tiles,
-        np.int32(coarse_active_tile_count),
+        coarse_active_tile_count,
         np.int32(current_shape[0]),
         np.int32(current_shape[1]),
         np.int32(current_shape[2]),
@@ -433,7 +399,7 @@ def v_cycle(
         coarse_tile_map,
         current_tile_map,
         coarse_active_tiles,
-        np.int32(coarse_active_tile_count),
+        coarse_active_tile_count,
         np.int32(coarse_shape[0]),
         np.int32(coarse_shape[1]),
         np.int32(coarse_shape[2]),
@@ -469,7 +435,7 @@ def smooth(
     iterations: int,
     tile_map: Any,
     active_tiles: Any,
-    active_tile_count: int | None,
+    active_tile_count: Any,
     field_shape: tuple[int, int, int],
 ) -> None:
     """
@@ -532,11 +498,10 @@ def smooth(
         if active_tile_count is None:
             raise ValueError("active_tile_count is required for sparse coarse levels")
 
-        if active_tile_count == 0:
-            return
+        active_tile_capacity = active_tiles.size // (3 * np.dtype(np.int32).itemsize)
 
         global_work_size = (
-            active_tile_count * local_work_size[0],
+            active_tile_capacity * local_work_size[0],
             local_work_size[1],
             local_work_size[2],
         )
@@ -552,7 +517,7 @@ def smooth(
                 np.int32(0),
                 tile_map,
                 active_tiles,
-                np.int32(active_tile_count),
+                active_tile_count,
                 np.int32(nx),
                 np.int32(ny),
                 np.int32(nz),
@@ -570,7 +535,7 @@ def smooth(
                 np.int32(1),
                 tile_map,
                 active_tiles,
-                np.int32(active_tile_count),
+                active_tile_count,
                 np.int32(nx),
                 np.int32(ny),
                 np.int32(nz),

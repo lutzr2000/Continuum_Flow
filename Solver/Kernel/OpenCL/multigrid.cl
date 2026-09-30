@@ -222,12 +222,13 @@ inline float residual_sparse(
 __kernel void restrict_residual_sparse(
     __global const float *fine_p,
     __global const float *fine_b,
+    __global float *coarse_p,
     __global float *coarse_b,
     const float fine_delta,
     __global const int *fine_tile_map,
     __global const int *coarse_tile_map,
     __global const int *coarse_active_tiles,
-    const int coarse_active_tile_count,
+    __global const int *coarse_active_tile_count,
     const int fine_nx,
     const int fine_ny,
     const int fine_nz,
@@ -243,7 +244,7 @@ __kernel void restrict_residual_sparse(
     const int coarse_pool_index =
         get_group_id(0);
 
-    if (coarse_pool_index >= coarse_active_tile_count)
+    if (coarse_pool_index >= coarse_active_tile_count[0])
         return;
 
     const int local_i = get_local_id(0);
@@ -353,6 +354,8 @@ __kernel void restrict_residual_sparse(
         * TILE_SIZE + local_j)
         * TILE_SIZE + local_k;
 
+    coarse_p[index] = 0.0f;
+
     if (residual_count > 0.0f)
     {
         coarse_b[index] =
@@ -371,7 +374,7 @@ __kernel void prolongate_add_nearest_sparse(
     __global const int *coarse_tile_map,
     __global const int *fine_tile_map,
     __global const int *coarse_active_tiles,
-    const int coarse_active_tile_count,
+    __global const int *coarse_active_tile_count,
     const int coarse_nx,
     const int coarse_ny,
     const int coarse_nz,
@@ -387,7 +390,7 @@ __kernel void prolongate_add_nearest_sparse(
     const int coarse_pool_index =
         get_group_id(0);
 
-    if (coarse_pool_index >= coarse_active_tile_count)
+    if (coarse_pool_index >= coarse_active_tile_count[0])
         return;
 
     const int local_i = get_local_id(0);
@@ -513,7 +516,7 @@ __kernel void rbgs_step_sparse(
     const int parity,
     __global const int *tile_map,
     __global const int *active_tiles,
-    const int active_tile_count,
+    __global const int *active_tile_count,
     const int nx,
     const int ny,
     const int nz,
@@ -523,7 +526,7 @@ __kernel void rbgs_step_sparse(
 {
     const int active_index = get_group_id(0);
 
-    if (active_index >= active_tile_count)
+    if (active_index >= active_tile_count[0])
         return;
 
     const int local_i = get_local_id(0);
