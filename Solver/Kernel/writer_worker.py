@@ -9,7 +9,7 @@ from multiprocessing import shared_memory
 from time import perf_counter
 from typing import Any, TypeAlias, TypedDict
 
-BRICK_TILES = 8
+BRICK_TILES = 32
 
 IntArray: TypeAlias = npt.NDArray[np.intp]
 TileMap: TypeAlias = npt.NDArray[np.int32]
@@ -250,6 +250,60 @@ def copy_field_to_grid(
         )
 
 
+def copy_velocity_to_grid(
+    grid: Any,
+    arrays: tuple[FieldArray, FieldArray, FieldArray],
+    bricks: list[Brick],
+    tile_size: int,
+) -> None:
+    """Pack three scalar velocity components into one OpenVDB vector grid."""
+    copy_from_array = grid.copyFromArray
+
+    for brick in bricks:
+        slots = brick["slots"]
+        origin = brick["origin"]
+
+        if len(slots) == 1:
+            slot = int(slots[0])
+            velocity = np.stack(
+                (arrays[0][slot], arrays[1][slot], arrays[2][slot]),
+                axis=-1,
+            )
+        else:
+            shape = brick["shape"]
+            velocity = np.zeros(
+                (
+                    shape[0] * tile_size,
+                    shape[1] * tile_size,
+                    shape[2] * tile_size,
+                    3,
+                ),
+                dtype=arrays[0].dtype,
+            )
+            velocity_view = velocity.reshape(
+                shape[0],
+                tile_size,
+                shape[1],
+                tile_size,
+                shape[2],
+                tile_size,
+                3,
+            )
+
+            target = (
+                brick["local_i"],
+                slice(None),
+                brick["local_j"],
+                slice(None),
+                brick["local_k"],
+                slice(None),
+            )
+            for component, array in enumerate(arrays):
+                velocity_view[target + (component,)] = array[slots]
+
+        copy_from_array(velocity, ijk=origin)
+
+
 def write_vdb(payload: dict[str, Any]) -> None:
     """
     Convert shared-memory field data into OpenVDB grids and save them.
@@ -266,6 +320,7 @@ def write_vdb(payload: dict[str, Any]) -> None:
     delta = float(payload["delta"])
     nx = int(payload["nx"])
     ny = int(payload["ny"])
+    precision = str(payload.get("precision", "float32")).lower()
 
     transform = openvdb.createLinearTransform(
         voxelSize=delta,
@@ -295,19 +350,50 @@ def write_vdb(payload: dict[str, Any]) -> None:
     grids = []
     brick_cache: dict[tuple[Shape3D, str], np.ndarray] = {}
 
+    velocity_names = ("velocity_x", "velocity_y", "velocity_z")
+    velocity_infos = [payload["fields"].get(name) for name in velocity_names]
+    if any(info is not None for info in velocity_infos):
+        if not all(info is not None for info in velocity_infos):
+            raise ValueError("Velocity output requires x, y and z components")
+
+        velocity_arrays = []
+        velocity_shms = []
+        try:
+            for info in velocity_infos:
+                array, shm = open_array(info)
+                velocity_arrays.append(array)
+                velocity_shms.append(shm)
+
+            grid = openvdb.Vec3SGrid(background=(0.0, 0.0, 0.0))
+            grid.name = "velocity"
+            grid.transform = transform
+            grid.saveFloatAsHalf = precision == "float16"
+
+            copy_velocity_to_grid(
+                grid=grid,
+                arrays=tuple(velocity_arrays),
+                bricks=bricks,
+                tile_size=tile_size,
+            )
+
+            grid.prune((0.0, 0.0, 0.0))
+            grids.append(grid)
+        finally:
+            velocity_arrays.clear()
+            for shm in velocity_shms:
+                shm.close()
+
     for name, info in payload["fields"].items():
+        if name in velocity_names:
+            continue
+
         array, shm = open_array(info)
 
         try:
-            for brick in bricks:
-                if np.any(brick["slots"] >= len(array)):
-                    raise ValueError(
-                        f"Field '{name}' contains an invalid tile slot index"
-                    )
-
             grid = openvdb.FloatGrid(background=0.0)
             grid.name = name
             grid.transform = transform
+            grid.saveFloatAsHalf = precision == "float16"
 
             copy_field_to_grid(
                 grid=grid,
@@ -335,14 +421,10 @@ def write_vdb(payload: dict[str, Any]) -> None:
     temp_path = output_path + ".tmp"
 
     try:
-        started = perf_counter()
-
         openvdb.write(
             temp_path,
             grids=grids,
         )
-
-        write_elapsed = perf_counter() - started
 
         os.replace(
             temp_path,
@@ -352,13 +434,6 @@ def write_vdb(payload: dict[str, Any]) -> None:
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
-    print(
-        f"[VDB Writer] {os.path.basename(output_path)} "
-        f"openvdb.write(): {write_elapsed * 1000:.2f} ms",
-        file=sys.stderr,
-        flush=True,
-    )
 
 
 def main() -> None:

@@ -20,7 +20,7 @@ def start_writer():
     )
 
 
-def write(writer, output_data, output_path, tile_size, delta, nx, ny):
+def write(writer, output_data, output_path, tile_size, delta, nx, ny, precision):
     shared_buffers = []
 
     def share_array(array):
@@ -54,6 +54,7 @@ def write(writer, output_data, output_path, tile_size, delta, nx, ny):
             "delta": float(delta),
             "nx": int(nx),
             "ny": int(ny),
+            "precision": str(precision),
             "fields": {},
         }
 

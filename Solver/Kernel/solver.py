@@ -1550,6 +1550,7 @@ def solver(config: dict, timings: Any = None):
                     delta=delta,
                     nx=nx,
                     ny=ny,
+                    precision=output_cfg.get("precision", "float32"),
                 )
             finally:
                 output.release(queue, output_data)
