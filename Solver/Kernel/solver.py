@@ -1586,6 +1586,8 @@ def solver(config: dict, timings: Any = None):
 
         timings.record_cpu("simulation_iteration", iteration_cpu_started)
 
+    writer_manager.stop_writer(writer)
+
     # ------------Conclusion-------------------
     if cancel_requested:
         print("Simulation cancelled after clean shutdown.")

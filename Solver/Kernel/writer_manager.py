@@ -7,20 +7,65 @@ import numpy as np
 from multiprocessing import shared_memory
 from pathlib import Path
 
+WRITER_COUNT = 4
+
 
 def start_writer():
     writer_script = Path(__file__).resolve().parent / "writer_worker.py"
 
-    return subprocess.Popen(
-        [sys.executable, str(writer_script)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-    )
+    slots = []
+    for _ in range(WRITER_COUNT):
+        process = subprocess.Popen(
+            [sys.executable, str(writer_script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        slots.append(
+            {
+                "process": process,
+                "shared_buffers": [],
+                "busy": False,
+            }
+        )
+
+    return {
+        "slots": slots,
+        "next_slot": 0,
+    }
+
+
+def _finish_slot(slot):
+    if not slot["busy"]:
+        return
+
+    process = slot["process"]
+    try:
+        response_line = process.stdout.readline()
+        if not response_line:
+            raise RuntimeError("VDB writer process exited.")
+
+        response = json.loads(response_line)
+        if response["status"] != "ok":
+            raise RuntimeError(response["message"])
+    finally:
+        for shm in slot["shared_buffers"]:
+            shm.close()
+            shm.unlink()
+        slot["shared_buffers"].clear()
+        slot["busy"] = False
 
 
 def write(writer, output_data, output_path, tile_size, delta, nx, ny, precision):
+    slots = writer["slots"]
+    slot_index = writer["next_slot"]
+    slot = slots[slot_index]
+    writer["next_slot"] = (slot_index + 1) % len(slots)
+
+    _finish_slot(slot)
+
+    process = slot["process"]
     shared_buffers = []
 
     def share_array(array):
@@ -63,29 +108,34 @@ def write(writer, output_data, output_path, tile_size, delta, nx, ny, precision)
 
         payload["tile_map"] = share_array(output_data["tile_map"])
 
-        writer.stdin.write(json.dumps(payload) + "\n")
-        writer.stdin.flush()
-
-        response_line = writer.stdout.readline()
-
-        if not response_line:
-            raise RuntimeError("VDB writer process exited.")
-
-        response = json.loads(response_line)
-
-        if response["status"] != "ok":
-            raise RuntimeError(response["message"])
-
-    finally:
+        process.stdin.write(json.dumps(payload) + "\n")
+        process.stdin.flush()
+        slot["shared_buffers"] = shared_buffers
+        slot["busy"] = True
+    except Exception:
         for shm in shared_buffers:
             shm.close()
             shm.unlink()
+        raise
 
 
 def stop_writer(writer):
-    if writer.poll() is None:
-        writer.stdin.write("__QUIT__\n")
-        writer.stdin.flush()
-        writer.stdin.close()
+    first_error = None
 
-    writer.wait()
+    for slot in writer["slots"]:
+        try:
+            _finish_slot(slot)
+        except Exception as exc:
+            if first_error is None:
+                first_error = exc
+
+    for slot in writer["slots"]:
+        process = slot["process"]
+        if process.poll() is None:
+            process.stdin.write("__QUIT__\n")
+            process.stdin.flush()
+            process.stdin.close()
+        process.wait()
+
+    if first_error is not None:
+        raise first_error
