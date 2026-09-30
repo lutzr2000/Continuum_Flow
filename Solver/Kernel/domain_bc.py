@@ -3,7 +3,7 @@ import numpy as np
 
 from typing import Any
 
-import Solver.Kernel_GPU.kernel_config as kernel_config
+import Solver.Kernel.kernel_config as kernel_config
 
 tile_size = kernel_config.TILE_SIZE
 

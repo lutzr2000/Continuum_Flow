@@ -23,7 +23,6 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
 
     cpu_available = False
     gpu_available = False
-    opencl_available = False
 
     bl_idname = "CONTINUUM_FLOW_SIMULATION_NODE"
     bl_label = "Simulation"
@@ -49,7 +48,6 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         items=(
             ("GPU", "GPU", "Use the GPU solver"),
             ("CPU", "CPU", "Use the CPU solver"),
-            ("OPENCL", "OpenCL", "Use the OpenCL solver"),
         ),
         default="CPU",
         options=set(),
@@ -105,10 +103,9 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         if int(self.start_frame) > maximum_start_frame:
             self.start_frame = maximum_start_frame
 
-    def set_solver_status(self, cpu_available, gpu_available, opencl_available=False):
+    def set_solver_status(self, cpu_available, gpu_available):
         self.cpu_available = cpu_available
         self.gpu_available = gpu_available
-        self.opencl_available = opencl_available
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
@@ -121,13 +118,9 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         gpu_row.enabled = solver_status.gpu_available
         gpu_row.prop_enum(self, "solver_backend", "GPU")
 
-        opencl_row = solver_row.row(align=True)
-        opencl_row.enabled = solver_status.opencl_available
-        opencl_row.prop_enum(self, "solver_backend", "OPENCL")
-
         backend_unavailable = (
             self.solver_backend == "GPU" and not solver_status.gpu_available
-        ) or (self.solver_backend == "OPENCL" and not solver_status.opencl_available)
+        )
         if backend_unavailable:
             self.solver_backend = "CPU"
 

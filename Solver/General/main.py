@@ -6,9 +6,6 @@ import contextlib
 import json
 import sys
 import traceback
-import os
-import shutil
-import platform
 
 
 def emit_message(message: Any) -> None:
@@ -28,8 +25,7 @@ def main(config: dict[str, Any]) -> None:
     Configure the runtime environment and execute the requested solver backend.
 
     Parent-process import paths from the job metadata are prepended to
-    ``sys.path`` before the configured CPU, CUDA GPU, or OpenCL backend is
-    normalized and dispatched.
+    ``sys.path`` before the configured backend is normalized and dispatched.
 
     Total bake time is printed from a ``finally`` block, so timing information
     is emitted after both successful runs and failures.
@@ -50,17 +46,10 @@ def main(config: dict[str, Any]) -> None:
         )
 
         if solver_backend == "CPU":
-            import Solver.Kernel_CPU.kernel as solver_kernel_module
-
-            return solver_kernel_module.solver(config)
+            print("CPU solver is not implemented.")
+            return
 
         elif solver_backend == "GPU":
-            prepare_cuda_libraries()
-            import Solver.Kernel_GPU.kernel as solver_kernel_module
-
-            return solver_kernel_module.solver(config)
-
-        elif solver_backend == "OPENCL":
             import Solver.Kernel.solver as solver_kernel_module
 
             return solver_kernel_module.solver(config)
@@ -73,79 +62,22 @@ def main(config: dict[str, Any]) -> None:
         print("################################################################")
 
 
-def prepare_cuda_libraries() -> None:
-    """
-    Make bundled NVIDIA runtime libraries discoverable by the current process.
-
-    On Windows, directories containing NVIDIA DLLs are registered and stable
-    aliases are created for versioned CUDA Runtime and NVVM libraries when
-    needed. On Linux, discovered library directories are prepended to
-    ``LD_LIBRARY_PATH``. macOS requires no setup here.
-    """
-    system = platform.system()
-
-    for entry in map(Path, sys.path):
-        nvidia = entry / "nvidia"
-        if not nvidia.exists():
-            continue
-
-        lib_dirs = set()
-
-        if system == "Windows":
-            for dll in nvidia.rglob("*.dll"):
-                lib_dirs.add(dll.parent)
-
-                name = dll.name.lower()
-
-                if name.startswith("cudart64_"):
-                    alias = dll.parent / "cudart.dll"
-                    if not alias.exists():
-                        shutil.copy2(dll, alias)
-
-                elif name.startswith("nvvm64_"):
-                    alias = dll.parent / "nvvm.dll"
-                    if not alias.exists():
-                        shutil.copy2(dll, alias)
-
-            for lib_dir in lib_dirs:
-                os.add_dll_directory(str(lib_dir))
-
-        elif system == "Linux":
-            for so in nvidia.rglob("*.so*"):
-                lib_dirs.add(so.parent)
-
-            if lib_dirs:
-                old = os.environ.get("LD_LIBRARY_PATH", "")
-                new = os.pathsep.join(str(p) for p in sorted(lib_dirs))
-                os.environ["LD_LIBRARY_PATH"] = new + (os.pathsep + old if old else "")
-
-        elif system == "Darwin":
-            return
-
-
 def preload_backend(backend: str) -> None:
     """Load a solver backend and initialize its process-local runtime."""
     backend = str(backend or "").strip().upper()
 
     if backend == "CPU":
-        import Solver.Kernel_CPU.kernel
-
         return
 
     if backend == "GPU":
-        prepare_cuda_libraries()
-        from numba import cuda
-        import Solver.Kernel_GPU.kernel
-
-        cuda.current_context()
-        return
-
-    if backend == "OPENCL":
         import pyopencl as cl
         import Solver.Kernel.solver
 
-        if not any(platform.get_devices() for platform in cl.get_platforms()):
-            raise RuntimeError("No OpenCL compute device is available")
+        if not any(
+            platform.get_devices(device_type=cl.device_type.GPU)
+            for platform in cl.get_platforms()
+        ):
+            raise RuntimeError("No GPU compute device is available")
         return
 
     raise ValueError(f"Unsupported solver backend: {backend}")
