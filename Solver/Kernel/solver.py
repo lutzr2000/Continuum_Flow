@@ -506,6 +506,11 @@ def solver(config: dict, timings: Any = None):
 
     # ------------source meshes------------------
     sources = simulation.get("sources") or []
+    obstacles = simulation.get("obstacles") or []
+
+    for entry in sources + obstacles:
+        for obj in entry.get("geometry_inputs") or []:
+            obj["animation_timeline"] = simulation["animation_timeline"]
 
     source_base_masks = []
     geometry_source_masks = []
@@ -573,8 +578,6 @@ def solver(config: dict, timings: Any = None):
     particle_source_flags = [bool(entries) for entries in particle_sources]
 
     # ------------obstacle meshes------------------
-    obstacles = simulation.get("obstacles") or []
-
     obstacle_base_masks = []
 
     for obstacle in obstacles:
@@ -604,11 +607,6 @@ def solver(config: dict, timings: Any = None):
         obstacle_base_masks.extend(base_masks)
 
     obstacle_mask = helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
-
-    # add times
-    for entry in sources + obstacles:
-        for obj in entry.get("geometry_inputs") or []:
-            obj["animation_timeline"] = simulation["animation_timeline"]
 
     # ------------multigrid------------------
     (
