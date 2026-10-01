@@ -17,22 +17,26 @@ __kernel void pack_preview(
     const int tile_x = get_global_id(0);
     const int tile_y = get_global_id(1);
     const int tile_z = get_global_id(2);
+
     if (tile_x >= tiles_x || tile_y >= tiles_y || tile_z >= tiles_z)
         return;
 
     const int solver_map_index = (tile_x * tiles_y + tile_y) * tiles_z + tile_z;
     const int preview_map_index = (tile_z * tiles_y + tile_y) * tiles_x + tile_x;
     const int source_slot = tile_map[solver_map_index];
+
     if (source_slot < 0) {
         preview_tile_lookup[preview_map_index] = -1.0f;
         return;
     }
 
     const int packed_slot = atomic_add(packed_tile_counter, 1);
+    
     if (packed_slot >= active_tile_count) {
         preview_tile_lookup[preview_map_index] = -1.0f;
         return;
     }
+    
     preview_tile_lookup[preview_map_index] = (float)packed_slot;
 
     const int atlas_tile_x = packed_slot % atlas_tiles_x;
