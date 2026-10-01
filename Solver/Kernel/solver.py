@@ -19,10 +19,8 @@ import Solver.Kernel.domain_bc as domain_bc
 import Solver.Kernel.output as output
 import Solver.Kernel.pressure_solve as pressure_solve
 import Solver.Kernel.writer_manager as writer_manager
-from Solver.Kernel.timing import profiled_run
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
-DEBUG_TIMING = True
 
 
 def get_source_values(
@@ -190,8 +188,7 @@ def compute_inital_velocity(
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-@profiled_run(lambda: DEBUG_TIMING)
-def solver(config: dict, timings: Any = None):
+def solver(config: dict):
 
     # ------------device-------------------
     device = None
@@ -205,12 +202,7 @@ def solver(config: dict, timings: Any = None):
 
     # ------------context-------------------
     context = cl.Context([device])
-    queue = cl.CommandQueue(
-        context,
-        properties=(
-            cl.command_queue_properties.PROFILING_ENABLE if DEBUG_TIMING else 0
-        ),
-    )
+    queue = cl.CommandQueue(context)
 
     kernel_path = Path(__file__).parent / "OpenCL"
 
@@ -282,40 +274,6 @@ def solver(config: dict, timings: Any = None):
     multigrid_kernels = helper.load_program(
         context,
         kernel_path / "multigrid.cl",
-    )
-
-    timings.configure(
-        queue,
-        {
-            "forces": forces,
-            "voxelise_mesh": voxelise_mesh,
-            "multigrid": multigrid,
-            "particles": particles,
-            "update_masks": update_masks,
-            "time_step": time_step,
-            "helper": helper,
-            "sparse_managment": sparse_managment,
-            "domain_bc": domain_bc,
-            "output": output,
-            "pressure_solve": pressure_solve,
-            "writer_manager": writer_manager,
-        },
-    )
-    timings.instrument_kernel_sets(
-        voxelise_mesh_kernels,
-        update_masks_kernels,
-        particles_kernels,
-        sparse_managment_kernels,
-        time_step_kernels,
-        reference_frame_kernels,
-        domain_bc_kernels,
-        source_bc_kernels,
-        obstacle_bc_kernels,
-        vorticity_kernels,
-        velocity_update_kernels,
-        scalar_update_kernels,
-        pressure_solve_kernels,
-        multigrid_kernels,
     )
 
     print("################################################################")
@@ -661,19 +619,14 @@ def solver(config: dict, timings: Any = None):
     active_tile_counter_host = initial_active_tile_count
     next_tile_index_counter_host = initial_next_tile_index
 
-    timings.start_loop()
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        physics_values = timings.call(
-            "get_simulation_values", get_simulation_values, simulation, t
-        )
-        source_values = timings.call(
-            "get_source_values", get_source_values, simulation, t
-        )
+        physics_values = get_simulation_values(simulation, t)
+        source_values = get_source_values(simulation, t)
 
         # ------------reference frame-------------------
         if has_reference_frame:
@@ -1606,8 +1559,6 @@ def solver(config: dict, timings: Any = None):
                     "vram_total_mb": total_vram / 1024**2,
                 }
             )
-
-    timings.stop_loop()
 
     if writer is not None:
         writer_manager.stop_writer(writer)

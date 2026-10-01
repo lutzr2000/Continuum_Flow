@@ -5,7 +5,6 @@ import pyopencl as cl
 
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.helper as helper
-from Solver.Kernel.timing import record_kernel_event
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -550,13 +549,7 @@ def smooth(
             * boundary_local_work_size[1],
         )
 
-        timed_boundary_kernel = multigrid_kernels[boundary_kernel_name]
-
-        boundary_kernel = getattr(
-            timed_boundary_kernel,
-            "kernel",
-            timed_boundary_kernel,
-        )
+        boundary_kernel = multigrid_kernels[boundary_kernel_name]
 
         boundary_kernel.set_args(
             p,
@@ -576,37 +569,22 @@ def smooth(
         )
 
     for _ in range(iterations):
-        red_event = cl.enqueue_nd_range_kernel(
+        cl.enqueue_nd_range_kernel(
             queue,
             red_kernel,
             rbgs_global_work_size,
             rbgs_local_work_size,
         )
-        record_kernel_event(
-            red_kernel,
-            red_event,
-        )
-
-        black_event = cl.enqueue_nd_range_kernel(
+        cl.enqueue_nd_range_kernel(
             queue,
             black_kernel,
             rbgs_global_work_size,
             rbgs_local_work_size,
         )
-        record_kernel_event(
-            black_kernel,
-            black_event,
-        )
-
         for boundary_kernel, boundary_global_work_size in boundary_dispatches:
-            boundary_event = cl.enqueue_nd_range_kernel(
+            cl.enqueue_nd_range_kernel(
                 queue,
                 boundary_kernel,
                 boundary_global_work_size,
                 boundary_local_work_size,
-            )
-
-            record_kernel_event(
-                boundary_kernel,
-                boundary_event,
             )
