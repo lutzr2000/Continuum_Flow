@@ -16,9 +16,7 @@ import Solver.Kernel.time_step as time_step
 import Solver.Kernel.helper as helper
 import Solver.Kernel.sparse_managment as sparse_managment
 import Solver.Kernel.domain_bc as domain_bc
-import Solver.Kernel.output as output
 import Solver.Kernel.pressure_solve as pressure_solve
-import Solver.Kernel.writer_manager as writer_manager
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -602,14 +600,6 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-
-    output_fields = output_cfg.get("fields") or {}
-
-    write_output = any(
-        (field_config or {}).get("enabled", False)
-        for field_config in output_fields.values()
-    )
-    writer = writer_manager.start_writer() if write_output else None
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1491,53 +1481,6 @@ def solver(config: dict):
 
         # ------------Output-------------------
         while t >= next_output_time:
-            field_mapping = {
-                "smoke": {"density": smoke},
-                "temperature": {"temperature": temperature},
-                "fuel": {"fuel": fuel},
-                "flame": {"flame": flame},
-                "pressure": {"pressure": p},
-                "velocity": {
-                    "velocity_x": u,
-                    "velocity_y": v,
-                    "velocity_z": w,
-                },
-            }
-            fields = {
-                name: value
-                for key, values in field_mapping.items()
-                if (output_fields.get(key) or {}).get("enabled", False)
-                for name, value in values.items()
-            }
-
-            if fields:
-                output_data = output.output(
-                    context=context,
-                    queue=queue,
-                    fields=fields,
-                    tile_map=tile_map,
-                    tile_shape=tile_shape,
-                    tile_size=kernel_config.TILE_SIZE,
-                    slot_count=next_tile_index_counter_host,
-                    dtype=FIELD_DTYPE,
-                )
-
-                cl.wait_for_events(output_data["events"])
-                try:
-                    writer_manager.write(
-                        writer=writer,
-                        output_data=output_data,
-                        output_path=Path(bake_path) / f"frame_{output_index:06d}.vdb",
-                        tile_size=kernel_config.TILE_SIZE,
-                        delta=delta,
-                        nx=nx,
-                        ny=ny,
-                        precision=output_cfg.get("precision", "float32"),
-                        frame_index=output_index,
-                    )
-                finally:
-                    output.release(queue, output_data)
-
             output_index += 1
             next_output_time += output_time_step
 
@@ -1559,9 +1502,6 @@ def solver(config: dict):
                     "vram_total_mb": total_vram / 1024**2,
                 }
             )
-
-    if writer is not None:
-        writer_manager.stop_writer(writer)
 
     # ------------Conclusion-------------------
     if cancel_requested:

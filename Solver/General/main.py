@@ -1,31 +1,53 @@
-from typing import Any
+from typing import Any, Callable
 
-from pathlib import Path
 from time import perf_counter
-import contextlib
-import json
 import sys
-import traceback
+import threading
 
 
-def emit_message(message: Any) -> None:
+MessageCallback = Callable[[dict[str, Any]], None]
+
+_message_callback: MessageCallback | None = None
+_message_callback_lock = threading.Lock()
+
+
+def set_message_callback(callback: MessageCallback | None) -> None:
     """
-    Serialize one worker-protocol message as JSON and write it to stdout.
-
-    The real process stdout is used so messages remain available even while
-    solver output is redirected through ``_JsonLogStream``. Flushing after
-    every line lets the parent process receive progress events immediately.
+    Set the callback used for solver runtime messages.
     """
-    sys.__stdout__.write(json.dumps(message) + "\n")
-    sys.__stdout__.flush()
+    global _message_callback
+
+    with _message_callback_lock:
+        _message_callback = callback
+
+
+def clear_message_callback() -> None:
+    """
+    Remove the currently registered solver message callback.
+    """
+    global _message_callback
+
+    with _message_callback_lock:
+        _message_callback = None
+
+
+def emit_message(message: dict[str, Any]) -> None:
+    """
+    Forward one solver runtime message to the registered callback.
+    """
+    with _message_callback_lock:
+        callback = _message_callback
+
+    if callback is not None:
+        callback(message)
 
 
 def main(config: dict[str, Any]) -> None:
     """
     Configure the runtime environment and execute the requested solver backend.
 
-    Parent-process import paths from the job metadata are prepended to
-    ``sys.path`` before the configured backend is normalized and dispatched.
+    Parent import paths from the job metadata are prepended to ``sys.path``
+    before the configured backend is normalized and dispatched.
 
     Total bake time is printed from a ``finally`` block, so timing information
     is emitted after both successful runs and failures.
@@ -63,7 +85,9 @@ def main(config: dict[str, Any]) -> None:
 
 
 def preload_backend(backend: str) -> None:
-    """Load a solver backend and initialize its process-local runtime."""
+    """
+    Load a solver backend and initialize its runtime.
+    """
     backend = str(backend or "").strip().upper()
 
     if backend == "CPU":
@@ -78,202 +102,7 @@ def preload_backend(backend: str) -> None:
             for platform in cl.get_platforms()
         ):
             raise RuntimeError("No GPU compute device is available")
+
         return
 
     raise ValueError(f"Unsupported solver backend: {backend}")
-
-
-def run_worker() -> None:
-    """
-    Serve newline-delimited JSON solver commands on standard input.
-
-    The worker announces readiness, executes ``run_job`` messages with stdout
-    and stderr converted into structured log events, and reports completion or
-    a formatted traceback. A ``shutdown`` command terminates the loop; unknown
-    commands produce protocol error messages without stopping the worker.
-    """
-    emit_message({"type": "ready"})
-
-    for raw_line in sys.stdin:
-        payload = raw_line.strip()
-        if not payload:
-            continue
-
-        message = json.loads(payload)
-        command = str(message.get("command") or "").strip().lower()
-
-        if command == "shutdown":
-            break
-
-        if command == "preload":
-            backend = str(message.get("backend") or "").strip().upper()
-
-            try:
-                preload_backend(backend)
-                emit_message(
-                    {
-                        "type": "preload_complete",
-                        "backend": backend,
-                        "success": True,
-                    }
-                )
-            except Exception as exc:
-                emit_message(
-                    {
-                        "type": "preload_complete",
-                        "backend": backend,
-                        "success": False,
-                        "message": f"Failed to preload {backend} backend: {exc}",
-                        "traceback": traceback.format_exc(),
-                    }
-                )
-
-            continue
-
-        if command == "run_job":
-            job_id = int(message.get("job_id", 0) or 0)
-            config = message.get("config") or {}
-
-            emit_message(
-                {
-                    "type": "job_started",
-                    "job_id": job_id,
-                }
-            )
-
-            logger = _JsonLogStream()
-
-            try:
-                with contextlib.redirect_stdout(logger), contextlib.redirect_stderr(
-                    logger
-                ):
-                    try:
-                        main(config)
-                    finally:
-                        logger.flush()
-
-                emit_message(
-                    {
-                        "type": "stats",
-                        "frame": 0,
-                        "active_tiles": 0,
-                        "total_tiles": 0,
-                        "active_cells": 0,
-                        "total_cells": 0,
-                        "vram_used_mb": 0.0,
-                        "vram_total_mb": 0.0,
-                    }
-                )
-
-                emit_message(
-                    {
-                        "type": "job_finished",
-                        "job_id": job_id,
-                        "success": True,
-                    }
-                )
-
-            except Exception:
-                emit_message(
-                    {
-                        "type": "stats",
-                        "frame": 0,
-                        "active_tiles": 0,
-                        "total_tiles": 0,
-                        "active_cells": 0,
-                        "total_cells": 0,
-                        "vram_used_mb": 0.0,
-                        "vram_total_mb": 0.0,
-                    }
-                )
-
-                emit_message(
-                    {
-                        "type": "job_finished",
-                        "job_id": job_id,
-                        "success": False,
-                        "message": "Solver job failed",
-                        "traceback": traceback.format_exc(),
-                    }
-                )
-
-            continue
-
-        emit_message(
-            {
-                "type": "error",
-                "message": f"Unknown solver worker command: {command}",
-            }
-        )
-
-
-class _JsonLogStream:
-    def __init__(self) -> None:
-        """
-        Initialize an empty buffer for incomplete log lines.
-        """
-        self._buffer = ""
-
-    def write(self, text: str) -> int:
-        """
-        Buffer text and emit every complete non-empty line as a JSON log event.
-
-        Partial lines remain buffered until a newline arrives or ``flush`` is
-        called. The consumed character count follows the text-stream protocol.
-        """
-        text = str(text or "")
-        if not text:
-            return 0
-
-        self._buffer += text
-
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            line = line.rstrip()
-
-            if line:
-                emit_message(
-                    {
-                        "type": "log",
-                        "message": line,
-                    }
-                )
-
-        return len(text)
-
-    def flush(self) -> None:
-        """
-        Emit any remaining buffered text as one log event and clear the buffer.
-        """
-        remaining = self._buffer.strip()
-
-        if remaining:
-            emit_message(
-                {
-                    "type": "log",
-                    "message": remaining,
-                }
-            )
-
-        self._buffer = ""
-
-
-if __name__ == "__main__":
-    try:
-        if len(sys.argv) >= 2 and sys.argv[1] == "--worker":
-            run_worker()
-
-        else:
-            if len(sys.argv) < 2:
-                raise ValueError("Expected bake directory path as first argument.")
-
-            bake_directory = Path(sys.argv[1]).resolve()
-
-            config = json.load(sys.stdin)
-            config["bake_directory"] = str(bake_directory)
-
-            main(config)
-
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)

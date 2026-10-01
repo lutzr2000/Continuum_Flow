@@ -331,10 +331,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         )
         update_live_preview_settings(self.simulation_node)
 
-        solver_manager.start(
-            wait=True,
-            timeout=120.0,
-        )
         self.job_id = solver_manager.start_job(config_dict)
 
 
