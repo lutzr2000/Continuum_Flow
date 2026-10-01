@@ -449,18 +449,18 @@ def smooth(
         for size in field_shape
     )
 
-    local_work_size = kernel_config.THREADS_PER_BLOCK_3D
+    rbgs_local_work_size = kernel_config.THREADS_PER_BLOCK_3D
 
     is_level_0 = active_tiles is None
 
     if is_level_0:
-        global_work_size = (
-            tile_shape[0] * local_work_size[0],
-            tile_shape[1] * local_work_size[1],
-            tile_shape[2] * local_work_size[2],
+        rbgs_global_work_size = (
+            tile_shape[0] * rbgs_local_work_size[0],
+            tile_shape[1] * rbgs_local_work_size[1],
+            tile_shape[2] * rbgs_local_work_size[2],
         )
 
-        kernel_name = "rbgs_step_level_0"
+        rbgs_kernel_name = "rbgs_step_level_0"
 
         kernel_args = (
             p,
@@ -478,13 +478,13 @@ def smooth(
     else:
         active_tile_capacity = active_tiles.size // (3 * np.dtype(np.int32).itemsize)
 
-        global_work_size = (
-            active_tile_capacity * local_work_size[0],
-            local_work_size[1],
-            local_work_size[2],
+        rbgs_global_work_size = (
+            active_tile_capacity * rbgs_local_work_size[0],
+            rbgs_local_work_size[1],
+            rbgs_local_work_size[2],
         )
 
-        kernel_name = "rbgs_step_sparse"
+        rbgs_kernel_name = "rbgs_step_sparse"
 
         kernel_args = (
             p,
@@ -500,10 +500,10 @@ def smooth(
             np.int32(tile_shape[2]),
         )
 
-    program = multigrid_kernels[kernel_name].program
+    program = multigrid_kernels[rbgs_kernel_name].program
 
-    red_kernel = cl.Kernel(program, kernel_name)
-    black_kernel = cl.Kernel(program, kernel_name)
+    red_kernel = cl.Kernel(program, rbgs_kernel_name)
+    black_kernel = cl.Kernel(program, rbgs_kernel_name)
 
     red_kernel.set_args(
         *kernel_args[:3],
@@ -517,46 +517,96 @@ def smooth(
         *kernel_args[3:],
     )
 
+    boundary_local_work_size = (16, 16)
+
+    boundary_kernel_configs = (
+        (
+            "pressure_poisson_neumann_x",
+            (ny, nz),
+        ),
+        (
+            "pressure_poisson_neumann_y",
+            (nx, nz),
+        ),
+        (
+            "pressure_poisson_neumann_z",
+            (nx, ny),
+        ),
+    )
+
+    boundary_dispatches = []
+
+    for boundary_kernel_name, shape in boundary_kernel_configs:
+        boundary_global_work_size = (
+            (
+                (shape[0] + boundary_local_work_size[0] - 1)
+                // boundary_local_work_size[0]
+            )
+            * boundary_local_work_size[0],
+            (
+                (shape[1] + boundary_local_work_size[1] - 1)
+                // boundary_local_work_size[1]
+            )
+            * boundary_local_work_size[1],
+        )
+
+        timed_boundary_kernel = multigrid_kernels[boundary_kernel_name]
+
+        boundary_kernel = getattr(
+            timed_boundary_kernel,
+            "kernel",
+            timed_boundary_kernel,
+        )
+
+        boundary_kernel.set_args(
+            p,
+            tile_map,
+            np.int32(nx),
+            np.int32(ny),
+            np.int32(nz),
+            np.int32(tile_shape[1]),
+            np.int32(tile_shape[2]),
+        )
+
+        boundary_dispatches.append(
+            (
+                boundary_kernel,
+                boundary_global_work_size,
+            )
+        )
+
     for _ in range(iterations):
         red_event = cl.enqueue_nd_range_kernel(
             queue,
             red_kernel,
-            global_work_size,
-            local_work_size,
+            rbgs_global_work_size,
+            rbgs_local_work_size,
         )
-        record_kernel_event(red_kernel, red_event)
+        record_kernel_event(
+            red_kernel,
+            red_event,
+        )
+
         black_event = cl.enqueue_nd_range_kernel(
             queue,
             black_kernel,
-            global_work_size,
-            local_work_size,
+            rbgs_global_work_size,
+            rbgs_local_work_size,
         )
-        record_kernel_event(black_kernel, black_event)
-    # Neumann boundary conditions
-    boundary_global_work_size = (
-        tile_shape[0] * local_work_size[0],
-        tile_shape[1] * local_work_size[1],
-        tile_shape[2] * local_work_size[2],
-    )
+        record_kernel_event(
+            black_kernel,
+            black_event,
+        )
 
-    timed_boundary_kernel = multigrid_kernels["pressure_poisson_apply_neumann_bcs"]
-    boundary_kernel = getattr(timed_boundary_kernel, "kernel", timed_boundary_kernel)
+        for boundary_kernel, boundary_global_work_size in boundary_dispatches:
+            boundary_event = cl.enqueue_nd_range_kernel(
+                queue,
+                boundary_kernel,
+                boundary_global_work_size,
+                boundary_local_work_size,
+            )
 
-    boundary_kernel.set_args(
-        p,
-        tile_map,
-        np.int32(nx),
-        np.int32(ny),
-        np.int32(nz),
-        np.int32(tile_shape[0]),
-        np.int32(tile_shape[1]),
-        np.int32(tile_shape[2]),
-    )
-
-    boundary_event = cl.enqueue_nd_range_kernel(
-        queue,
-        boundary_kernel,
-        boundary_global_work_size,
-        local_work_size,
-    )
-    record_kernel_event(boundary_kernel, boundary_event)
+            record_kernel_event(
+                boundary_kernel,
+                boundary_event,
+            )

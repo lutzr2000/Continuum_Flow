@@ -22,6 +22,7 @@ import Solver.Kernel.writer_manager as writer_manager
 from Solver.Kernel.timing import profiled_run
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
+DEBUG_TIMING = True
 
 
 def get_source_values(
@@ -189,7 +190,7 @@ def compute_inital_velocity(
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
-@profiled_run
+@profiled_run(lambda: DEBUG_TIMING)
 def solver(config: dict, timings: Any = None):
 
     # ------------device-------------------
@@ -206,7 +207,9 @@ def solver(config: dict, timings: Any = None):
     context = cl.Context([device])
     queue = cl.CommandQueue(
         context,
-        properties=cl.command_queue_properties.PROFILING_ENABLE,
+        properties=(
+            cl.command_queue_properties.PROFILING_ENABLE if DEBUG_TIMING else 0
+        ),
     )
 
     kernel_path = Path(__file__).parent / "OpenCL"

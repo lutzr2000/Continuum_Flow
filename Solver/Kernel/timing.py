@@ -33,7 +33,8 @@ class TimedKernel:
 class RunTimings:
     """Collect synchronized method timings and OpenCL event timings."""
 
-    def __init__(self) -> None:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
         self.entries: dict[str, list[float]] = {}
         self.queue: cl.CommandQueue | None = None
         self.active = False
@@ -47,6 +48,9 @@ class RunTimings:
         modules: dict[str, ModuleType],
     ) -> None:
         global _CURRENT_TIMINGS
+        if not self.enabled:
+            _CURRENT_TIMINGS = None
+            return
         _CURRENT_TIMINGS = self
         self.queue = queue
         for prefix, module in modules.items():
@@ -63,6 +67,8 @@ class RunTimings:
             )
 
     def instrument_kernel_sets(self, *kernel_sets: dict[str, cl.Kernel]) -> None:
+        if not self.enabled:
+            return
         for kernels in kernel_sets:
             for name, kernel in kernels.items():
                 raw_kernel = (
@@ -103,15 +109,19 @@ class RunTimings:
         *args: Any,
         **kwargs: Any,
     ) -> Any:
+        if not self.enabled:
+            return function(*args, **kwargs)
         return self.wrap(name, function)(*args, **kwargs)
 
     def start_loop(self) -> None:
+        if not self.enabled:
+            return
         self._synchronize()
         self.loop_started = perf_counter()
         self.active = True
 
     def stop_loop(self) -> None:
-        if not self.active:
+        if not self.enabled or not self.active:
             return
         self._synchronize()
         self.loop_elapsed += perf_counter() - (self.loop_started or perf_counter())
@@ -136,6 +146,8 @@ class RunTimings:
         self.record_kernel(kernel.function_name, elapsed)
 
     def report(self, status: str) -> None:
+        if not self.enabled:
+            return
         self.stop_loop()
         total = self.loop_elapsed
         print(f"Timing report ({status}) - timed loop: {total:.6f} s")
@@ -159,24 +171,29 @@ class RunTimings:
             self.queue.finish()
 
 
-def profiled_run(function: Callable[..., Any]) -> Callable[..., Any]:
-    """Create one timing collector and always print its final loop report."""
+def profiled_run(
+    enabled: Callable[[], bool],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Optionally collect and print timings for one solver invocation."""
 
-    @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        if kwargs.get("timings") is not None:
-            return function(*args, **kwargs)
-        timings = RunTimings()
-        kwargs["timings"] = timings
-        status = "failed / partial"
-        try:
-            result = function(*args, **kwargs)
-            status = "finished / clean stop"
-            return result
-        finally:
-            timings.report(status)
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(function)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("timings") is not None:
+                return function(*args, **kwargs)
+            timings = RunTimings(enabled=enabled())
+            kwargs["timings"] = timings
+            status = "failed / partial"
+            try:
+                result = function(*args, **kwargs)
+                status = "finished / clean stop"
+                return result
+            finally:
+                timings.report(status)
 
-    return wrapped
+        return wrapped
+
+    return decorate
 
 
 def record_kernel_event(kernel: cl.Kernel, event: cl.Event) -> None:
