@@ -310,8 +310,6 @@ def write_vdb(payload: dict[str, Any]) -> None:
     The writer groups active tiles into cropped bricks, builds one
     grid per field and writes all grids into a single VDB file.
 
-    Only the openvdb.write() call is timed.
-
     Args:
         payload: Frame metadata, shared-memory descriptors and output path.
     """

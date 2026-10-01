@@ -4,7 +4,6 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Any
 from pathlib import Path
-from time import perf_counter
 from Solver.General.main import emit_message
 import Solver.General.forces as forces
 
@@ -209,7 +208,6 @@ def solver(config: dict, timings: Any = None):
         context,
         properties=cl.command_queue_properties.PROFILING_ENABLE,
     )
-    timings.set_queue(queue)
 
     kernel_path = Path(__file__).parent / "OpenCL"
 
@@ -283,23 +281,39 @@ def solver(config: dict, timings: Any = None):
         kernel_path / "multigrid.cl",
     )
 
-    for group, kernels in (
-        ("voxelise_mesh", voxelise_mesh_kernels),
-        ("update_masks", update_masks_kernels),
-        ("particles", particles_kernels),
-        ("sparse_managment", sparse_managment_kernels),
-        ("time_step", time_step_kernels),
-        ("reference_frame", reference_frame_kernels),
-        ("domain_bc", domain_bc_kernels),
-        ("source_bc", source_bc_kernels),
-        ("obstacle_bc", obstacle_bc_kernels),
-        ("vorticity", vorticity_kernels),
-        ("velocity_update", velocity_update_kernels),
-        ("scalar_update", scalar_update_kernels),
-        ("pressure_solve", pressure_solve_kernels),
-        ("multigrid", multigrid_kernels),
-    ):
-        timings.instrument_kernels(kernels, group)
+    timings.configure(
+        queue,
+        {
+            "forces": forces,
+            "voxelise_mesh": voxelise_mesh,
+            "multigrid": multigrid,
+            "particles": particles,
+            "update_masks": update_masks,
+            "time_step": time_step,
+            "helper": helper,
+            "sparse_managment": sparse_managment,
+            "domain_bc": domain_bc,
+            "output": output,
+            "pressure_solve": pressure_solve,
+            "writer_manager": writer_manager,
+        },
+    )
+    timings.instrument_kernel_sets(
+        voxelise_mesh_kernels,
+        update_masks_kernels,
+        particles_kernels,
+        sparse_managment_kernels,
+        time_step_kernels,
+        reference_frame_kernels,
+        domain_bc_kernels,
+        source_bc_kernels,
+        obstacle_bc_kernels,
+        vorticity_kernels,
+        velocity_update_kernels,
+        scalar_update_kernels,
+        pressure_solve_kernels,
+        multigrid_kernels,
+    )
 
     print("################################################################")
     print(f"Running on: {device.name}")
@@ -644,16 +658,19 @@ def solver(config: dict, timings: Any = None):
     active_tile_counter_host = initial_active_tile_count
     next_tile_index_counter_host = initial_next_tile_index
 
+    timings.start_loop()
     while t < t_max:
-        iteration_cpu_started = perf_counter()
-
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        physics_values = get_simulation_values(simulation, t)
-        source_values = get_source_values(simulation, t)
+        physics_values = timings.call(
+            "get_simulation_values", get_simulation_values, simulation, t
+        )
+        source_values = timings.call(
+            "get_source_values", get_source_values, simulation, t
+        )
 
         # ------------reference frame-------------------
         if has_reference_frame:
@@ -676,8 +693,6 @@ def solver(config: dict, timings: Any = None):
         gravity = inverse_reference_linear @ np.asarray(
             (0.0, 0.0, 9.81), dtype=FIELD_DTYPE
         )
-
-        sparse_cpu_started = perf_counter()
 
         # ------------Clear scratch-------------------
         sparse_managment.reset_pools(
@@ -923,10 +938,7 @@ def solver(config: dict, timings: Any = None):
             active_tile_counter_host = total_tile_count
             next_tile_index_counter_host = total_tile_count
 
-        timings.record_cpu("sparse_activity_and_resize", sparse_cpu_started)
-
         # ------------Update geometry source masks-------------------
-        masks_cpu_started = perf_counter()
         update_geometry_sources = time_step_count == 0 or has_animated_sources
 
         if update_geometry_sources:
@@ -961,10 +973,7 @@ def solver(config: dict, timings: Any = None):
                 tile_shape,
             )
 
-        timings.record_cpu("update_source_masks", masks_cpu_started)
-
         # ------------time step-------------------
-        timestep_cpu_started = perf_counter()
         dt = time_step.compute_new_timestep(
             queue,
             time_step_kernels,
@@ -980,12 +989,6 @@ def solver(config: dict, timings: Any = None):
             cfl,
             output_time_step,
         )
-        timings.record_cpu("compute_new_timestep", timestep_cpu_started)
-
-        # The CFL readback above already waits for all earlier commands. Collect
-        # their profiling events here without adding another synchronization.
-        timings.collect_completed()
-
         # ------------Reference Frame Velocity Transfer-------------------
         if reference_velocity_transfer != 0.0 and reference_frame_animated:
             reference_matrix, reference_rate = update_masks.get_matrix_data(
@@ -1264,7 +1267,6 @@ def solver(config: dict, timings: Any = None):
             )
 
         # ------------force params-------------------
-        forces_cpu_started = perf_counter()
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
@@ -1291,8 +1293,6 @@ def solver(config: dict, timings: Any = None):
 
         swirl_count = len(swirl_config)
         turbulence_count = len(turbulence_config)
-        timings.record_cpu("prepare_force_buffers", forces_cpu_started)
-
         # ------------Velocity update-------------------
         sparse_managment.copy_pools(
             queue,
@@ -1387,7 +1387,6 @@ def solver(config: dict, timings: Any = None):
         w, w_work = w_work, w
 
         # ------------Pressure solve-------------------
-        pressure_cpu_started = perf_counter()
         p = pressure_solve.pressure_poisson_multigrid(
             pressure_solve_kernels,
             multigrid_kernels,
@@ -1431,8 +1430,6 @@ def solver(config: dict, timings: Any = None):
             ny,
             nz,
         )
-        timings.record_cpu("pressure_poisson_multigrid", pressure_cpu_started)
-
         # ------------Velocity projection-------------------
         pressure_solve_kernels["project_velocity_kernel"](
             queue,
@@ -1538,8 +1535,6 @@ def solver(config: dict, timings: Any = None):
 
         # ------------Output-------------------
         while t >= next_output_time:
-            download_started = perf_counter()
-
             field_mapping = {
                 "smoke": {"density": smoke},
                 "temperature": {"temperature": temperature},
@@ -1572,9 +1567,6 @@ def solver(config: dict, timings: Any = None):
                 )
 
                 cl.wait_for_events(output_data["events"])
-                timings.record_cpu("output_download", download_started)
-                write_started = perf_counter()
-
                 try:
                     writer_manager.write(
                         writer=writer,
@@ -1589,8 +1581,6 @@ def solver(config: dict, timings: Any = None):
                     )
                 finally:
                     output.release(queue, output_data)
-
-                timings.record_cpu("output_write", write_started)
 
             output_index += 1
             next_output_time += output_time_step
@@ -1614,7 +1604,7 @@ def solver(config: dict, timings: Any = None):
                 }
             )
 
-        timings.record_cpu("simulation_iteration", iteration_cpu_started)
+    timings.stop_loop()
 
     if writer is not None:
         writer_manager.stop_writer(writer)

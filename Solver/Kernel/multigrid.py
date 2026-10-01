@@ -5,6 +5,7 @@ import pyopencl as cl
 
 import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.helper as helper
+from Solver.Kernel.timing import record_kernel_event
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
@@ -499,11 +500,7 @@ def smooth(
             np.int32(tile_shape[2]),
         )
 
-    profiled_kernel = multigrid_kernels[kernel_name]
-
-    raw_kernel = profiled_kernel.kernel
-
-    program = raw_kernel.program
+    program = multigrid_kernels[kernel_name].program
 
     red_kernel = cl.Kernel(program, kernel_name)
     black_kernel = cl.Kernel(program, kernel_name)
@@ -527,16 +524,14 @@ def smooth(
             global_work_size,
             local_work_size,
         )
-        profiled_kernel.record_event(red_event)
-
+        record_kernel_event(red_kernel, red_event)
         black_event = cl.enqueue_nd_range_kernel(
             queue,
             black_kernel,
             global_work_size,
             local_work_size,
         )
-        profiled_kernel.record_event(black_event)
-
+        record_kernel_event(black_kernel, black_event)
     # Neumann boundary conditions
     boundary_global_work_size = (
         tile_shape[0] * local_work_size[0],
@@ -544,8 +539,8 @@ def smooth(
         tile_shape[2] * local_work_size[2],
     )
 
-    profiled_boundary_kernel = multigrid_kernels["pressure_poisson_apply_neumann_bcs"]
-    boundary_kernel = profiled_boundary_kernel.kernel
+    timed_boundary_kernel = multigrid_kernels["pressure_poisson_apply_neumann_bcs"]
+    boundary_kernel = getattr(timed_boundary_kernel, "kernel", timed_boundary_kernel)
 
     boundary_kernel.set_args(
         p,
@@ -564,4 +559,4 @@ def smooth(
         boundary_global_work_size,
         local_work_size,
     )
-    profiled_boundary_kernel.record_event(boundary_event)
+    record_kernel_event(boundary_kernel, boundary_event)
