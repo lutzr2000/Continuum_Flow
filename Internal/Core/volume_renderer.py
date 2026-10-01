@@ -1,18 +1,14 @@
-"""GPU raymarch preview for the newest shared-memory smoke/flame frame."""
+"""Sparse GPU raymarch preview backed by an OpenCL snapshot."""
 
 from pathlib import Path
-from multiprocessing import shared_memory
-import threading
 
-import time
 import bpy
 import gpu
-import numba
-import numpy as np
 from gpu_extras.batch import batch_for_shader
-from . import reference_frame
 
-# -------------- shaders ----------------
+from . import reference_frame
+from .solver.solver_manager import solver_manager
+
 SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"
 VERTEX_SHADER_PATH = SHADER_DIRECTORY / "volume_preview.vert"
 FRAGMENT_SHADER_PATH = SHADER_DIRECTORY / "volume_preview.frag"
@@ -21,96 +17,19 @@ smoke_density = 10.0
 smoke_color = (0.32, 0.34, 0.38)
 flame_density = 5.0
 flame_color = (1.0, 0.12, 0.01)
-
-# -------------- vars ----------------
-dense_fields = None
-previous_active_tiles = None
-draw_handler = None
-shader = None
-batch = None
-texture = None
-uniform_buffer = None
-grid_shape = None
-resolution = None
-bounds_min = None
-bounds_max = None
+draw_handler = shader = batch = None
+tile_lookup_texture = field_atlas_texture = uniform_buffer = None
+grid_shape = resolution = bounds_min = bounds_max = None
 capture_enabled = False
-latest_frame = -1
-pending_frame = None
-preview_frame_busy = False
-pending_lock = threading.Lock()
+pending_transfer = displayed_metadata = None
+release_after_draw = False
 simulation_reference = None
-
-
-# -------------- methods ----------------
-def get_shared_frame(payload):
-    """Copy selected smoke/flame output while the writer owns its shared memory."""
-    global latest_frame, pending_frame, preview_frame_busy
-
-    if not capture_enabled or grid_shape is None:
-        return
-
-    frame_index = int(payload["frame"])
-
-    with pending_lock:
-        if frame_index <= latest_frame:
-            return
-
-    preview_fields = payload.get("fields") or {}
-    if not preview_fields:
-        return
-
-    with pending_lock:
-        if frame_index <= latest_frame or preview_frame_busy:
-            return
-        preview_frame_busy = True
-
-    try:
-        tile_map_info = payload["tile_map"]
-        tile_map = copy_shared_array(tile_map_info)
-        active_coordinates = np.argwhere(tile_map >= 0)
-        active_tiles = np.empty((len(active_coordinates), 4), dtype=np.int32)
-        active_tiles[:, 0] = tile_map[tuple(active_coordinates.T)]
-
-        pools = {}
-        tile_size = int(payload["tile_size"])
-        active_tiles[:, 1:] = active_coordinates * tile_size
-
-        for field_name, field_info in preview_fields.items():
-            pools[field_name] = copy_shared_array(field_info)
-
-        with pending_lock:
-            if capture_enabled and frame_index > latest_frame:
-                latest_frame = frame_index
-                pending_frame = (frame_index, active_tiles, pools, tile_size)
-            else:
-                preview_frame_busy = False
-    except Exception:
-        with pending_lock:
-            preview_frame_busy = False
-        raise
-
-
-def copy_shared_array(info):
-    shm = shared_memory.SharedMemory(name=info["shm_name"])
-    try:
-        source = np.ndarray(
-            tuple(info["shape"]),
-            dtype=np.dtype(info["dtype"]),
-            buffer=shm.buf,
-        )
-        return source.copy()
-    finally:
-        shm.close()
 
 
 def configure(new_grid_shape, new_resolution, simulation_node=None):
     """Set the simulation grid geometry used by the preview."""
-    global grid_shape, resolution, bounds_min, bounds_max, batch
-    global latest_frame, pending_frame, preview_frame_busy
-    global simulation_reference
-
-    grid_shape = new_grid_shape
+    global grid_shape, resolution, bounds_min, bounds_max, batch, simulation_reference
+    grid_shape = tuple(new_grid_shape)
     resolution = new_resolution
     nx, ny, nz = grid_shape
     bounds_min = (-0.5 * nx * resolution, -0.5 * ny * resolution, 0.0)
@@ -125,15 +44,12 @@ def configure(new_grid_shape, new_resolution, simulation_node=None):
         str(getattr(node_tree, "name", "")),
         str(getattr(simulation_node, "name", "")),
     )
-    with pending_lock:
-        latest_frame = -1
-        pending_frame = None
-        preview_frame_busy = False
 
 
 def set_enabled(enabled):
-    """Enable or disable capture of incoming shared-memory frames."""
+    """Enable or disable acquisition of preview snapshots."""
     global capture_enabled
+    enabled = bool(enabled)
     if enabled == capture_enabled:
         return
     capture_enabled = enabled
@@ -142,10 +58,7 @@ def set_enabled(enabled):
 
 
 def set_preview_settings(
-    new_smoke_density,
-    new_smoke_color,
-    new_flame_density,
-    new_flame_color,
+    new_smoke_density, new_smoke_color, new_flame_density, new_flame_color
 ):
     global smoke_density, smoke_color, flame_density, flame_color
     smoke_density = new_smoke_density
@@ -155,228 +68,91 @@ def set_preview_settings(
 
 
 def upload_pending_frame():
-    """Assemble and upload the latest captured frame on Blender's main thread."""
-    global draw_handler, pending_frame, preview_frame_busy, texture
-
-    if not capture_enabled:
-        return
-
-    with pending_lock:
-        next_frame = pending_frame
-        pending_frame = None
-
-    if next_frame is None:
-        return
-
-    frame_index, active_tiles, pools, tile_size = next_frame
-
-    try:
-        fields = build_dense_texture(active_tiles, pools, tile_size)
-
-        buffer = gpu.types.Buffer(
+    """Advance the asynchronous transfer and upload completed sparse data."""
+    global pending_transfer, tile_lookup_texture
+    global field_atlas_texture, displayed_metadata, draw_handler, release_after_draw
+    if pending_transfer is not None:
+        if not pending_transfer.complete:
+            return
+        if not capture_enabled:
+            solver_manager.preview_exchange.release()
+            pending_transfer = None
+            return
+        metadata = pending_transfer.metadata
+        lookup_buffer = gpu.types.Buffer(
             "FLOAT",
-            fields.size,
-            fields.ravel(),
+            pending_transfer.tile_lookup.size,
+            pending_transfer.tile_lookup.ravel(),
         )
-
-        next_texture = gpu.types.GPUTexture(
-            grid_shape,
-            format="RG16F",
-            data=buffer,
+        fields_buffer = gpu.types.Buffer(
+            "FLOAT", pending_transfer.fields.size, pending_transfer.fields
         )
-        next_texture.filter_mode(True)
-
-        texture = next_texture
-
+        tile_lookup_texture = gpu.types.GPUTexture(
+            metadata.tile_shape, format="R32F", data=lookup_buffer
+        )
+        atlas_size = tuple(
+            count * metadata.tile_size for count in metadata.atlas_tile_shape
+        )
+        field_atlas_texture = gpu.types.GPUTexture(
+            atlas_size, format="RG32F", data=fields_buffer
+        )
+        field_atlas_texture.filter_mode(False)
+        displayed_metadata = metadata
+        pending_transfer = None
+        release_after_draw = True
         active_shader = ensure_shader()
         ensure_batch(active_shader)
-
         if draw_handler is None:
             draw_handler = bpy.types.SpaceView3D.draw_handler_add(
-                draw_volume,
-                (),
-                "WINDOW",
-                "POST_VIEW",
+                draw_volume, (), "WINDOW", "POST_VIEW"
             )
-
         redraw_viewports()
-    finally:
-        with pending_lock:
-            preview_frame_busy = False
+        return
+    if capture_enabled and not release_after_draw:
+        pending_transfer = solver_manager.preview_exchange.begin_transfer()
 
 
 def clear_live_preview():
-    """Stop drawing and release the temporary GPU texture."""
-    global draw_handler, texture, pending_frame, preview_frame_busy
-
+    """Stop drawing while safely retiring any acquired OpenCL snapshot."""
+    global draw_handler, tile_lookup_texture, field_atlas_texture
+    global displayed_metadata, release_after_draw, pending_transfer
     if draw_handler is not None:
         try:
             bpy.types.SpaceView3D.draw_handler_remove(draw_handler, "WINDOW")
         except (ReferenceError, RuntimeError):
             pass
         draw_handler = None
-
-    texture = None
-    with pending_lock:
-        pending_frame = None
-        preview_frame_busy = False
+    tile_lookup_texture = field_atlas_texture = displayed_metadata = None
+    if release_after_draw:
+        solver_manager.preview_exchange.release()
+        release_after_draw = False
+    if pending_transfer is not None:
+        solver_manager.preview_exchange.release_when_complete(pending_transfer)
+        pending_transfer = None
     redraw_viewports()
-
-
-def build_dense_texture(active_tiles, pools, tile_size):
-    global dense_fields, previous_active_tiles
-
-    nx, ny, nz = grid_shape
-
-    if dense_fields is None or dense_fields.shape != (nz, ny, nx, 2):
-        dense_fields = np.zeros(
-            (nz, ny, nx, 2),
-            dtype=np.float32,
-        )
-        previous_active_tiles = None
-
-    smoke_pool = pools.get("density")
-    flame_pool = pools.get("flame")
-
-    if smoke_pool is None:
-        smoke_pool = np.empty(
-            (0, tile_size, tile_size, tile_size),
-            dtype=np.float32,
-        )
-
-    if flame_pool is None:
-        flame_pool = np.empty(
-            (0, tile_size, tile_size, tile_size),
-            dtype=np.float32,
-        )
-
-    if previous_active_tiles is not None:
-        clear_sparse_fields(
-            dense_fields,
-            previous_active_tiles,
-            tile_size,
-        )
-
-    scatter_sparse_fields(
-        dense_fields,
-        active_tiles,
-        smoke_pool,
-        flame_pool,
-        tile_size,
-    )
-
-    previous_active_tiles = active_tiles.copy()
-
-    return dense_fields
-
-
-@numba.njit(cache=True, nogil=True)
-def clear_sparse_fields(
-    fields,
-    active_tiles,
-    tile_size,
-):
-    for tile_number in range(active_tiles.shape[0]):
-        start_x = active_tiles[tile_number, 1]
-        start_y = active_tiles[tile_number, 2]
-        start_z = active_tiles[tile_number, 3]
-
-        for local_z in range(tile_size):
-            z = start_z + local_z
-
-            for local_y in range(tile_size):
-                y = start_y + local_y
-
-                for local_x in range(tile_size):
-                    x = start_x + local_x
-
-                    fields[z, y, x, 0] = 0.0
-                    fields[z, y, x, 1] = 0.0
-
-
-@numba.njit(cache=True, nogil=True)
-def scatter_sparse_fields(
-    fields,
-    active_tiles,
-    smoke_pool,
-    flame_pool,
-    tile_size,
-):
-    has_smoke = smoke_pool.shape[0] > 0
-    has_flame = flame_pool.shape[0] > 0
-
-    for tile_number in range(active_tiles.shape[0]):
-        pool_index = active_tiles[tile_number, 0]
-
-        start_x = active_tiles[tile_number, 1]
-        start_y = active_tiles[tile_number, 2]
-        start_z = active_tiles[tile_number, 3]
-
-        for local_z in range(tile_size):
-            z = start_z + local_z
-
-            for local_y in range(tile_size):
-                y = start_y + local_y
-
-                for local_x in range(tile_size):
-                    x = start_x + local_x
-
-                    if has_smoke:
-                        fields[z, y, x, 0] = smoke_pool[
-                            pool_index,
-                            local_x,
-                            local_y,
-                            local_z,
-                        ]
-
-                    if has_flame:
-                        fields[z, y, x, 1] = flame_pool[
-                            pool_index,
-                            local_x,
-                            local_y,
-                            local_z,
-                        ]
 
 
 def ensure_shader():
     global shader
-
     if shader is not None:
         return shader
-
-    vertex_source = VERTEX_SHADER_PATH.read_text(encoding="utf-8")
-    fragment_source = FRAGMENT_SHADER_PATH.read_text(encoding="utf-8")
-
     interface = gpu.types.GPUStageInterfaceInfo("continuum_flow_volume_interface")
     interface.smooth("VEC3", "world_position")
-
-    shader_info = gpu.types.GPUShaderCreateInfo()
-
-    shader_info.push_constant("MAT4", "view_projection_matrix")
-    shader_info.push_constant("MAT4", "model_matrix")
-    shader_info.typedef_source(
-        """
-        struct VolumeParameters {
-            vec4 camera_position_and_step_size;
-            vec4 bounds_min_and_smoke_density;
-            vec4 bounds_max_and_flame_density;
-            vec4 smoke_color;
-            vec4 flame_color;
-        };
-        """
+    info = gpu.types.GPUShaderCreateInfo()
+    info.push_constant("MAT4", "view_projection_matrix")
+    info.push_constant("MAT4", "model_matrix")
+    info.typedef_source(
+        """struct VolumeParameters { vec4 camera_position_and_step_size; vec4 bounds_min_and_smoke_density; vec4 bounds_max_and_flame_density; vec4 smoke_color; vec4 flame_color; vec4 tile_shape_and_size; vec4 atlas_tile_shape; };"""
     )
-    shader_info.uniform_buf(0, "VolumeParameters", "volume_parameters")
-
-    shader_info.sampler(0, "FLOAT_3D", "volume_texture")
-
-    shader_info.vertex_in(0, "VEC3", "position")
-    shader_info.vertex_out(interface)
-    shader_info.fragment_out(0, "VEC4", "frag_color")
-
-    shader_info.vertex_source(vertex_source)
-    shader_info.fragment_source(fragment_source)
-
-    shader = gpu.shader.create_from_info(shader_info)
+    info.uniform_buf(0, "VolumeParameters", "volume_parameters")
+    info.sampler(0, "FLOAT_3D", "tile_lookup_texture")
+    info.sampler(1, "FLOAT_3D", "field_atlas_texture")
+    info.vertex_in(0, "VEC3", "position")
+    info.vertex_out(interface)
+    info.fragment_out(0, "VEC4", "frag_color")
+    info.vertex_source(VERTEX_SHADER_PATH.read_text(encoding="utf-8"))
+    info.fragment_source(FRAGMENT_SHADER_PATH.read_text(encoding="utf-8"))
+    shader = gpu.shader.create_from_info(info)
     return shader
 
 
@@ -384,7 +160,6 @@ def ensure_batch(active_shader):
     global batch
     if batch is not None:
         return batch
-
     x0, y0, z0 = bounds_min
     x1, y1, z1 = bounds_max
     vertices = (
@@ -418,15 +193,13 @@ def ensure_batch(active_shader):
 
 
 def draw_volume():
-    if texture is None:
+    global release_after_draw
+    if tile_lookup_texture is None or field_atlas_texture is None:
         return
-
     region_data = bpy.context.region_data
-
     active_shader = ensure_shader()
     active_batch = ensure_batch(active_shader)
-    simulation_node = resolve_simulation_node()
-    model_matrix = reference_frame.display_matrix(simulation_node)
+    model_matrix = reference_frame.display_matrix(resolve_simulation_node())
     camera_position = (
         model_matrix.inverted_safe() @ region_data.view_matrix.inverted().translation
     )
@@ -442,7 +215,6 @@ def draw_volume():
         for coordinate, minimum, maximum in zip(camera_position, bounds_min, bounds_max)
     )
     update_uniform_buffer(camera_position, step_size)
-
     gpu.state.blend_set("ALPHA_PREMULT")
     gpu.state.depth_test_set("LESS_EQUAL")
     gpu.state.depth_mask_set(False)
@@ -454,27 +226,28 @@ def draw_volume():
         )
         active_shader.uniform_float("model_matrix", model_matrix)
         active_shader.uniform_block("volume_parameters", uniform_buffer)
-        active_shader.uniform_sampler("volume_texture", texture)
+        active_shader.uniform_sampler("tile_lookup_texture", tile_lookup_texture)
+        active_shader.uniform_sampler("field_atlas_texture", field_atlas_texture)
         active_batch.draw(active_shader)
     finally:
         gpu.state.face_culling_set("NONE")
         gpu.state.depth_mask_set(True)
         gpu.state.depth_test_set("NONE")
         gpu.state.blend_set("NONE")
+        if release_after_draw:
+            solver_manager.preview_exchange.release()
+            release_after_draw = False
 
 
 def resolve_simulation_node():
     if not simulation_reference:
         return None
     node_tree = bpy.data.node_groups.get(simulation_reference[0])
-    if node_tree is None:
-        return None
-    return node_tree.nodes.get(simulation_reference[1])
+    return None if node_tree is None else node_tree.nodes.get(simulation_reference[1])
 
 
 def update_uniform_buffer(camera_position, step_size):
     global uniform_buffer
-
     values = (
         camera_position.x,
         camera_position.y,
@@ -496,6 +269,10 @@ def update_uniform_buffer(camera_position, step_size):
         flame_color[1],
         flame_color[2],
         0.0,
+        *displayed_metadata.tile_shape,
+        displayed_metadata.tile_size,
+        *displayed_metadata.atlas_tile_shape,
+        0.0,
     )
     buffer = gpu.types.Buffer("FLOAT", len(values), values)
     if uniform_buffer is None:
@@ -508,9 +285,7 @@ def redraw_viewports():
     window_manager = getattr(bpy.context, "window_manager", None)
     if window_manager is None:
         return
-
     for window in window_manager.windows:
-        screen = window.screen
-        for area in screen.areas:
+        for area in window.screen.areas:
             if area.type == "VIEW_3D":
                 area.tag_redraw()

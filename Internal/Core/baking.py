@@ -61,7 +61,9 @@ def get_live_preview_node(simulation_node):
 
 def update_live_preview_settings(simulation_node):
     viewer_node = get_live_preview_node(simulation_node)
-    volume_renderer.set_enabled(viewer_node is not None)
+    enabled = viewer_node is not None
+    solver_manager.set_live_preview_enabled(enabled)
+    volume_renderer.set_enabled(enabled)
     if viewer_node is None:
         return
 
@@ -247,6 +249,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             should_load_result = self.cancel_requested or (
                 bool(self.job_result) and bool(self.job_result.get("success", False))
             )
+            solver_manager.set_live_preview_enabled(False)
             volume_renderer.set_enabled(False)
 
             if self.cancel_flag_path:
