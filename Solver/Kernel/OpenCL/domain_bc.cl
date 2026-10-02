@@ -12,7 +12,7 @@ inline void apply_face_state(
     __global float *T,
     __global float *smoke,
     __global uchar *fuel,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float ref_temp,
     const float u_initial,
     const float v_initial,
@@ -49,7 +49,7 @@ inline void apply_face_state(
         * tiles_z + src_tile_k;
 
     const int src_tile_index =
-        tile_map[src_tile_map_index];
+        index_tile_map[src_tile_map_index];
 
     float neighbor_u;
     float neighbor_v;
@@ -109,7 +109,7 @@ inline void apply_face_state(
         * tiles_z + dst_tile_k;
 
     const int dst_tile_index =
-        tile_map[dst_tile_map_index];
+        index_tile_map[dst_tile_map_index];
 
     if (dst_tile_index == -1)
         return;
@@ -182,7 +182,7 @@ inline void apply_face_state(
 
     p[dst_index] = get_pool_value(
         p,
-        tile_map,
+        index_tile_map,
         src_i,
         src_j,
         src_k,
@@ -207,7 +207,7 @@ __kernel void domain_bc(
     __global float *T,
     __global float *smoke,
     __global uchar *fuel,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float ref_temp,
     const float u_initial,
     const float v_initial,
@@ -284,7 +284,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,
@@ -306,7 +306,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,
@@ -329,7 +329,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,
@@ -351,7 +351,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,
@@ -374,7 +374,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,
@@ -396,7 +396,7 @@ __kernel void domain_bc(
     {
         apply_face_state(
             u, v, w, p, T, smoke, fuel,
-            tile_map,
+            index_tile_map,
             ref_temp,
             u_initial,
             v_initial,

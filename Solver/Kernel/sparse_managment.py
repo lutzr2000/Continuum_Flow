@@ -25,7 +25,7 @@ def reset_reused_pool_slots(
     queue: cl.CommandQueue,
     sparse_managment_kernels: dict[str, cl.Kernel],
     pool_specs: Any,
-    reused_slot_stack: Any,
+    reused_slot_list: Any,
     reused_slot_count: int,
 ) -> None:
     """
@@ -57,7 +57,7 @@ def reset_reused_pool_slots(
             (total_cell_count,),
             None,
             pool_tile_buffer,
-            reused_slot_stack,
+            reused_slot_list,
             np.int32(reused_slot_count),
             kernel_fill_value,
         )

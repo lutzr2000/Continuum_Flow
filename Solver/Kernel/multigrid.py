@@ -210,7 +210,7 @@ def v_cycle(
     nx: int,
     ny: int,
     nz: int,
-    tile_map: Any,
+    index_tile_map: Any,
     multigrid_tile_maps: list[Any],
     multigrid_active_tiles: list[Any],
     multigrid_active_tile_counts: list[Any],
@@ -254,7 +254,7 @@ def v_cycle(
 
     A final post-smoothing step then damps the remaining high-frequency error.
 
-    Level 0 uses ``tile_map`` to access the pooled tile storage,
+    Level 0 uses ``index_tile_map`` to access the pooled tile storage,
     while all coarser levels operate on dense arrays.
 
     """
@@ -263,7 +263,7 @@ def v_cycle(
         b = b_level0
         delta = base_delta
 
-        current_tile_map = tile_map
+        current_tile_map = index_tile_map
         current_active_tiles = None
         current_active_tile_count = None
         current_shape = (nx, ny, nz)
@@ -287,7 +287,7 @@ def v_cycle(
         b,
         delta,
         pre_smooth,
-        tile_map=current_tile_map,
+        index_tile_map=current_tile_map,
         active_tiles=current_active_tiles,
         active_tile_count=current_active_tile_count,
         field_shape=current_shape,
@@ -303,7 +303,7 @@ def v_cycle(
             b,
             delta,
             coarse_smooth,
-            tile_map=current_tile_map,
+            index_tile_map=current_tile_map,
             active_tiles=current_active_tiles,
             active_tile_count=current_active_tile_count,
             field_shape=current_shape,
@@ -383,7 +383,7 @@ def v_cycle(
         nx,
         ny,
         nz,
-        tile_map,
+        index_tile_map,
         multigrid_tile_maps,
         multigrid_active_tiles,
         multigrid_active_tile_counts,
@@ -419,7 +419,7 @@ def v_cycle(
         b,
         delta,
         post_smooth,
-        tile_map=current_tile_map,
+        index_tile_map=current_tile_map,
         active_tiles=current_active_tiles,
         active_tile_count=current_active_tile_count,
         field_shape=current_shape,
@@ -433,7 +433,7 @@ def smooth(
     b: Any,
     delta: float,
     iterations: int,
-    tile_map: Any,
+    index_tile_map: Any,
     active_tiles: Any,
     active_tile_count: Any,
     field_shape: tuple[int, int, int],
@@ -465,7 +465,7 @@ def smooth(
             p,
             b,
             np.float32(delta),
-            tile_map,
+            index_tile_map,
             np.int32(nx),
             np.int32(ny),
             np.int32(nz),
@@ -489,7 +489,7 @@ def smooth(
             p,
             b,
             np.float32(delta),
-            tile_map,
+            index_tile_map,
             active_tiles,
             active_tile_count,
             np.int32(nx),
@@ -553,7 +553,7 @@ def smooth(
 
         boundary_kernel.set_args(
             p,
-            tile_map,
+            index_tile_map,
             np.int32(nx),
             np.int32(ny),
             np.int32(nz),

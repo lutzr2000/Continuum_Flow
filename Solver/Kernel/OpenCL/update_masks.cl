@@ -31,7 +31,7 @@ __kernel void mark_source_tiles(
 
 __kernel void update_source_masks(
     __global uchar *mask,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const uchar *local_mask,
     const float c0,
     const float c1,
@@ -74,7 +74,7 @@ __kernel void update_source_masks(
     const int tile_map_index =
         (ti * tiles_y + tj) * tiles_z + tk;
 
-    const int tile = tile_map[tile_map_index];
+    const int tile = index_tile_map[tile_map_index];
 
     if (tile < 0)
         return;
@@ -138,7 +138,7 @@ __kernel void update_source_velocity(
     __global float *velocity_x,
     __global float *velocity_y,
     __global float *velocity_z,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const uchar *local_mask,
     const float c0,
     const float c1,
@@ -190,7 +190,7 @@ __kernel void update_source_velocity(
         (ti * tiles_y + tj) * tiles_z + tk;
 
     const int tile =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile < 0)
         return;
@@ -265,7 +265,7 @@ __kernel void update_obstacle_mask(
     __global float *velocity_x,
     __global float *velocity_y,
     __global float *velocity_z,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const uchar *local_mask,
     const float c0,
     const float c1,
@@ -327,7 +327,7 @@ __kernel void update_obstacle_mask(
         * tiles_z + tk;
 
     const int tile =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile < 0)
         return;

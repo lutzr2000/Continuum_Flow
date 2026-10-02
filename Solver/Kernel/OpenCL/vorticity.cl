@@ -14,7 +14,7 @@ __kernel void compute_vorticity(
     __global const uchar *obstacle_mask,
     __global float *vorticity_magnitude,
     const float delta,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -52,7 +52,7 @@ __kernel void compute_vorticity(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -88,7 +88,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -99,7 +99,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -114,7 +114,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -125,7 +125,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -140,7 +140,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -151,7 +151,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -166,7 +166,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -177,7 +177,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -192,7 +192,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -203,7 +203,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -218,7 +218,7 @@ __kernel void compute_vorticity(
         (
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -229,7 +229,7 @@ __kernel void compute_vorticity(
             -
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -264,7 +264,7 @@ inline void apply_vorticity_confinement(
     const int k,
     const float delta,
     const float vorticity_strength,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -301,7 +301,7 @@ inline void apply_vorticity_confinement(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
     {
@@ -339,7 +339,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -350,7 +350,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -365,7 +365,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -376,7 +376,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -391,7 +391,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -402,7 +402,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 omega_magnitude,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -442,7 +442,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -453,7 +453,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -468,7 +468,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -479,7 +479,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -495,7 +495,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -506,7 +506,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -521,7 +521,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -532,7 +532,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -548,7 +548,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -559,7 +559,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -574,7 +574,7 @@ inline void apply_vorticity_confinement(
         (
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -585,7 +585,7 @@ inline void apply_vorticity_confinement(
             -
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,

@@ -11,7 +11,7 @@ __kernel void source_bc(
     __global float *T,
     __global float *smoke,
     __global uchar *fuel,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const uchar *source_mask,
     const float temperature_value,
     const float smoke_value,
@@ -59,7 +59,7 @@ __kernel void source_bc(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;

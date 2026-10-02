@@ -1,6 +1,6 @@
 // Pack active smoke and flame tiles into an atlas owned by the preview.
 __kernel void pack_preview(
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const float *smoke,
     __global const float *flame,
     __global float *preview_tile_lookup,
@@ -23,7 +23,7 @@ __kernel void pack_preview(
 
     const int solver_map_index = (tile_x * tiles_y + tile_y) * tiles_z + tile_z;
     const int preview_map_index = (tile_z * tiles_y + tile_y) * tiles_x + tile_x;
-    const int source_slot = tile_map[solver_map_index];
+    const int source_slot = index_tile_map[solver_map_index];
 
     if (source_slot < 0) {
         preview_tile_lookup[preview_map_index] = -1.0f;

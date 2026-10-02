@@ -7,7 +7,7 @@
 
 inline float get_pool_value(
     __global const float *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int i,
     const int j,
     const int k,
@@ -30,7 +30,7 @@ inline float get_pool_value(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return default_value;
@@ -54,7 +54,7 @@ inline float get_pool_value(
 
 inline float get_pool_value_uint8(
     __global const uchar *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int i,
     const int j,
     const int k,
@@ -67,7 +67,7 @@ inline float get_pool_value_uint8(
     const int tile_j = j / TILE_SIZE;
     const int tile_k = k / TILE_SIZE;
     const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-    const int tile_index = tile_map[tile_map_index];
+    const int tile_index = index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return default_value;
@@ -85,9 +85,9 @@ __kernel void build_activity_mask(
     __global const float *smoke,
     __global const uchar *fuel,
     __global const float *flame,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const uchar *source_tile_mask,
-    __global int *base_tile_map,
+    __global uchar *activity_tile_map,
     const float threshold,
     const int nx,
     const int ny,
@@ -111,16 +111,16 @@ __kernel void build_activity_mask(
     const int tile_map_index =
         (tile_i * tile_count_y + tile_j) * tile_count_z + tile_k;
 
-    base_tile_map[tile_map_index] = -1;
+    activity_tile_map[tile_map_index] = (uchar)0;
 
     // Sources activate a tile regardless of existing sparse allocation.
     if (source_tile_mask[tile_map_index])
     {
-        base_tile_map[tile_map_index] = 1;
+        activity_tile_map[tile_map_index] = (uchar)1;
         return;
     }
 
-    const int tile_index = tile_map[tile_map_index];
+    const int tile_index = index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -161,7 +161,7 @@ __kernel void build_activity_mask(
                     flame[index] >= threshold
                 )
                 {
-                    base_tile_map[tile_map_index] = 1;
+                    activity_tile_map[tile_map_index] = (uchar)1;
                     return;
                 }
             }
@@ -171,8 +171,8 @@ __kernel void build_activity_mask(
 
 
 __kernel void dilate_activity_x(
-    __global const int *src,
-    __global int *dst,
+    __global const uchar *src,
+    __global uchar *dst,
     const int margin,
     const int tiles_x,
     const int tiles_y,
@@ -192,20 +192,20 @@ __kernel void dilate_activity_x(
          ++sample_x)
     {
         const int index = (sample_x * tiles_y + y) * tiles_z + z;
-        if (src[index] != -1)
+        if (src[index])
         {
             active = 1;
             break;
         }
     }
 
-    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
+    dst[(x * tiles_y + y) * tiles_z + z] = (uchar)active;
 }
 
 
 __kernel void dilate_activity_y(
-    __global const int *src,
-    __global int *dst,
+    __global const uchar *src,
+    __global uchar *dst,
     const int margin,
     const int tiles_x,
     const int tiles_y,
@@ -225,20 +225,20 @@ __kernel void dilate_activity_y(
          ++sample_y)
     {
         const int index = (x * tiles_y + sample_y) * tiles_z + z;
-        if (src[index] != -1)
+        if (src[index])
         {
             active = 1;
             break;
         }
     }
 
-    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
+    dst[(x * tiles_y + y) * tiles_z + z] = (uchar)active;
 }
 
 
 __kernel void dilate_activity_z(
-    __global const int *src,
-    __global int *dst,
+    __global const uchar *src,
+    __global uchar *dst,
     const int margin,
     const int tiles_x,
     const int tiles_y,
@@ -258,23 +258,23 @@ __kernel void dilate_activity_z(
          ++sample_z)
     {
         const int index = (x * tiles_y + y) * tiles_z + sample_z;
-        if (src[index] != -1)
+        if (src[index])
         {
             active = 1;
             break;
         }
     }
 
-    dst[(x * tiles_y + y) * tiles_z + z] = active ? 1 : -1;
+    dst[(x * tiles_y + y) * tiles_z + z] = (uchar)active;
 }
 
 
 __kernel void activate_tiles_with_reuse(
-    __global const int *activity_map,
-    __global int *tile_map,
-    __global const int *free_slot_stack,
+    __global const uchar *activity_map,
+    __global int *index_tile_map,
+    __global const int *free_slot_list,
     volatile __global int *free_slot_count,
-    __global int *reused_slot_stack,
+    __global int *reused_slot_list,
     volatile __global int *reused_slot_count,
     volatile __global int *next_tile_index_counter,
     volatile __global int *active_tile_counter,
@@ -297,7 +297,7 @@ __kernel void activate_tiles_with_reuse(
     const int tile_index =
         (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-    if (activity_map[tile_index] == -1)
+    if (!activity_map[tile_index])
         return;
 
     atomic_add(
@@ -305,7 +305,7 @@ __kernel void activate_tiles_with_reuse(
         1
     );
 
-    if (tile_map[tile_index] != -1)
+    if (index_tile_map[tile_index] != -1)
         return;
 
     const int previous_free_count = atomic_add(
@@ -316,16 +316,16 @@ __kernel void activate_tiles_with_reuse(
     if (previous_free_count > 0)
     {
         const int slot_index =
-            free_slot_stack[previous_free_count - 1];
+            free_slot_list[previous_free_count - 1];
 
-        tile_map[tile_index] = slot_index;
+        index_tile_map[tile_index] = slot_index;
 
         const int reused_index = atomic_add(
             reused_slot_count,
             1
         );
 
-        reused_slot_stack[reused_index] = slot_index;
+        reused_slot_list[reused_index] = slot_index;
 
         return;
     }
@@ -335,7 +335,7 @@ __kernel void activate_tiles_with_reuse(
         1
     );
 
-    tile_map[tile_index] = atomic_add(
+    index_tile_map[tile_index] = atomic_add(
         next_tile_index_counter,
         1
     );
@@ -439,9 +439,9 @@ __kernel void fill_sparse_tile_slots_uchar(
 
 
 __kernel void release_inactive_tile_slots(
-    __global const int *activity_map,
-    __global int *tile_map,
-    __global int *free_slot_stack,
+    __global const uchar *activity_map,
+    __global int *index_tile_map,
+    __global int *free_slot_list,
     volatile __global int *free_slot_count,
     const int tiles_x,
     const int tiles_y,
@@ -462,40 +462,24 @@ __kernel void release_inactive_tile_slots(
     const int tile_index =
         (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-    if (tile_map[tile_index] == -1)
+    if (index_tile_map[tile_index] == -1)
         return;
 
-    if (activity_map[tile_index] != -1)
+    if (activity_map[tile_index])
         return;
 
     const int released_slot =
-        tile_map[tile_index];
+        index_tile_map[tile_index];
 
-    tile_map[tile_index] = -1;
+    index_tile_map[tile_index] = -1;
 
-    const int stack_index = atomic_add(
+    const int list_index = atomic_add(
         free_slot_count,
         1
     );
 
-    free_slot_stack[stack_index] =
+    free_slot_list[list_index] =
         released_slot;
-}
-
-
-__kernel void pack_sparse_counters(
-    __global const int *reused_slot_count,
-    __global const int *next_tile_index_counter,
-    __global const int *active_tile_counter,
-    __global int *packed_counters
-)
-{
-    if (get_global_id(0) != 0)
-        return;
-
-    packed_counters[0] = reused_slot_count[0];
-    packed_counters[1] = next_tile_index_counter[0];
-    packed_counters[2] = active_tile_counter[0];
 }
 #endif // SPARSE_MANAGMENT_CL
 

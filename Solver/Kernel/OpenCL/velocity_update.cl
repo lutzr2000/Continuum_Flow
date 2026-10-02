@@ -17,7 +17,7 @@ __kernel void advect_velocity_semi_lagrangian(
     const float dt,
     const float delta,
     const int n_substeps,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -49,7 +49,7 @@ __kernel void advect_velocity_semi_lagrangian(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -72,7 +72,7 @@ __kernel void advect_velocity_semi_lagrangian(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         (float)i,
         (float)j,
         (float)k,
@@ -100,7 +100,7 @@ __kernel void advect_velocity_semi_lagrangian(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         x_depart,
         y_depart,
         z_depart,
@@ -153,7 +153,7 @@ __kernel void update_velocity_maccormack(
     const float gravity_x,
     const float gravity_y,
     const float gravity_z,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float fx_const,
     const float fy_const,
     const float fz_const,
@@ -207,7 +207,7 @@ __kernel void update_velocity_maccormack(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -258,7 +258,7 @@ __kernel void update_velocity_maccormack(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         (float)i,
         (float)j,
         (float)k,
@@ -290,7 +290,7 @@ __kernel void update_velocity_maccormack(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         x_depart,
         y_depart,
         z_depart,
@@ -336,7 +336,7 @@ __kernel void update_velocity_maccormack(
         predictor_u,
         predictor_v,
         predictor_w,
-        tile_map,
+        index_tile_map,
         x_forward,
         y_forward,
         z_forward,
@@ -421,7 +421,7 @@ __kernel void update_velocity_maccormack(
 
     sample_cell_extrema_inner_sparse(
         u,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -437,7 +437,7 @@ __kernel void update_velocity_maccormack(
 
     sample_cell_extrema_inner_sparse(
         v,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -453,7 +453,7 @@ __kernel void update_velocity_maccormack(
 
     sample_cell_extrema_inner_sparse(
         w,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -513,7 +513,7 @@ __kernel void update_velocity_maccormack(
             k,
             delta,
             vorticity_strength,
-            tile_map,
+            index_tile_map,
             u_initial,
             v_initial,
             w_initial,
@@ -606,7 +606,7 @@ __kernel void update_velocity_maccormack(
     const float buoyancy =
         buoyancy_approximation(
             temperature,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k,
@@ -642,7 +642,7 @@ __kernel void update_velocity_maccormack(
     const float u_xp =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i + 1,
             j,
             k,
@@ -654,7 +654,7 @@ __kernel void update_velocity_maccormack(
     const float u_xm =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i - 1,
             j,
             k,
@@ -666,7 +666,7 @@ __kernel void update_velocity_maccormack(
     const float u_yp =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i,
             j + 1,
             k,
@@ -678,7 +678,7 @@ __kernel void update_velocity_maccormack(
     const float u_ym =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i,
             j - 1,
             k,
@@ -690,7 +690,7 @@ __kernel void update_velocity_maccormack(
     const float u_zp =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k + 1,
@@ -702,7 +702,7 @@ __kernel void update_velocity_maccormack(
     const float u_zm =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k - 1,
@@ -719,7 +719,7 @@ __kernel void update_velocity_maccormack(
     const float v_xp =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i + 1,
             j,
             k,
@@ -731,7 +731,7 @@ __kernel void update_velocity_maccormack(
     const float v_xm =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i - 1,
             j,
             k,
@@ -743,7 +743,7 @@ __kernel void update_velocity_maccormack(
     const float v_yp =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i,
             j + 1,
             k,
@@ -755,7 +755,7 @@ __kernel void update_velocity_maccormack(
     const float v_ym =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i,
             j - 1,
             k,
@@ -767,7 +767,7 @@ __kernel void update_velocity_maccormack(
     const float v_zp =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k + 1,
@@ -779,7 +779,7 @@ __kernel void update_velocity_maccormack(
     const float v_zm =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k - 1,
@@ -796,7 +796,7 @@ __kernel void update_velocity_maccormack(
     const float w_xp =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i + 1,
             j,
             k,
@@ -808,7 +808,7 @@ __kernel void update_velocity_maccormack(
     const float w_xm =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i - 1,
             j,
             k,
@@ -820,7 +820,7 @@ __kernel void update_velocity_maccormack(
     const float w_yp =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i,
             j + 1,
             k,
@@ -832,7 +832,7 @@ __kernel void update_velocity_maccormack(
     const float w_ym =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i,
             j - 1,
             k,
@@ -844,7 +844,7 @@ __kernel void update_velocity_maccormack(
     const float w_zp =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k + 1,
@@ -856,7 +856,7 @@ __kernel void update_velocity_maccormack(
     const float w_zm =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k - 1,

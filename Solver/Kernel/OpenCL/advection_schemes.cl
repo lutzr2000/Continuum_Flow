@@ -78,7 +78,7 @@ inline void prepare_trilinear_coords(
 
 inline float sample_trilinear_inner_sparse(
     __global const float *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int x0,
     const int y0,
     const int z0,
@@ -95,7 +95,7 @@ inline float sample_trilinear_inner_sparse(
 {
     const float c000 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y0, z0,
             default_value,
             tiles_y, tiles_z
@@ -103,7 +103,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c100 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y0, z0,
             default_value,
             tiles_y, tiles_z
@@ -111,7 +111,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c010 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y1, z0,
             default_value,
             tiles_y, tiles_z
@@ -119,7 +119,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c110 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y1, z0,
             default_value,
             tiles_y, tiles_z
@@ -127,7 +127,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c001 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y0, z1,
             default_value,
             tiles_y, tiles_z
@@ -135,7 +135,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c101 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y0, z1,
             default_value,
             tiles_y, tiles_z
@@ -143,7 +143,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c011 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y1, z1,
             default_value,
             tiles_y, tiles_z
@@ -151,7 +151,7 @@ inline float sample_trilinear_inner_sparse(
 
     const float c111 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y1, z1,
             default_value,
             tiles_y, tiles_z
@@ -181,7 +181,7 @@ inline float sample_trilinear_inner_sparse(
 
 inline float sample_trilinear_inner_sparse_uint8(
     __global const uchar *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int x0, const int y0, const int z0,
     const int x1, const int y1, const int z1,
     const float tx, const float ty, const float tz,
@@ -189,14 +189,14 @@ inline float sample_trilinear_inner_sparse_uint8(
     const int tiles_y, const int tiles_z
 )
 {
-    const float c000 = get_pool_value_uint8(field, tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
-    const float c100 = get_pool_value_uint8(field, tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
-    const float c010 = get_pool_value_uint8(field, tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
-    const float c110 = get_pool_value_uint8(field, tile_map, x1, y1, z0, default_value, tiles_y, tiles_z);
-    const float c001 = get_pool_value_uint8(field, tile_map, x0, y0, z1, default_value, tiles_y, tiles_z);
-    const float c101 = get_pool_value_uint8(field, tile_map, x1, y0, z1, default_value, tiles_y, tiles_z);
-    const float c011 = get_pool_value_uint8(field, tile_map, x0, y1, z1, default_value, tiles_y, tiles_z);
-    const float c111 = get_pool_value_uint8(field, tile_map, x1, y1, z1, default_value, tiles_y, tiles_z);
+    const float c000 = get_pool_value_uint8(field, index_tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
+    const float c100 = get_pool_value_uint8(field, index_tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
+    const float c010 = get_pool_value_uint8(field, index_tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
+    const float c110 = get_pool_value_uint8(field, index_tile_map, x1, y1, z0, default_value, tiles_y, tiles_z);
+    const float c001 = get_pool_value_uint8(field, index_tile_map, x0, y0, z1, default_value, tiles_y, tiles_z);
+    const float c101 = get_pool_value_uint8(field, index_tile_map, x1, y0, z1, default_value, tiles_y, tiles_z);
+    const float c011 = get_pool_value_uint8(field, index_tile_map, x0, y1, z1, default_value, tiles_y, tiles_z);
+    const float c111 = get_pool_value_uint8(field, index_tile_map, x1, y1, z1, default_value, tiles_y, tiles_z);
     const float c00 = c000 + tx * (c100 - c000);
     const float c10 = c010 + tx * (c110 - c010);
     const float c01 = c001 + tx * (c101 - c001);
@@ -208,7 +208,7 @@ inline float sample_trilinear_inner_sparse_uint8(
 
 inline void sample_cell_extrema_inner_sparse(
     __global const float *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int x0,
     const int y0,
     const int z0,
@@ -224,7 +224,7 @@ inline void sample_cell_extrema_inner_sparse(
 {
     const float c000 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y0, z0,
             default_value,
             tiles_y, tiles_z
@@ -232,7 +232,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c100 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y0, z0,
             default_value,
             tiles_y, tiles_z
@@ -240,7 +240,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c010 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y1, z0,
             default_value,
             tiles_y, tiles_z
@@ -248,7 +248,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c110 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y1, z0,
             default_value,
             tiles_y, tiles_z
@@ -256,7 +256,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c001 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y0, z1,
             default_value,
             tiles_y, tiles_z
@@ -264,7 +264,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c101 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y0, z1,
             default_value,
             tiles_y, tiles_z
@@ -272,7 +272,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c011 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x0, y1, z1,
             default_value,
             tiles_y, tiles_z
@@ -280,7 +280,7 @@ inline void sample_cell_extrema_inner_sparse(
 
     const float c111 =
         get_pool_value(
-            field, tile_map,
+            field, index_tile_map,
             x1, y1, z1,
             default_value,
             tiles_y, tiles_z
@@ -312,7 +312,7 @@ inline void sample_cell_extrema_inner_sparse(
 
 inline void sample_cell_extrema_inner_sparse_uint8(
     __global const uchar *field,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int x0, const int y0, const int z0,
     const int x1, const int y1, const int z1,
     const float default_value,
@@ -320,14 +320,14 @@ inline void sample_cell_extrema_inner_sparse_uint8(
     float *lower, float *upper
 )
 {
-    const float c000 = get_pool_value_uint8(field, tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
-    const float c100 = get_pool_value_uint8(field, tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
-    const float c010 = get_pool_value_uint8(field, tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
-    const float c110 = get_pool_value_uint8(field, tile_map, x1, y1, z0, default_value, tiles_y, tiles_z);
-    const float c001 = get_pool_value_uint8(field, tile_map, x0, y0, z1, default_value, tiles_y, tiles_z);
-    const float c101 = get_pool_value_uint8(field, tile_map, x1, y0, z1, default_value, tiles_y, tiles_z);
-    const float c011 = get_pool_value_uint8(field, tile_map, x0, y1, z1, default_value, tiles_y, tiles_z);
-    const float c111 = get_pool_value_uint8(field, tile_map, x1, y1, z1, default_value, tiles_y, tiles_z);
+    const float c000 = get_pool_value_uint8(field, index_tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
+    const float c100 = get_pool_value_uint8(field, index_tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
+    const float c010 = get_pool_value_uint8(field, index_tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
+    const float c110 = get_pool_value_uint8(field, index_tile_map, x1, y1, z0, default_value, tiles_y, tiles_z);
+    const float c001 = get_pool_value_uint8(field, index_tile_map, x0, y0, z1, default_value, tiles_y, tiles_z);
+    const float c101 = get_pool_value_uint8(field, index_tile_map, x1, y0, z1, default_value, tiles_y, tiles_z);
+    const float c011 = get_pool_value_uint8(field, index_tile_map, x0, y1, z1, default_value, tiles_y, tiles_z);
+    const float c111 = get_pool_value_uint8(field, index_tile_map, x1, y1, z1, default_value, tiles_y, tiles_z);
     *lower = fmin(fmin(fmin(c000, c100), fmin(c010, c110)), fmin(fmin(c001, c101), fmin(c011, c111)));
     *upper = fmax(fmax(fmax(c000, c100), fmax(c010, c110)), fmax(fmax(c001, c101), fmax(c011, c111)));
 }
@@ -336,7 +336,7 @@ inline void sample_trilinear_vec3_sparse(
     __global const float *field_x,
     __global const float *field_y,
     __global const float *field_z,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float x,
     const float y,
     const float z,
@@ -385,7 +385,7 @@ inline void sample_trilinear_vec3_sparse(
     *sample_x =
         sample_trilinear_inner_sparse(
             field_x,
-            tile_map,
+            index_tile_map,
             x0,
             y0,
             z0,
@@ -403,7 +403,7 @@ inline void sample_trilinear_vec3_sparse(
     *sample_y =
         sample_trilinear_inner_sparse(
             field_y,
-            tile_map,
+            index_tile_map,
             x0,
             y0,
             z0,
@@ -421,7 +421,7 @@ inline void sample_trilinear_vec3_sparse(
     *sample_z =
         sample_trilinear_inner_sparse(
             field_z,
-            tile_map,
+            index_tile_map,
             x0,
             y0,
             z0,
@@ -442,7 +442,7 @@ inline void backtrace_position_sparse(
     __global const float *u,
     __global const float *v,
     __global const float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float x_start,
     const float y_start,
     const float z_start,
@@ -478,7 +478,7 @@ inline void backtrace_position_sparse(
             u,
             v,
             w,
-            tile_map,
+            index_tile_map,
             x_pos,
             y_pos,
             z_pos,
@@ -510,7 +510,7 @@ inline void forward_trace_position_sparse(
     __global const float *u,
     __global const float *v,
     __global const float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float x_start,
     const float y_start,
     const float z_start,
@@ -533,7 +533,7 @@ inline void forward_trace_position_sparse(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         x_start,
         y_start,
         z_start,

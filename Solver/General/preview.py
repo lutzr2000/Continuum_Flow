@@ -183,7 +183,7 @@ class PreviewExchange:
         *,
         queue: cl.CommandQueue,
         frame_index: int,
-        tile_map: cl.Buffer,
+        index_tile_map: cl.Buffer,
         smoke: cl.Buffer,
         flame: cl.Buffer,
         active_tile_count: int,
@@ -238,7 +238,7 @@ class PreviewExchange:
             )
 
             self._kernel.set_args(
-                tile_map,
+                index_tile_map,
                 smoke,
                 flame,
                 self._tile_lookup,

@@ -6,7 +6,7 @@ __kernel void velocity_maxima_partial(
     __global const float *u,
     __global const float *v,
     __global const float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global float *partial_maxima,
     const int total_tile_count,
     const int tiles_y,
@@ -50,7 +50,7 @@ __kernel void velocity_maxima_partial(
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
         const int tile_index =
-            tile_map[tile_map_index];
+            index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {

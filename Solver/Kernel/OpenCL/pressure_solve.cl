@@ -14,7 +14,7 @@ __kernel void project_velocity_kernel(
     const float dt,
     const float delta,
     const float rho,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -43,7 +43,7 @@ __kernel void project_velocity_kernel(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -81,7 +81,7 @@ __kernel void project_velocity_kernel(
     const float px1 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i + 1,
             j,
             k,
@@ -93,7 +93,7 @@ __kernel void project_velocity_kernel(
     const float px0 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i - 1,
             j,
             k,
@@ -105,7 +105,7 @@ __kernel void project_velocity_kernel(
     const float py1 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i,
             j + 1,
             k,
@@ -117,7 +117,7 @@ __kernel void project_velocity_kernel(
     const float py0 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i,
             j - 1,
             k,
@@ -129,7 +129,7 @@ __kernel void project_velocity_kernel(
     const float pz1 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k + 1,
@@ -141,7 +141,7 @@ __kernel void project_velocity_kernel(
     const float pz0 =
         get_pool_value(
             p,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k - 1,
@@ -168,7 +168,7 @@ __kernel void pressure_equation_right_side(
     const float dt,
     const float delta,
     const float rho,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -200,7 +200,7 @@ __kernel void pressure_equation_right_side(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -242,7 +242,7 @@ __kernel void pressure_equation_right_side(
         (
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -253,7 +253,7 @@ __kernel void pressure_equation_right_side(
             -
             get_pool_value(
                 u,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -268,7 +268,7 @@ __kernel void pressure_equation_right_side(
         (
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -279,7 +279,7 @@ __kernel void pressure_equation_right_side(
             -
             get_pool_value(
                 v,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -294,7 +294,7 @@ __kernel void pressure_equation_right_side(
         (
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -305,7 +305,7 @@ __kernel void pressure_equation_right_side(
             -
             get_pool_value(
                 w,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -328,7 +328,7 @@ __kernel void pressure_equation_right_side(
 
 __kernel void reset_inactive_pressure(
     __global float *p,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -357,7 +357,7 @@ __kernel void reset_inactive_pressure(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -401,7 +401,7 @@ __kernel void reset_inactive_pressure(
 
 __kernel void rhs_sum_count_partial_kernel(
     __global const float *b,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global float *partial_sums,
     __global float *partial_counts,
     const int nx,
@@ -473,7 +473,7 @@ __kernel void rhs_sum_count_partial_kernel(
             * tiles_z + tile_k;
 
         const int tile_index =
-            tile_map[tile_map_index];
+            index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -619,7 +619,7 @@ __kernel void rhs_mean_kernel(
 __kernel void subtract_rhs_mean_kernel(
     __global float *b,
     __global const float *rhs_mean,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -658,7 +658,7 @@ __kernel void subtract_rhs_mean_kernel(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -701,7 +701,7 @@ __kernel void add_artifical_divergence(
     const float expansion_rate,
     const float t_reference,
     __global float *b,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float rho,
     const float delta,
     const int nx,
@@ -733,7 +733,7 @@ __kernel void add_artifical_divergence(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;

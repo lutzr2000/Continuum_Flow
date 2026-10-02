@@ -324,68 +324,82 @@ def solver(config: dict):
 
     # ------------sparse layout------------------
     if simulate_sparsely:
-        tile_map_values = np.full(
+        index_tile_map_start_values = np.full(
             tile_shape,
             -1,
             dtype=np.int32,
         )
 
-        base_tile_map_values = np.full(
+        activity_tile_map_start_values = np.zeros(
             tile_shape,
-            -1,
-            dtype=np.int32,
-        )
+            dtype=np.uint8,
+        )  # if sparse everything is inactive
 
         initial_next_tile_index = 0
         initial_active_tile_count = 0
 
     else:
-        tile_map_values = np.arange(
+        index_tile_map_start_values = np.arange(
             total_tile_count,
             dtype=np.int32,
-        ).reshape(tile_shape)
+        ).reshape(
+            tile_shape
+        )  # if active simply list from 0 to total_tile_count
 
-        base_tile_map_values = np.ones(
+        activity_tile_map_start_values = np.ones(
             tile_shape,
-            dtype=np.int32,
-        )
+            dtype=np.uint8,
+        )  # if dense everything is active
 
         initial_next_tile_index = total_tile_count
         initial_active_tile_count = total_tile_count
 
     # controls the indexing in which slot a tile is
-    tile_map = helper.to_device(context, tile_map_values)
+    index_tile_map = helper.to_device(context, index_tile_map_start_values)
     # controls which tile is active
-    base_tile_map = helper.to_device(context, base_tile_map_values)
-    dilated_tile_map_a = helper.device_array(context, tile_shape, np.int32)
-    dilated_tile_map_b = helper.device_array(context, tile_shape, np.int32)
+    activity_tile_map = helper.to_device(context, activity_tile_map_start_values)
 
-    free_slot_stack = helper.to_device(
+    # these are needed for dilating the tile map
+    activity_tile_map_dilate_a = helper.device_array(context, tile_shape, np.uint8)
+    activity_tile_map_dilate_b = helper.device_array(context, tile_shape, np.uint8)
+
+    # list of freed up slots in the sparse pool, -1 indicates no free slot
+    free_slot_list = helper.to_device(
         context, np.full(total_tile_count, -1, dtype=np.int32)
     )
+    # how many slots got free
     free_slot_count = helper.to_device(context, np.zeros(1, dtype=np.int32))
 
-    reused_slot_stack = helper.to_device(
+    # list of reused slots in this time step, -1 indicates no reused slot
+    reused_slot_list = helper.to_device(
         context, np.full(total_tile_count, -1, dtype=np.int32)
     )
+    # how many slots got reused
     reused_slot_count = helper.to_device(context, np.zeros(1, dtype=np.int32))
 
+    # next never used index
     next_tile_index_counter = helper.to_device(
         context, np.asarray([initial_next_tile_index], dtype=np.int32)
     )
+    # how many tiles are active in this time step
     active_tile_counter = helper.to_device(
         context, np.asarray([initial_active_tile_count], dtype=np.int32)
     )
-    sparse_counters_device = helper.zeros_device(context, 3, dtype=np.int32)
-    sparse_counters_host = np.empty(3, dtype=np.int32)
 
-    tile_growth_size = max(
+    # cpu arrays for reading back gpu counters
+    reused_slot_count_readback = np.empty(1, dtype=np.int32)
+    next_tile_index_readback = np.empty(1, dtype=np.int32)
+    active_tile_count_readback = np.empty(1, dtype=np.int32)
+
+    # block size by which to grow the pool
+    growth_size_pool = max(
         1,
         math.ceil(
             total_tile_count * (float(kernel_config.SPARSE_TILE_GROWTH_PERCENT) / 100.0)
         ),
     )
 
+    # ------------work sizes------------------
     local_work_size = kernel_config.THREADS_PER_BLOCK_3D
 
     global_work_size = (
@@ -400,14 +414,14 @@ def solver(config: dict):
 
     # ------------fields------------------
     sparse_tile_capacity = (
-        total_tile_count if not simulate_sparsely else max(1, tile_growth_size)
-    )
+        total_tile_count if not simulate_sparsely else max(1, growth_size_pool)
+    )  # current number of tile slots allocated in the sparse pool
     sparse_pool_shape = (
         sparse_tile_capacity,
         kernel_config.TILE_SIZE,
         kernel_config.TILE_SIZE,
         kernel_config.TILE_SIZE,
-    )
+    )  # shape of the sparse pool
 
     zero_pool = helper.zeros_device(context, sparse_pool_shape)
 
@@ -681,9 +695,9 @@ def solver(config: dict):
                 smoke,
                 fuel,
                 flame,
-                tile_map,
+                index_tile_map,
                 source_tile_mask,
-                base_tile_map,
+                activity_tile_map,
                 np.float32(sparse_threshold),
                 np.int32(nx),
                 np.int32(ny),
@@ -694,9 +708,21 @@ def solver(config: dict):
             )
 
             for kernel_name, src_map, dst_map in (
-                ("dilate_activity_x", base_tile_map, dilated_tile_map_a),
-                ("dilate_activity_y", dilated_tile_map_a, dilated_tile_map_b),
-                ("dilate_activity_z", dilated_tile_map_b, dilated_tile_map_a),
+                (
+                    "dilate_activity_x",
+                    activity_tile_map,
+                    activity_tile_map_dilate_a,
+                ),
+                (
+                    "dilate_activity_y",
+                    activity_tile_map_dilate_a,
+                    activity_tile_map_dilate_b,
+                ),
+                (
+                    "dilate_activity_z",
+                    activity_tile_map_dilate_b,
+                    activity_tile_map_dilate_a,
+                ),
             ):
                 sparse_managment_kernels[kernel_name](
                     queue,
@@ -718,9 +744,9 @@ def solver(config: dict):
                 queue,
                 tile_shape,
                 None,
-                dilated_tile_map_a,
-                tile_map,
-                free_slot_stack,
+                activity_tile_map_dilate_a,
+                index_tile_map,
+                free_slot_list,
                 free_slot_count,
                 np.int32(tile_shape[0]),
                 np.int32(tile_shape[1]),
@@ -731,11 +757,11 @@ def solver(config: dict):
                 queue,
                 tile_shape,
                 None,
-                dilated_tile_map_a,
-                tile_map,
-                free_slot_stack,
+                activity_tile_map_dilate_a,
+                index_tile_map,
+                free_slot_list,
                 free_slot_count,
-                reused_slot_stack,
+                reused_slot_list,
                 reused_slot_count,
                 next_tile_index_counter,
                 active_tile_counter,
@@ -744,24 +770,31 @@ def solver(config: dict):
                 np.int32(tile_shape[2]),
             )
 
-            sparse_managment_kernels["pack_sparse_counters"](
-                queue,
-                (1,),
-                None,
-                reused_slot_count,
-                next_tile_index_counter,
-                active_tile_counter,
-                sparse_counters_device,
+            counter_read_events = (
+                cl.enqueue_copy(
+                    queue,
+                    reused_slot_count_readback,
+                    reused_slot_count,
+                    is_blocking=False,
+                ),
+                cl.enqueue_copy(
+                    queue,
+                    next_tile_index_readback,
+                    next_tile_index_counter,
+                    is_blocking=False,
+                ),
+                cl.enqueue_copy(
+                    queue,
+                    active_tile_count_readback,
+                    active_tile_counter,
+                    is_blocking=False,
+                ),
             )
-            cl.enqueue_copy(
-                queue,
-                sparse_counters_host,
-                sparse_counters_device,
-                is_blocking=True,
-            )
-            reused_slot_count_host = int(sparse_counters_host[0])
-            next_tile_index_counter_host = int(sparse_counters_host[1])
-            active_tile_counter_host = int(sparse_counters_host[2])
+            cl.wait_for_events(counter_read_events)
+
+            reused_slot_count_host = int(reused_slot_count_readback[0])
+            next_tile_index_counter_host = int(next_tile_index_readback[0])
+            active_tile_counter_host = int(active_tile_count_readback[0])
 
             if reused_slot_count_host > 0:
                 sparse_managment.reset_reused_pool_slots(
@@ -791,7 +824,7 @@ def solver(config: dict):
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
                         *[(mask, False, np.bool_) for mask in particle_source_masks],
                     ],
-                    reused_slot_stack,
+                    reused_slot_list,
                     reused_slot_count_host,
                 )
 
@@ -799,7 +832,7 @@ def solver(config: dict):
                 next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
                     sparse_tile_capacity,
                     next_tile_index_counter_host,
-                    tile_growth_size,
+                    growth_size_pool,
                 )
 
                 (
@@ -900,7 +933,7 @@ def solver(config: dict):
                 origin_x,
                 origin_y,
                 origin_z,
-                tile_map,
+                index_tile_map,
                 tile_shape,
             )
 
@@ -915,7 +948,7 @@ def solver(config: dict):
                 t,
                 delta,
                 origin,
-                tile_map,
+                index_tile_map,
                 tile_shape,
             )
 
@@ -926,7 +959,7 @@ def solver(config: dict):
             u,
             v,
             w,
-            tile_map,
+            index_tile_map,
             tile_shape,
             active_tile_counter_host,
             velocity_maxima,
@@ -970,7 +1003,7 @@ def solver(config: dict):
                     u,
                     v,
                     w,
-                    tile_map,
+                    index_tile_map,
                     *[np.float32(value) for value in reference_velocity_delta.ravel()],
                     np.float32(origin_x),
                     np.float32(origin_y),
@@ -1000,7 +1033,7 @@ def solver(config: dict):
             smoke,
             fuel,
             bc_config,
-            tile_map,
+            index_tile_map,
             tile_shape,
             reference_temperature,
             u_initial,
@@ -1030,7 +1063,7 @@ def solver(config: dict):
                     origin_x,
                     origin_y,
                     origin_z,
-                    tile_map,
+                    index_tile_map,
                     tile_shape,
                     scratch_A,
                     scratch_B,
@@ -1050,7 +1083,7 @@ def solver(config: dict):
                 temperature,
                 smoke,
                 fuel,
-                tile_map,
+                index_tile_map,
                 source_mask,
                 np.float32(source_values["temperature"][source_idx]),
                 np.float32(source_values["smoke"][source_idx]),
@@ -1087,7 +1120,7 @@ def solver(config: dict):
                     temperature,
                     smoke,
                     fuel,
-                    tile_map,
+                    index_tile_map,
                     particle_source_mask,
                     np.float32(source_values["temperature"][source_idx]),
                     np.float32(source_values["smoke"][source_idx]),
@@ -1123,7 +1156,7 @@ def solver(config: dict):
                         t,
                         delta,
                         origin,
-                        tile_map,
+                        index_tile_map,
                         tile_shape,
                     )
 
@@ -1137,7 +1170,7 @@ def solver(config: dict):
                 t,
                 delta,
                 origin,
-                tile_map,
+                index_tile_map,
                 tile_shape,
             )
 
@@ -1153,7 +1186,7 @@ def solver(config: dict):
                 origin_x,
                 origin_y,
                 origin_z,
-                tile_map,
+                index_tile_map,
                 tile_shape,
                 scratch_A,
                 scratch_B,
@@ -1175,7 +1208,7 @@ def solver(config: dict):
             scratch_A,
             scratch_B,
             scratch_C,
-            tile_map,
+            index_tile_map,
             np.int32(tile_shape[0]),
             np.int32(tile_shape[1]),
             np.int32(tile_shape[2]),
@@ -1203,7 +1236,7 @@ def solver(config: dict):
                 obstacle_mask,
                 vorticity_magnitude,
                 np.float32(delta),
-                tile_map,
+                index_tile_map,
                 np.int32(nx),
                 np.int32(ny),
                 np.int32(nz),
@@ -1263,7 +1296,7 @@ def solver(config: dict):
             np.float32(dt),
             np.float32(delta),
             np.int32(advection_substeps),
-            tile_map,
+            index_tile_map,
             np.float32(u_initial),
             np.float32(v_initial),
             np.float32(w_initial),
@@ -1302,7 +1335,7 @@ def solver(config: dict):
             np.float32(gravity[0]),
             np.float32(gravity[1]),
             np.float32(gravity[2]),
-            tile_map,
+            index_tile_map,
             np.float32(fx_const),
             np.float32(fy_const),
             np.float32(fz_const),
@@ -1356,7 +1389,7 @@ def solver(config: dict):
             physics_values["fluid"]["density"],
             physics_values["temperature"]["expansion_rate"],
             reference_temperature,
-            tile_map,
+            index_tile_map,
             tile_shape,
             u_initial,
             v_initial,
@@ -1389,7 +1422,7 @@ def solver(config: dict):
             np.float32(dt),
             np.float32(delta),
             np.float32(physics_values["fluid"]["density"]),
-            tile_map,
+            index_tile_map,
             np.int32(nx),
             np.int32(ny),
             np.int32(nz),
@@ -1416,7 +1449,7 @@ def solver(config: dict):
             np.float32(delta),
             np.int32(advection_substeps),
             np.float32(reference_temperature),
-            tile_map,
+            index_tile_map,
             np.float32(u_initial),
             np.float32(v_initial),
             np.float32(w_initial),
@@ -1458,7 +1491,7 @@ def solver(config: dict):
             np.float32(physics_values["burning"]["scale"]),
             np.float32(physics_values["burning"]["amplitude"]),
             np.float32(reference_temperature),
-            tile_map,
+            index_tile_map,
             np.float32(u_initial),
             np.float32(v_initial),
             np.float32(w_initial),
@@ -1490,7 +1523,7 @@ def solver(config: dict):
                     preview_exchange.try_publish(
                         queue=queue,
                         frame_index=output_index,
-                        tile_map=tile_map,
+                        index_tile_map=index_tile_map,
                         smoke=smoke,
                         flame=flame,
                         active_tile_count=active_tile_counter_host,

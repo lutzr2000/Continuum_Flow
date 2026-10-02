@@ -8,7 +8,7 @@
 
 inline float buoyancy_approximation(
     __global const float *T,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int i,
     const int j,
     const int k,
@@ -21,7 +21,7 @@ inline float buoyancy_approximation(
     const float temperature =
         get_pool_value(
             T,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k,

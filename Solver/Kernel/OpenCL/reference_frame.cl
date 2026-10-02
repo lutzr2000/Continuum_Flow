@@ -8,7 +8,7 @@ __kernel void transfer_velocity(
     __global float *u,
     __global float *v,
     __global float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float a00,
     const float a01,
     const float a02,
@@ -63,7 +63,7 @@ __kernel void transfer_velocity(
         (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -85,7 +85,7 @@ __kernel void transfer_velocity(
     u[index] =
         get_pool_value(
             u,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k,
@@ -101,7 +101,7 @@ __kernel void transfer_velocity(
     v[index] =
         get_pool_value(
             v,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k,
@@ -117,7 +117,7 @@ __kernel void transfer_velocity(
     w[index] =
         get_pool_value(
             w,
-            tile_map,
+            index_tile_map,
             i,
             j,
             k,

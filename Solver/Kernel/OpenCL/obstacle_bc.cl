@@ -13,7 +13,7 @@ __kernel void obstacle_bc(
     __global const float *obstacle_velocity_x,
     __global const float *obstacle_velocity_y,
     __global const float *obstacle_velocity_z,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int tiles_x,
     const int tiles_y,
     const int tiles_z
@@ -46,7 +46,7 @@ __kernel void obstacle_bc(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;

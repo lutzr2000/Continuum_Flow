@@ -21,7 +21,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     const float delta,
     const int n_substeps,
     const float t_reference,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -53,7 +53,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -75,7 +75,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         (float)i,
         (float)j,
         (float)k,
@@ -107,21 +107,21 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         &fuel_tx, &fuel_ty, &fuel_tz
     );
     sampled_T = sample_trilinear_inner_sparse(
-        T, tile_map,
+        T, index_tile_map,
         fuel_x0, fuel_y0, fuel_z0,
         fuel_x1, fuel_y1, fuel_z1,
         fuel_tx, fuel_ty, fuel_tz,
         t_reference, tiles_y, tiles_z
     );
     sampled_smoke = sample_trilinear_inner_sparse(
-        smoke, tile_map,
+        smoke, index_tile_map,
         fuel_x0, fuel_y0, fuel_z0,
         fuel_x1, fuel_y1, fuel_z1,
         fuel_tx, fuel_ty, fuel_tz,
         0.0f, tiles_y, tiles_z
     );
     sampled_fuel = sample_trilinear_inner_sparse_uint8(
-        fuel, tile_map,
+        fuel, index_tile_map,
         fuel_x0, fuel_y0, fuel_z0,
         fuel_x1, fuel_y1, fuel_z1,
         fuel_tx, fuel_ty, fuel_tz,
@@ -166,7 +166,7 @@ __kernel void update_scalar_fields_maccormack(
     const float burn_noise_scale,
     const float burn_noise_amplitude,
     const float t_reference,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -198,7 +198,7 @@ __kernel void update_scalar_fields_maccormack(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -243,7 +243,7 @@ __kernel void update_scalar_fields_maccormack(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         (float)i,
         (float)j,
         (float)k,
@@ -275,7 +275,7 @@ __kernel void update_scalar_fields_maccormack(
         u,
         v,
         w,
-        tile_map,
+        index_tile_map,
         x_depart,
         y_depart,
         z_depart,
@@ -321,7 +321,7 @@ __kernel void update_scalar_fields_maccormack(
         predictor_T,
         predictor_smoke,
         predictor_fuel,
-        tile_map,
+        index_tile_map,
         x_forward,
         y_forward,
         z_forward,
@@ -406,7 +406,7 @@ __kernel void update_scalar_fields_maccormack(
 
     sample_cell_extrema_inner_sparse(
         T,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -422,7 +422,7 @@ __kernel void update_scalar_fields_maccormack(
 
     sample_cell_extrema_inner_sparse(
         smoke,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -438,7 +438,7 @@ __kernel void update_scalar_fields_maccormack(
 
     sample_cell_extrema_inner_sparse_uint8(
         fuel,
-        tile_map,
+        index_tile_map,
         x0,
         y0,
         z0,
@@ -497,7 +497,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_xp =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -509,7 +509,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_xm =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -521,7 +521,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_yp =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -533,7 +533,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_ym =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -545,7 +545,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_zp =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -557,7 +557,7 @@ __kernel void update_scalar_fields_maccormack(
         const float fuel_zm =
             get_pool_value_uint8(
                 fuel,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -570,7 +570,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_xp =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -582,7 +582,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_xm =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -594,7 +594,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_yp =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -606,7 +606,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_ym =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -618,7 +618,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_zp =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -630,7 +630,7 @@ __kernel void update_scalar_fields_maccormack(
         const float T_zm =
             get_pool_value(
                 T,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,

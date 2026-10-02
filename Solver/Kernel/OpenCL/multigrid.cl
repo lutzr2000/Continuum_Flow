@@ -105,7 +105,7 @@ inline float residual_sparse(
     __global const float *p,
     __global const float *b,
     const float inv_delta2,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int i,
     const int j,
     const int k,
@@ -123,7 +123,7 @@ inline float residual_sparse(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
     {
@@ -149,7 +149,7 @@ inline float residual_sparse(
         (
             get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i + 1,
                 j,
                 k,
@@ -159,7 +159,7 @@ inline float residual_sparse(
             )
             + get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i - 1,
                 j,
                 k,
@@ -169,7 +169,7 @@ inline float residual_sparse(
             )
             + get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i,
                 j + 1,
                 k,
@@ -179,7 +179,7 @@ inline float residual_sparse(
             )
             + get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i,
                 j - 1,
                 k,
@@ -189,7 +189,7 @@ inline float residual_sparse(
             )
             + get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k + 1,
@@ -199,7 +199,7 @@ inline float residual_sparse(
             )
             + get_pool_value(
                 p,
-                tile_map,
+                index_tile_map,
                 i,
                 j,
                 k - 1,
@@ -514,7 +514,7 @@ __kernel void rbgs_step_sparse(
     __global const float *b,
     const float delta,
     const int parity,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const int *active_tiles,
     __global const int *active_tile_count,
     const int nx,
@@ -550,7 +550,7 @@ __kernel void rbgs_step_sparse(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -588,37 +588,37 @@ __kernel void rbgs_step_sparse(
     p[index] =
         (
             get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i + 1, j, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i - 1, j, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j + 1, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j - 1, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, k + 1,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, k - 1,
                 0.0f,
                 tiles_y, tiles_z
@@ -634,7 +634,7 @@ __kernel void rbgs_step_level_0(
     __global const float *b,
     const float delta,
     const int parity,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -663,7 +663,7 @@ __kernel void rbgs_step_level_0(
         * tiles_z + tile_k;
 
     const int tile_index =
-        tile_map[tile_map_index];
+        index_tile_map[tile_map_index];
 
     if (tile_index == -1)
         return;
@@ -699,44 +699,44 @@ __kernel void rbgs_step_level_0(
     const float center =
         (
             get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i + 1, j, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i - 1, j, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j + 1, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j - 1, k,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, k + 1,
                 0.0f,
                 tiles_y, tiles_z
             )
             + get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, k - 1,
                 0.0f,
                 tiles_y, tiles_z
             )
             - delta2
             * get_pool_value(
-                b, tile_map,
+                b, index_tile_map,
                 i, j, k,
                 0.0f,
                 tiles_y, tiles_z
@@ -749,7 +749,7 @@ __kernel void rbgs_step_level_0(
 
 __kernel void pressure_poisson_neumann_x(
     __global float *p,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -771,7 +771,7 @@ __kernel void pressure_poisson_neumann_x(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -785,7 +785,7 @@ __kernel void pressure_poisson_neumann_x(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 1, j, k,
                 0.0f,
                 tiles_y, tiles_z);
@@ -801,7 +801,7 @@ __kernel void pressure_poisson_neumann_x(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -815,7 +815,7 @@ __kernel void pressure_poisson_neumann_x(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 nx - 2, j, k,
                 0.0f,
                 tiles_y, tiles_z);
@@ -826,7 +826,7 @@ __kernel void pressure_poisson_neumann_x(
 
 __kernel void pressure_poisson_neumann_y(
     __global float *p,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -848,7 +848,7 @@ __kernel void pressure_poisson_neumann_y(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -862,7 +862,7 @@ __kernel void pressure_poisson_neumann_y(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, 1, k,
                 0.0f,
                 tiles_y, tiles_z);
@@ -878,7 +878,7 @@ __kernel void pressure_poisson_neumann_y(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -892,7 +892,7 @@ __kernel void pressure_poisson_neumann_y(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, ny - 2, k,
                 0.0f,
                 tiles_y, tiles_z);
@@ -903,7 +903,7 @@ __kernel void pressure_poisson_neumann_y(
 
 __kernel void pressure_poisson_neumann_z(
     __global float *p,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     const int nx,
     const int ny,
     const int nz,
@@ -925,7 +925,7 @@ __kernel void pressure_poisson_neumann_z(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -939,7 +939,7 @@ __kernel void pressure_poisson_neumann_z(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, 1,
                 0.0f,
                 tiles_y, tiles_z);
@@ -955,7 +955,7 @@ __kernel void pressure_poisson_neumann_z(
         const int tile_map_index =
             (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
 
-        const int tile_index = tile_map[tile_map_index];
+        const int tile_index = index_tile_map[tile_map_index];
 
         if (tile_index != -1)
         {
@@ -969,7 +969,7 @@ __kernel void pressure_poisson_neumann_z(
                  * TILE_SIZE + local_k;
 
             p[index] = get_pool_value(
-                p, tile_map,
+                p, index_tile_map,
                 i, j, nz - 2,
                 0.0f,
                 tiles_y, tiles_z);

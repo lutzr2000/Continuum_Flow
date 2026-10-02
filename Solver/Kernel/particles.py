@@ -227,7 +227,7 @@ def update_particle_source_masks(
     time_value: float,
     delta: float,
     origin: tuple[float, float, float],
-    tile_map: Any,
+    index_tile_map: Any,
     tile_shape: tuple[int, int, int],
 ) -> None:
     """Rebuild the particle-only sparse source masks for one solver step."""
@@ -263,7 +263,7 @@ def update_particle_source_masks(
                 (count * threads,),
                 (threads,),
                 particle_source_mask,
-                tile_map,
+                index_tile_map,
                 previous_positions,
                 current_positions,
                 np.int32(count),
@@ -459,7 +459,7 @@ def reset_particle_velocity(
     time_value: float,
     delta: float,
     origin: tuple[float, float, float],
-    tile_map: Any,
+    index_tile_map: Any,
     tile_shape: tuple[int, int, int],
 ) -> None:
     """Reset particle-covered cells before additive velocity transfer."""
@@ -482,7 +482,7 @@ def reset_particle_velocity(
             u,
             v,
             w,
-            tile_map,
+            index_tile_map,
             entry["current_positions_device"],
             entry["next_positions_device"],
             np.int32(count),
@@ -509,7 +509,7 @@ def transfer_particle_velocities(
     time_value: float,
     delta: float,
     origin: tuple[float, float, float],
-    tile_map: Any,
+    index_tile_map: Any,
     tile_shape: tuple[int, int, int],
 ) -> None:
     """Add interpolated particle velocities inside each particle sphere."""
@@ -538,7 +538,7 @@ def transfer_particle_velocities(
                 u,
                 v,
                 w,
-                tile_map,
+                index_tile_map,
                 entry["current_positions_device"],
                 entry["next_positions_device"],
                 entry["current_velocities_device"],

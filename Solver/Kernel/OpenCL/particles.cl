@@ -376,7 +376,7 @@ __kernel void mark_particle_tiles(
 
 __kernel void rasterize_particle_spheres(
     __global uchar *source_mask,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const float *previous_positions,
     __global const float *current_positions,
     const int count,
@@ -518,7 +518,7 @@ __kernel void rasterize_particle_spheres(
             int tile_map_index =
                 (ti * tile_count_y + tj) * tile_count_z + tk;
 
-            int pool_index = tile_map[tile_map_index];
+            int pool_index = index_tile_map[tile_map_index];
 
             if (pool_index >= 0)
             {
@@ -544,7 +544,7 @@ __kernel void reset_particle_velocity_kernel(
     __global float *u,
     __global float *v,
     __global float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const float *current_positions,
     __global const float *next_positions,
     const int count,
@@ -642,7 +642,7 @@ __kernel void reset_particle_velocity_kernel(
             int tile_map_index =
                 (ti * tile_count_y + tj) * tile_count_z + tk;
 
-            int pool_index = tile_map[tile_map_index];
+            int pool_index = index_tile_map[tile_map_index];
 
             if (pool_index >= 0)
             {
@@ -670,7 +670,7 @@ __kernel void transfer_particle_velocities(
     __global float *u,
     __global float *v,
     __global float *w,
-    __global const int *tile_map,
+    __global const int *index_tile_map,
     __global const float *current_positions,
     __global const float *next_positions,
     __global const float *current_velocities,
@@ -783,7 +783,7 @@ __kernel void transfer_particle_velocities(
             int tile_map_index =
                 (ti * tile_count_y + tj) * tile_count_z + tk;
 
-            int pool_index = tile_map[tile_map_index];
+            int pool_index = index_tile_map[tile_map_index];
 
             if (pool_index >= 0)
             {
