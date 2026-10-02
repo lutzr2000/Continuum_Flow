@@ -52,9 +52,38 @@ inline float get_pool_value(
     return field[index];
 }
 
+inline float get_pool_value_uint8(
+    __global const uchar *field,
+    __global const int *tile_map,
+    const int i,
+    const int j,
+    const int k,
+    const float default_value,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int tile_i = i / TILE_SIZE;
+    const int tile_j = j / TILE_SIZE;
+    const int tile_k = k / TILE_SIZE;
+    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+    const int tile_index = tile_map[tile_map_index];
+
+    if (tile_index == -1)
+        return default_value;
+
+    const int local_i = i - tile_i * TILE_SIZE;
+    const int local_j = j - tile_j * TILE_SIZE;
+    const int local_k = k - tile_k * TILE_SIZE;
+    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j)
+        * TILE_SIZE + local_k;
+
+    return (float)field[index] * (100.0f / 255.0f);
+}
+
 __kernel void build_activity_mask(
     __global const float *smoke,
-    __global const float *fuel,
+    __global const uchar *fuel,
     __global const float *flame,
     __global const int *tile_map,
     __global const uchar *source_tile_mask,
@@ -128,7 +157,7 @@ __kernel void build_activity_mask(
 
                 if (
                     smoke[index] >= threshold ||
-                    fuel[index] >= threshold ||
+                    (float)fuel[index] * (100.0f / 255.0f) >= threshold ||
                     flame[index] >= threshold
                 )
                 {

@@ -10,7 +10,7 @@
 __kernel void predict_scalar_fields_semi_lagrangian(
     __global const float *T,
     __global const float *smoke,
-    __global const float *fuel,
+    __global const uchar *fuel,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -98,25 +98,34 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     float sampled_smoke;
     float sampled_fuel;
 
-    sample_trilinear_vec3_sparse(
-        T,
-        smoke,
-        fuel,
-        tile_map,
-        x_depart,
-        y_depart,
-        z_depart,
-        nx,
-        ny,
-        nz,
-        t_reference,
-        0.0f,
-        0.0f,
-        tiles_y,
-        tiles_z,
-        &sampled_T,
-        &sampled_smoke,
-        &sampled_fuel
+    int fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1, fuel_z1;
+    float fuel_tx, fuel_ty, fuel_tz;
+    prepare_trilinear_coords(
+        x_depart, y_depart, z_depart, nx, ny, nz,
+        &fuel_x0, &fuel_y0, &fuel_z0,
+        &fuel_x1, &fuel_y1, &fuel_z1,
+        &fuel_tx, &fuel_ty, &fuel_tz
+    );
+    sampled_T = sample_trilinear_inner_sparse(
+        T, tile_map,
+        fuel_x0, fuel_y0, fuel_z0,
+        fuel_x1, fuel_y1, fuel_z1,
+        fuel_tx, fuel_ty, fuel_tz,
+        t_reference, tiles_y, tiles_z
+    );
+    sampled_smoke = sample_trilinear_inner_sparse(
+        smoke, tile_map,
+        fuel_x0, fuel_y0, fuel_z0,
+        fuel_x1, fuel_y1, fuel_z1,
+        fuel_tx, fuel_ty, fuel_tz,
+        0.0f, tiles_y, tiles_z
+    );
+    sampled_fuel = sample_trilinear_inner_sparse_uint8(
+        fuel, tile_map,
+        fuel_x0, fuel_y0, fuel_z0,
+        fuel_x1, fuel_y1, fuel_z1,
+        fuel_tx, fuel_ty, fuel_tz,
+        0.0f, tiles_y, tiles_z
     );
 
     const int index =
@@ -133,7 +142,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
 __kernel void update_scalar_fields_maccormack(
     __global const float *T,
     __global const float *smoke,
-    __global const float *fuel,
+    __global const uchar *fuel,
     __global const float *predictor_T,
     __global const float *predictor_smoke,
     __global const float *predictor_fuel,
@@ -143,7 +152,7 @@ __kernel void update_scalar_fields_maccormack(
     const float dt,
     __global float *T_out,
     __global float *smoke_out,
-    __global float *fuel_out,
+    __global uchar *fuel_out,
     __global float *flame_out,
     const float delta,
     const int n_substeps,
@@ -344,7 +353,7 @@ __kernel void update_scalar_fields_maccormack(
 
     float fuel_corrected =
         fuel_advected
-        + 0.5f * (fuel[index] - fuel_reverse);
+        + 0.5f * ((float)fuel[index] * (100.0f / 255.0f) - fuel_reverse);
 
 
     // ---------------------------------------------------------
@@ -427,7 +436,7 @@ __kernel void update_scalar_fields_maccormack(
         &smoke_upper
     );
 
-    sample_cell_extrema_inner_sparse(
+    sample_cell_extrema_inner_sparse_uint8(
         fuel,
         tile_map,
         x0,
@@ -486,7 +495,7 @@ __kernel void update_scalar_fields_maccormack(
     )
     {
         const float fuel_xp =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i + 1,
@@ -498,7 +507,7 @@ __kernel void update_scalar_fields_maccormack(
             );
 
         const float fuel_xm =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i - 1,
@@ -510,7 +519,7 @@ __kernel void update_scalar_fields_maccormack(
             );
 
         const float fuel_yp =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i,
@@ -522,7 +531,7 @@ __kernel void update_scalar_fields_maccormack(
             );
 
         const float fuel_ym =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i,
@@ -534,7 +543,7 @@ __kernel void update_scalar_fields_maccormack(
             );
 
         const float fuel_zp =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i,
@@ -546,7 +555,7 @@ __kernel void update_scalar_fields_maccormack(
             );
 
         const float fuel_zm =
-            get_pool_value(
+            get_pool_value_uint8(
                 fuel,
                 tile_map,
                 i,
@@ -758,12 +767,9 @@ __kernel void update_scalar_fields_maccormack(
             100.0f
         );
 
-    fuel_out[index] =
-        clamp(
-            fuel_updated,
-            0.0f,
-            100.0f
-        );
+    fuel_out[index] = convert_uchar_rte(
+        clamp(fuel_updated, 0.0f, 100.0f) * (255.0f / 100.0f)
+    );
 
     flame_out[index] =
         fmax(

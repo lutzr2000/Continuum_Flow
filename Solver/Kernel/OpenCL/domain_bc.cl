@@ -11,7 +11,7 @@ inline void apply_face_state(
     __global float *p,
     __global float *T,
     __global float *smoke,
-    __global float *fuel,
+    __global uchar *fuel,
     __global const int *tile_map,
     const float ref_temp,
     const float u_initial,
@@ -56,7 +56,7 @@ inline void apply_face_state(
     float neighbor_w;
     float neighbor_T;
     float neighbor_smoke;
-    float neighbor_fuel;
+    uchar neighbor_fuel;
 
     if (src_tile_index == -1)
     {
@@ -68,7 +68,7 @@ inline void apply_face_state(
             use_temp ? temp_value : ref_temp;
 
         neighbor_smoke = 0.0f;
-        neighbor_fuel = 0.0f;
+        neighbor_fuel = (uchar)0;
     }
     else
     {
@@ -206,7 +206,7 @@ __kernel void domain_bc(
     __global float *p,
     __global float *T,
     __global float *smoke,
-    __global float *fuel,
+    __global uchar *fuel,
     __global const int *tile_map,
     const float ref_temp,
     const float u_initial,

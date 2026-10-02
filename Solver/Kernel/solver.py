@@ -431,13 +431,13 @@ def solver(config: dict):
     # scalars
     temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
     smoke = helper.zeros_device(context, sparse_pool_shape)
-    fuel = helper.zeros_device(context, sparse_pool_shape)
+    fuel = helper.zeros_device(context, sparse_pool_shape, dtype=np.uint8)
 
     temperature_work = helper.full_device(
         context, sparse_pool_shape, reference_temperature
     )
     smoke_work = helper.zeros_device(context, sparse_pool_shape)
-    fuel_work = helper.zeros_device(context, sparse_pool_shape)
+    fuel_work = helper.zeros_device(context, sparse_pool_shape, dtype=np.uint8)
 
     # flame
     flame = helper.zeros_device(context, sparse_pool_shape)
@@ -781,10 +781,10 @@ def solver(config: dict):
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
-                        (fuel, 0.0, FIELD_DTYPE),
+                        (fuel, 0, np.uint8),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
-                        (fuel_work, 0.0, FIELD_DTYPE),
+                        (fuel_work, 0, np.uint8),
                         (flame, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
@@ -842,10 +842,10 @@ def solver(config: dict):
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
-                        (fuel, 0.0, FIELD_DTYPE),
+                        (fuel, 0, np.uint8),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
-                        (fuel_work, 0.0, FIELD_DTYPE),
+                        (fuel_work, 0, np.uint8),
                         (flame, 0.0, FIELD_DTYPE),
                         (zero_pool, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),

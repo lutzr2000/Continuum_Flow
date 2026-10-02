@@ -7,7 +7,7 @@ __kernel void obstacle_bc(
     __global float *v,
     __global float *w,
     __global float *smoke,
-    __global float *fuel,
+    __global uchar *fuel,
     __global float *flame,
     __global const uchar *mask,
     __global const float *obstacle_velocity_x,
@@ -69,6 +69,6 @@ __kernel void obstacle_bc(
         obstacle_velocity_z[index];
 
     smoke[index] = 0.0f;
-    fuel[index] = 0.0f;
+    fuel[index] = (uchar)0;
     flame[index] = 0.0f;
 }
