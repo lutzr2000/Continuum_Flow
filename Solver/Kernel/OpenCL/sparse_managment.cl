@@ -276,7 +276,7 @@ __kernel void activate_tiles_with_reuse(
     volatile __global int *free_slot_count,
     __global int *reused_slot_list,
     volatile __global int *reused_slot_count,
-    volatile __global int *next_tile_index_counter,
+    volatile __global int *next_pool_slot_counter,
     volatile __global int *active_tile_counter,
     const int tiles_x,
     const int tiles_y,
@@ -336,7 +336,7 @@ __kernel void activate_tiles_with_reuse(
     );
 
     index_tile_map[tile_index] = atomic_add(
-        next_tile_index_counter,
+        next_pool_slot_counter,
         1
     );
 }

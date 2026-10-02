@@ -335,7 +335,7 @@ def solver(config: dict):
             dtype=np.uint8,
         )  # if sparse everything is inactive
 
-        initial_next_tile_index = 0
+        initial_next_pool_slot = 0
         initial_active_tile_count = 0
 
     else:
@@ -351,8 +351,11 @@ def solver(config: dict):
             dtype=np.uint8,
         )  # if dense everything is active
 
-        initial_next_tile_index = total_tile_count
+        initial_next_pool_slot = total_tile_count
         initial_active_tile_count = total_tile_count
+
+    active_tile_count_value = initial_active_tile_count
+    next_pool_slot_value = initial_next_pool_slot
 
     # controls the indexing in which slot a tile is
     index_tile_map = helper.to_device(context, index_tile_map_start_values)
@@ -378,8 +381,8 @@ def solver(config: dict):
     reused_slot_count = helper.to_device(context, np.zeros(1, dtype=np.int32))
 
     # next never used index
-    next_tile_index_counter = helper.to_device(
-        context, np.asarray([initial_next_tile_index], dtype=np.int32)
+    next_pool_slot_counter = helper.to_device(
+        context, np.asarray([initial_next_pool_slot], dtype=np.int32)
     )
     # how many tiles are active in this time step
     active_tile_counter = helper.to_device(
@@ -387,9 +390,9 @@ def solver(config: dict):
     )
 
     # cpu arrays for reading back gpu counters
-    reused_slot_count_readback = np.empty(1, dtype=np.int32)
-    next_tile_index_readback = np.empty(1, dtype=np.int32)
-    active_tile_count_readback = np.empty(1, dtype=np.int32)
+    reused_slot_count_readback_buffer = np.empty(1, dtype=np.int32)
+    next_pool_slot_readback_buffer = np.empty(1, dtype=np.int32)
+    active_tile_count_readback_buffer = np.empty(1, dtype=np.int32)
 
     # block size by which to grow the pool
     growth_size_pool = max(
@@ -620,8 +623,6 @@ def solver(config: dict):
     next_output_time = 0.0
     output_index = 0
     time_step_count = 0
-    active_tile_counter_host = initial_active_tile_count
-    next_tile_index_counter_host = initial_next_tile_index
 
     while t < t_max:
         if cancel_flag_path and Path(cancel_flag_path).exists():
@@ -661,33 +662,35 @@ def solver(config: dict):
             zero_pool,
         )
 
-        # ------------Update source tile mask-------------------
-        update_masks.update_source_tile_mask(
-            queue,
-            update_masks_kernels["mark_source_tiles"],
-            source_tile_mask,
-            source_base_masks,
-            tile_shape,
-            t,
-            delta,
-            origin,
-        )
-
-        if has_particle_sources:
-            particles.update_source_tile_mask(
+        # ------------sparse managmentk-------------------
+        if simulate_sparsely:
+            # ------------Update tile mask geometry sources-------------------
+            update_masks.update_source_tile_mask(
                 queue,
-                particles_kernels["mark_particle_tiles"],
-                particles_kernels["sample_interpolated_vectors"],
+                update_masks_kernels["mark_source_tiles"],
                 source_tile_mask,
-                particle_sources,
+                source_base_masks,
                 tile_shape,
                 t,
                 delta,
                 origin,
             )
 
-        # ------------Start Active tiles-------------------
-        if simulate_sparsely:
+            # ------------Update tile mask particle sources-------------------
+            if has_particle_sources:
+                particles.update_source_tile_mask(
+                    queue,
+                    particles_kernels["mark_particle_tiles"],
+                    particles_kernels["sample_interpolated_vectors"],
+                    source_tile_mask,
+                    particle_sources,
+                    tile_shape,
+                    t,
+                    delta,
+                    origin,
+                )
+
+            # ------------Active tiles based on fields------------------
             sparse_managment_kernels["build_activity_mask"](
                 queue,
                 tile_shape,
@@ -707,6 +710,7 @@ def solver(config: dict):
                 np.int32(tile_shape[2]),
             )
 
+            # ------------dilate tile map------------------
             for kernel_name, src_map, dst_map in (
                 (
                     "dilate_activity_x",
@@ -740,6 +744,7 @@ def solver(config: dict):
             helper.fill_device(queue, free_slot_count, 0, dtype=np.int32)
             helper.fill_device(queue, reused_slot_count, 0, dtype=np.int32)
 
+            # ------------manage resusable slots------------------
             sparse_managment_kernels["release_inactive_tile_slots"](
                 queue,
                 tile_shape,
@@ -763,7 +768,7 @@ def solver(config: dict):
                 free_slot_count,
                 reused_slot_list,
                 reused_slot_count,
-                next_tile_index_counter,
+                next_pool_slot_counter,
                 active_tile_counter,
                 np.int32(tile_shape[0]),
                 np.int32(tile_shape[1]),
@@ -773,30 +778,31 @@ def solver(config: dict):
             counter_read_events = (
                 cl.enqueue_copy(
                     queue,
-                    reused_slot_count_readback,
+                    reused_slot_count_readback_buffer,
                     reused_slot_count,
                     is_blocking=False,
                 ),
                 cl.enqueue_copy(
                     queue,
-                    next_tile_index_readback,
-                    next_tile_index_counter,
+                    next_pool_slot_readback_buffer,
+                    next_pool_slot_counter,
                     is_blocking=False,
                 ),
                 cl.enqueue_copy(
                     queue,
-                    active_tile_count_readback,
+                    active_tile_count_readback_buffer,
                     active_tile_counter,
                     is_blocking=False,
                 ),
             )
             cl.wait_for_events(counter_read_events)
 
-            reused_slot_count_host = int(reused_slot_count_readback[0])
-            next_tile_index_counter_host = int(next_tile_index_readback[0])
-            active_tile_counter_host = int(active_tile_count_readback[0])
+            reused_slot_count_value = int(reused_slot_count_readback_buffer[0])
+            next_pool_slot_value = int(next_pool_slot_readback_buffer[0])
+            active_tile_count_value = int(active_tile_count_readback_buffer[0])
 
-            if reused_slot_count_host > 0:
+            # ------------empty pools marked for reuse------------------
+            if reused_slot_count_value > 0:
                 sparse_managment.reset_reused_pool_slots(
                     queue,
                     sparse_managment_kernels,
@@ -825,16 +831,18 @@ def solver(config: dict):
                         *[(mask, False, np.bool_) for mask in particle_source_masks],
                     ],
                     reused_slot_list,
-                    reused_slot_count_host,
+                    reused_slot_count_value,
                 )
 
-            if next_tile_index_counter_host > sparse_tile_capacity:
+            # ------------compute required pool capacity------------------
+            if next_pool_slot_value > sparse_tile_capacity:
                 next_sparse_tile_capacity = sparse_managment.required_pool_capacity(
                     sparse_tile_capacity,
-                    next_tile_index_counter_host,
+                    next_pool_slot_value,
                     growth_size_pool,
                 )
 
+                # ------------grow pool------------------
                 (
                     u,
                     v,
@@ -914,8 +922,8 @@ def solver(config: dict):
                 )
 
         else:
-            active_tile_counter_host = total_tile_count
-            next_tile_index_counter_host = total_tile_count
+            active_tile_count_value = total_tile_count
+            next_pool_slot_value = total_tile_count
 
         # ------------Update geometry source masks-------------------
         update_geometry_sources = time_step_count == 0 or has_animated_sources
@@ -961,7 +969,7 @@ def solver(config: dict):
             w,
             index_tile_map,
             tile_shape,
-            active_tile_counter_host,
+            active_tile_count_value,
             velocity_maxima,
             partial_velocity_maxima,
             delta,
@@ -1280,7 +1288,7 @@ def solver(config: dict):
                 (v_work, v),
                 (w_work, w),
             ),
-            next_tile_index_counter_host,
+            next_pool_slot_value,
         )
 
         velocity_update_kernels["advect_velocity_semi_lagrangian"](
@@ -1526,7 +1534,7 @@ def solver(config: dict):
                         index_tile_map=index_tile_map,
                         smoke=smoke,
                         flame=flame,
-                        active_tile_count=active_tile_counter_host,
+                        active_tile_count=active_tile_count_value,
                         tile_shape=tile_shape,
                         tile_size=kernel_config.TILE_SIZE,
                     )
@@ -1549,9 +1557,9 @@ def solver(config: dict):
                 {
                     "type": "stats",
                     "frame": output_index,
-                    "active_tiles": active_tile_counter_host,
+                    "active_tiles": active_tile_count_value,
                     "total_tiles": total_tile_count,
-                    "active_cells": active_tile_counter_host
+                    "active_cells": active_tile_count_value
                     * kernel_config.TILE_SIZE**3,
                     "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
                     "vram_used_mb": allocated_vram / 1024**2,
