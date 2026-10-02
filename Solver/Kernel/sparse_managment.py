@@ -98,8 +98,9 @@ def ensure_pool_capacities(
     """
     Grow undersized GPU field pools while preserving all allocated tile data.
 
-    Pools already large enough are returned unchanged; replacement buffers are
-    initialized and populated through device-to-device copies.
+    Replacement buffers are allocated one at a time.  Each buffer is fully
+    copied and initialized before its old buffer is released, limiting the
+    temporary VRAM overhead to one field pool instead of all field pools.
     """
     if target_capacity_tiles == current_capacity_tiles:
         return [pool for pool, _fill_value, _dtype in pool_specs]
@@ -150,6 +151,9 @@ def ensure_pool_capacities(
                 fill_offset,
                 fill_size,
             )
+
+        queue.finish()
+        pool_tile_buffer.release()
 
         resized_pools.append(new_pool_tile_buffer)
 
