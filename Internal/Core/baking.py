@@ -126,13 +126,24 @@ def clear_status_progress(context):
 
 # -------------- UI ----------------
 def ui_redraw():
-    window_manager = getattr(bpy.context, "window_manager")
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
 
     for window in window_manager.windows:
-        screen = getattr(window, "screen")
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
 
         for area in screen.areas:
-            if area.type in {"STATUSBAR", "NODE_EDITOR", "PROPERTIES"}:
+            if area.type in {
+                "STATUSBAR",
+                "NODE_EDITOR",
+                "PROPERTIES",
+                "TIMELINE",
+                "DOPESHEET_EDITOR",
+                "VIEW_3D",
+            }:
                 area.tag_redraw()
 
 
@@ -285,19 +296,30 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 pass
 
     def update_bake_progress(self):
-        written_frame_count = count_contiguous_vdb_frames(
-            self.output_directory,
-            self.start_frame,
-        )
-        set_bake_progress(written_frame_count, solver_status.progress_total_frames)
+        stats = solver_manager.get_stats()
 
-        if written_frame_count > 0:
-            latest_written_frame = self.start_frame + written_frame_count - 1
-            if bpy.context.scene.frame_current != latest_written_frame:
-                bpy.context.scene.frame_set(latest_written_frame)
+        solver_frame = stats.get("frame")
+        if solver_frame is None:
+            return
+
+        solver_frame = int(solver_frame)
+
+        set_bake_progress(
+            solver_frame,
+            solver_status.progress_total_frames,
+        )
+
+        blender_frame = self.start_frame + solver_frame - 1
+
+        scene = bpy.context.scene
+
+        if scene.frame_current != blender_frame:
+            scene.frame_set(blender_frame)
 
         update_live_preview_settings(self.simulation_node)
         volume_renderer.upload_pending_frame()
+
+        ui_redraw()
 
     def run_bake(self, context):
         config_dict = export_config.build_config_dict(
