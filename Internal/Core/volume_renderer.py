@@ -6,8 +6,8 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
+from Solver.Kernel import preview
 from . import reference_frame
-from .solver.solver_manager import solver_manager
 
 SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"
 VERTEX_SHADER_PATH = SHADER_DIRECTORY / "volume_preview.vert"
@@ -17,125 +17,123 @@ smoke_density = 10.0
 smoke_color = (0.32, 0.34, 0.38)
 flame_density = 5.0
 flame_color = (1.0, 0.12, 0.01)
-draw_handler = shader = batch = None
-tile_lookup_texture = field_atlas_texture = uniform_buffer = None
-grid_shape = resolution = bounds_min = bounds_max = None
-capture_enabled = False
-pending_transfer = displayed_metadata = None
-release_after_draw = False
+draw_handler = None
+shader = None
+batch = None
+tile_lookup_texture = None
+field_atlas_texture = None
+uniform_buffer = None
+grid_shape = None
+resolution = None
+bounds_min = None
+bounds_max = None
+displayed_metadata = None
 simulation_reference = None
 
 
-def configure(new_grid_shape, new_resolution, simulation_node=None):
+def configure(new_grid_shape, new_resolution, new_simulation_reference=None):
     """Set the simulation grid geometry used by the preview."""
     global grid_shape, resolution, bounds_min, bounds_max, batch, simulation_reference
+
     grid_shape = tuple(new_grid_shape)
     resolution = new_resolution
     nx, ny, nz = grid_shape
+
     bounds_min = (-0.5 * nx * resolution, -0.5 * ny * resolution, 0.0)
     bounds_max = (
         bounds_min[0] + nx * resolution,
         bounds_min[1] + ny * resolution,
         nz * resolution,
     )
+
     batch = None
-    node_tree = getattr(simulation_node, "id_data", None)
-    simulation_reference = (
-        str(getattr(node_tree, "name", "")),
-        str(getattr(simulation_node, "name", "")),
+    simulation_reference = new_simulation_reference
+    load_viewer_settings()
+
+
+def get_solver_data(snapshot):
+    """Upload one complete solver snapshot to Blender GPU textures."""
+    global tile_lookup_texture, field_atlas_texture, displayed_metadata, draw_handler
+
+    if (
+        grid_shape != tuple(snapshot["grid_shape"])
+        or resolution != snapshot["resolution"]
+        or simulation_reference != snapshot["simulation_reference"]
+    ):
+        configure(
+            snapshot["grid_shape"],
+            snapshot["resolution"],
+            snapshot["simulation_reference"],
+        )
+
+    lookup = snapshot["tile_lookup"]
+    fields = snapshot["fields"]
+
+    lookup_buffer = gpu.types.Buffer("FLOAT", lookup.size, lookup.ravel())
+    fields_buffer = gpu.types.Buffer("FLOAT", fields.size, fields)
+    tile_lookup_texture = gpu.types.GPUTexture(
+        snapshot["tile_shape"], format="R32F", data=lookup_buffer
     )
+    atlas_size = tuple(
+        count * snapshot["tile_size"] for count in snapshot["atlas_tile_shape"]
+    )
+    field_atlas_texture = gpu.types.GPUTexture(
+        atlas_size, format="RG32F", data=fields_buffer
+    )
+    field_atlas_texture.filter_mode(False)
+    displayed_metadata = snapshot
+    active_shader = ensure_shader()
+    ensure_batch(active_shader)
+
+    if draw_handler is None:
+        draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+            draw_volume, (), "WINDOW", "POST_VIEW"
+        )
+    redraw_viewports()
 
 
-def set_enabled(enabled):
-    """Enable or disable acquisition of preview snapshots."""
-    global capture_enabled
-    enabled = bool(enabled)
-    if enabled == capture_enabled:
-        return
-    capture_enabled = enabled
-    if not enabled:
+def update_live_preview():
+    """Read complete snapshots without participating in solver transfer management."""
+    snapshot = preview.take_snapshot()
+    if snapshot is not None:
+        get_solver_data(snapshot)
+    elif not preview.is_enabled() and draw_handler is not None:
         clear_live_preview()
 
-
-def set_preview_settings(
-    new_smoke_density, new_smoke_color, new_flame_density, new_flame_color
-):
-    global smoke_density, smoke_color, flame_density, flame_color
-    smoke_density = new_smoke_density
-    smoke_color = tuple(new_smoke_color)
-    flame_density = new_flame_density
-    flame_color = tuple(new_flame_color)
+    return 0.01
 
 
-def upload_pending_frame():
-    """Advance the asynchronous transfer and upload completed sparse data."""
-    global pending_transfer, tile_lookup_texture
-    global field_atlas_texture, displayed_metadata, draw_handler, release_after_draw
-    if pending_transfer is not None:
-        if not pending_transfer.complete:
-            return
-        if not capture_enabled:
-            solver_manager.preview_exchange.release()
-            pending_transfer = None
-            return
-        metadata = pending_transfer.metadata
-        lookup_buffer = gpu.types.Buffer(
-            "FLOAT",
-            pending_transfer.tile_lookup.size,
-            pending_transfer.tile_lookup.ravel(),
-        )
-        fields_buffer = gpu.types.Buffer(
-            "FLOAT", pending_transfer.fields.size, pending_transfer.fields
-        )
-        tile_lookup_texture = gpu.types.GPUTexture(
-            metadata.tile_shape, format="R32F", data=lookup_buffer
-        )
-        atlas_size = tuple(
-            count * metadata.tile_size for count in metadata.atlas_tile_shape
-        )
-        field_atlas_texture = gpu.types.GPUTexture(
-            atlas_size, format="RG32F", data=fields_buffer
-        )
-        field_atlas_texture.filter_mode(False)
-        displayed_metadata = metadata
-        pending_transfer = None
-        release_after_draw = True
-        active_shader = ensure_shader()
-        ensure_batch(active_shader)
-        if draw_handler is None:
-            draw_handler = bpy.types.SpaceView3D.draw_handler_add(
-                draw_volume, (), "WINDOW", "POST_VIEW"
-            )
-        redraw_viewports()
-        return
-    if capture_enabled and not release_after_draw:
-        pending_transfer = solver_manager.preview_exchange.begin_transfer()
+def ensure_update_live_preview():
+    """Ensure that the Blender-side snapshot consumer is running."""
+    if not bpy.app.timers.is_registered(update_live_preview):
+        bpy.app.timers.register(update_live_preview, first_interval=0.1)
 
 
 def clear_live_preview():
     """Stop drawing while safely retiring any acquired OpenCL snapshot."""
     global draw_handler, tile_lookup_texture, field_atlas_texture
-    global displayed_metadata, release_after_draw, pending_transfer
+    global displayed_metadata, grid_shape, resolution, bounds_min, bounds_max
+    global simulation_reference, batch
+
     if draw_handler is not None:
         try:
             bpy.types.SpaceView3D.draw_handler_remove(draw_handler, "WINDOW")
         except (ReferenceError, RuntimeError):
             pass
         draw_handler = None
+
     tile_lookup_texture = field_atlas_texture = displayed_metadata = None
-    if release_after_draw:
-        solver_manager.preview_exchange.release()
-        release_after_draw = False
-    if pending_transfer is not None:
-        solver_manager.preview_exchange.release_when_complete(pending_transfer)
-        pending_transfer = None
+    grid_shape = resolution = bounds_min = bounds_max = None
+    simulation_reference = batch = None
     redraw_viewports()
 
 
 def ensure_shader():
     global shader
+
     if shader is not None:
         return shader
+
     interface = gpu.types.GPUStageInterfaceInfo("continuum_flow_volume_interface")
     interface.smooth("VEC3", "world_position")
     info = gpu.types.GPUShaderCreateInfo()
@@ -153,13 +151,16 @@ def ensure_shader():
     info.vertex_source(VERTEX_SHADER_PATH.read_text(encoding="utf-8"))
     info.fragment_source(FRAGMENT_SHADER_PATH.read_text(encoding="utf-8"))
     shader = gpu.shader.create_from_info(info)
+
     return shader
 
 
 def ensure_batch(active_shader):
     global batch
+
     if batch is not None:
         return batch
+
     x0, y0, z0 = bounds_min
     x1, y1, z1 = bounds_max
     vertices = (
@@ -193,9 +194,9 @@ def ensure_batch(active_shader):
 
 
 def draw_volume():
-    global release_after_draw
     if tile_lookup_texture is None or field_atlas_texture is None:
         return
+
     region_data = bpy.context.region_data
     active_shader = ensure_shader()
     active_batch = ensure_batch(active_shader)
@@ -234,16 +235,43 @@ def draw_volume():
         gpu.state.depth_mask_set(True)
         gpu.state.depth_test_set("NONE")
         gpu.state.blend_set("NONE")
-        if release_after_draw:
-            solver_manager.preview_exchange.release()
-            release_after_draw = False
 
 
 def resolve_simulation_node():
     if not simulation_reference:
         return None
+
     node_tree = bpy.data.node_groups.get(simulation_reference[0])
     return None if node_tree is None else node_tree.nodes.get(simulation_reference[1])
+
+
+def load_viewer_settings():
+    """Load display-only settings from the connected viewer node."""
+    global smoke_density, smoke_color, flame_density, flame_color
+
+    simulation_node = resolve_simulation_node()
+    result_socket = (
+        None if simulation_node is None else simulation_node.outputs.get("Result")
+    )
+    if result_socket is None:
+        return
+
+    viewer_node = next(
+        (
+            link.to_node
+            for link in result_socket.links
+            if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
+            and bool(getattr(link.to_node, "live_preview", False))
+        ),
+        None,
+    )
+    if viewer_node is None:
+        return
+
+    smoke_density = float(viewer_node.preview_smoke_density)
+    smoke_color = tuple(viewer_node.preview_smoke_color)
+    flame_density = float(viewer_node.preview_flame_density)
+    flame_color = tuple(viewer_node.preview_flame_color)
 
 
 def update_uniform_buffer(camera_position, step_size):
@@ -269,9 +297,9 @@ def update_uniform_buffer(camera_position, step_size):
         flame_color[1],
         flame_color[2],
         0.0,
-        *displayed_metadata.tile_shape,
-        displayed_metadata.tile_size,
-        *displayed_metadata.atlas_tile_shape,
+        *displayed_metadata["tile_shape"],
+        displayed_metadata["tile_size"],
+        *displayed_metadata["atlas_tile_shape"],
         0.0,
     )
     buffer = gpu.types.Buffer("FLOAT", len(values), values)

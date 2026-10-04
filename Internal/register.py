@@ -157,6 +157,8 @@ def register():
     if not bpy.app.timers.is_registered(forces.force_preview_timer):
         bpy.app.timers.register(forces.force_preview_timer, first_interval=0.1)
 
+    volume_renderer.ensure_update_live_preview()
+
     if not bpy.app.timers.is_registered(preload_solver_backends):
         bpy.app.timers.register(preload_solver_backends, first_interval=0.1)
 
@@ -173,6 +175,9 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(volume_renderer.update_live_preview):
+        bpy.app.timers.unregister(volume_renderer.update_live_preview)
+
     if bpy.app.timers.is_registered(preload_solver_backends):
         bpy.app.timers.unregister(preload_solver_backends)
 

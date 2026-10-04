@@ -21,14 +21,12 @@ class SolverManager:
         self._stats = {}
         self._compiling_backend = None
         self._compiled_backends = set()
-        from Solver.General.preview import PreviewExchange
-
-        self.preview_exchange = PreviewExchange()
-
-    def set_live_preview_enabled(self, enabled):
-        self.preview_exchange.set_enabled(enabled)
 
     def start_job(self, config):
+        from .. import volume_renderer
+
+        volume_renderer.ensure_update_live_preview()
+
         with self._lock:
             if self._active_job_id is not None:
                 raise RuntimeError("Solver is already busy")
@@ -80,12 +78,10 @@ class SolverManager:
                 main,
                 set_message_callback,
                 clear_message_callback,
-                set_preview_exchange,
             )
 
             clear_callback = clear_message_callback
             set_message_callback(self._handle_message)
-            set_preview_exchange(self.preview_exchange)
 
             main(config)
 
@@ -112,7 +108,9 @@ class SolverManager:
             if clear_callback is not None:
                 clear_callback()
 
-            self.preview_exchange.close()
+            from Solver.Kernel import preview
+
+            preview.close()
 
             with self._lock:
                 self._job_results[job_id] = result
@@ -164,7 +162,9 @@ class SolverManager:
         return
 
     def shutdown(self):
-        self.preview_exchange.set_enabled(False)
+        from Solver.Kernel import preview
+
+        preview.close()
         with self._lock:
             thread = self._solver_thread
 

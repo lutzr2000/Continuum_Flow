@@ -257,6 +257,16 @@ def build_entries(simulation_node):
         ),
     )
 
+    viewer_node = next(
+        (
+            node
+            for node in result_nodes
+            if node.bl_idname == "CONTINUUM_FLOW_VIEWER_NODE"
+            and bool(getattr(node, "live_preview", False))
+        ),
+        None,
+    )
+
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
     simulation_fps = max(1, int(getattr(output_node, "fps", 24)))
@@ -288,6 +298,9 @@ def build_entries(simulation_node):
         "animation_timeline": {
             "fps": simulation_fps,
             "times": simulation_times,
+        },
+        "preview": {
+            "enabled": viewer_node is not None,
         },
         "reference_frame": build_reference_frame_entry(
             reference_frame_node,

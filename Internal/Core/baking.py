@@ -6,7 +6,6 @@ from pathlib import Path
 
 from .export import export_config
 from . import load_result
-from . import volume_renderer
 from .solver.solver_manager import solver_manager
 from .solver import solver_status
 
@@ -41,38 +40,6 @@ def get_linked_simulation_nodes(output_node):
         ):
             simulation_nodes.append(simulation_node)
     return simulation_nodes
-
-
-def get_live_preview_node(simulation_node):
-    result_socket = simulation_node.outputs.get("Result")
-    if result_socket is None:
-        return None
-
-    return next(
-        (
-            link.to_node
-            for link in result_socket.links
-            if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
-            and link.to_node.live_preview
-        ),
-        None,
-    )
-
-
-def update_live_preview_settings(simulation_node):
-    viewer_node = get_live_preview_node(simulation_node)
-    enabled = viewer_node is not None
-    solver_manager.set_live_preview_enabled(enabled)
-    volume_renderer.set_enabled(enabled)
-    if viewer_node is None:
-        return
-
-    volume_renderer.set_preview_settings(
-        new_smoke_density=viewer_node.preview_smoke_density,
-        new_smoke_color=viewer_node.preview_smoke_color,
-        new_flame_density=viewer_node.preview_flame_density,
-        new_flame_color=viewer_node.preview_flame_color,
-    )
 
 
 # -------------- progress managment ----------------
@@ -260,9 +227,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
             should_load_result = self.cancel_requested or (
                 bool(self.job_result) and bool(self.job_result.get("success", False))
             )
-            solver_manager.set_live_preview_enabled(False)
-            volume_renderer.set_enabled(False)
-
             if self.cancel_flag_path:
                 try:
                     self.cancel_flag_path.unlink(missing_ok=True)
@@ -316,9 +280,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         if scene.frame_current != blender_frame:
             scene.frame_set(blender_frame)
 
-        update_live_preview_settings(self.simulation_node)
-        volume_renderer.upload_pending_frame()
-
         ui_redraw()
 
     def run_bake(self, context):
@@ -346,16 +307,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         vdb_output_dir = Path(output_config["output_path"]).resolve()
         self.output_directory = vdb_output_dir
-        volume_renderer.clear_live_preview()
-        domain_config = simulation_config["domain"]
-        grid_config = domain_config["grid"]
-        volume_renderer.configure(
-            (grid_config["nx"], grid_config["ny"], grid_config["nz"]),
-            domain_config["resolution"],
-            self.simulation_node,
-        )
-        update_live_preview_settings(self.simulation_node)
-
         self.job_id = solver_manager.start_job(config_dict)
 
 

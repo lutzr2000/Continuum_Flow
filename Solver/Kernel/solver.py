@@ -4,7 +4,8 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Any
 from pathlib import Path
-from Solver.General.main import emit_message, get_preview_exchange
+from Solver.General.main import emit_message
+from Solver.Kernel import preview
 import Solver.General.forces as forces
 
 import Solver.Kernel.kernel_config as kernel_config
@@ -187,6 +188,7 @@ def compute_inital_velocity(
 
 
 def solver(config: dict):
+    preview.configure(config)
 
     # ------------device-------------------
     device = None
@@ -273,6 +275,12 @@ def solver(config: dict):
         context,
         kernel_path / "multigrid.cl",
     )
+
+    preview_kernels = helper.load_program(
+        context,
+        kernel_path / "preview.cl",
+    )
+    preview_transfer_queue = cl.CommandQueue(context)
 
     print("################################################################")
     print(f"Running on: {device.name}")
@@ -1525,31 +1533,22 @@ def solver(config: dict):
             output_index += 1
             next_output_time += output_time_step
 
-            preview_exchange = get_preview_exchange()
-            if preview_exchange is not None:
-                try:
-                    preview_exchange.try_publish(
-                        queue=queue,
-                        frame_index=output_index,
-                        index_tile_map=index_tile_map,
-                        smoke=smoke,
-                        flame=flame,
-                        active_tile_count=active_tile_count_value,
-                        tile_shape=tile_shape,
-                        tile_size=kernel_config.TILE_SIZE,
-                    )
-                except Exception as exc:
-                    emit_message(
-                        {
-                            "type": "log",
-                            "message": f"Live preview publication failed: {exc}",
-                        }
-                    )
+            preview.try_publish(
+                context=context,
+                queue=queue,
+                transfer_queue=preview_transfer_queue,
+                kernel=preview_kernels["pack_preview"],
+                index_tile_map=index_tile_map,
+                smoke=smoke,
+                flame=flame,
+                active_tile_count=active_tile_count_value,
+                tile_shape=tile_shape,
+                tile_size=kernel_config.TILE_SIZE,
+            )
 
             # ------------(V)RAM Track-------------------
             allocated_vram = helper.opencl_buffer_bytes(*locals().values())
-            if preview_exchange is not None:
-                allocated_vram += preview_exchange.allocated_bytes
+            allocated_vram += preview.allocated_bytes()
 
             total_vram = device.global_mem_size
 

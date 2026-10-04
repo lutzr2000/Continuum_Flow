@@ -9,7 +9,6 @@ MessageCallback = Callable[[dict[str, Any]], None]
 
 _message_callback: MessageCallback | None = None
 _message_callback_lock = threading.Lock()
-_preview_exchange = None
 
 
 def set_message_callback(callback: MessageCallback | None) -> None:
@@ -30,17 +29,6 @@ def clear_message_callback() -> None:
 
     with _message_callback_lock:
         _message_callback = None
-
-
-def set_preview_exchange(exchange) -> None:
-    """Set the in-process preview exchange used by the GPU solver."""
-    global _preview_exchange
-    _preview_exchange = exchange
-
-
-def get_preview_exchange():
-    """Return the preview exchange without importing Blender modules."""
-    return _preview_exchange
 
 
 def emit_message(message: dict[str, Any]) -> None:
