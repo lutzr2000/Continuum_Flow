@@ -49,6 +49,7 @@ from .Core import forces, volume_renderer
 from .Core.solver.solver_manager import solver_manager
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
 from .Core.solver import solver_status
+from .UI import animation_proxy
 
 classes = (
     ContinuumFlowNodeTree,
@@ -100,6 +101,10 @@ def initialize_fake_user_state(_scene=None, _depsgraph=None):
     for tree in node_groups:
         if tree.bl_idname == NODE_TREE_ID:
             tree["continuum_flow_fake_user_initialized"] = True
+            for node in tree.nodes:
+                animation_proxy.ensure_node_proxy_id(node)
+                for scene in getattr(bpy.data, "scenes", ()):
+                    animation_proxy.ensure_node_scene_proxies(scene, node)
 
 
 @persistent
@@ -162,6 +167,12 @@ def register():
     if not bpy.app.timers.is_registered(preload_solver_backends):
         bpy.app.timers.register(preload_solver_backends, first_interval=0.1)
 
+    if not bpy.app.timers.is_registered(animation_proxy.maintain_animation_proxies):
+        bpy.app.timers.register(
+            animation_proxy.maintain_animation_proxies,
+            first_interval=0.1,
+        )
+
     if ensure_fake_user not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(ensure_fake_user)
 
@@ -175,6 +186,9 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(animation_proxy.maintain_animation_proxies):
+        bpy.app.timers.unregister(animation_proxy.maintain_animation_proxies)
+
     if bpy.app.timers.is_registered(volume_renderer.update_live_preview):
         bpy.app.timers.unregister(volume_renderer.update_live_preview)
 

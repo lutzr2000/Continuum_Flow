@@ -19,6 +19,15 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 200.0
     bl_width_max = 360.0
     scalar_property_names = ("fuel", "smoke", "temperature", "extra_pressure")
+    animation_proxy_properties = (
+        "fuel",
+        "smoke",
+        "temperature",
+        "extra_pressure",
+        "noise_scale",
+        "noise_amplitude",
+        "velocity",
+    )
 
     fuel: FloatProperty(name="Fuel Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How much fuel is emitted", options={"ANIMATABLE"})  # type: ignore
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How much smoke is emitted", options={"ANIMATABLE"})  # type: ignore
@@ -52,16 +61,16 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
         self._set_layout_enabled(context, layout)
         col = layout.column(align=True)
         for property_name in self.scalar_property_names:
-            col.prop(self, property_name)
+            self._draw_property(col, property_name)
 
         noise_col = layout.column(align=True)
         noise_col.prop(self, "source_noise")
         if self.source_noise:
-            noise_col.prop(self, "noise_scale")
+            self._draw_property(noise_col, "noise_scale")
             noise_col.prop(self, "noise_seed")
-            noise_col.prop(self, "noise_amplitude")
+            self._draw_property(noise_col, "noise_amplitude")
 
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
         velocity_col.prop(self, "velocity_space", text="")
-        velocity_col.prop(self, "velocity", text="")
+        self._draw_property(velocity_col, "velocity", text="")

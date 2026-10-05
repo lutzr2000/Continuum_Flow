@@ -4,10 +4,10 @@ import re
 from datetime import datetime, timezone
 from . import export_geometry, export_particles
 from .. import viewer
+from ...UI import animation_proxy
 from ..domain_grid import grid_shape
 from bpy.app.handlers import persistent
 
-NODE_TREE_ID = "CONTINUUM_FLOW_NODE_TREE"
 ANIMATABLE_PROPERTIES = {
     "CONTINUUM_FLOW_PHYSICS_NODE": (
         "fluid_density",
@@ -190,6 +190,7 @@ def build_config_dict(context, simulation_node):
     """
     Build the genetal simulation config
     """
+    sync_ui_animation_state(getattr(context, "scene", None))
     node_tree = getattr(simulation_node, "id_data")
 
     config_dict = {
@@ -831,7 +832,7 @@ def build_animations(node, start_frame, end_frame):
     try:
         for frame in range(start_frame, end_frame):
             scene.frame_set(frame)
-            sync_node_tree_animations(scene)
+            animation_proxy.sync_scene_animation_proxies(scene)
 
             for name in sampled:
                 sampled[name].append(
@@ -843,7 +844,7 @@ def build_animations(node, start_frame, end_frame):
 
     finally:
         scene.frame_set(current_frame)
-        sync_node_tree_animations(scene)
+        animation_proxy.sync_scene_animation_proxies(scene)
 
     animations = {name: {"values": values} for name, values in sampled.items()}
     animated_values = {
@@ -906,99 +907,18 @@ def sample_animated_value(property_name, value):
 
 
 def node_property_is_animated(node, property_name):
-    try:
-        data_path = node.path_from_id(property_name)
-    except Exception:
-        return False
-
-    animation_data = getattr(node.id_data, "animation_data", None)
-    if animation_data is None:
-        return False
-
-    for fcurve in iter_action_curves(getattr(animation_data, "action", None)):
-        if getattr(fcurve, "data_path", None) == data_path:
-            return True
-
-    for fcurve in getattr(animation_data, "drivers", ()):
-        if getattr(fcurve, "data_path", None) == data_path:
+    scene = getattr(bpy.context, "scene", None)
+    scene_animation_data = getattr(scene, "animation_data", None)
+    scene_data_path = animation_proxy.scene_proxy_data_path(node, property_name)
+    for fcurve in iter_action_curves(getattr(scene_animation_data, "action", None)):
+        if getattr(fcurve, "data_path", None) == scene_data_path:
             return True
 
     return False
 
 
-def _set_node_property_component(node, property_name, value, array_index):
-    current_value = getattr(node, property_name)
-
-    if array_index < 0 or isinstance(current_value, (int, float, bool, str, bytes)):
-        setattr(node, property_name, value)
-        return
-
-    values = list(current_value)
-    if array_index >= len(values):
-        return
-
-    values[array_index] = value
-    setattr(node, property_name, values)
-
-
-def _iter_keyframeable_node_properties(node_tree):
-    for node in getattr(node_tree, "nodes", ()):
-        for property_name in ANIMATABLE_PROPERTIES.get(
-            getattr(node, "bl_idname", ""), ()
-        ):
-            try:
-                node.path_from_id(property_name)
-            except Exception:
-                continue
-            yield node, property_name
-
-
-def sync_node_tree_animations(scene=None):
-    if scene is None:
-        scene = getattr(bpy.context, "scene", None)
-    if scene is None:
-        return
-
-    frame_value = float(getattr(scene, "frame_current", 0))
-    node_groups = getattr(bpy.data, "node_groups", None)
-    if node_groups is None:
-        return
-
-    for node_tree in node_groups:
-        if getattr(node_tree, "bl_idname", "") != NODE_TREE_ID:
-            continue
-
-        animation_data = getattr(node_tree, "animation_data", None)
-        action = getattr(animation_data, "action", None)
-        if action is None:
-            continue
-
-        property_path_map = {}
-        for node, property_name in _iter_keyframeable_node_properties(node_tree):
-            try:
-                property_path_map[node.path_from_id(property_name)] = (
-                    node,
-                    property_name,
-                )
-            except Exception:
-                continue
-
-        for fcurve in iter_action_curves(action):
-            property_target = property_path_map.get(getattr(fcurve, "data_path", ""))
-            if property_target is None:
-                continue
-
-            node, property_name = property_target
-            _set_node_property_component(
-                node,
-                property_name,
-                fcurve.evaluate(frame_value),
-                int(getattr(fcurve, "array_index", -1)),
-            )
-
-
 def sync_ui_animation_state(scene=None):
-    sync_node_tree_animations(scene)
+    animation_proxy.sync_scene_animation_proxies(scene)
     viewer.redraw_UI()
 
 

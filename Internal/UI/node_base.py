@@ -1,12 +1,17 @@
+import uuid
+
 import bpy
 from .node_tree import ContinuumFlowNodeTree
 from ..Core.solver import solver_status
+from . import animation_proxy
 
 
 class ContinuumFlowBaseNode(bpy.types.Node):
     """
     Shared poll, lifecycle, and small UI helpers for Continuum Flow nodes.
     """
+
+    animation_proxy_properties = ()
 
     @classmethod
     def poll(cls, ntree):
@@ -18,9 +23,14 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         """
 
     def init(self, context):
+        self["continuum_flow_animation_id"] = uuid.uuid4().hex
+        scene = getattr(context, "scene", None) or getattr(bpy.context, "scene", None)
+        animation_proxy.ensure_node_scene_proxies(scene, self)
         self._sync_node()
 
     def copy(self, node):
+        self["continuum_flow_animation_id"] = uuid.uuid4().hex
+        animation_proxy.ensure_node_scene_proxies(bpy.context.scene, self)
         self._sync_node()
 
     def update(self):
@@ -34,7 +44,19 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         box.label(text=title)
         col = box.column(align=True)
         for property_name in property_names:
-            col.prop(self, property_name)
+            self._draw_property(col, property_name)
+
+    def _draw_property(self, layout, property_name, text=None):
+        if property_name in self.animation_proxy_properties:
+            animation_proxy.draw_scene_proxy(
+                layout,
+                bpy.context.scene,
+                self,
+                property_name,
+                text=text,
+            )
+        else:
+            layout.prop(self, property_name, text=text)
 
     def _ensure_socket(self, collection, socket_type, name, multi_input=False):
         """

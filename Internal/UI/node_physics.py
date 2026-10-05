@@ -44,6 +44,23 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
         ),
         ("Extras", ("vorticity",)),
     )
+    animation_proxy_properties = (
+        "fluid_density",
+        "fluid_viscosity",
+        "temperature_dissipation",
+        "temperature_production_rate",
+        "reference_temperature",
+        "buoyancy",
+        "expansion_rate",
+        "smoke_dissipation",
+        "smoke_production_rate",
+        "fuel_dissipation",
+        "fuel_burn_rate",
+        "fuel_ignition_temperature",
+        "burn_noise_scale",
+        "burn_noise_amplitude",
+        "vorticity",
+    )
 
     fluid_density: FloatProperty(name="Fluid Density", default=1.225, min=0.0001, precision=4, description="Density of the fluid, default is air", options=set())  # type: ignore
     fluid_viscosity: FloatProperty(name="Fluid Viscosity", default=1.81e-5, min=0.0, precision=6, description="Viscosity of the fluid, default is air", options=set())  # type: ignore

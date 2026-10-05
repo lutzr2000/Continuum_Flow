@@ -26,10 +26,10 @@ class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
-        forces.sync_force_preview()
         col = layout.column(align=True)
         for property_name in self.draw_property_names:
-            col.prop(self, property_name)
+            self._draw_property(col, property_name)
+        forces.sync_force_preview()
 
 
 class ContinuumFlowForceConstantNode(_ContinuumFlowBaseForceNode):
@@ -44,6 +44,7 @@ class ContinuumFlowForceConstantNode(_ContinuumFlowBaseForceNode):
     bl_width_min = 200.0
     bl_width_max = 320.0
     draw_property_names = ("fx", "fy", "fz")
+    animation_proxy_properties = draw_property_names
 
     fx: FloatProperty(name="Fx", default=0.0, description="Force in the x-direction", options={"ANIMATABLE"})  # type: ignore
     fy: FloatProperty(name="Fy", default=0.0, description="Force in the y-direction", options={"ANIMATABLE"})  # type: ignore
@@ -62,6 +63,7 @@ class ContinuumFlowForceSwirlNode(_ContinuumFlowBaseForceNode):
     bl_width_min = 200.0
     bl_width_max = 340.0
     draw_property_names = ("strength", "origin", "axis", "radius")
+    animation_proxy_properties = draw_property_names
 
     strength: FloatProperty(name="Strength", default=0.0, description="Strength of swirl", options={"ANIMATABLE"})  # type: ignore
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the swirl, flow will rotate about this point", options={"ANIMATABLE"})  # type: ignore
@@ -81,6 +83,7 @@ class ContinuumFlowForceTurbulenceNode(_ContinuumFlowBaseForceNode):
     bl_width_min = 200.0
     bl_width_max = 340.0
     draw_property_names = ("scale", "frequency", "amplitude", "seed")
+    animation_proxy_properties = ("amplitude",)
 
     scale: FloatProperty(name="Scale", default=1.0, min=0.0, description="Scale of turbulent force, bigger means more large scale fluctuations", options=set())  # type: ignore
     frequency: FloatProperty(name="Frequency", default=1.0, min=0.0, description="Frequency of turbulence, bigger means faster fluctuations", options=set())  # type: ignore
