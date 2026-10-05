@@ -626,7 +626,7 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    output_manager = output.OutputManager(
+    output_manager = output.create_output(
         context=context,
         output_config=output_cfg,
         grid_shape=shape,
@@ -1542,8 +1542,9 @@ def solver(config: dict):
             output_index += 1
             next_output_time += output_time_step
 
-            if output_manager.enabled:
-                output_manager.submit(
+            if output_manager["enabled"]:
+                output.submit_output(
+                    output_manager,
                     queue=queue,
                     frame=output_index,
                     index_tile_map=index_tile_map,
@@ -1591,7 +1592,7 @@ def solver(config: dict):
                 }
             )
 
-    output_manager.close()
+    output.close_output(output_manager)
 
     # ------------Conclusion-------------------
     if cancel_requested:
