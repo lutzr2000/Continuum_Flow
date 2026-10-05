@@ -6,6 +6,7 @@ from typing import Any
 from pathlib import Path
 from Solver.General.main import emit_message
 from Solver.Kernel import preview
+from Solver.Kernel import output
 import Solver.General.forces as forces
 
 import Solver.Kernel.kernel_config as kernel_config
@@ -625,6 +626,11 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
+    output_enabled = any(
+        bool((field_config or {}).get("enabled", False))
+        for field_config in (output_cfg.get("fields") or {}).values()
+    )
+    output_host_queue = cl.CommandQueue(context) if output_enabled else None
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1532,6 +1538,24 @@ def solver(config: dict):
         while t >= next_output_time:
             output_index += 1
             next_output_time += output_time_step
+
+            if output_enabled:
+                output_data = output.output_to_memory(
+                    queue=queue,
+                    host_queue=output_host_queue,
+                    output_config=output_cfg,
+                    index_tile_map=index_tile_map,
+                    tile_shape=tile_shape,
+                    used_pool_slots=next_pool_slot_value,
+                    u=u,
+                    v=v,
+                    w=w,
+                    pressure=p,
+                    temperature=temperature,
+                    smoke=smoke,
+                    fuel=fuel,
+                    flame=flame,
+                )
 
             preview.try_publish(
                 context=context,
