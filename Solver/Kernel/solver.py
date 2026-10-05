@@ -626,11 +626,14 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
-    output_enabled = any(
-        bool((field_config or {}).get("enabled", False))
-        for field_config in (output_cfg.get("fields") or {}).values()
+    output_manager = output.OutputManager(
+        context=context,
+        output_config=output_cfg,
+        grid_shape=shape,
+        tile_shape=tile_shape,
+        voxel_size=delta,
+        origin=origin,
     )
-    output_host_queue = cl.CommandQueue(context) if output_enabled else None
 
     # ------------time loop------------------
     print("Start time iteration")
@@ -1539,13 +1542,11 @@ def solver(config: dict):
             output_index += 1
             next_output_time += output_time_step
 
-            if output_enabled:
-                output_data = output.output_to_memory(
+            if output_manager.enabled:
+                output_manager.submit(
                     queue=queue,
-                    host_queue=output_host_queue,
-                    output_config=output_cfg,
+                    frame=output_index,
                     index_tile_map=index_tile_map,
-                    tile_shape=tile_shape,
                     used_pool_slots=next_pool_slot_value,
                     u=u,
                     v=v,
@@ -1589,6 +1590,8 @@ def solver(config: dict):
                     "vram_total_mb": total_vram / 1024**2,
                 }
             )
+
+    output_manager.close()
 
     # ------------Conclusion-------------------
     if cancel_requested:

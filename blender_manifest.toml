@@ -23,7 +23,8 @@ wheels = [
     "./wheels/trimesh-4.12.2-py3-none-any.whl",
     "./wheels/pyopencl-2026.1.4-cp313-cp313-win_amd64.whl",
     "./wheels/pytools-2026.1.1-py3-none-any.whl",
-    "./wheels/siphash24-1.9-cp313-cp313-win_amd64.whl"
+    "./wheels/siphash24-1.9-cp313-cp313-win_amd64.whl",
+    "./wheels/continuum_vdb_writer-0.3.0-cp313-cp313-win_amd64.whl"
 ]
 
 [permissions]
