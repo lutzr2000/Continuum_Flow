@@ -39,12 +39,12 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 420.0
     field_rows = (
-        ("export_velocity", "velocity"),
-        ("export_p", "pressure"),
-        ("export_t", "temperature"),
-        ("export_smoke", "density"),
-        ("export_fuel", "fuel"),
-        ("export_flame", "flame"),
+        ("export_velocity", "velocity", "velocity_field_name"),
+        ("export_p", "pressure", "pressure_field_name"),
+        ("export_t", "temperature", "temperature_field_name"),
+        ("export_smoke", "smoke", "smoke_field_name"),
+        ("export_fuel", "fuel", "fuel_field_name"),
+        ("export_flame", "flame", "flame_field_name"),
     )
 
     fps: IntProperty(name="FPS", default=24, min=1, soft_min=1, description="Output frame rate", options=set())  # type: ignore
@@ -68,9 +68,15 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     export_velocity: BoolProperty(name="velocity", default=False, options=set())  # type: ignore
     export_p: BoolProperty(name="pressure", default=False, options=set())  # type: ignore
     export_t: BoolProperty(name="temperature", default=False, options=set())  # type: ignore
-    export_smoke: BoolProperty(name="density", default=True, options=set())  # type: ignore
+    export_smoke: BoolProperty(name="smoke", default=True, options=set())  # type: ignore
     export_fuel: BoolProperty(name="fuel", default=False, options=set())  # type: ignore
     export_flame: BoolProperty(name="flame", default=True, options=set())  # type: ignore
+    velocity_field_name: StringProperty(name="Field Name", default="velocity", options=set())  # type: ignore
+    pressure_field_name: StringProperty(name="Field Name", default="pressure", options=set())  # type: ignore
+    temperature_field_name: StringProperty(name="Field Name", default="temperature", options=set())  # type: ignore
+    smoke_field_name: StringProperty(name="Field Name", default="density", options=set())  # type: ignore
+    fuel_field_name: StringProperty(name="Field Name", default="fuel", options=set())  # type: ignore
+    flame_field_name: StringProperty(name="Field Name", default="flame", options=set())  # type: ignore
     output_path: StringProperty(name="Path", default="", subtype="DIR_PATH", options=set())  # type: ignore
     last_bake_directory: StringProperty(default="", options={"HIDDEN"})  # type: ignore
 
@@ -107,9 +113,10 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     def update(self):
         self._sync_node()
 
-    def _draw_field_row(self, layout, export_attr, label=None):
+    def _draw_field_row(self, layout, export_attr, label, name_attr):
         row = layout.row(align=True)
         row.prop(self, export_attr, text=label)
+        row.prop(self, name_attr, text="")
 
     def _linked_simulation_node(self):
         socket = self.inputs.get("Result")
@@ -154,8 +161,8 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
 
         layout.separator()
 
-        for export_attr, label in self.field_rows:
-            self._draw_field_row(layout, export_attr, label)
+        for export_attr, label, name_attr in self.field_rows:
+            self._draw_field_row(layout, export_attr, label, name_attr)
 
         layout.separator()
 

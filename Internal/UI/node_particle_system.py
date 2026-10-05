@@ -45,10 +45,11 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
     )  # type: ignore
     velocity_transfer: FloatProperty(
         name="Velocity Transfer",
-        default=1.0,
-        min=-1.0,
-        max=1.0,
-        description="Amount of particle velocity transferred to the fluid, -1 means velocity opposite to movement",
+        default=100.0,
+        min=0.0,
+        soft_max=100.0,
+        subtype="PERCENTAGE",
+        description="Percentage of particle velocity transferred to the fluid",
     )  # type: ignore
 
     def _sync_node(self):

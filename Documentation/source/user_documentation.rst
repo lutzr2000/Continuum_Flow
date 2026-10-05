@@ -278,7 +278,7 @@ This node lets you first select an object and then a particle system belonging t
     Radius aroung each particle in which a voxel is considered a source.
 
 **Velocity Transfer**
-    How much of the particles velocity is transfered to the flow. Zero means no transfer, one means the flow has the same velocity as the particle. Negative one means velocity in the opposite direction.
+    Percentage of the particle velocity transferred to the flow. Values above 100% can be entered manually.
 
 
 Force-Constant

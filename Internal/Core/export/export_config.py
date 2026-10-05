@@ -571,8 +571,9 @@ def build_particle_system_entries(particle_system_nodes):
                 "particle_system_name": particle_system_name or None,
                 "radius": float(getattr(particle_node, "radius", 0.0)),
                 "velocity_transfer": float(
-                    getattr(particle_node, "velocity_transfer", 1.0)
-                ),
+                    getattr(particle_node, "velocity_transfer", 100.0)
+                )
+                / 100.0,
                 "particle_file": (
                     f"particles/{particle_file_name}"
                     if source_object is not None and particle_system_name
@@ -641,12 +642,30 @@ def build_output_node_entries(node):
         "fps": int(node.fps),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
-            "velocity": {"enabled": bool(getattr(node, "export_velocity", True))},
-            "pressure": {"enabled": bool(getattr(node, "export_p", False))},
-            "temperature": {"enabled": bool(getattr(node, "export_t", False))},
-            "smoke": {"enabled": bool(getattr(node, "export_smoke", False))},
-            "fuel": {"enabled": bool(getattr(node, "export_fuel", False))},
-            "flame": {"enabled": bool(getattr(node, "export_flame", False))},
+            "velocity": {
+                "enabled": bool(getattr(node, "export_velocity", True)),
+                "name": str(getattr(node, "velocity_field_name", "velocity")),
+            },
+            "pressure": {
+                "enabled": bool(getattr(node, "export_p", False)),
+                "name": str(getattr(node, "pressure_field_name", "pressure")),
+            },
+            "temperature": {
+                "enabled": bool(getattr(node, "export_t", False)),
+                "name": str(getattr(node, "temperature_field_name", "temperature")),
+            },
+            "smoke": {
+                "enabled": bool(getattr(node, "export_smoke", False)),
+                "name": str(getattr(node, "smoke_field_name", "density")),
+            },
+            "fuel": {
+                "enabled": bool(getattr(node, "export_fuel", False)),
+                "name": str(getattr(node, "fuel_field_name", "fuel")),
+            },
+            "flame": {
+                "enabled": bool(getattr(node, "export_flame", False)),
+                "name": str(getattr(node, "flame_field_name", "flame")),
+            },
         },
         "performance": {},
         "output_path": output_path,
@@ -788,7 +807,8 @@ def get_particle_system_nodes(node_tree):
                     str(getattr(node, "particle_system", "") or "") or None
                 ),
                 "radius": float(getattr(node, "radius", 0.0)),
-                "velocity_transfer": float(getattr(node, "velocity_transfer", 1.0)),
+                "velocity_transfer": float(getattr(node, "velocity_transfer", 100.0))
+                / 100.0,
             }
         )
     return entries

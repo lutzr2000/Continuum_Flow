@@ -139,6 +139,7 @@ def _writer_loop(state: dict[str, Any]) -> None:
                 origin=state["origin"],
                 compression=state["compression"],
                 precision=state["precision"],
+                field_names=state["field_names"],
             )
         except BaseException as exc:
             with state["error_lock"]:
@@ -178,6 +179,17 @@ def create_output(
         "output_path": Path(output_config.get("output_path") or "."),
         "compression": str(output_config.get("compression", "none")),
         "precision": str(output_config.get("precision", "float16")),
+        "field_names": {
+            name: str((configured_fields.get(name) or {}).get("name") or default)
+            for name, default in (
+                ("velocity", "velocity"),
+                ("pressure", "pressure"),
+                ("temperature", "temperature"),
+                ("smoke", "density"),
+                ("fuel", "fuel"),
+                ("flame", "flame"),
+            )
+        },
         "host_queue": cl.CommandQueue(context) if enabled else None,
         "free_slots": Queue(SNAPSHOT_SLOT_COUNT),
         "write_queue": Queue(SNAPSHOT_SLOT_COUNT),

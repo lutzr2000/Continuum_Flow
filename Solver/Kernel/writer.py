@@ -16,6 +16,7 @@ def write_snapshot(
     origin: tuple[float, float, float],
     compression: str,
     precision: str,
+    field_names: dict[str, str],
 ) -> None:
     if not fields:
         return
@@ -24,10 +25,8 @@ def write_snapshot(
     filepath = output_path / f"frame_{frame:06d}.vdb"
 
     grid_names = {
-        "smoke": "density",
-        "temperature": "temperature",
-        "pressure": "pressure",
-        "flame": "flame",
+        name: field_names[name]
+        for name in ("smoke", "temperature", "pressure", "fuel", "flame")
     }
 
     scalar_fields = {
@@ -39,7 +38,7 @@ def write_snapshot(
     vector_fields = {}
 
     if all(name in fields for name in ("u", "v", "w")):
-        vector_fields["velocity"] = (
+        vector_fields[field_names["velocity"]] = (
             fields["u"],
             fields["v"],
             fields["w"],
