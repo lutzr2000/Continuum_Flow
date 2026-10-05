@@ -44,6 +44,11 @@ def load_particle_sources(
                     dtype=FIELD_DTYPE,
                 ).reshape(-1, 3)
 
+                particle_ids = np.asarray(
+                    archive["particle_ids"],
+                    dtype=np.uint32,
+                )
+
                 sizes = np.asarray(
                     archive["sizes"],
                     dtype=FIELD_DTYPE,
@@ -80,6 +85,7 @@ def load_particle_sources(
                     "times": times,
                     "offsets": offsets,
                     "positions": positions,
+                    "particle_ids": particle_ids,
                     "sizes": sizes,
                     "velocities": velocities,
                     "current_positions_device": helper.device_array(
@@ -114,6 +120,7 @@ def load_particle_sources(
                     ),
                     "sample_time": None,
                     "sample_count": 0,
+                    "sample_frame_index": -1,
                     "loaded_frame_index": -1,
                     "radius": np.float32(
                         particle_input.get(
@@ -314,8 +321,12 @@ def particle_motion_samples(
                 np.float32(alpha),
             )
 
-        # At the first solver sample there is no path to sweep yet.
-        if entry["sample_time"] is None:
+        # At the first sample and after the compact particle layout changes,
+        # there is no valid index-wise path to sweep from the previous sample.
+        if (
+            entry["sample_time"] is None
+            or entry["sample_frame_index"] != entry["loaded_frame_index"]
+        ):
             previous_positions, current_positions = (
                 current_positions,
                 previous_positions,
@@ -341,6 +352,7 @@ def particle_motion_samples(
         entry["current_sample_positions_device"] = current_positions
 
         entry["sample_count"] = count
+        entry["sample_frame_index"] = entry["loaded_frame_index"]
         entry["previous_sample_count"] = previous_count
         entry["sample_time"] = time_value
 
@@ -413,17 +425,29 @@ def particle_frame(
                 entry["velocities"][current_start:current_end],
             )
 
-        if next_count:
+        if current_count:
+            current_ids = entry["particle_ids"][current_start:current_end]
+            next_ids = entry["particle_ids"][next_start:next_end]
+            next_indices = {particle_id: i for i, particle_id in enumerate(next_ids)}
+            next_positions = entry["positions"][current_start:current_end].copy()
+            next_velocities = entry["velocities"][current_start:current_end].copy()
+
+            for i, particle_id in enumerate(current_ids):
+                next_index = next_indices.get(particle_id)
+                if next_index is not None:
+                    next_positions[i] = entry["positions"][next_start + next_index]
+                    next_velocities[i] = entry["velocities"][next_start + next_index]
+
             cl.enqueue_copy(
                 queue,
                 entry["next_positions_device"],
-                entry["positions"][next_start:next_end],
+                next_positions,
             )
 
             cl.enqueue_copy(
                 queue,
                 entry["next_velocities_device"],
-                entry["velocities"][next_start:next_end],
+                next_velocities,
             )
 
         entry["loaded_frame_index"] = frame_index
@@ -444,7 +468,7 @@ def particle_frame(
 
     return (
         current_count,
-        next_count,
+        current_count,
         alpha,
     )
 

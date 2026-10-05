@@ -20,6 +20,7 @@ def export_particle_system_as_npz(
     times = []
     offsets = [0]
     positions = []
+    particle_ids = []
     sizes = []
     velocities = []
 
@@ -33,11 +34,12 @@ def export_particle_system_as_npz(
             times.append(float(frame - int(start_frame)) / float(max(1, fps)))
 
             if particle_system is not None:
-                for particle in particle_system.particles:
+                for particle_id, particle in enumerate(particle_system.particles):
                     if getattr(particle, "alive_state", "ALIVE") != "ALIVE":
                         continue
 
                     positions.append(tuple(float(value) for value in particle.location))
+                    particle_ids.append(particle_id)
                     sizes.append(float(particle.size))
                     velocities.append(
                         tuple(float(value) for value in particle.velocity)
@@ -54,6 +56,7 @@ def export_particle_system_as_npz(
         times=np.asarray(times, dtype=np.float32),
         offsets=np.asarray(offsets, dtype=np.uint64),
         positions=np.asarray(positions, dtype=np.float32).reshape((-1, 3)),
+        particle_ids=np.asarray(particle_ids, dtype=np.uint32),
         sizes=np.asarray(sizes, dtype=np.float32),
         velocities=np.asarray(velocities, dtype=np.float32).reshape((-1, 3)),
     )
