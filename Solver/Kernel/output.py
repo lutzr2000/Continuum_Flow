@@ -12,30 +12,10 @@ from Solver.Kernel import writer
 import Solver.Kernel.kernel_config as kernel_config
 
 WRITER_COUNT = 2
-SNAPSHOT_SLOT_COUNT = WRITER_COUNT + 1
-
-FIELDS = (
-    ("velocity", "u", kernel_config.FIELD_DTYPE),
-    ("velocity", "v", kernel_config.FIELD_DTYPE),
-    ("velocity", "w", kernel_config.FIELD_DTYPE),
-    ("pressure", "pressure", kernel_config.FIELD_DTYPE),
-    ("temperature", "temperature", kernel_config.FIELD_DTYPE),
-    ("smoke", "smoke", kernel_config.FIELD_DTYPE),
-    ("fuel", "fuel", np.uint8),
-    ("flame", "flame", kernel_config.FIELD_DTYPE),
-)
-CURRENT_WHEEL_FIELDS = frozenset(
-    {
-        "velocity",
-        "pressure",
-        "temperature",
-        "smoke",
-        "flame",
-    }
-)
+PINNED_MEMORY_SLOTS = WRITER_COUNT + 1
 
 
-def _pinned_array(
+def pinned_array(
     queue: cl.CommandQueue,
     shape: tuple[int, ...],
     dtype: Any,
@@ -59,18 +39,7 @@ def _pinned_array(
     return host_array, host_buffer
 
 
-def _create_slot() -> dict[str, Any]:
-    return {
-        "tile_map": None,
-        "fields": {},
-        "host_buffers": [],
-        "pool_capacity": 0,
-        "frame": 0,
-        "used_pool_slots": 0,
-    }
-
-
-def _ensure_capacity(
+def ensure_capacity(
     slot: dict[str, Any],
     host_queue: cl.CommandQueue,
     tile_shape: tuple[int, int, int],
@@ -80,7 +49,7 @@ def _ensure_capacity(
     required_pool_slots = max(1, int(required_pool_slots))
 
     if slot["tile_map"] is None:
-        slot["tile_map"], tile_buffer = _pinned_array(
+        slot["tile_map"], tile_buffer = pinned_array(
             host_queue,
             tile_shape,
             np.int32,
@@ -100,8 +69,8 @@ def _ensure_capacity(
         kernel_config.TILE_SIZE,
     )
 
-    for _config_name, field_name, dtype in field_specs:
-        host_array, host_buffer = _pinned_array(
+    for _, field_name, dtype in field_specs:
+        host_array, host_buffer = pinned_array(
             host_queue,
             pool_shape,
             dtype,
@@ -110,12 +79,6 @@ def _ensure_capacity(
         slot["host_buffers"].append(host_buffer)
 
     slot["pool_capacity"] = required_pool_slots
-
-
-def _raise_writer_error(state: dict[str, Any]) -> None:
-    with state["error_lock"]:
-        if state["errors"]:
-            raise RuntimeError("VDB writer failed") from state["errors"][0]
 
 
 def _writer_loop(state: dict[str, Any]) -> None:
@@ -162,9 +125,16 @@ def create_output(
 
     field_specs = tuple(
         spec
-        for spec in FIELDS
-        if spec[0] in CURRENT_WHEEL_FIELDS
-        and bool((configured_fields.get(spec[0]) or {}).get("enabled", False))
+        for spec in (
+            ("velocity", "u", kernel_config.FIELD_DTYPE),
+            ("velocity", "v", kernel_config.FIELD_DTYPE),
+            ("velocity", "w", kernel_config.FIELD_DTYPE),
+            ("pressure", "pressure", kernel_config.FIELD_DTYPE),
+            ("temperature", "temperature", kernel_config.FIELD_DTYPE),
+            ("smoke", "smoke", kernel_config.FIELD_DTYPE),
+            ("flame", "flame", kernel_config.FIELD_DTYPE),
+        )
+        if bool((configured_fields.get(spec[0]) or {}).get("enabled", False))
     )
 
     enabled = bool(field_specs)
@@ -191,8 +161,8 @@ def create_output(
             )
         },
         "host_queue": cl.CommandQueue(context) if enabled else None,
-        "free_slots": Queue(SNAPSHOT_SLOT_COUNT),
-        "write_queue": Queue(SNAPSHOT_SLOT_COUNT),
+        "free_slots": Queue(PINNED_MEMORY_SLOTS),
+        "write_queue": Queue(PINNED_MEMORY_SLOTS),
         "threads": [],
         "errors": [],
         "error_lock": Lock(),
@@ -202,8 +172,17 @@ def create_output(
     if not enabled:
         return state
 
-    for _ in range(SNAPSHOT_SLOT_COUNT):
-        state["free_slots"].put(_create_slot())
+    for _ in range(PINNED_MEMORY_SLOTS):
+        state["free_slots"].put(
+            {
+                "tile_map": None,
+                "fields": {},
+                "host_buffers": [],
+                "pool_capacity": 0,
+                "frame": 0,
+                "used_pool_slots": 0,
+            }
+        )
 
     for index in range(WRITER_COUNT):
         thread = Thread(
@@ -237,11 +216,9 @@ def submit_output(
     if not state["enabled"]:
         return
 
-    _raise_writer_error(state)
-
     slot = state["free_slots"].get()
 
-    _ensure_capacity(
+    ensure_capacity(
         slot,
         state["host_queue"],
         state["tile_shape"],
@@ -299,5 +276,3 @@ def close_output(state: dict[str, Any]) -> None:
 
     for thread in state["threads"]:
         thread.join()
-
-    _raise_writer_error(state)

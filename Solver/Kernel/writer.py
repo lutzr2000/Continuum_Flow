@@ -18,10 +18,6 @@ def write_snapshot(
     precision: str,
     field_names: dict[str, str],
 ) -> None:
-    if not fields:
-        return
-
-    output_path.mkdir(parents=True, exist_ok=True)
     filepath = output_path / f"frame_{frame:06d}.vdb"
 
     grid_names = {
