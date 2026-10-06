@@ -189,15 +189,6 @@ def take_snapshot():
         return None
 
 
-def allocated_bytes():
-    with lock:
-        return sum(
-            buffer.size
-            for buffer in (tile_lookup_buffer, fields_buffer, counter_buffer)
-            if buffer is not None
-        )
-
-
 def close():
     """Disable publication and release all solver-owned preview resources."""
     global enabled, snapshot_queue

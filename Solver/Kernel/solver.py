@@ -1590,12 +1590,6 @@ def solver(config: dict):
                 tile_size=kernel_config.TILE_SIZE,
             )
 
-            # ------------(V)RAM Track-------------------
-            allocated_vram = helper.opencl_buffer_bytes(*locals().values())
-            allocated_vram += preview.allocated_bytes()
-
-            total_vram = device.global_mem_size
-
             emit_message(
                 {
                     "type": "stats",
@@ -1605,8 +1599,6 @@ def solver(config: dict):
                     "active_cells": active_tile_count_value
                     * kernel_config.TILE_SIZE**3,
                     "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
-                    "vram_used_mb": allocated_vram / 1024**2,
-                    "vram_total_mb": total_vram / 1024**2,
                 }
             )
 
