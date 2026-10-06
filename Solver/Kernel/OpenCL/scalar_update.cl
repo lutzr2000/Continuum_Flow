@@ -7,6 +7,95 @@
 #include "noise.cl"
 
 
+inline void compute_combustion_sources(
+    const float T,
+    const float fuel_concentration,
+    const float oxygen_concentration,
+    const float fuel_gradient,
+    const float oxygen_gradient,
+    const float dt,
+    const float temperature_production_rate,
+    const float smoke_production_rate,
+    const float fuel_burn_rate,
+    const float fuel_ignition_temperature,
+    const float burn_noise_scale,
+    const float burn_noise_amplitude,
+    const int i,
+    const int j,
+    const int k,
+    __private float *temperature_source,
+    __private float *smoke_source,
+    __private float *fuel_source,
+    __private float *oxygen_source
+)
+{
+    const float ignition_width = 50.0f;
+    const float oxygen_per_fuel = 1.0f;
+    const float base_mixing = 0.20f;
+    const float interface_gain = 2.0f;
+    const float clean_smoke_yield = 0.10f;
+    const float dirty_smoke_yield = 1.50f;
+
+    const float F = clamp(fuel_concentration * 0.01f, 0.0f, 1.0f);
+    const float O = clamp(oxygen_concentration * 0.01f, 0.0f, 1.0f);
+    const float ignition = smoothstep(
+        fuel_ignition_temperature - ignition_width,
+        fuel_ignition_temperature + ignition_width,
+        T
+    );
+    const float interface_factor = clamp(
+        sqrt(fmax(fuel_gradient * oxygen_gradient, 0.0f)),
+        0.0f,
+        1.0f
+    );
+    const float mixing = clamp(
+        base_mixing + interface_gain * interface_factor,
+        0.0f,
+        1.0f
+    );
+    const float phi = F / fmax(O / oxygen_per_fuel, 1.0e-4f);
+    const float combustion_quality = exp(
+        -1.5f * fabs(log(fmax(phi, 1.0e-4f)))
+    );
+    const float noise = value_noise_3d(
+        (float)i * burn_noise_scale,
+        (float)j * burn_noise_scale,
+        (float)k * burn_noise_scale,
+        0
+    );
+    const float burn_noise = clamp(
+        1.0f + 0.20f * burn_noise_amplitude * noise,
+        0.75f,
+        1.25f
+    );
+    const float reactant_factor = sqrt(fmax(F * O, 0.0f));
+    const float reaction_rate =
+        fuel_burn_rate * reactant_factor * ignition * mixing * burn_noise;
+    float burned_fuel = fmax(
+        fmin(fmin(reaction_rate * dt, F), O / oxygen_per_fuel),
+        0.0f
+    );
+    const float fuel_consumed = burned_fuel * 100.0f;
+    const float oxygen_consumed =
+        burned_fuel * oxygen_per_fuel * 100.0f;
+    const float inv_dt = 1.0f / fmax(dt, 1.0e-6f);
+    const float heat_efficiency = mix(0.35f, 1.0f, combustion_quality);
+    const float oxygen_starvation = smoothstep(0.9f, 2.5f, phi);
+    const float soot_yield = mix(
+        clean_smoke_yield,
+        dirty_smoke_yield,
+        oxygen_starvation
+    );
+
+    *fuel_source = -fuel_consumed * inv_dt;
+    *oxygen_source = -oxygen_consumed * inv_dt;
+    *temperature_source =
+        temperature_production_rate * fuel_consumed * heat_efficiency * inv_dt;
+    *smoke_source =
+        smoke_production_rate * fuel_consumed * soot_yield * inv_dt;
+}
+
+
 __kernel void predict_scalar_fields_semi_lagrangian(
     __global const float *T,
     __global const float *smoke,
@@ -543,52 +632,6 @@ __kernel void update_scalar_fields_maccormack(
     // Combustion
     // ---------------------------------------------------------
 
-    // Work internally in normalized concentrations [0, 1].
-    const float F =
-        clamp(fuel_corrected * 0.01f, 0.0f, 1.0f);
-
-    const float O =
-        clamp(oxygen_corrected * 0.01f, 0.0f, 1.0f);
-
-
-    // ---------------------------------------------------------
-    // Artist / combustion constants
-    // ---------------------------------------------------------
-
-    // Width of the ignition transition in temperature units.
-    const float ignition_width = 50.0f;
-
-    // Oxygen required to burn one unit of fuel.
-    // 1.0 = equal normalized quantities.
-    const float oxygen_per_fuel = 1.0f;
-
-    // Even well-mixed hot gas may continue burning.
-    // Interface mixing adds extra combustion at the flame sheet.
-    const float base_mixing = 0.20f;
-    const float interface_gain = 2.0f;
-
-    // Smoke yield for clean vs. oxygen-starved combustion.
-    const float clean_smoke_yield = 0.10f;
-    const float dirty_smoke_yield = 1.50f;
-
-
-    // ---------------------------------------------------------
-    // Ignition
-    // ---------------------------------------------------------
-
-    // Smooth ignition instead of a hard temperature threshold.
-    //
-    // 0 below ignition region
-    // 1 above ignition region
-    //
-    const float ignition =
-        smoothstep(
-            fuel_ignition_temperature - ignition_width,
-            fuel_ignition_temperature + ignition_width,
-            T_corrected
-        );
-
-
     // ---------------------------------------------------------
     // Fuel neighborhood
     // ---------------------------------------------------------
@@ -740,215 +783,32 @@ __kernel void update_scalar_fields_maccormack(
         + fabs(O_zp - O_zm);
 
 
-    // Geometric mean:
-    // both gradients need to be present for a strong interface.
-    const float interface_factor =
-        clamp(
-            sqrt(fmax(grad_F * grad_O, 0.0f)),
-            0.0f,
-            1.0f
-        );
+    float temperature_burn_source;
+    float smoke_burn_source;
+    float fuel_burn_source;
+    float oxygen_burn_source;
 
-
-    // ---------------------------------------------------------
-    // Mixing
-    // ---------------------------------------------------------
-
-    const float mixing =
-        clamp(
-            base_mixing
-            + interface_gain * interface_factor,
-            0.0f,
-            1.0f
-        );
-
-
-    // ---------------------------------------------------------
-    // Mixture / combustion quality
-    // ---------------------------------------------------------
-
-    // phi:
-    //
-    // < 1  -> oxygen rich
-    // = 1  -> approximately stoichiometric
-    // > 1  -> fuel rich
-    //
-    const float phi =
-        F / fmax(O / oxygen_per_fuel, 1.0e-4f);
-
-
-    // Combustion efficiency peaks around phi = 1.
-    //
-    // This is deliberately an artistic approximation rather
-    // than detailed combustion chemistry.
-    //
-    const float log_phi =
-        log(fmax(phi, 1.0e-4f));
-
-    const float combustion_quality =
-        exp(-1.5f * fabs(log_phi));
-
-
-    // ---------------------------------------------------------
-    // Burn noise
-    // ---------------------------------------------------------
-
-    const float n =
-        value_noise_3d(
-            (float)i * burn_noise_scale,
-            (float)j * burn_noise_scale,
-            (float)k * burn_noise_scale,
-            0
-        );
-
-    // Keep noise subtle. It should perturb combustion rather
-    // than determine where combustion exists.
-    const float burn_noise =
-        clamp(
-            1.0f + 0.20f * burn_noise_amplitude * n,
-            0.75f,
-            1.25f
-        );
-
-
-    // ---------------------------------------------------------
-    // Reaction rate
-    // ---------------------------------------------------------
-
-    // Both reactants must exist.
-    //
-    // sqrt(F * O) is intentionally used instead of F * O.
-    // F * O tends to make low concentrations disappear too
-    // aggressively and produces very thin / weak flames.
-    //
-    const float reactant_factor =
-        sqrt(fmax(F * O, 0.0f));
-
-    float reaction_rate =
-        fuel_burn_rate
-        * reactant_factor
-        * ignition
-        * mixing
-        * burn_noise;
-
-
-    // ---------------------------------------------------------
-    // Stoichiometric limitation
-    // ---------------------------------------------------------
-
-    // reaction_rate is normalized fuel fraction / second.
-    //
-    // Determine how much fuel can actually burn during this
-    // timestep.
-    float burned_fuel =
-        reaction_rate * dt;
-
-
-    // Cannot consume more fuel than exists.
-    burned_fuel =
-        fmin(
-            burned_fuel,
-            F
-        );
-
-
-    // Cannot consume more oxygen than exists.
-    burned_fuel =
-        fmin(
-            burned_fuel,
-            O / oxygen_per_fuel
-        );
-
-
-    burned_fuel =
-        fmax(
-            burned_fuel,
-            0.0f
-        );
-
-
-    // Convert back from normalized [0,1] concentration to the
-    // solver's [0,100] concentration.
-    //
-    // These are actual changes over this timestep.
-    const float fuel_consumed =
-        burned_fuel * 100.0f;
-
-    const float oxygen_consumed =
-        burned_fuel
-        * oxygen_per_fuel
-        * 100.0f;
-
-
-    // Convert timestep consumption into source rates so that
-    // the existing:
-    //
-    //     field += dt * source
-    //
-    // update scheme can remain unchanged.
-    const float inv_dt =
-        1.0f / fmax(dt, 1.0e-6f);
-
-    float fuel_burn_source =
-        -fuel_consumed * inv_dt;
-
-    float oxygen_burn_source =
-        -oxygen_consumed * inv_dt;
-
-
-    // ---------------------------------------------------------
-    // Heat production
-    // ---------------------------------------------------------
-
-    // Clean / near-stoichiometric combustion releases the most
-    // useful heat.
-    //
-    // Keep a minimum contribution so rich flames do not become
-    // unnaturally cold immediately.
-    const float heat_efficiency =
-        mix(
-            0.35f,
-            1.0f,
-            combustion_quality
-        );
-
-    float temperature_burn_source =
-        temperature_production_rate
-        * fuel_consumed
-        * heat_efficiency
-        * inv_dt;
-
-
-    // ---------------------------------------------------------
-    // Smoke / soot production
-    // ---------------------------------------------------------
-
-    // Fuel-rich combustion produces considerably more soot.
-    //
-    // Start increasing soot around phi ~= 1 and approach dirty
-    // combustion for strongly fuel-rich mixtures.
-    const float oxygen_starvation =
-        smoothstep(
-            0.9f,
-            2.5f,
-            phi
-        );
-
-
-    // A little smoke is produced even by clean combustion,
-    // while oxygen-starved combustion becomes much dirtier.
-    const float soot_yield =
-        mix(
-            clean_smoke_yield,
-            dirty_smoke_yield,
-            oxygen_starvation
-        );
-
-    float smoke_burn_source =
-        smoke_production_rate
-        * fuel_consumed
-        * soot_yield
-        * inv_dt;
+    compute_combustion_sources(
+        T_corrected,
+        fuel_corrected,
+        oxygen_corrected,
+        grad_F,
+        grad_O,
+        dt,
+        temperature_production_rate,
+        smoke_production_rate,
+        fuel_burn_rate,
+        fuel_ignition_temperature,
+        burn_noise_scale,
+        burn_noise_amplitude,
+        i,
+        j,
+        k,
+        &temperature_burn_source,
+        &smoke_burn_source,
+        &fuel_burn_source,
+        &oxygen_burn_source
+    );
 
     // ---------------------------------------------------------
     // Dissipation
