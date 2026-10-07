@@ -228,8 +228,17 @@ The Source node defines where fluid, smoke, temperature, pressure and velocity a
 **Extra Pressure**
     Additional pressure created. Positive values push flow away, negative values suck the flow in.
 
+**Randomness Scale / Seed**
+    Define one shared, world-space gradient-noise field for the source.
+
+**Fuel / Smoke / Temperature / Extra Pressure Randomness**
+    Control how strongly the shared noise field modulates each source value from zero to one hundred percent.
+
 **World/local Space**
     In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.
+
+**Velocity Randomness**
+    Controls how strongly the shared source noise field modulates velocity from zero to one hundred percent.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.

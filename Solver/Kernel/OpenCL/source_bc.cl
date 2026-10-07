@@ -2,6 +2,8 @@
 #define TILE_SIZE 4
 #endif
 
+#include "noise.cl"
+
 __kernel void source_bc(
     __global float *u,
     __global float *v,
@@ -21,6 +23,16 @@ __kernel void source_bc(
     __global const float *velocity_x_field,
     __global const float *velocity_y_field,
     __global const float *velocity_z_field,
+    const float randomness_scale,
+    const int randomness_seed,
+    const float temperature_randomness,
+    const float smoke_randomness,
+    const float fuel_randomness,
+    const float velocity_randomness,
+    const float delta,
+    const float origin_x,
+    const float origin_y,
+    const float origin_z,
     const float dt,
     const int tiles_x,
     const int tiles_y,
@@ -67,6 +79,34 @@ __kernel void source_bc(
     if (!source_mask[index])
         return;
 
+    const int i = tile_i * TILE_SIZE + local_i;
+    const int j = tile_j * TILE_SIZE + local_j;
+    const int k = tile_k * TILE_SIZE + local_k;
+    float noise = 0.0f;
+    if (
+        temperature_randomness != 0.0f ||
+        smoke_randomness != 0.0f ||
+        fuel_randomness != 0.0f ||
+        velocity_randomness != 0.0f
+    )
+    {
+        noise = gradient_noise_3d(
+            origin_x + (float)i * delta,
+            origin_y + (float)j * delta,
+            origin_z + (float)k * delta,
+            randomness_seed,
+            randomness_scale
+        );
+    }
+    const float temperature_multiplier =
+        fmax(1.0f + noise * temperature_randomness, 0.0f);
+    const float smoke_multiplier =
+        fmax(1.0f + noise * smoke_randomness, 0.0f);
+    const float fuel_multiplier =
+        fmax(1.0f + noise * fuel_randomness, 0.0f);
+    const float velocity_multiplier =
+        fmax(1.0f + noise * velocity_randomness, 0.0f);
+
     float source_u;
     float source_v;
     float source_w;
@@ -84,6 +124,10 @@ __kernel void source_bc(
         source_w = velocity_z_value;
     }
 
+    source_u *= velocity_multiplier;
+    source_v *= velocity_multiplier;
+    source_w *= velocity_multiplier;
+
     if (
         source_u != 0.0f ||
         source_v != 0.0f ||
@@ -96,14 +140,14 @@ __kernel void source_bc(
     }
 
     T[index] = fmax(
-        temperature_value,
+        temperature_value * temperature_multiplier,
         0.0f
     );
 
     smoke[index] = fmin(
         fmax(
             smoke[index] +
-            smoke_value * dt,
+            smoke_value * smoke_multiplier * dt,
             0.0f
         ),
         100.0f
@@ -112,7 +156,7 @@ __kernel void source_bc(
     fuel[index] = convert_uchar_rte(
         clamp(
             (float)fuel[index] +
-            fuel_value * dt,
+            fuel_value * fuel_multiplier * dt,
             0.0f,
             255.0f
         )

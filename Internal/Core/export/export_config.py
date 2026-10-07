@@ -466,6 +466,15 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
+        "randomness_scale": float(getattr(node, "randomness_scale", 1.0)),
+        "randomness_seed": int(getattr(node, "randomness_seed", 0)),
+        "fuel_randomness": float(getattr(node, "fuel_randomness", 0.0)),
+        "smoke_randomness": float(getattr(node, "smoke_randomness", 0.0)),
+        "temperature_randomness": float(getattr(node, "temperature_randomness", 0.0)),
+        "extra_pressure_randomness": float(
+            getattr(node, "extra_pressure_randomness", 0.0)
+        ),
+        "velocity_randomness": float(getattr(node, "velocity_randomness", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": safe_float_vector(node.velocity),
         "animations": animations,

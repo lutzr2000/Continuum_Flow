@@ -3,6 +3,7 @@ from . import node_base
 from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
+from bpy.props import IntProperty
 
 
 class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
@@ -29,6 +30,13 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     smoke: FloatProperty(name="Smoke Emission", default=0.0, min=0.0, max=100.0, soft_min=0.0, soft_max=100.0, subtype="PERCENTAGE", description="How much smoke is emitted", options={"ANIMATABLE"})  # type: ignore
     temperature: FloatProperty(name="Temperature", default=300.0, min=0.0, max=2000.0, soft_min=0.0, soft_max=2000.0, unit="TEMPERATURE", description="Amount of temperature to spawn", options={"ANIMATABLE"})  # type: ignore
     extra_pressure: FloatProperty(name="Extra Pressure", default=0.0, precision=4, description="Additional pressure added in the source", options={"ANIMATABLE"})  # type: ignore
+    randomness_scale: FloatProperty(name="Scale", default=1.0, min=0.000001, unit="LENGTH", description="World-space scale of the source randomness field", options=set())  # type: ignore
+    randomness_seed: IntProperty(name="Seed", default=0, description="Seed of the source randomness field", options=set())  # type: ignore
+    fuel_randomness: FloatProperty(name="Fuel Randomness", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", options=set())  # type: ignore
+    smoke_randomness: FloatProperty(name="Smoke Randomness", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", options=set())  # type: ignore
+    temperature_randomness: FloatProperty(name="Temperature Randomness", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", options=set())  # type: ignore
+    extra_pressure_randomness: FloatProperty(name="Extra Pressure Randomness", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", options=set())  # type: ignore
+    velocity_randomness: FloatProperty(name="Velocity Randomness", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", options=set())  # type: ignore
     velocity_space: EnumProperty(
         name="Space",
         items=(
@@ -51,11 +59,19 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
 
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
+
+        randomness_col = layout.column(align=True)
+        randomness_col.label(text="Randomness")
+        randomness_col.prop(self, "randomness_scale")
+        randomness_col.prop(self, "randomness_seed")
+
         col = layout.column(align=True)
         for property_name in self.scalar_property_names:
             self._draw_property(col, property_name)
+            col.prop(self, f"{property_name}_randomness")
 
         velocity_col = layout.column(align=True)
         velocity_col.label(text="Velocity")
         velocity_col.prop(self, "velocity_space", text="")
+        velocity_col.prop(self, "velocity_randomness")
         self._draw_property(velocity_col, "velocity", text="")

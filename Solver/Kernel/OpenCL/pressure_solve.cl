@@ -2,6 +2,8 @@
 #define TILE_SIZE 4
 #endif
 
+#include "noise.cl"
+
 #include "sparse_managment.cl"
 
 __kernel void project_velocity_kernel(
@@ -765,6 +767,9 @@ __kernel void add_thermal_divergence(
 __kernel void add_source_extra_pressure(
     __global const uchar *source_mask,
     const float source_extra_pressure,
+    const float randomness_scale,
+    const int randomness_seed,
+    const float pressure_randomness,
     __global float *b,
     __global const int *index_tile_map,
     const float rho,
@@ -772,6 +777,10 @@ __kernel void add_source_extra_pressure(
     const int ny,
     const int nz,
     const float dt,
+    const float delta,
+    const float origin_x,
+    const float origin_y,
+    const float origin_z,
     const int tiles_x,
     const int tiles_y,
     const int tiles_z
@@ -830,7 +839,20 @@ __kernel void add_source_extra_pressure(
 
     if (source_mask[index])
     {
-        extra_pressure_term = source_extra_pressure;
+        float noise = 0.0f;
+        if (pressure_randomness != 0.0f)
+        {
+            noise = gradient_noise_3d(
+                origin_x + (float)i * delta,
+                origin_y + (float)j * delta,
+                origin_z + (float)k * delta,
+                randomness_seed,
+                randomness_scale
+            );
+        }
+        const float multiplier =
+            fmax(1.0f + noise * pressure_randomness, 0.0f);
+        extra_pressure_term = source_extra_pressure * multiplier;
     }
 
     b[index] -= (rho / dt) * extra_pressure_term;
