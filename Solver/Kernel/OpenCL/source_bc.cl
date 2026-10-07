@@ -149,10 +149,10 @@ __kernel void source_bc(
 
     fuel[index] = convert_uchar_rte(
         clamp(
-            (float)fuel[index] * (100.0f / 255.0f) +
+            (float)fuel[index] +
             fuel_value * scalar_multiplier * dt,
             0.0f,
-            100.0f
-        ) * (255.0f / 100.0f)
+            255.0f
+        )
     );
 }

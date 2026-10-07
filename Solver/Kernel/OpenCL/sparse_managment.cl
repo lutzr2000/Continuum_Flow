@@ -78,7 +78,7 @@ inline float get_pool_value_uint8(
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j)
         * TILE_SIZE + local_k;
 
-    return (float)field[index] * (100.0f / 255.0f);
+    return (float)field[index];
 }
 
 __kernel void build_activity_mask(
@@ -157,7 +157,7 @@ __kernel void build_activity_mask(
 
                 if (
                     smoke[index] >= threshold ||
-                    (float)fuel[index] * (100.0f / 255.0f) >= threshold ||
+                    (float)fuel[index] >= threshold ||
                     flame[index] >= threshold
                 )
                 {

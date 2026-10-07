@@ -33,7 +33,7 @@ def get_source_values(
     property_map = {
         "temperature": ("temperature", None, FIELD_DTYPE, 1.0),
         "smoke": ("smoke", None, FIELD_DTYPE, 1.0),
-        "fuel": ("fuel", None, FIELD_DTYPE, 1.0),
+        "fuel": ("fuel", None, FIELD_DTYPE, 2.55),  # convert from 0-100 to 0-255 range
         "noise_scale": ("noise_scale", None, FIELD_DTYPE, 1.0),
         "noise_amplitude": ("noise_amplitude", None, FIELD_DTYPE, 0.01),
         "noise_seed": ("noise_seed", None, np.int32, 1.0),

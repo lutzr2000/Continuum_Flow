@@ -11,8 +11,6 @@ inline void compute_combustion_sources(
     const float T,
     const float fuel_concentration,
     const float oxygen_concentration,
-    const float fuel_gradient,
-    const float oxygen_gradient,
     const float dt,
     const float temperature_production_rate,
     const float smoke_production_rate,
@@ -26,73 +24,30 @@ inline void compute_combustion_sources(
     __private float *temperature_source,
     __private float *smoke_source,
     __private float *fuel_source,
-    __private float *oxygen_source
+    __private float *oxygen_source,
+    __private float *flame_source
 )
 {
-    const float ignition_width = 50.0f; // Width of the temperature range over which ignition occurs.
-    const float oxygen_per_fuel = 1.0f; // used oxigen per burned fuel
-    const float base_mixing = 0.20f; // base burning withdout fuel and oxigen meeting
-    const float interface_gain = 2.0f; // how much the burning increases when fuel and oxigen meet
-    const float clean_smoke_yield = 0.50f; // yield of clean smoke
-    const float dirty_smoke_yield = 1.50f; // yield of dirty smoke
+    const float inv_dt = 1.0f / dt;
 
-    const float F = clamp(fuel_concentration * 0.01f, 0.0f, 1.0f);
-    const float O = clamp(oxygen_concentration * 0.01f, 0.0f, 1.0f);
-    const float ignition = smoothstep(
-        fuel_ignition_temperature - ignition_width,
-        fuel_ignition_temperature + ignition_width,
-        T
-    );
-    const float interface_factor = clamp(
-        sqrt(fmax(fuel_gradient * oxygen_gradient, 0.0f)),
-        0.0f,
-        1.0f
-    );
-    const float mixing = clamp(
-        base_mixing + interface_gain * interface_factor,
-        0.0f,
-        1.0f
-    );
-    const float phi = F / fmax(O / oxygen_per_fuel, 1.0e-4f);
-    const float combustion_quality = exp(
-        -1.5f * fabs(log(fmax(phi, 1.0e-4f)))
-    );
-    const float noise = value_noise_3d(
-        (float)i * burn_noise_scale,
-        (float)j * burn_noise_scale,
-        (float)k * burn_noise_scale,
-        0
-    );
-    const float burn_noise = clamp(
-        1.0f + 0.20f * burn_noise_amplitude * noise,
-        0.75f,
-        1.25f
-    );
-    const float reactant_factor = sqrt(fmax(F * O, 0.0f));
-    const float reaction_rate =
-        fuel_burn_rate * reactant_factor * ignition * mixing * burn_noise;
-    float burned_fuel = fmax(
-        fmin(fmin(reaction_rate * dt, F), O / oxygen_per_fuel),
-        0.0f
-    );
-    const float fuel_consumed = burned_fuel * 100.0f;
-    const float oxygen_consumed =
-        burned_fuel * oxygen_per_fuel * 100.0f;
-    const float inv_dt = 1.0f / fmax(dt, 1.0e-6f);
-    const float heat_efficiency = mix(0.35f, 1.0f, combustion_quality);
-    const float oxygen_starvation = smoothstep(0.9f, 2.5f, phi);
-    const float soot_yield = mix(
-        clean_smoke_yield,
-        dirty_smoke_yield,
-        oxygen_starvation
-    );
+    if (T > fuel_ignition_temperature)
+    {
+        float burn_factor = 1.0f;
 
-    *fuel_source = -fuel_consumed * inv_dt;
-    *oxygen_source = -oxygen_consumed * inv_dt;
-    *temperature_source =
-        temperature_production_rate * fuel_consumed * heat_efficiency * inv_dt;
-    *smoke_source =
-        smoke_production_rate * fuel_consumed * soot_yield * inv_dt;
+        *fuel_source = -fuel_burn_rate * burn_factor * inv_dt;
+        *smoke_source = smoke_production_rate * burn_factor * inv_dt;
+        *temperature_source = temperature_production_rate * burn_factor * inv_dt;
+        *oxygen_source = -fuel_burn_rate * burn_factor * inv_dt;
+        *flame_source = burn_factor * inv_dt;
+    }
+    else
+    {
+        *fuel_source = 0.0f;
+        *smoke_source = 0.0f;
+        *temperature_source = 0.0f;
+        *oxygen_source = 0.0f;
+        *flame_source = 0.0f;
+    }
 }
 
 
@@ -224,7 +179,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         fuel_x0, fuel_y0, fuel_z0,
         fuel_x1, fuel_y1, fuel_z1,
         fuel_tx, fuel_ty, fuel_tz,
-        100.0f, tiles_y, tiles_z
+        255.0f, tiles_y, tiles_z
     );
 
     const int index =
@@ -459,7 +414,7 @@ __kernel void update_scalar_fields_maccormack(
         oxygen_x0, oxygen_y0, oxygen_z0,
         oxygen_x1, oxygen_y1, oxygen_z1,
         oxygen_tx, oxygen_ty, oxygen_tz,
-        100.0f, tiles_y, tiles_z
+        255.0f, tiles_y, tiles_z
     );
 
 
@@ -477,11 +432,11 @@ __kernel void update_scalar_fields_maccormack(
 
     float fuel_corrected =
         fuel_advected
-        + 0.5f * ((float)fuel[index] * (100.0f / 255.0f) - fuel_reverse);
+        + 0.5f * ((float)fuel[index] - fuel_reverse);
 
     float oxygen_corrected =
         oxygen_advected
-        + 0.5f * ((float)oxygen[index] * (100.0f / 255.0f) - oxygen_reverse);
+        + 0.5f * ((float)oxygen[index] - oxygen_reverse);
 
 
     // ---------------------------------------------------------
@@ -592,7 +547,7 @@ __kernel void update_scalar_fields_maccormack(
         x1,
         y1,
         z1,
-        100.0f,
+        255.0f,
         tiles_y,
         tiles_z,
         &oxygen_lower,
@@ -632,168 +587,16 @@ __kernel void update_scalar_fields_maccormack(
     // Combustion
     // ---------------------------------------------------------
 
-    // ---------------------------------------------------------
-    // Fuel neighborhood
-    // ---------------------------------------------------------
-
-    const float F_xp =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i + 1, j, k,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float F_xm =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i - 1, j, k,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float F_yp =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i, j + 1, k,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float F_ym =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i, j - 1, k,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float F_zp =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i, j, k + 1,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float F_zm =
-        get_pool_value_uint8(
-            fuel,
-            index_tile_map,
-            i, j, k - 1,
-            0.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-
-    // ---------------------------------------------------------
-    // Oxygen neighborhood
-    // ---------------------------------------------------------
-
-    const float O_xp =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i + 1, j, k,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float O_xm =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i - 1, j, k,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float O_yp =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i, j + 1, k,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float O_ym =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i, j - 1, k,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float O_zp =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i, j, k + 1,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-    const float O_zm =
-        get_pool_value_uint8(
-            oxygen,
-            index_tile_map,
-            i, j, k - 1,
-            100.0f,
-            tiles_y,
-            tiles_z
-        ) * 0.01f;
-
-
-    // ---------------------------------------------------------
-    // Fuel / oxygen interface
-    // ---------------------------------------------------------
-
-    // Approximate gradient magnitudes.
-    //
-    // Strong gradients mean that fuel-rich and oxygen-rich gas
-    // are meeting here. This approximates unresolved mixing at
-    // the flame sheet.
-    //
-    const float grad_F =
-        fabs(F_xp - F_xm)
-        + fabs(F_yp - F_ym)
-        + fabs(F_zp - F_zm);
-
-    const float grad_O =
-        fabs(O_xp - O_xm)
-        + fabs(O_yp - O_ym)
-        + fabs(O_zp - O_zm);
-
-
     float temperature_burn_source;
     float smoke_burn_source;
     float fuel_burn_source;
     float oxygen_burn_source;
+    float flame_burn_source;
 
     compute_combustion_sources(
         T_corrected,
         fuel_corrected,
         oxygen_corrected,
-        grad_F,
-        grad_O,
         dt,
         temperature_production_rate,
         smoke_production_rate,
@@ -807,24 +610,17 @@ __kernel void update_scalar_fields_maccormack(
         &temperature_burn_source,
         &smoke_burn_source,
         &fuel_burn_source,
-        &oxygen_burn_source
+        &oxygen_burn_source,
+        &flame_burn_source
     );
 
     // ---------------------------------------------------------
     // Dissipation
     // ---------------------------------------------------------
 
-    const float dT =
-        T_corrected - t_reference;
-
-    const float cool_factor =
-        fabs(dT)
-        / (fabs(dT) + 200.0f);
-
     const float temperature_dissipation =
         -temperature_dissipation_rate
-        * dT
-        * cool_factor;
+        * (T_corrected - t_reference);
 
     const float smoke_dissipation =
         -smoke_dissipation_rate
@@ -873,16 +669,16 @@ __kernel void update_scalar_fields_maccormack(
         );
 
     fuel_out[index] = convert_uchar_rte(
-        clamp(fuel_updated, 0.0f, 100.0f) * (255.0f / 100.0f)
+        clamp(fuel_updated, 0.0f, 255.0f)
     );
 
     oxygen_out[index] = convert_uchar_rte(
-        clamp(oxygen_updated, 0.0f, 100.0f) * (255.0f / 100.0f)
+        clamp(oxygen_updated, 0.0f, 255.0f)
     );
 
     flame_out[index] =
         fmax(
-            -fuel_burn_source,
+            flame_burn_source,
             0.0f
         );
 }
