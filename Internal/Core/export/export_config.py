@@ -22,8 +22,6 @@ ANIMATABLE_PROPERTIES = {
         "fuel_dissipation",
         "fuel_burn_rate",
         "fuel_ignition_temperature",
-        "burn_noise_scale",
-        "burn_noise_amplitude",
         "vorticity",
     ),
     "CONTINUUM_FLOW_SOURCE_NODE": (
@@ -31,8 +29,6 @@ ANIMATABLE_PROPERTIES = {
         "smoke",
         "temperature",
         "extra_pressure",
-        "noise_scale",
-        "noise_amplitude",
         "velocity",
     ),
     "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
@@ -52,7 +48,6 @@ ANIMATABLE_PROPERTIES = {
         "axis",
         "radius",
     ),
-    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": ("amplitude",),
 }
 
 PERCENTAGE_MAPPING = {
@@ -64,7 +59,6 @@ PERCENTAGE_MAPPING = {
     "smoke_production_rate": (0.0, 1),
     "fuel_dissipation": (0.0, 10),
     "fuel_burn_rate": (0.0, 20.0),
-    "burn_noise_amplitude": (0.0, 1.0),
     "vorticity": (0.0, 1.0),
 }
 
@@ -422,10 +416,6 @@ def build_physics_node_entries(node, start_frame, end_frame, fps):
             "burn_rate": physics_value(node, "fuel_burn_rate"),
             "ignition_temperature": physics_value(node, "fuel_ignition_temperature"),
         },
-        "burning": {
-            "scale": physics_value(node, "burn_noise_scale"),
-            "amplitude": physics_value(node, "burn_noise_amplitude"),
-        },
         "extras": {
             "vorticity": physics_value(node, "vorticity"),
         },
@@ -471,10 +461,6 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
         "smoke": float(node.smoke),
         "temperature": float(node.temperature),
         "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
-        "source_noise": bool(getattr(node, "source_noise", False)),
-        "noise_scale": float(getattr(node, "noise_scale", 1.0)),
-        "noise_seed": int(getattr(node, "noise_seed", 0)),
-        "noise_amplitude": float(getattr(node, "noise_amplitude", 0.0)),
         "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
         "velocity": safe_float_vector(node.velocity),
         "animations": animations,
@@ -618,16 +604,6 @@ def build_force_entries(node, start_frame, end_frame, fps):
                 "origin": safe_float_vector(node.origin),
                 "axis": safe_float_vector(node.axis),
                 "radius": float(node.radius),
-            }
-        )
-
-    elif node.bl_idname == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
-        data.update(
-            {
-                "scale": float(node.scale),
-                "frequency": float(node.frequency),
-                "amplitude": float(node.amplitude),
-                "seed": int(node.seed),
             }
         )
 

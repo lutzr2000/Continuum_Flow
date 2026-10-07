@@ -111,37 +111,3 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
     swirl_nodes = np.asarray(swirl_nodes, dtype=np.float32).reshape((-1, 8))
 
     return swirl_nodes, swirl_nodes.shape[0] > 0
-
-
-def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
-    """
-    Pack turbulence-force nodes into the GPU input layout.
-
-    Each row contains the time-resolved amplitude followed by spatial scale,
-    temporal frequency, and random seed. The accompanying Boolean indicates
-    whether the packed array contains any nodes.
-    """
-    turbulence_nodes = []
-    animation_times = _get_animation_times(simulation)
-
-    for node in simulation.get("forces", []):
-        if node.get("node_type") != "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
-            continue
-
-        amplitude = get_animated_node_value(node, "amplitude", t, 0.0, animation_times)
-        scale = node.get("scale", 1.0)
-        frequency = node.get("frequency", 1.0)
-        seed = node.get("seed", 0)
-
-        turbulence_nodes.append(
-            [
-                amplitude,
-                scale,
-                frequency,
-                seed,
-            ]
-        )
-
-    turbulence_nodes = np.asarray(turbulence_nodes, dtype=np.float32).reshape((-1, 4))
-
-    return turbulence_nodes, turbulence_nodes.shape[0] > 0

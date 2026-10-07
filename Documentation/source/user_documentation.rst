@@ -8,7 +8,7 @@ In general, Continuum Flow's workflow is node-based. After installation, there w
 
 The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
-Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, swirl settings, and turbulence amplitude. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well. 
+Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well.
 
 Nodes
 -----
@@ -138,14 +138,6 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
-The following two settings control the random variation of combustion:
-
-**Scale**
-    Spatial scale of the randomness applied to the combustion process.
-
-**Amplitude**
-    Strength of the random modulation of the local fuel burn rate. Higher values produce greater spatial variation in combustion.
-
 **Vorticity**
     Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
     
@@ -236,18 +228,6 @@ The Source node defines where fluid, smoke, temperature, pressure and velocity a
 **Extra Pressure**
     Additional pressure created. Positive values push flow away, negative values suck the flow in.
 
-**Source Noise**
-    Activates random spatial variations of temperature, smoke emission, fuel emission, and extra pressure to create more dynamic flow. Source velocity is not affected.
-
-**Scale**
-    Scale of the random variation. Larger values produce broader variations.
-
-**Seed**
-    Random seed used to produce a repeatable source-noise pattern.
-
-**Amplitude**
-    Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.
-
 **World/local Space**
     In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.
 
@@ -298,28 +278,6 @@ Adds constant forcing to the whole domain.
 
 **Fz**
     Strength of the force in the z-direction.
-
-
-Force-Turbulence
-~~~~~~~~~~~~~~~~
-
-.. figure:: ../images/force_turbulence_node.jpg
-   :class: block-image-left
-   :width: 300px
-
-Adds turbulent forcing to the domain.
-
-**Scale**
-    Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.
-
-**Frequency**
-    How quickly the turbulence field alternates. Larger values alternate more quickly.
-
-**Amplitude**
-    Amplitude of the turbulence.
-
-**Seed**
-    Random seed for turbulence field generation.
 
 
 Force-Swirl

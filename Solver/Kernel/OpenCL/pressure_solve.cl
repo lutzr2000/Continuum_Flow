@@ -3,7 +3,6 @@
 #endif
 
 #include "sparse_managment.cl"
-#include "noise.cl"
 
 __kernel void project_velocity_kernel(
     __global float *u,
@@ -766,9 +765,6 @@ __kernel void add_thermal_divergence(
 __kernel void add_source_extra_pressure(
     __global const uchar *source_mask,
     const float source_extra_pressure,
-    const float noise_scale,
-    const float noise_amplitude,
-    const float noise_seed,
     __global float *b,
     __global const int *index_tile_map,
     const float rho,
@@ -834,32 +830,7 @@ __kernel void add_source_extra_pressure(
 
     if (source_mask[index])
     {
-        float scalar_multiplier = 1.0f;
-
-        if (noise_amplitude != 0.0f)
-        {
-            const float scale =
-                fmax(noise_scale, 1.0e-6f);
-
-            const float noise_value =
-                value_noise_3d(
-                    (float)i / scale,
-                    (float)j / scale,
-                    (float)k / scale,
-                    noise_seed
-                );
-
-            scalar_multiplier =
-                fmax(
-                    1.0f
-                    + noise_value * noise_amplitude,
-                    0.0f
-                );
-        }
-
-        extra_pressure_term =
-            source_extra_pressure
-            * scalar_multiplier;
+        extra_pressure_term = source_extra_pressure;
     }
 
     b[index] -= (rho / dt) * extra_pressure_term;

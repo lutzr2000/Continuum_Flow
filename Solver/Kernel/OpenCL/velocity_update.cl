@@ -163,10 +163,6 @@ __kernel void update_velocity_maccormack(
     const float origin_x,
     const float origin_y,
     const float origin_z,
-    const int has_turbulence_nodes,
-    __global const float *turbulence_config,
-    const int turbulence_count,
-    const float t,
     const float u_initial,
     const float v_initial,
     const float w_initial,
@@ -558,39 +554,6 @@ __kernel void update_velocity_maccormack(
         Fx += swirl_fx;
         Fy += swirl_fy;
         Fz += swirl_fz;
-    }
-
-
-    // Turbulence
-
-    if (
-        has_turbulence_nodes &&
-        turbulence_count > 0
-    )
-    {
-        float turb_fx;
-        float turb_fy;
-        float turb_fz;
-
-        apply_turbulence_forces(
-            turbulence_config,
-            turbulence_count,
-            i,
-            j,
-            k,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            t,
-            &turb_fx,
-            &turb_fy,
-            &turb_fz
-        );
-
-        Fx += turb_fx;
-        Fy += turb_fy;
-        Fz += turb_fz;
     }
 
 

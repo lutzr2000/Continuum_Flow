@@ -24,7 +24,6 @@ from .UI.node_domain import ContinuumFlowDomainNode
 from .UI.node_forces import (
     ContinuumFlowForceConstantNode,
     ContinuumFlowForceSwirlNode,
-    ContinuumFlowForceTurbulenceNode,
 )
 from .UI.node_geometry import ContinuumFlowGeometryNode
 from .UI.node_particle_system import ContinuumFlowParticleSystemNode
@@ -75,7 +74,6 @@ classes = (
     ContinuumFlowViewerNode,
     ContinuumFlowForceConstantNode,
     ContinuumFlowForceSwirlNode,
-    ContinuumFlowForceTurbulenceNode,
     ContinuumFlow_OT_add_basic_setup,
     ContinuumFlow_OT_viewer_toggle_domain,
     CONTINUUM_FLOW_OT_free_bake,

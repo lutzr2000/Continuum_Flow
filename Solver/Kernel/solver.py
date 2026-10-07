@@ -34,10 +34,6 @@ def get_source_values(
         "temperature": ("temperature", None, FIELD_DTYPE, 1.0),
         "smoke": ("smoke", None, FIELD_DTYPE, 1.0),
         "fuel": ("fuel", None, FIELD_DTYPE, 2.55),  # convert from 0-100 to 0-255 range
-        "noise_scale": ("noise_scale", None, FIELD_DTYPE, 1.0),
-        "noise_amplitude": ("noise_amplitude", None, FIELD_DTYPE, 0.01),
-        "noise_seed": ("noise_seed", None, np.int32, 1.0),
-        "noise_enabled": ("source_noise", None, np.bool_, 1.0),
         "velocity_x": ("velocity", 0, FIELD_DTYPE, 1.0),
         "velocity_y": ("velocity", 1, FIELD_DTYPE, 1.0),
         "velocity_z": ("velocity", 2, FIELD_DTYPE, 1.0),
@@ -65,7 +61,6 @@ def get_source_values(
                 value = value[component] if value is not None else 0.0
             values[value_name][source_idx] = np.asarray(value, dtype=dtype) * scale
 
-    values["noise_amplitude"][~values["noise_enabled"]] = 0.0
     values["velocity_local"] = np.asarray(
         [
             str(source.get("velocity_space", "WORLD")).upper() == "LOCAL"
@@ -99,7 +94,6 @@ def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any
             "burn_rate": "fuel_burn_rate",
             "ignition_temperature": "fuel_ignition_temperature",
         },
-        "burning": {"scale": "burn_noise_scale", "amplitude": "burn_noise_amplitude"},
         "extras": {"vorticity": "vorticity"},
     }
 
@@ -1120,9 +1114,6 @@ def solver(config: dict):
                 scratch_A,
                 scratch_B,
                 scratch_C,
-                np.float32(source_values["noise_scale"][source_idx]),
-                np.float32(source_values["noise_amplitude"][source_idx]),
-                np.int32(source_values["noise_seed"][source_idx]),
                 np.float32(dt),
                 np.int32(tile_shape[0]),
                 np.int32(tile_shape[1]),
@@ -1157,9 +1148,6 @@ def solver(config: dict):
                     scratch_A,
                     scratch_B,
                     scratch_C,
-                    np.float32(source_values["noise_scale"][source_idx]),
-                    np.float32(source_values["noise_amplitude"][source_idx]),
-                    np.int32(source_values["noise_seed"][source_idx]),
                     np.float32(dt),
                     np.int32(tile_shape[0]),
                     np.int32(tile_shape[1]),
@@ -1273,7 +1261,6 @@ def solver(config: dict):
         # ------------force params-------------------
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
-        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
 
         swirl_config_device = helper.to_device(
             context,
@@ -1285,18 +1272,7 @@ def solver(config: dict):
             ),
         )
 
-        turbulence_config_device = helper.to_device(
-            context,
-            np.ascontiguousarray(
-                np.asarray(
-                    turbulence_config,
-                    dtype=FIELD_DTYPE,
-                ).reshape((-1, 4))
-            ),
-        )
-
         swirl_count = len(swirl_config)
-        turbulence_count = len(turbulence_config)
         # ------------Velocity update-------------------
         sparse_managment.copy_pools(
             queue,
@@ -1370,10 +1346,6 @@ def solver(config: dict):
             np.float32(origin_x),
             np.float32(origin_y),
             np.float32(origin_z),
-            np.int32(has_turbulence_nodes),
-            turbulence_config_device,
-            np.int32(turbulence_count),
-            np.float32(t),
             np.float32(u_initial),
             np.float32(v_initial),
             np.float32(w_initial),
@@ -1406,9 +1378,6 @@ def solver(config: dict):
             dt,
             geometry_source_masks,
             particle_source_masks,
-            source_values["noise_scale"],
-            source_values["noise_amplitude"],
-            source_values["noise_seed"],
             source_values["extra_pressure"],
             delta,
             physics_values["fluid"]["density"],
@@ -1513,8 +1482,6 @@ def solver(config: dict):
             np.float32(physics_values["fuel"]["dissipation"]),
             np.float32(physics_values["fuel"]["burn_rate"]),
             np.float32(physics_values["fuel"]["ignition_temperature"]),
-            np.float32(physics_values["burning"]["scale"]),
-            np.float32(physics_values["burning"]["amplitude"]),
             np.float32(reference_temperature),
             index_tile_map,
             np.float32(u_initial),

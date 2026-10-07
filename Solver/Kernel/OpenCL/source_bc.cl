@@ -2,8 +2,6 @@
 #define TILE_SIZE 4
 #endif
 
-#include "noise.cl"
-
 __kernel void source_bc(
     __global float *u,
     __global float *v,
@@ -23,9 +21,6 @@ __kernel void source_bc(
     __global const float *velocity_x_field,
     __global const float *velocity_y_field,
     __global const float *velocity_z_field,
-    const float noise_scale,
-    const float noise_amplitude,
-    const int noise_seed,
     const float dt,
     const int tiles_x,
     const int tiles_y,
@@ -72,15 +67,6 @@ __kernel void source_bc(
     if (!source_mask[index])
         return;
 
-    const int i =
-        tile_i * TILE_SIZE + local_i;
-
-    const int j =
-        tile_j * TILE_SIZE + local_j;
-
-    const int k =
-        tile_k * TILE_SIZE + local_k;
-
     float source_u;
     float source_v;
     float source_w;
@@ -109,39 +95,15 @@ __kernel void source_bc(
         w[index] = source_w;
     }
 
-    float scalar_multiplier = 1.0f;
-
-    if (noise_amplitude != 0.0f)
-    {
-        const float scale =
-            fmax(noise_scale, 1.0e-6f);
-
-        const float noise_value =
-            value_noise_3d(
-                (float)i / scale,
-                (float)j / scale,
-                (float)k / scale,
-                noise_seed
-            );
-
-        scalar_multiplier = fmax(
-            1.0f +
-            noise_value * noise_amplitude,
-            0.0f
-        );
-    }
-
     T[index] = fmax(
-        temperature_value * scalar_multiplier,
+        temperature_value,
         0.0f
     );
 
     smoke[index] = fmin(
         fmax(
             smoke[index] +
-            smoke_value *
-            scalar_multiplier *
-            dt,
+            smoke_value * dt,
             0.0f
         ),
         100.0f
@@ -150,7 +112,7 @@ __kernel void source_bc(
     fuel[index] = convert_uchar_rte(
         clamp(
             (float)fuel[index] +
-            fuel_value * scalar_multiplier * dt,
+            fuel_value * dt,
             0.0f,
             255.0f
         )

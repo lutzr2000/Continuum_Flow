@@ -3,7 +3,6 @@
 #endif
 
 #include "sparse_managment.cl"
-#include "noise.cl"
 
 
 inline float buoyancy_approximation(
@@ -202,97 +201,5 @@ inline void apply_swirl_forces(
 
         *Fz +=
             strength * falloff * tz;
-    }
-}
-
-
-inline void apply_turbulence_forces(
-    __global const float *turbulence_config,
-    const int turbulence_count,
-    const int i,
-    const int j,
-    const int k,
-    const float delta,
-    const float origin_x,
-    const float origin_y,
-    const float origin_z,
-    const float t,
-    float *Fx,
-    float *Fy,
-    float *Fz
-)
-{
-    *Fx = 0.0f;
-    *Fy = 0.0f;
-    *Fz = 0.0f;
-
-    const float px =
-        origin_x + (float)i * delta;
-
-    const float py =
-        origin_y + (float)j * delta;
-
-    const float pz =
-        origin_z + (float)k * delta;
-
-    for (
-        int turb_idx = 0;
-        turb_idx < turbulence_count;
-        ++turb_idx
-    )
-    {
-        const int offset =
-            turb_idx * 4;
-
-        const float amplitude =
-            turbulence_config[offset + 0];
-
-        const float scale =
-            turbulence_config[offset + 1];
-
-        const float frequency =
-            turbulence_config[offset + 2];
-
-        const int seed =
-            (int)turbulence_config[offset + 3];
-
-        if (
-            amplitude == 0.0f ||
-            scale <= 1.0e-8f
-        )
-            continue;
-
-        const float inv_scale =
-            1.0f / scale;
-
-        const float time_offset =
-            t * frequency;
-
-        const float x =
-            px * inv_scale;
-
-        const float y =
-            py * inv_scale;
-
-        const float z =
-            pz * inv_scale +
-            time_offset;
-
-        const float noise_value =
-            value_noise_3d(
-                x,
-                y,
-                z,
-                seed
-            );
-
-        *Fx +=
-            amplitude * noise_value;
-
-        *Fy +=
-            amplitude * noise_value;
-
-        *Fz +=
-            amplitude * noise_value;
     }
 }

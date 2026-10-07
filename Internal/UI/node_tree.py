@@ -13,7 +13,7 @@ class ContinuumFlowNodeTree(bpy.types.NodeTree):
 
     bl_idname = NODE_TREE_ID
     bl_label = "Continuum Flow Nodes"
-    bl_icon = "FORCE_TURBULENCE"
+    bl_icon = "MOD_FLUIDSIM"
 
 
 class ContinuumFlowNodeCategory(NodeCategory):
@@ -57,7 +57,6 @@ def build_node_categories():
             items=[
                 NodeItem("CONTINUUM_FLOW_FORCE_CONSTANT_NODE"),
                 NodeItem("CONTINUUM_FLOW_FORCE_SWIRL_NODE"),
-                NodeItem("CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"),
             ],
         ),
         ContinuumFlowNodeCategory(
@@ -68,7 +67,7 @@ def build_node_categories():
                     draw=lambda _item, layout, _context: layout.operator(
                         "continuum_flow.add_basic_setup",
                         text="Basic Continuum Flow Setup",
-                        icon="FORCE_TURBULENCE",
+                        icon="MOD_FLUIDSIM",
                     ),
                 ),
             ],

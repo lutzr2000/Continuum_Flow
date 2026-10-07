@@ -4,7 +4,6 @@
 
 #include "sparse_managment.cl"
 #include "advection_schemes.cl"
-#include "noise.cl"
 
 
 inline void compute_combustion_sources(
@@ -15,11 +14,6 @@ inline void compute_combustion_sources(
     const float smoke_production_rate,
     const float fuel_burn_rate,
     const float fuel_ignition_temperature,
-    const float burn_noise_scale,
-    const float burn_noise_amplitude,
-    const int i,
-    const int j,
-    const int k,
     __private float *temperature_source,
     __private float *smoke_source,
     __private float *fuel_source,
@@ -202,8 +196,6 @@ __kernel void update_scalar_fields_maccormack(
     const float fuel_dissipation_rate,
     const float fuel_burn_rate,
     const float fuel_ignition_temperature,
-    const float burn_noise_scale,
-    const float burn_noise_amplitude,
     const float t_reference,
     __global const int *index_tile_map,
     const float u_initial,
@@ -526,11 +518,6 @@ __kernel void update_scalar_fields_maccormack(
         smoke_production_rate,
         fuel_burn_rate,
         fuel_ignition_temperature,
-        burn_noise_scale,
-        burn_noise_amplitude,
-        i,
-        j,
-        k,
         &temperature_burn_source,
         &smoke_burn_source,
         &fuel_burn_source,
