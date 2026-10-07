@@ -100,7 +100,6 @@ __kernel void build_coarse_tile_level(
     coarse_active_tiles[active_index + 1] = coarse_j;
     coarse_active_tiles[active_index + 2] = coarse_k;
 }
-
 inline float residual_sparse(
     __global const float *p,
     __global const float *b,
@@ -747,7 +746,7 @@ __kernel void rbgs_step_level_0(
     p[index] = center;
 }
 
-__kernel void pressure_poisson_neumann_x(
+__kernel void pressure_poisson_neumann(
     __global float *p,
     __global const int *index_tile_map,
     const int nx,
@@ -756,223 +755,76 @@ __kernel void pressure_poisson_neumann_x(
     const int tiles_y,
     const int tiles_z)
 {
-    const int j = get_global_id(0);
-    const int k = get_global_id(1);
+    const int boundary_index = get_global_id(0);
+    const int x_face_count = 2 * ny * nz;
+    const int y_face_count = 2 * max(nx - 2, 0) * nz;
+    const int z_face_count = 2 * max(nx - 2, 0) * max(ny - 2, 0);
+    const int boundary_cell_count =
+        x_face_count + y_face_count + z_face_count;
 
-    if (j >= ny || k >= nz)
+    if (boundary_index >= boundary_cell_count)
         return;
 
+    int i;
+    int j;
+    int k;
+
+    /* Assign every boundary cell to exactly one work-item. Edges belong to
+       the X faces and the remaining Z-face edges belong to the Y faces. */
+    if (boundary_index < x_face_count)
     {
-        const int i = 0;
-        const int tile_i = 0;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = k / TILE_SIZE;
-
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = 0;
-            const int local_j = j - tile_j * TILE_SIZE;
-            const int local_k = k - tile_k * TILE_SIZE;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                1, j, k,
-                0.0f,
-                tiles_y, tiles_z);
-        }
+        const int face_area = ny * nz;
+        const int face_index = boundary_index % face_area;
+        i = boundary_index < face_area ? 0 : nx - 1;
+        j = face_index / nz;
+        k = face_index - j * nz;
+    }
+    else if (boundary_index < x_face_count + y_face_count)
+    {
+        const int local_index = boundary_index - x_face_count;
+        const int face_area = (nx - 2) * nz;
+        const int face_index = local_index % face_area;
+        i = 1 + face_index / nz;
+        j = local_index < face_area ? 0 : ny - 1;
+        k = face_index - (i - 1) * nz;
+    }
+    else
+    {
+        const int local_index =
+            boundary_index - x_face_count - y_face_count;
+        const int face_area = (nx - 2) * (ny - 2);
+        const int face_index = local_index % face_area;
+        i = 1 + face_index / (ny - 2);
+        j = 1 + face_index - (i - 1) * (ny - 2);
+        k = local_index < face_area ? 0 : nz - 1;
     }
 
-    {
-        const int i = nx - 1;
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = k / TILE_SIZE;
+    const int tile_i = i / TILE_SIZE;
+    const int tile_j = j / TILE_SIZE;
+    const int tile_k = k / TILE_SIZE;
+    const int tile_map_index =
+        (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+    const int tile_index = index_tile_map[tile_map_index];
 
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = i - tile_i * TILE_SIZE;
-            const int local_j = j - tile_j * TILE_SIZE;
-            const int local_k = k - tile_k * TILE_SIZE;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                nx - 2, j, k,
-                0.0f,
-                tiles_y, tiles_z);
-        }
-    }
-}
-
-
-__kernel void pressure_poisson_neumann_y(
-    __global float *p,
-    __global const int *index_tile_map,
-    const int nx,
-    const int ny,
-    const int nz,
-    const int tiles_y,
-    const int tiles_z)
-{
-    const int i = get_global_id(0);
-    const int k = get_global_id(1);
-
-    if (i >= nx || k >= nz)
+    if (tile_index == -1)
         return;
 
-    {
-        const int j = 0;
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = 0;
-        const int tile_k = k / TILE_SIZE;
+    const int local_i = i - tile_i * TILE_SIZE;
+    const int local_j = j - tile_j * TILE_SIZE;
+    const int local_k = k - tile_k * TILE_SIZE;
+    const int index =
+        ((tile_index * TILE_SIZE + local_i)
+         * TILE_SIZE + local_j)
+         * TILE_SIZE + local_k;
 
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+    const int source_i = clamp(i, 1, nx - 2);
+    const int source_j = clamp(j, 1, ny - 2);
+    const int source_k = clamp(k, 1, nz - 2);
 
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = i - tile_i * TILE_SIZE;
-            const int local_j = 0;
-            const int local_k = k - tile_k * TILE_SIZE;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                i, 1, k,
-                0.0f,
-                tiles_y, tiles_z);
-        }
-    }
-
-    {
-        const int j = ny - 1;
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = k / TILE_SIZE;
-
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = i - tile_i * TILE_SIZE;
-            const int local_j = j - tile_j * TILE_SIZE;
-            const int local_k = k - tile_k * TILE_SIZE;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                i, ny - 2, k,
-                0.0f,
-                tiles_y, tiles_z);
-        }
-    }
+    p[index] = get_pool_value(
+        p, index_tile_map,
+        source_i, source_j, source_k,
+        0.0f,
+        tiles_y, tiles_z);
 }
 
-
-__kernel void pressure_poisson_neumann_z(
-    __global float *p,
-    __global const int *index_tile_map,
-    const int nx,
-    const int ny,
-    const int nz,
-    const int tiles_y,
-    const int tiles_z)
-{
-    const int i = get_global_id(0);
-    const int j = get_global_id(1);
-
-    if (i >= nx || j >= ny)
-        return;
-
-    {
-        const int k = 0;
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = 0;
-
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = i - tile_i * TILE_SIZE;
-            const int local_j = j - tile_j * TILE_SIZE;
-            const int local_k = 0;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                i, j, 1,
-                0.0f,
-                tiles_y, tiles_z);
-        }
-    }
-
-    {
-        const int k = nz - 1;
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = k / TILE_SIZE;
-
-        const int tile_map_index =
-            (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1)
-        {
-            const int local_i = i - tile_i * TILE_SIZE;
-            const int local_j = j - tile_j * TILE_SIZE;
-            const int local_k = k - tile_k * TILE_SIZE;
-
-            const int index =
-                ((tile_index * TILE_SIZE + local_i)
-                 * TILE_SIZE + local_j)
-                 * TILE_SIZE + local_k;
-
-            p[index] = get_pool_value(
-                p, index_tile_map,
-                i, j, nz - 2,
-                0.0f,
-                tiles_y, tiles_z);
-        }
-    }
-}
