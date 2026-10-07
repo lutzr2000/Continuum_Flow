@@ -165,6 +165,46 @@ def prepare_matrix_data(mesh_object: Any) -> Any:
     return times, matrices, rates
 
 
+def matrix_rates(times: Any, matrices: Any) -> Any:
+    """Build element-wise interpolation rates for a matrix time series."""
+    times = np.asarray(times)
+    matrices = np.asarray(matrices)
+
+    if len(matrices) <= 1:
+        return None
+
+    durations = np.diff(times)
+    deltas = np.diff(matrices, axis=0)
+    rates = np.zeros_like(deltas)
+    valid = durations > 0
+    rates[valid] = deltas[valid] / durations[valid, None, None]
+    return rates
+
+
+def make_matrix_data_relative(
+    times: Any,
+    matrices: Any,
+    reference_times: Any,
+    reference_matrices: Any,
+    reference_rates: Any,
+) -> Any:
+    """Express sampled world matrices in an animated reference-frame space."""
+    times = np.asarray(times)
+    matrices = np.asarray(matrices)
+    relative_matrices = np.empty_like(matrices)
+
+    for index, (time_value, matrix) in enumerate(zip(times, matrices)):
+        reference_matrix, _ = get_matrix_data(
+            reference_times,
+            reference_matrices,
+            reference_rates,
+            float(time_value),
+        )
+        relative_matrices[index] = np.linalg.solve(reference_matrix, matrix)
+
+    return times, relative_matrices, matrix_rates(times, relative_matrices)
+
+
 def get_matrix_data(times: Any, matrices: Any, rates: Any, time_value: float) -> Any:
     """
     Interpolate a world matrix and return its current element-wise rate.

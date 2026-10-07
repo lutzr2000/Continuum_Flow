@@ -243,6 +243,17 @@ def domain_bounds(domain_node):
     )
 
 
+def force_property_value(force_node, property_name):
+    """Read the value currently displayed in the node UI."""
+    from ..UI import animation_proxy
+
+    return animation_proxy.scene_proxy_value(
+        getattr(bpy.context, "scene", None),
+        force_node,
+        property_name,
+    )
+
+
 def ensure_turbulence_preview_shader():
     global turbulence_preview_shader
 
@@ -465,9 +476,9 @@ def build_constant_force_segments(force_node, simulation_node, domain_node):
 
     force_vector = Vector(
         (
-            float(force_node.fx),
-            float(force_node.fy),
-            float(force_node.fz),
+            float(force_property_value(force_node, "fx")),
+            float(force_property_value(force_node, "fy")),
+            float(force_property_value(force_node, "fz")),
         )
     )
 
@@ -520,14 +531,14 @@ def build_swirl_force_segments(
     if domain_node is None:
         return []
 
-    axis = Vector(force_node.axis)
+    axis = Vector(force_property_value(force_node, "axis"))
 
     if axis.length <= 1.0e-9:
         return []
 
     axis.normalize()
 
-    radius = float(force_node.radius)
+    radius = float(force_property_value(force_node, "radius"))
 
     if radius <= 0.0:
         return []
@@ -537,7 +548,7 @@ def build_swirl_force_segments(
     if axis_u is None or axis_v is None:
         return []
 
-    origin = Vector(force_node.origin)
+    origin = Vector(force_property_value(force_node, "origin"))
 
     box_min, box_max = domain_bounds(domain_node)
 
@@ -613,7 +624,7 @@ def build_swirl_force_segments(
             axis,
             axis_u,
             radius,
-            float(force_node.strength),
+            float(force_property_value(force_node, "strength")),
             size_scale,
         )
     )

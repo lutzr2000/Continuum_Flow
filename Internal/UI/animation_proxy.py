@@ -116,6 +116,15 @@ def draw_scene_proxy(layout, scene, node, property_name, text=None):
     )
 
 
+def scene_proxy_value(scene, node, property_name):
+    """Return the displayed proxy value without modifying the node data-block."""
+    if scene is not None:
+        key = node_proxy_key(node, property_name)
+        if key in scene:
+            return scene[key]
+    return getattr(node, property_name)
+
+
 def ensure_node_scene_proxies(scene, node):
     if scene is None:
         return
