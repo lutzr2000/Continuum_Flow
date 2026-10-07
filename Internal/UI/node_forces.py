@@ -3,6 +3,7 @@ from . import node_base
 from ..Core import forces
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
+from bpy.props import IntProperty
 
 
 class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
@@ -68,3 +69,19 @@ class ContinuumFlowForceSwirlNode(_ContinuumFlowBaseForceNode):
     origin: FloatVectorProperty(name="Origin", size=3, subtype="XYZ", default=(0.0, 0.0, 0.0), unit="LENGTH", description="Origin of the swirl, flow will rotate about this point", options={"ANIMATABLE"})  # type: ignore
     axis: FloatVectorProperty(name="Axis", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0), description="Axis of swirl, flow will rotate around this axis", options={"ANIMATABLE"})  # type: ignore
     radius: FloatProperty(name="Radius", default=1.0, min=0.0, unit="LENGTH", description="Radius until which the swirl is applied", options={"ANIMATABLE"})  # type: ignore
+
+
+class ContinuumFlowForceTurbulenceNode(_ContinuumFlowBaseForceNode):
+    bl_idname = "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"
+    bl_label = "Force Turbulence"
+    bl_icon = "FORCE_TURBULENCE"
+    bl_width_default = 220.0
+    bl_width_min = 200.0
+    bl_width_max = 340.0
+    draw_property_names = ("scale", "seed", "amplitude", "frequency")
+    animation_proxy_properties = ("amplitude",)
+
+    scale: FloatProperty(name="Scale", default=1.0, min=0.000001, unit="LENGTH", description="World-space scale of the turbulence field", options=set())  # type: ignore
+    seed: IntProperty(name="Seed", default=0, description="Seed of the turbulence field", options=set())  # type: ignore
+    amplitude: FloatProperty(name="Amplitude", default=1.0, min=0.0, description="Amplitude of the turbulence force", options={"ANIMATABLE"})  # type: ignore
+    frequency: FloatProperty(name="Frequency", default=3.0, min=0.000001, description="Frequency multiplier of the turbulence force", options=set())  # type: ignore

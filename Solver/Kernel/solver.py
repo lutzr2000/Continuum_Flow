@@ -1261,6 +1261,7 @@ def solver(config: dict):
         # ------------force params-------------------
         fx_const, fy_const, fz_const = forces.constant_force(simulation, t)
         swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
+        turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
 
         swirl_config_device = helper.to_device(
             context,
@@ -1272,7 +1273,18 @@ def solver(config: dict):
             ),
         )
 
+        turbulence_config_device = helper.to_device(
+            context,
+            np.ascontiguousarray(
+                np.asarray(
+                    turbulence_config,
+                    dtype=FIELD_DTYPE,
+                ).reshape((-1, 4))
+            ),
+        )
+
         swirl_count = len(swirl_config)
+        turbulence_count = len(turbulence_config)
         # ------------Velocity update-------------------
         sparse_managment.copy_pools(
             queue,
@@ -1346,6 +1358,9 @@ def solver(config: dict):
             np.float32(origin_x),
             np.float32(origin_y),
             np.float32(origin_z),
+            np.int32(has_turbulence_nodes),
+            turbulence_config_device,
+            np.int32(turbulence_count),
             np.float32(u_initial),
             np.float32(v_initial),
             np.float32(w_initial),

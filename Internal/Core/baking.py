@@ -240,13 +240,15 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                     simulation_node=self.simulation_node,
                 )
 
-            bake_directory = Path(self.bake_directory).resolve()
-            for temporary_directory_name in ("geometry", "particles"):
-                temporary_directory = bake_directory / temporary_directory_name
-                if temporary_directory.is_dir():
-                    shutil.rmtree(temporary_directory)
+            if self.bake_directory is not None:
+                bake_directory = Path(self.bake_directory).resolve()
+                for temporary_directory_name in ("geometry", "particles"):
+                    temporary_directory = bake_directory / temporary_directory_name
+                    if temporary_directory.is_dir():
+                        shutil.rmtree(temporary_directory)
 
-            self.output_node.last_bake_directory = str(self.output_directory)
+            if self.output_directory is not None:
+                self.output_node.last_bake_directory = str(self.output_directory)
             set_bake_progress(0, 0)
             clear_status_progress(bpy.context)
 

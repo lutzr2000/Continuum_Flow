@@ -42,6 +42,7 @@ ANIMATABLE_PROPERTIES = {
         "fy",
         "fz",
     ),
+    "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": ("amplitude",),
     "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
         "strength",
         "origin",
@@ -144,7 +145,7 @@ def export_particle_system_npzs(config_dict, export_directory):
     timeline = simulation.get("animation_timeline") or {}
     start_frame = int(settings.get("start_frame", 1))
     end_frame = int(settings.get("end_frame", start_frame))
-    fps = max(1, int(timeline.get("fps", 24)))
+    fps = max(1.0, float(timeline.get("fps", 24.0)))
     particle_dir = Path(export_directory) / "particles"
     seen = set()
 
@@ -192,14 +193,14 @@ def build_config_dict(context, simulation_node):
             "node_tree_name": node_tree.name,
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
         },
-        "simulation": build_entries(simulation_node),
+        "simulation": build_entries(simulation_node, context),
         "geometry_nodes": get_geometry_nodes(node_tree),
         "particle_system_nodes": get_particle_system_nodes(node_tree),
     }
     return config_dict
 
 
-def build_entries(simulation_node):
+def build_entries(simulation_node, context):
     """
     Build a grouped config for the connected nodes
     """
@@ -264,7 +265,11 @@ def build_entries(simulation_node):
 
     start_frame = int(getattr(simulation_node, "start_frame", 1))
     end_frame = int(getattr(simulation_node, "end_frame", start_frame + 1))
-    simulation_fps = max(1, int(getattr(output_node, "fps", 24)))
+    scene = getattr(context, "scene", None)
+    render = getattr(scene, "render", None)
+    scene_fps = float(getattr(render, "fps", 24.0))
+    scene_fps_base = max(float(getattr(render, "fps_base", 1.0)), 1.0e-9)
+    simulation_fps = max(scene_fps / scene_fps_base, 1.0)
     simulation_length = float(end_frame - start_frame) / float(simulation_fps)
     simulation_times = [
         float(frame - int(start_frame)) / float(simulation_fps)
@@ -604,6 +609,16 @@ def build_force_entries(node, start_frame, end_frame, fps):
                 "origin": safe_float_vector(node.origin),
                 "axis": safe_float_vector(node.axis),
                 "radius": float(node.radius),
+            }
+        )
+
+    elif node.bl_idname == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+        data.update(
+            {
+                "scale": float(node.scale),
+                "seed": int(node.seed),
+                "amplitude": float(node.amplitude),
+                "frequency": float(node.frequency),
             }
         )
 

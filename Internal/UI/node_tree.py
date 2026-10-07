@@ -57,6 +57,7 @@ def build_node_categories():
             items=[
                 NodeItem("CONTINUUM_FLOW_FORCE_CONSTANT_NODE"),
                 NodeItem("CONTINUUM_FLOW_FORCE_SWIRL_NODE"),
+                NodeItem("CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"),
             ],
         ),
         ContinuumFlowNodeCategory(

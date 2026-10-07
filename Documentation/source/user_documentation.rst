@@ -280,6 +280,24 @@ Adds constant forcing to the whole domain.
     Strength of the force in the z-direction.
 
 
+Force-Turbulence
+~~~~~~~~~~~~~~~~
+
+Adds gradient-noise forcing to the domain.
+
+**Scale**
+    Spatial scale of the turbulence field in world units, independent of grid resolution.
+
+**Seed**
+    Seed used to generate the turbulence field.
+
+**Amplitude**
+    Strength applied to the generated noise value.
+
+**Frequency**
+    Controls the animated ``sin(time * frequency)`` force multiplier.
+
+
 Force-Swirl
 ~~~~~~~~~~~
 

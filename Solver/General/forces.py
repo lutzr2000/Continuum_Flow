@@ -1,4 +1,5 @@
 from typing import Any
+import math
 
 import numpy as np
 
@@ -111,3 +112,28 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
     swirl_nodes = np.asarray(swirl_nodes, dtype=np.float32).reshape((-1, 8))
 
     return swirl_nodes, swirl_nodes.shape[0] > 0
+
+
+def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
+    turbulence_nodes = []
+    animation_times = _get_animation_times(simulation)
+
+    for node in simulation.get("forces", []):
+        if node.get("node_type") != "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+            continue
+
+        amplitude = get_animated_node_value(node, "amplitude", t, 0.0, animation_times)
+        frequency = max(abs(float(node.get("frequency", 1.0))), 1.0e-6)
+
+        turbulence_nodes.append(
+            [
+                amplitude,
+                node.get("scale", 1.0),
+                node.get("seed", 0),
+                math.sin(float(t) * frequency),
+            ]
+        )
+
+    turbulence_nodes = np.asarray(turbulence_nodes, dtype=np.float32).reshape((-1, 4))
+
+    return turbulence_nodes, turbulence_nodes.shape[0] > 0

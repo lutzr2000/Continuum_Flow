@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 from . import viewer
 from . import reference_frame
 
@@ -10,6 +11,10 @@ from mathutils import Vector
 
 draw_handler = None
 current_drawn_force = None
+turbulence_preview_shader = None
+SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"
+TURBULENCE_VERTEX_SHADER_PATH = SHADER_DIRECTORY / "turbulence_preview.vert"
+TURBULENCE_FRAGMENT_SHADER_PATH = SHADER_DIRECTORY / "turbulence_preview.frag"
 
 
 # -------------- general ----------------
@@ -71,6 +76,7 @@ def selected_force_node():
             if getattr(node, "bl_idname", "") not in {
                 "CONTINUUM_FLOW_FORCE_CONSTANT_NODE",
                 "CONTINUUM_FLOW_FORCE_SWIRL_NODE",
+                "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE",
             }:
                 continue
             yield node
@@ -174,6 +180,10 @@ def draw_force_preview():
         gpu.state.blend_set("NONE")
         return
 
+    if force_type == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
+        draw_turbulence_force_preview(force_node, simulation_node, domain_node)
+        return
+
 
 # -------------- helper ----------------
 def get_linked_simulation_node(force_node):
@@ -231,6 +241,126 @@ def domain_bounds(domain_node):
         (-0.5 * width, -0.5 * depth, 0.0),
         (0.5 * width, 0.5 * depth, height),
     )
+
+
+def ensure_turbulence_preview_shader():
+    global turbulence_preview_shader
+
+    if turbulence_preview_shader is not None:
+        return turbulence_preview_shader
+
+    interface = gpu.types.GPUStageInterfaceInfo(
+        "continuum_flow_turbulence_preview_interface"
+    )
+    interface.smooth("VEC3", "noise_position")
+
+    info = gpu.types.GPUShaderCreateInfo()
+    info.push_constant("MAT4", "view_projection_matrix")
+    info.push_constant("FLOAT", "scale")
+    info.push_constant("FLOAT", "animation_factor")
+    info.push_constant("INT", "seed")
+    info.vertex_in(0, "VEC3", "position")
+    info.vertex_in(1, "VEC3", "coordinate")
+    info.vertex_out(interface)
+    info.fragment_out(0, "VEC4", "frag_color")
+    info.vertex_source(TURBULENCE_VERTEX_SHADER_PATH.read_text(encoding="utf-8"))
+    info.fragment_source(TURBULENCE_FRAGMENT_SHADER_PATH.read_text(encoding="utf-8"))
+    turbulence_preview_shader = gpu.shader.create_from_info(info)
+
+    return turbulence_preview_shader
+
+
+def turbulence_plane(simulation_node, domain_node):
+    if simulation_node is None or domain_node is None:
+        return []
+
+    region_data = getattr(bpy.context, "region_data", None)
+    if region_data is None:
+        return []
+
+    view_direction = region_data.view_rotation @ Vector((0.0, 0.0, -1.0))
+    model_matrix = reference_frame.display_matrix(simulation_node)
+    local_view_direction = model_matrix.inverted_safe().to_3x3() @ view_direction
+
+    if local_view_direction.length <= 1.0e-9:
+        return []
+
+    axis = max(range(3), key=lambda index: abs(local_view_direction[index]))
+    box_min, box_max = domain_bounds(domain_node)
+    x0, y0, z0 = box_min
+    x1, y1, z1 = box_max
+    cx = (x0 + x1) * 0.5
+    cy = (y0 + y1) * 0.5
+    cz = (z0 + z1) * 0.5
+
+    if axis == 0:
+        return [
+            Vector((cx, y0, z0)),
+            Vector((cx, y1, z0)),
+            Vector((cx, y1, z1)),
+            Vector((cx, y0, z1)),
+        ]
+
+    if axis == 1:
+        return [
+            Vector((x0, cy, z0)),
+            Vector((x0, cy, z1)),
+            Vector((x1, cy, z1)),
+            Vector((x1, cy, z0)),
+        ]
+
+    return [
+        Vector((x0, y0, cz)),
+        Vector((x1, y0, cz)),
+        Vector((x1, y1, cz)),
+        Vector((x0, y1, cz)),
+    ]
+
+
+def draw_turbulence_force_preview(force_node, simulation_node, domain_node):
+    local_positions = turbulence_plane(simulation_node, domain_node)
+    if len(local_positions) < 3:
+        return
+
+    region_data = getattr(bpy.context, "region_data", None)
+    if region_data is None:
+        return
+
+    model_matrix = reference_frame.display_matrix(simulation_node)
+    world_positions = [tuple(model_matrix @ position) for position in local_positions]
+    noise_coordinates = [tuple(position) for position in local_positions]
+    indices = [(0, index, index + 1) for index in range(1, len(local_positions) - 1)]
+
+    shader = ensure_turbulence_preview_shader()
+    batch = batch_for_shader(
+        shader,
+        "TRIS",
+        {
+            "position": world_positions,
+            "coordinate": noise_coordinates,
+        },
+        indices=indices,
+    )
+    frequency = max(abs(float(force_node.frequency)), 1.0e-6)
+    scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    scene_fps = float(getattr(render, "fps", 24.0))
+    scene_fps_base = max(float(getattr(render, "fps_base", 1.0)), 1.0e-9)
+    fps = max(scene_fps / scene_fps_base, 1.0)
+    start_frame = float(getattr(simulation_node, "start_frame", 1.0))
+    current_frame = float(getattr(scene, "frame_current", start_frame))
+    time_value = (current_frame - start_frame) / fps
+    animation_factor = math.sin(time_value * frequency)
+
+    gpu.state.blend_set("NONE")
+    gpu.state.depth_test_set("LESS_EQUAL")
+    shader.bind()
+    shader.uniform_float("view_projection_matrix", region_data.perspective_matrix)
+    shader.uniform_float("scale", float(force_node.scale))
+    shader.uniform_float("animation_factor", animation_factor)
+    shader.uniform_int("seed", int(force_node.seed))
+    batch.draw(shader)
+    gpu.state.depth_test_set("NONE")
 
 
 def arrow_segments(start, end, head_size):

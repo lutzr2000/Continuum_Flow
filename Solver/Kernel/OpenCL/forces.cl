@@ -3,6 +3,7 @@
 #endif
 
 #include "sparse_managment.cl"
+#include "noise.cl"
 
 
 inline float buoyancy_approximation(
@@ -202,4 +203,45 @@ inline void apply_swirl_forces(
         *Fz +=
             strength * falloff * tz;
     }
+}
+
+
+inline void apply_turbulence_forces(
+    __global const float *turbulence_config,
+    const int turbulence_count,
+    const int i,
+    const int j,
+    const int k,
+    const float delta,
+    const float origin_x,
+    const float origin_y,
+    const float origin_z,
+    float *Fx,
+    float *Fy,
+    float *Fz
+)
+{
+    float force = 0.0f;
+
+    for (int index = 0; index < turbulence_count; ++index)
+    {
+        const int offset = index * 4;
+        const float amplitude = turbulence_config[offset];
+        const float scale = turbulence_config[offset + 1];
+        const int seed = convert_int_rte(turbulence_config[offset + 2]);
+        const float frequency_factor = turbulence_config[offset + 3];
+        const float noise = gradient_noise_3d(
+            origin_x + (float)i * delta,
+            origin_y + (float)j * delta,
+            origin_z + (float)k * delta,
+            seed,
+            scale
+        );
+
+        force = mad(amplitude * frequency_factor, noise, force);
+    }
+
+    *Fx = force;
+    *Fy = force;
+    *Fz = force;
 }
