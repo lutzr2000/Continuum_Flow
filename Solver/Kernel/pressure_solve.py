@@ -170,23 +170,38 @@ def pressure_poisson_multigrid(
         np.int32(tile_shape[2]),
     )
 
+    pressure_solve_kernels["add_thermal_divergence"](
+        queue,
+        global_work_size,
+        local_work_size,
+        T,
+        np.float32(expansion_rate),
+        np.float32(t_reference),
+        b,
+        index_tile_map,
+        np.float32(rho),
+        np.float32(dt),
+        np.int32(nx),
+        np.int32(ny),
+        np.int32(nz),
+        np.int32(tile_shape[0]),
+        np.int32(tile_shape[1]),
+        np.int32(tile_shape[2]),
+    )
+
     for source_idx, source_mask in enumerate(geometry_source_masks):
-        pressure_solve_kernels["add_artifical_divergence"](
+        pressure_solve_kernels["add_source_extra_pressure"](
             queue,
             global_work_size,
             local_work_size,
-            T,
             source_mask,
             np.float32(extra_pressure[source_idx]),
             np.float32(source_noise_scales[source_idx]),
             np.float32(source_noise_amplitudes[source_idx]),
             np.float32(source_noise_seeds[source_idx]),
-            np.float32(expansion_rate),
-            np.float32(t_reference),
             b,
             index_tile_map,
             np.float32(rho),
-            np.float32(delta),
             np.int32(nx),
             np.int32(ny),
             np.int32(nz),
@@ -197,22 +212,18 @@ def pressure_poisson_multigrid(
         )
 
     for source_idx, source_mask in enumerate(particle_source_masks):
-        pressure_solve_kernels["add_artifical_divergence"](
+        pressure_solve_kernels["add_source_extra_pressure"](
             queue,
             global_work_size,
             local_work_size,
-            T,
             source_mask,
             np.float32(extra_pressure[source_idx]),
             np.float32(source_noise_scales[source_idx]),
             np.float32(source_noise_amplitudes[source_idx]),
             np.float32(source_noise_seeds[source_idx]),
-            np.float32(expansion_rate),
-            np.float32(t_reference),
             b,
             index_tile_map,
             np.float32(rho),
-            np.float32(delta),
             np.int32(nx),
             np.int32(ny),
             np.int32(nz),

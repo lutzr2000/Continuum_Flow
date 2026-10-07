@@ -691,19 +691,87 @@ __kernel void subtract_rhs_mean_kernel(
 }
 
 
-__kernel void add_artifical_divergence(
+__kernel void add_thermal_divergence(
     __global const float *T,
-    __global const uchar *source_mask,
-    const float source_extra_pressure,
-    const float noise_scale,
-    const float noise_amplitude,
-    const float noise_seed,
     const float expansion_rate,
     const float t_reference,
     __global float *b,
     __global const int *index_tile_map,
     const float rho,
-    const float delta,
+    const float dt,
+    const int nx,
+    const int ny,
+    const int nz,
+    const int tiles_x,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const int tile_i = get_group_id(0);
+    const int tile_j = get_group_id(1);
+    const int tile_k = get_group_id(2);
+
+    const int local_i = get_local_id(0);
+    const int local_j = get_local_id(1);
+    const int local_k = get_local_id(2);
+
+    if (
+        tile_i >= tiles_x ||
+        tile_j >= tiles_y ||
+        tile_k >= tiles_z
+    )
+        return;
+
+    const int tile_map_index =
+        (tile_i * tiles_y + tile_j)
+        * tiles_z + tile_k;
+
+    const int tile_index =
+        index_tile_map[tile_map_index];
+
+    if (tile_index == -1)
+        return;
+
+    const int i =
+        tile_i * TILE_SIZE + local_i;
+
+    const int j =
+        tile_j * TILE_SIZE + local_j;
+
+    const int k =
+        tile_k * TILE_SIZE + local_k;
+
+    if (
+        i < 1 ||
+        j < 1 ||
+        k < 1 ||
+        i >= nx - 1 ||
+        j >= ny - 1 ||
+        k >= nz - 1
+    )
+        return;
+
+    const int index =
+        ((tile_index * TILE_SIZE + local_i)
+        * TILE_SIZE + local_j)
+        * TILE_SIZE + local_k;
+
+    b[index] -=
+        (rho / dt)
+        * expansion_rate
+        * (T[index] - t_reference);
+}
+
+
+__kernel void add_source_extra_pressure(
+    __global const uchar *source_mask,
+    const float source_extra_pressure,
+    const float noise_scale,
+    const float noise_amplitude,
+    const float noise_seed,
+    __global float *b,
+    __global const int *index_tile_map,
+    const float rho,
     const int nx,
     const int ny,
     const int nz,
@@ -762,10 +830,6 @@ __kernel void add_artifical_divergence(
         * TILE_SIZE + local_j)
         * TILE_SIZE + local_k;
 
-    const float thermal_divergence =
-        expansion_rate
-        * (T[index] - t_reference);
-
     float extra_pressure_term = 0.0f;
 
     if (source_mask[index])
@@ -794,15 +858,9 @@ __kernel void add_artifical_divergence(
         }
 
         extra_pressure_term =
-            (1.0f / dt)
-            * source_extra_pressure
+            source_extra_pressure
             * scalar_multiplier;
     }
 
-    b[index] -=
-        (rho / delta)
-        * (
-            thermal_divergence
-            + extra_pressure_term
-        );
+    b[index] -= (rho / dt) * extra_pressure_term;
 }

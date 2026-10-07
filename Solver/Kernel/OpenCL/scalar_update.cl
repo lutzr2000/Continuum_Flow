@@ -29,12 +29,12 @@ inline void compute_combustion_sources(
     __private float *oxygen_source
 )
 {
-    const float ignition_width = 50.0f;
-    const float oxygen_per_fuel = 1.0f;
-    const float base_mixing = 0.20f;
-    const float interface_gain = 2.0f;
-    const float clean_smoke_yield = 0.10f;
-    const float dirty_smoke_yield = 1.50f;
+    const float ignition_width = 50.0f; // Width of the temperature range over which ignition occurs.
+    const float oxygen_per_fuel = 1.0f; // used oxigen per burned fuel
+    const float base_mixing = 0.20f; // base burning withdout fuel and oxigen meeting
+    const float interface_gain = 2.0f; // how much the burning increases when fuel and oxigen meet
+    const float clean_smoke_yield = 0.50f; // yield of clean smoke
+    const float dirty_smoke_yield = 1.50f; // yield of dirty smoke
 
     const float F = clamp(fuel_concentration * 0.01f, 0.0f, 1.0f);
     const float O = clamp(oxygen_concentration * 0.01f, 0.0f, 1.0f);
