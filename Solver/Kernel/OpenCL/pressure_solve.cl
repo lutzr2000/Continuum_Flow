@@ -850,8 +850,10 @@ __kernel void add_source_extra_pressure(
                 randomness_scale
             );
         }
-        const float multiplier =
-            fmax(1.0f + noise * pressure_randomness, 0.0f);
+        const float multiplier = noise_amplitude_multiplier(
+            noise,
+            pressure_randomness
+        );
         extra_pressure_term = source_extra_pressure * multiplier;
     }
 

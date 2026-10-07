@@ -98,14 +98,23 @@ __kernel void source_bc(
             randomness_scale
         );
     }
-    const float temperature_multiplier =
-        fmax(1.0f + noise * temperature_randomness, 0.0f);
-    const float smoke_multiplier =
-        fmax(1.0f + noise * smoke_randomness, 0.0f);
-    const float fuel_multiplier =
-        fmax(1.0f + noise * fuel_randomness, 0.0f);
-    const float velocity_multiplier =
-        fmax(1.0f + noise * velocity_randomness, 0.0f);
+    // Reuse this source's one procedural sample for every emitted field.
+    const float temperature_multiplier = noise_amplitude_multiplier(
+        noise,
+        temperature_randomness
+    );
+    const float smoke_multiplier = noise_amplitude_multiplier(
+        noise,
+        smoke_randomness
+    );
+    const float fuel_multiplier = noise_amplitude_multiplier(
+        noise,
+        fuel_randomness
+    );
+    const float velocity_multiplier = noise_amplitude_multiplier(
+        noise,
+        velocity_randomness
+    );
 
     float source_u;
     float source_v;

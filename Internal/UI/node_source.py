@@ -60,18 +60,22 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
 
-        randomness_col = layout.column(align=True)
-        randomness_col.label(text="Randomness")
+        randomness_box = layout.box()
+        randomness_col = randomness_box.column(align=True)
+        randomness_col.label(text="Noise Settings")
         randomness_col.prop(self, "randomness_scale")
         randomness_col.prop(self, "randomness_seed")
 
-        col = layout.column(align=True)
         for property_name in self.scalar_property_names:
-            self._draw_property(col, property_name)
-            col.prop(self, f"{property_name}_randomness")
+            box = layout.box()
+            col = box.column(align=True)
+            col.label(text=property_name.replace("_", " ").title())
+            self._draw_property(col, property_name, text="Value")
+            col.prop(self, f"{property_name}_randomness", text="Randomness")
 
-        velocity_col = layout.column(align=True)
+        velocity_box = layout.box()
+        velocity_col = velocity_box.column(align=True)
         velocity_col.label(text="Velocity")
         velocity_col.prop(self, "velocity_space", text="")
-        velocity_col.prop(self, "velocity_randomness")
+        velocity_col.prop(self, "velocity_randomness", text="Randomness")
         self._draw_property(velocity_col, "velocity", text="")

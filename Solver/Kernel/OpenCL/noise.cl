@@ -124,3 +124,13 @@ inline float gradient_noise_3d(
 
     return mad(w, nxy1 - nxy0, nxy0) * 0.70710678118f;
 }
+
+
+inline float noise_amplitude_multiplier(
+    const float noise,
+    const float amplitude
+)
+{
+    // An amplitude of 0.5 varies the configured value by up to +/-50%.
+    return fmax(1.0f + noise * amplitude, 0.0f);
+}

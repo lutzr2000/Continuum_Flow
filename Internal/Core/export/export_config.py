@@ -462,21 +462,31 @@ def build_source_node_entries(node, start_frame, end_frame, fps):
 
     return {
         "node_name": node.name,
-        "fuel": float(node.fuel),
-        "smoke": float(node.smoke),
-        "temperature": float(node.temperature),
-        "extra_pressure": float(getattr(node, "extra_pressure", 0.0)),
-        "randomness_scale": float(getattr(node, "randomness_scale", 1.0)),
-        "randomness_seed": int(getattr(node, "randomness_seed", 0)),
-        "fuel_randomness": float(getattr(node, "fuel_randomness", 0.0)),
-        "smoke_randomness": float(getattr(node, "smoke_randomness", 0.0)),
-        "temperature_randomness": float(getattr(node, "temperature_randomness", 0.0)),
-        "extra_pressure_randomness": float(
-            getattr(node, "extra_pressure_randomness", 0.0)
-        ),
-        "velocity_randomness": float(getattr(node, "velocity_randomness", 0.0)),
-        "velocity_space": str(getattr(node, "velocity_space", "WORLD")),
-        "velocity": safe_float_vector(node.velocity),
+        "noise": {
+            "scale": float(getattr(node, "randomness_scale", 1.0)),
+            "seed": int(getattr(node, "randomness_seed", 0)),
+        },
+        "fuel": {
+            "value": float(node.fuel),
+            "randomness": float(getattr(node, "fuel_randomness", 0.0)),
+        },
+        "smoke": {
+            "value": float(node.smoke),
+            "randomness": float(getattr(node, "smoke_randomness", 0.0)),
+        },
+        "temperature": {
+            "value": float(node.temperature),
+            "randomness": float(getattr(node, "temperature_randomness", 0.0)),
+        },
+        "extra_pressure": {
+            "value": float(getattr(node, "extra_pressure", 0.0)),
+            "randomness": float(getattr(node, "extra_pressure_randomness", 0.0)),
+        },
+        "velocity": {
+            "value": safe_float_vector(node.velocity),
+            "space": str(getattr(node, "velocity_space", "WORLD")),
+            "randomness": float(getattr(node, "velocity_randomness", 0.0)),
+        },
         "animations": animations,
         "animated_values": animated_values,
         **build_geometry_entries(

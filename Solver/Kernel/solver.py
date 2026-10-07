@@ -31,36 +31,55 @@ def get_source_values(
     source_entries = simulation.get("sources") or []
     animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
     property_map = {
-        "temperature": ("temperature", None, FIELD_DTYPE, 1.0),
-        "smoke": ("smoke", None, FIELD_DTYPE, 1.0),
-        "fuel": ("fuel", None, FIELD_DTYPE, 2.55),  # convert from 0-100 to 0-255 range
-        "randomness_scale": ("randomness_scale", None, FIELD_DTYPE, 1.0),
-        "randomness_seed": ("randomness_seed", None, np.int32, 1.0),
-        "temperature_randomness": ("temperature_randomness", None, FIELD_DTYPE, 0.01),
-        "smoke_randomness": ("smoke_randomness", None, FIELD_DTYPE, 0.01),
-        "fuel_randomness": ("fuel_randomness", None, FIELD_DTYPE, 0.01),
-        "velocity_randomness": ("velocity_randomness", None, FIELD_DTYPE, 0.01),
-        "extra_pressure_randomness": (
-            "extra_pressure_randomness",
+        "temperature": ("temperature", "value", None, FIELD_DTYPE, 1.0),
+        "smoke": ("smoke", "value", None, FIELD_DTYPE, 1.0),
+        "fuel": (
+            "fuel",
+            "value",
+            None,
+            FIELD_DTYPE,
+            2.55,
+        ),  # convert from 0-100 to 0-255 range
+        "randomness_scale": ("noise", "scale", None, FIELD_DTYPE, 1.0),
+        "randomness_seed": ("noise", "seed", None, np.int32, 1.0),
+        "temperature_randomness": (
+            "temperature",
+            "randomness",
             None,
             FIELD_DTYPE,
             0.01,
         ),
-        "velocity_x": ("velocity", 0, FIELD_DTYPE, 1.0),
-        "velocity_y": ("velocity", 1, FIELD_DTYPE, 1.0),
-        "velocity_z": ("velocity", 2, FIELD_DTYPE, 1.0),
-        "extra_pressure": ("extra_pressure", None, FIELD_DTYPE, 1.0),
+        "smoke_randomness": ("smoke", "randomness", None, FIELD_DTYPE, 0.01),
+        "fuel_randomness": ("fuel", "randomness", None, FIELD_DTYPE, 0.01),
+        "velocity_randomness": ("velocity", "randomness", None, FIELD_DTYPE, 0.01),
+        "extra_pressure_randomness": (
+            "extra_pressure",
+            "randomness",
+            None,
+            FIELD_DTYPE,
+            0.01,
+        ),
+        "velocity_x": ("velocity", "value", 0, FIELD_DTYPE, 1.0),
+        "velocity_y": ("velocity", "value", 1, FIELD_DTYPE, 1.0),
+        "velocity_z": ("velocity", "value", 2, FIELD_DTYPE, 1.0),
+        "extra_pressure": ("extra_pressure", "value", None, FIELD_DTYPE, 1.0),
     }
     values = {
         name: np.zeros(len(source_entries), dtype=dtype)
-        for name, (_, _, dtype, _) in property_map.items()
+        for name, (_, _, _, dtype, _) in property_map.items()
     }
 
-    for value_name, (property_name, component, dtype, scale) in property_map.items():
+    for value_name, (
+        section_name,
+        property_name,
+        component,
+        dtype,
+        scale,
+    ) in property_map.items():
         for source_idx, source_entry in enumerate(source_entries):
-            value = source_entry.get(property_name, 0.0)
+            value = (source_entry.get(section_name) or {}).get(property_name, 0.0)
             animation_values = (
-                (source_entry.get("animations") or {}).get(property_name) or {}
+                (source_entry.get("animations") or {}).get(section_name) or {}
             ).get("values") or ()
             sample_count = min(len(animation_times), len(animation_values))
             if sample_count > 0:
@@ -75,7 +94,7 @@ def get_source_values(
 
     values["velocity_local"] = np.asarray(
         [
-            str(source.get("velocity_space", "WORLD")).upper() == "LOCAL"
+            str((source.get("velocity") or {}).get("space", "WORLD")).upper() == "LOCAL"
             for source in source_entries
         ],
         dtype=np.bool_,
