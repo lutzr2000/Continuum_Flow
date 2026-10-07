@@ -10,7 +10,6 @@
 inline void compute_combustion_sources(
     const float T,
     const float fuel_concentration,
-    const float oxygen_concentration,
     const float dt,
     const float temperature_production_rate,
     const float smoke_production_rate,
@@ -24,7 +23,6 @@ inline void compute_combustion_sources(
     __private float *temperature_source,
     __private float *smoke_source,
     __private float *fuel_source,
-    __private float *oxygen_source,
     __private float *flame_source
 )
 {
@@ -37,7 +35,6 @@ inline void compute_combustion_sources(
         *fuel_source = -fuel_burn_rate * burn_factor * inv_dt;
         *smoke_source = smoke_production_rate * burn_factor * inv_dt;
         *temperature_source = temperature_production_rate * burn_factor * inv_dt;
-        *oxygen_source = -fuel_burn_rate * burn_factor * inv_dt;
         *flame_source = burn_factor * inv_dt;
     }
     else
@@ -45,7 +42,6 @@ inline void compute_combustion_sources(
         *fuel_source = 0.0f;
         *smoke_source = 0.0f;
         *temperature_source = 0.0f;
-        *oxygen_source = 0.0f;
         *flame_source = 0.0f;
     }
 }
@@ -55,7 +51,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     __global const float *T,
     __global const float *smoke,
     __global const uchar *fuel,
-    __global const uchar *oxygen,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -63,7 +58,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     __global float *predictor_T,
     __global float *predictor_smoke,
     __global float *predictor_fuel,
-    __global float *predictor_oxygen,
     const float delta,
     const int n_substeps,
     const float t_reference,
@@ -143,7 +137,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     float sampled_T;
     float sampled_smoke;
     float sampled_fuel;
-    float sampled_oxygen;
 
     int fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1, fuel_z1;
     float fuel_tx, fuel_ty, fuel_tz;
@@ -174,14 +167,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         fuel_tx, fuel_ty, fuel_tz,
         0.0f, tiles_y, tiles_z
     );
-    sampled_oxygen = sample_trilinear_inner_sparse_uint8(
-        oxygen, index_tile_map,
-        fuel_x0, fuel_y0, fuel_z0,
-        fuel_x1, fuel_y1, fuel_z1,
-        fuel_tx, fuel_ty, fuel_tz,
-        255.0f, tiles_y, tiles_z
-    );
-
     const int index =
         ((tile_index * TILE_SIZE + local_i)
         * TILE_SIZE + local_j)
@@ -190,7 +175,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     predictor_T[index] = sampled_T;
     predictor_smoke[index] = sampled_smoke;
     predictor_fuel[index] = sampled_fuel;
-    predictor_oxygen[index] = sampled_oxygen;
 }
 
 
@@ -198,11 +182,9 @@ __kernel void update_scalar_fields_maccormack(
     __global const float *T,
     __global const float *smoke,
     __global const uchar *fuel,
-    __global const uchar *oxygen,
     __global const float *predictor_T,
     __global const float *predictor_smoke,
     __global const float *predictor_fuel,
-    __global const float *predictor_oxygen,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -210,7 +192,6 @@ __kernel void update_scalar_fields_maccormack(
     __global float *T_out,
     __global float *smoke_out,
     __global uchar *fuel_out,
-    __global uchar *oxygen_out,
     __global float *flame_out,
     const float delta,
     const int n_substeps,
@@ -366,10 +347,6 @@ __kernel void update_scalar_fields_maccormack(
     const float fuel_advected =
         predictor_fuel[index];
 
-    const float oxygen_advected =
-        predictor_oxygen[index];
-
-
     // ---------------------------------------------------------
     // Reverse sample
     // ---------------------------------------------------------
@@ -377,7 +354,6 @@ __kernel void update_scalar_fields_maccormack(
     float T_reverse;
     float smoke_reverse;
     float fuel_reverse;
-    float oxygen_reverse;
 
     sample_trilinear_vec3_sparse(
         predictor_T,
@@ -400,24 +376,6 @@ __kernel void update_scalar_fields_maccormack(
         &fuel_reverse
     );
 
-    int oxygen_x0, oxygen_y0, oxygen_z0;
-    int oxygen_x1, oxygen_y1, oxygen_z1;
-    float oxygen_tx, oxygen_ty, oxygen_tz;
-    prepare_trilinear_coords(
-        x_forward, y_forward, z_forward, nx, ny, nz,
-        &oxygen_x0, &oxygen_y0, &oxygen_z0,
-        &oxygen_x1, &oxygen_y1, &oxygen_z1,
-        &oxygen_tx, &oxygen_ty, &oxygen_tz
-    );
-    oxygen_reverse = sample_trilinear_inner_sparse(
-        predictor_oxygen, index_tile_map,
-        oxygen_x0, oxygen_y0, oxygen_z0,
-        oxygen_x1, oxygen_y1, oxygen_z1,
-        oxygen_tx, oxygen_ty, oxygen_tz,
-        255.0f, tiles_y, tiles_z
-    );
-
-
     // ---------------------------------------------------------
     // MacCormack correction
     // ---------------------------------------------------------
@@ -433,11 +391,6 @@ __kernel void update_scalar_fields_maccormack(
     float fuel_corrected =
         fuel_advected
         + 0.5f * ((float)fuel[index] - fuel_reverse);
-
-    float oxygen_corrected =
-        oxygen_advected
-        + 0.5f * ((float)oxygen[index] - oxygen_reverse);
-
 
     // ---------------------------------------------------------
     // Departure cell
@@ -487,9 +440,6 @@ __kernel void update_scalar_fields_maccormack(
     float fuel_lower;
     float fuel_upper;
 
-    float oxygen_lower;
-    float oxygen_upper;
-
     sample_cell_extrema_inner_sparse(
         T,
         index_tile_map,
@@ -538,22 +488,6 @@ __kernel void update_scalar_fields_maccormack(
         &fuel_upper
     );
 
-    sample_cell_extrema_inner_sparse_uint8(
-        oxygen,
-        index_tile_map,
-        x0,
-        y0,
-        z0,
-        x1,
-        y1,
-        z1,
-        255.0f,
-        tiles_y,
-        tiles_z,
-        &oxygen_lower,
-        &oxygen_upper
-    );
-
     T_corrected =
         clamp_value(
             T_corrected,
@@ -575,14 +509,6 @@ __kernel void update_scalar_fields_maccormack(
             fuel_upper
         );
 
-    oxygen_corrected =
-        clamp_value(
-            oxygen_corrected,
-            oxygen_lower,
-            oxygen_upper
-        );
-
-
     // ---------------------------------------------------------
     // Combustion
     // ---------------------------------------------------------
@@ -590,13 +516,11 @@ __kernel void update_scalar_fields_maccormack(
     float temperature_burn_source;
     float smoke_burn_source;
     float fuel_burn_source;
-    float oxygen_burn_source;
     float flame_burn_source;
 
     compute_combustion_sources(
         T_corrected,
         fuel_corrected,
-        oxygen_corrected,
         dt,
         temperature_production_rate,
         smoke_production_rate,
@@ -610,7 +534,6 @@ __kernel void update_scalar_fields_maccormack(
         &temperature_burn_source,
         &smoke_burn_source,
         &fuel_burn_source,
-        &oxygen_burn_source,
         &flame_burn_source
     );
 
@@ -650,11 +573,6 @@ __kernel void update_scalar_fields_maccormack(
         + dt * fuel_burn_source
         + dt * fuel_dissipation;
 
-    const float oxygen_updated =
-        oxygen_corrected
-        + dt * oxygen_burn_source;
-
-
     T_out[index] =
         fmax(
             T_updated,
@@ -670,10 +588,6 @@ __kernel void update_scalar_fields_maccormack(
 
     fuel_out[index] = convert_uchar_rte(
         clamp(fuel_updated, 0.0f, 255.0f)
-    );
-
-    oxygen_out[index] = convert_uchar_rte(
-        clamp(oxygen_updated, 0.0f, 255.0f)
     );
 
     flame_out[index] =
