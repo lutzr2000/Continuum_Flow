@@ -33,6 +33,9 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         animation_proxy.ensure_node_scene_proxies(bpy.context.scene, self)
         self._sync_node()
 
+    def free(self):
+        animation_proxy.remove_node_scene_proxies(self)
+
     def update(self):
         self._sync_node()
 

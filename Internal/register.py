@@ -1,4 +1,5 @@
 import bpy
+import uuid
 from nodeitems_utils import register_node_categories, unregister_node_categories
 from bpy.app.handlers import persistent
 
@@ -98,11 +99,16 @@ def initialize_fake_user_state(_scene=None, _depsgraph=None):
     if node_groups is None:
         return
 
+    used_animation_proxy_ids = set()
     for tree in node_groups:
         if tree.bl_idname == NODE_TREE_ID:
             tree["continuum_flow_fake_user_initialized"] = True
             for node in tree.nodes:
+                proxy_id = node.get("continuum_flow_animation_id")
+                if proxy_id and proxy_id in used_animation_proxy_ids:
+                    node["continuum_flow_animation_id"] = uuid.uuid4().hex
                 animation_proxy.ensure_node_proxy_id(node)
+                used_animation_proxy_ids.add(node.get("continuum_flow_animation_id"))
                 for scene in getattr(bpy.data, "scenes", ()):
                     animation_proxy.ensure_node_scene_proxies(scene, node)
 

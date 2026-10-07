@@ -78,9 +78,11 @@ def get_source_values(
     ) in property_map.items():
         for source_idx, source_entry in enumerate(source_entries):
             value = (source_entry.get(section_name) or {}).get(property_name, 0.0)
-            animation_values = (
-                (source_entry.get("animations") or {}).get(section_name) or {}
-            ).get("values") or ()
+            animation_values = ()
+            if property_name == "value":
+                animation_values = (
+                    (source_entry.get("animations") or {}).get(section_name) or {}
+                ).get("values") or ()
             sample_count = min(len(animation_times), len(animation_values))
             if sample_count > 0:
                 nearest_time_idx = min(

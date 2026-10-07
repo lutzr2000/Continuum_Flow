@@ -51,9 +51,8 @@ def node_proxy_key(node, property_name):
     proxy_id = node.get("continuum_flow_animation_id")
 
     if not proxy_id:
-        node_tree = getattr(node, "id_data", None)
-        identity = f"{getattr(node_tree, 'name_full', '')}:{node.name}"
-        proxy_id = uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+        ensure_node_proxy_id(node)
+        proxy_id = node.get("continuum_flow_animation_id")
 
     return f"{PROXY_PREFIX}{proxy_id[:12]}_{property_name}"
 
@@ -62,12 +61,11 @@ def ensure_node_proxy_id(node):
     if node.get("continuum_flow_animation_id"):
         return
 
-    node_tree = getattr(node, "id_data", None)
-    identity = f"{getattr(node_tree, 'name_full', '')}:{node.name}"
-    node["continuum_flow_animation_id"] = uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        identity,
-    ).hex
+    # Names can be reused after deleting a node, and Blender copies custom
+    # properties when duplicating one. A random persistent ID prevents a new
+    # node from inheriting an unrelated scene proxy solely because its name
+    # matches an older node.
+    node["continuum_flow_animation_id"] = uuid.uuid4().hex
 
 
 def ensure_scene_proxy(scene, node, property_name):
@@ -81,10 +79,10 @@ def ensure_scene_proxy(scene, node, property_name):
     rna_property = node.bl_rna.properties[property_name]
     ui_data = scene.id_properties_ui(key)
     metadata = {"description": rna_property.description}
-    subtype = str(getattr(rna_property, "subtype", "") or "")
-
-    if subtype not in VALID_SUBTYPES:
-        subtype = UNIT_SUBTYPES.get(str(getattr(rna_property, "unit", "") or ""))
+    unit = str(getattr(rna_property, "unit", "") or "")
+    subtype = UNIT_SUBTYPES.get(unit)
+    if subtype is None:
+        subtype = str(getattr(rna_property, "subtype", "") or "")
     if subtype in VALID_SUBTYPES:
         metadata["subtype"] = subtype
 
@@ -131,6 +129,34 @@ def ensure_node_scene_proxies(scene, node):
 
     for property_name in getattr(node, "animation_proxy_properties", ()):
         ensure_scene_proxy(scene, node, property_name)
+
+
+def remove_node_scene_proxies(node):
+    """Remove every scene value and F-curve owned by a deleted node."""
+    proxy_id = node.get("continuum_flow_animation_id")
+    if not proxy_id:
+        return
+
+    key_prefix = f"{PROXY_PREFIX}{str(proxy_id)[:12]}_"
+    for scene in getattr(bpy.data, "scenes", ()):
+        owned_keys = {
+            str(key) for key in scene.keys() if str(key).startswith(key_prefix)
+        }
+        if not owned_keys:
+            continue
+
+        animation_data = getattr(scene, "animation_data", None)
+        action = getattr(animation_data, "action", None)
+        if action is not None:
+            owned_paths = {f'["{key}"]' for key in owned_keys}
+            for curves, _groups in _curve_collections(action):
+                for curve in tuple(curves):
+                    if curve.data_path in owned_paths:
+                        curves.remove(curve)
+
+        for key in owned_keys:
+            if key in scene:
+                del scene[key]
 
 
 def sync_scene_animation_proxies(scene):

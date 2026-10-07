@@ -58,7 +58,7 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     iterations: IntProperty(name="Iterations", default=1, min=1, max=10, soft_min=1, soft_max=10, description="Number of solver itterations", options=set())  # type: ignore
     advection_substeps: IntProperty(name="Advection Substeps", default=1, min=1, soft_min=1, soft_max=10, description="Number of integration substeps used for advection tracing", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
-    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.1, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
+    adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.01, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
