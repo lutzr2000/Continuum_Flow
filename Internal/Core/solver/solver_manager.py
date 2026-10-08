@@ -126,37 +126,12 @@ class SolverManager:
         with self._lock:
             return self._job_results.pop(int(job_id), None)
 
-    def wait_for_job(self, job_id, timeout=None):
-
-        thread = None
-
-        with self._lock:
-            if self._active_job_id == int(job_id):
-                thread = self._solver_thread
-
-        if thread is not None:
-            thread.join(timeout=timeout)
-
-        return self.get_job_result(job_id)
-
-    def is_running(self):
-        with self._lock:
-            return self._active_job_id is not None
-
-    def is_ready(self):
-        # Kein externer Worker muss mehr gestartet werden.
-        return True
-
     def is_compiling(self):
         return False
 
     def get_stats(self):
         with self._lock:
             return dict(self._stats)
-
-    def set_stats(self, stats):
-        with self._lock:
-            self._stats = dict(stats or {})
 
     def request_preload(self, backend, config=None):
         return

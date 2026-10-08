@@ -132,18 +132,6 @@ def output_directory_has_vdbs(output_directory):
     )
 
 
-def count_contiguous_vdb_frames(output_directory, start_frame):
-    if output_directory is None or not output_directory.is_dir():
-        return 0
-
-    frame_count = 0
-    frame_index = int(start_frame)
-    while (output_directory / f"frame_{frame_index:06d}.vdb").is_file():
-        frame_count += 1
-        frame_index += 1
-    return frame_count
-
-
 # -------------- bake ----------------
 class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"

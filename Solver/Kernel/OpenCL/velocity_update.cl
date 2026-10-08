@@ -129,6 +129,166 @@ __kernel void advect_velocity_semi_lagrangian(
 }
 
 
+inline float3 apply_forces(
+    __global const float *u,
+    __global const float *v,
+    __global const float *w,
+    __global const uchar *obstacle_mask,
+    __global const float *vorticity_magnitude,
+    const float vorticity_strength,
+    __global const float *temperature,
+    const float buoyancy_factor,
+    const float t_reference,
+    const float gravity_x,
+    const float gravity_y,
+    const float gravity_z,
+    __global const int *index_tile_map,
+    const float fx_const,
+    const float fy_const,
+    const float fz_const,
+    const int has_swirl_nodes,
+    __global const float *swirl_config,
+    const int swirl_count,
+    const float origin_x,
+    const float origin_y,
+    const float origin_z,
+    const int has_turbulence_nodes,
+    __global const float *turbulence_config,
+    const int turbulence_count,
+    const int i,
+    const int j,
+    const int k,
+    const float delta,
+    const float u_initial,
+    const float v_initial,
+    const float w_initial,
+    const int nx,
+    const int ny,
+    const int nz,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    float Fx = 0.0f;
+    float Fy = 0.0f;
+    float Fz = 0.0f;
+
+    if (vorticity_strength > 0.0f)
+    {
+        apply_vorticity_confinement(
+            u, v, w, obstacle_mask, vorticity_magnitude,
+            i, j, k, delta, vorticity_strength, index_tile_map,
+            u_initial, v_initial, w_initial,
+            nx, ny, nz, tiles_y, tiles_z,
+            &Fx, &Fy, &Fz
+        );
+    }
+
+    if (has_swirl_nodes && swirl_count > 0)
+    {
+        float swirl_fx;
+        float swirl_fy;
+        float swirl_fz;
+
+        apply_swirl_forces(
+            swirl_config, swirl_count,
+            i, j, k, delta,
+            origin_x, origin_y, origin_z,
+            &swirl_fx, &swirl_fy, &swirl_fz
+        );
+
+        Fx += swirl_fx;
+        Fy += swirl_fy;
+        Fz += swirl_fz;
+    }
+
+    if (has_turbulence_nodes && turbulence_count > 0)
+    {
+        float turbulence_fx;
+        float turbulence_fy;
+        float turbulence_fz;
+
+        apply_turbulence_forces(
+            turbulence_config, turbulence_count,
+            i, j, k, delta,
+            origin_x, origin_y, origin_z,
+            &turbulence_fx, &turbulence_fy, &turbulence_fz
+        );
+
+        Fx += turbulence_fx;
+        Fy += turbulence_fy;
+        Fz += turbulence_fz;
+    }
+
+    Fx += fx_const * 0.1f;
+    Fy += fy_const * 0.1f;
+    Fz += fz_const * 0.1f;
+
+    const float buoyancy = buoyancy_approximation(
+        temperature, index_tile_map,
+        i, j, k,
+        buoyancy_factor, t_reference,
+        tiles_y, tiles_z
+    );
+
+    Fx += gravity_x * buoyancy;
+    Fy += gravity_y * buoyancy;
+    Fz += gravity_z * buoyancy;
+
+    return (float3)(Fx, Fy, Fz);
+}
+
+
+inline float3 diffusion(
+    __global const float *u,
+    __global const float *v,
+    __global const float *w,
+    __global const int *index_tile_map,
+    const float3 rhs,
+    const int i,
+    const int j,
+    const int k,
+    const float diffusion_alpha,
+    const float diffusion_inv_diag,
+    const float u_initial,
+    const float v_initial,
+    const float w_initial,
+    const int tiles_y,
+    const int tiles_z
+)
+{
+    const float u_neighbor_sum =
+        get_pool_value(u, index_tile_map, i + 1, j, k, u_initial, tiles_y, tiles_z) +
+        get_pool_value(u, index_tile_map, i - 1, j, k, u_initial, tiles_y, tiles_z) +
+        get_pool_value(u, index_tile_map, i, j + 1, k, u_initial, tiles_y, tiles_z) +
+        get_pool_value(u, index_tile_map, i, j - 1, k, u_initial, tiles_y, tiles_z) +
+        get_pool_value(u, index_tile_map, i, j, k + 1, u_initial, tiles_y, tiles_z) +
+        get_pool_value(u, index_tile_map, i, j, k - 1, u_initial, tiles_y, tiles_z);
+
+    const float v_neighbor_sum =
+        get_pool_value(v, index_tile_map, i + 1, j, k, v_initial, tiles_y, tiles_z) +
+        get_pool_value(v, index_tile_map, i - 1, j, k, v_initial, tiles_y, tiles_z) +
+        get_pool_value(v, index_tile_map, i, j + 1, k, v_initial, tiles_y, tiles_z) +
+        get_pool_value(v, index_tile_map, i, j - 1, k, v_initial, tiles_y, tiles_z) +
+        get_pool_value(v, index_tile_map, i, j, k + 1, v_initial, tiles_y, tiles_z) +
+        get_pool_value(v, index_tile_map, i, j, k - 1, v_initial, tiles_y, tiles_z);
+
+    const float w_neighbor_sum =
+        get_pool_value(w, index_tile_map, i + 1, j, k, w_initial, tiles_y, tiles_z) +
+        get_pool_value(w, index_tile_map, i - 1, j, k, w_initial, tiles_y, tiles_z) +
+        get_pool_value(w, index_tile_map, i, j + 1, k, w_initial, tiles_y, tiles_z) +
+        get_pool_value(w, index_tile_map, i, j - 1, k, w_initial, tiles_y, tiles_z) +
+        get_pool_value(w, index_tile_map, i, j, k + 1, w_initial, tiles_y, tiles_z) +
+        get_pool_value(w, index_tile_map, i, j, k - 1, w_initial, tiles_y, tiles_z);
+
+    return (float3)(
+        (rhs.x + diffusion_alpha * u_neighbor_sum) * diffusion_inv_diag,
+        (rhs.y + diffusion_alpha * v_neighbor_sum) * diffusion_inv_diag,
+        (rhs.z + diffusion_alpha * w_neighbor_sum) * diffusion_inv_diag
+    );
+}
+
+
 __kernel void update_velocity_maccormack(
     __global const float *u,
     __global const float *v,
@@ -238,7 +398,6 @@ __kernel void update_velocity_maccormack(
 
     const float force_coeff =
         dt / rho;
-
 
     const float u_center = u[index];
     const float v_center = v[index];
@@ -487,423 +646,49 @@ __kernel void update_velocity_maccormack(
             w_upper
         );
 
-
     // ---------------------------------------------------------
     // Forces
     // ---------------------------------------------------------
 
-    float Fx = 0.0f;
-    float Fy = 0.0f;
-    float Fz = 0.0f;
+    const float3 force = apply_forces(
+        u, v, w,
+        obstacle_mask,
+        vorticity_magnitude, vorticity_strength,
+        temperature, buoyancy_factor, t_reference,
+        gravity_x, gravity_y, gravity_z,
+        index_tile_map,
+        fx_const, fy_const, fz_const,
+        has_swirl_nodes, swirl_config, swirl_count,
+        origin_x, origin_y, origin_z,
+        has_turbulence_nodes, turbulence_config, turbulence_count,
+        i, j, k, delta,
+        u_initial, v_initial, w_initial,
+        nx, ny, nz, tiles_y, tiles_z
+    );
 
-
-    // Vorticity confinement
-
-    if (vorticity_strength > 0.0f)
-    {
-        apply_vorticity_confinement(
-            u,
-            v,
-            w,
-            obstacle_mask,
-            vorticity_magnitude,
-            i,
-            j,
-            k,
-            delta,
-            vorticity_strength,
-            index_tile_map,
-            u_initial,
-            v_initial,
-            w_initial,
-            nx,
-            ny,
-            nz,
-            tiles_y,
-            tiles_z,
-            &Fx,
-            &Fy,
-            &Fz
-        );
-    }
-
-
-    // Swirl
-
-    if (
-        has_swirl_nodes &&
-        swirl_count > 0
-    )
-    {
-        float swirl_fx;
-        float swirl_fy;
-        float swirl_fz;
-
-        apply_swirl_forces(
-            swirl_config,
-            swirl_count,
-            i,
-            j,
-            k,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            &swirl_fx,
-            &swirl_fy,
-            &swirl_fz
-        );
-
-        Fx += swirl_fx;
-        Fy += swirl_fy;
-        Fz += swirl_fz;
-    }
-
-
-    if (
-        has_turbulence_nodes &&
-        turbulence_count > 0
-    )
-    {
-        float turbulence_fx;
-        float turbulence_fy;
-        float turbulence_fz;
-
-        apply_turbulence_forces(
-            turbulence_config,
-            turbulence_count,
-            i,
-            j,
-            k,
-            delta,
-            origin_x,
-            origin_y,
-            origin_z,
-            &turbulence_fx,
-            &turbulence_fy,
-            &turbulence_fz
-        );
-
-        Fx += turbulence_fx;
-        Fy += turbulence_fy;
-        Fz += turbulence_fz;
-    }
-
-
-    // Constant force
-
-    Fx += fx_const * 0.1f;
-    Fy += fy_const * 0.1f;
-    Fz += fz_const * 0.1f;
-
-
-    // Buoyancy
-
-    const float buoyancy =
-        buoyancy_approximation(
-            temperature,
-            index_tile_map,
-            i,
-            j,
-            k,
-            buoyancy_factor,
-            t_reference,
-            tiles_y,
-            tiles_z
-        );
-
-    Fx += gravity_x * buoyancy;
-    Fy += gravity_y * buoyancy;
-    Fz += gravity_z * buoyancy;
-
-
-    // ---------------------------------------------------------
-    // RHS
-    // ---------------------------------------------------------
-
-    const float rhs_u =
-        corrected_u + force_coeff * Fx;
-
-    const float rhs_v =
-        corrected_v + force_coeff * Fy;
-
-    const float rhs_w =
-        corrected_w + force_coeff * Fz;
-
-
-    // ---------------------------------------------------------
-    // Diffusion neighbours - U
-    // ---------------------------------------------------------
-
-    const float u_xp =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i + 1,
-            j,
-            k,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float u_xm =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i - 1,
-            j,
-            k,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float u_yp =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i,
-            j + 1,
-            k,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float u_ym =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i,
-            j - 1,
-            k,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float u_zp =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i,
-            j,
-            k + 1,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float u_zm =
-        get_pool_value(
-            u,
-            index_tile_map,
-            i,
-            j,
-            k - 1,
-            u_initial,
-            tiles_y,
-            tiles_z
-        );
-
-
-    // ---------------------------------------------------------
-    // Diffusion neighbours - V
-    // ---------------------------------------------------------
-
-    const float v_xp =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i + 1,
-            j,
-            k,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float v_xm =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i - 1,
-            j,
-            k,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float v_yp =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i,
-            j + 1,
-            k,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float v_ym =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i,
-            j - 1,
-            k,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float v_zp =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i,
-            j,
-            k + 1,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float v_zm =
-        get_pool_value(
-            v,
-            index_tile_map,
-            i,
-            j,
-            k - 1,
-            v_initial,
-            tiles_y,
-            tiles_z
-        );
-
-
-    // ---------------------------------------------------------
-    // Diffusion neighbours - W
-    // ---------------------------------------------------------
-
-    const float w_xp =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i + 1,
-            j,
-            k,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float w_xm =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i - 1,
-            j,
-            k,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float w_yp =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i,
-            j + 1,
-            k,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float w_ym =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i,
-            j - 1,
-            k,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float w_zp =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i,
-            j,
-            k + 1,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
-
-    const float w_zm =
-        get_pool_value(
-            w,
-            index_tile_map,
-            i,
-            j,
-            k - 1,
-            w_initial,
-            tiles_y,
-            tiles_z
-        );
+    const float3 rhs = (float3)(
+        corrected_u + force_coeff * force.x,
+        corrected_v + force_coeff * force.y,
+        corrected_w + force_coeff * force.z
+    );
 
 
     // ---------------------------------------------------------
     // Diffusion
     // ---------------------------------------------------------
 
-    const float u_neighbor_sum =
-        u_xp + u_xm +
-        u_yp + u_ym +
-        u_zp + u_zm;
+    const float3 velocity = diffusion(
+        u, v, w,
+        index_tile_map,
+        rhs,
+        i, j, k,
+        diffusion_alpha,
+        diffusion_inv_diag,
+        u_initial, v_initial, w_initial,
+        tiles_y, tiles_z
+    );
 
-    const float v_neighbor_sum =
-        v_xp + v_xm +
-        v_yp + v_ym +
-        v_zp + v_zm;
-
-    const float w_neighbor_sum =
-        w_xp + w_xm +
-        w_yp + w_ym +
-        w_zp + w_zm;
-
-    const float u_raw =
-        (
-            rhs_u +
-            diffusion_alpha * u_neighbor_sum
-        )
-        * diffusion_inv_diag;
-
-    const float v_raw =
-        (
-            rhs_v +
-            diffusion_alpha * v_neighbor_sum
-        )
-        * diffusion_inv_diag;
-
-    const float w_raw =
-        (
-            rhs_w +
-            diffusion_alpha * w_neighbor_sum
-        )
-        * diffusion_inv_diag;
-
-
-    un[index] = u_raw;
-    vn[index] = v_raw;
-    wn[index] = w_raw;
+    un[index] = velocity.x;
+    vn[index] = velocity.y;
+    wn[index] = velocity.z;
 }

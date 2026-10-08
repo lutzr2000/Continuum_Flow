@@ -82,27 +82,3 @@ def main(config: dict[str, Any]) -> None:
         total_runtime = perf_counter() - total_start_time
         print(f"Bake runtime: {total_runtime:.3f} s")
         print("################################################################")
-
-
-def preload_backend(backend: str) -> None:
-    """
-    Load a solver backend and initialize its runtime.
-    """
-    backend = str(backend or "").strip().upper()
-
-    if backend == "CPU":
-        return
-
-    if backend == "GPU":
-        import pyopencl as cl
-        import Solver.Kernel.solver
-
-        if not any(
-            platform.get_devices(device_type=cl.device_type.GPU)
-            for platform in cl.get_platforms()
-        ):
-            raise RuntimeError("No GPU compute device is available")
-
-        return
-
-    raise ValueError(f"Unsupported solver backend: {backend}")

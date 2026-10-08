@@ -103,10 +103,6 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         if int(self.start_frame) > maximum_start_frame:
             self.start_frame = maximum_start_frame
 
-    def set_solver_status(self, cpu_available, gpu_available):
-        self.cpu_available = cpu_available
-        self.gpu_available = gpu_available
-
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
 
