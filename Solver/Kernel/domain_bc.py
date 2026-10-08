@@ -70,6 +70,7 @@ def domain_bc(
     T: Any,
     smoke: Any,
     fuel: Any,
+    oxygen: Any,
     bc_config: dict[str, Any],
     index_tile_map: Any,
     tile_shape: tuple[int, int, int],
@@ -128,6 +129,7 @@ def domain_bc(
         T,
         smoke,
         fuel,
+        oxygen,
         index_tile_map,
         np.float32(ref_temp),
         np.float32(u_initial),
@@ -146,4 +148,4 @@ def domain_bc(
         np.int32(tile_shape[2]),
     )
 
-    return u, v, w, p, T, smoke, fuel
+    return u, v, w, p, T, smoke, fuel, oxygen

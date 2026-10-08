@@ -57,7 +57,7 @@ PERCENTAGE_MAPPING = {
     "buoyancy": (0.0, 0.01),
     "expansion_rate": (0.0, 0.03),
     "smoke_dissipation": (0.0, 10),
-    "smoke_production_rate": (0.0, 1),
+    "smoke_production_rate": (0.0, 10),
     "fuel_dissipation": (0.0, 10),
     "fuel_burn_rate": (0.0, 1),
     "vorticity": (0.0, 1.0),

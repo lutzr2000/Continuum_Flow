@@ -9,6 +9,7 @@
 inline void compute_combustion_sources(
     const float T,
     const float fuel_concentration,
+    const float oxygen_concentration,
     const float dt,
     const float temperature_production_rate,
     const float smoke_production_rate,
@@ -17,27 +18,72 @@ inline void compute_combustion_sources(
     __private float *temperature_source,
     __private float *smoke_source,
     __private float *fuel_source,
+    __private float *oxygen_source,
     __private float *flame_source
 )
 {
-    const float inv_dt = 1.0f / dt;
+    *temperature_source = 0.0f;
+    *smoke_source = 0.0f;
+    *fuel_source = 0.0f;
+    *oxygen_source = 0.0f;
+    *flame_source = 0.0f;
 
-    if (T > fuel_ignition_temperature)
+    const float oxygen_per_fuel = 1.0f; 
+    const float ignition_temperature_width = 50.0f;
+    
+    if (
+        fuel_concentration <= 0.0f ||
+        oxygen_concentration <= 0.0f ||
+        fuel_burn_rate <= 0.0f
+    )
     {
-        float burn_factor = 1.0f; // this should be tied to temperature and maybe also fake oxygen (oxygen = 1-fuel_concentration-smoke_concentration)
+        return;
+    }
 
-        *fuel_source = -fuel_burn_rate * burn_factor * inv_dt;
-        *smoke_source = smoke_production_rate * burn_factor * inv_dt;
-        *temperature_source = temperature_production_rate * burn_factor * inv_dt;
-        *flame_source = burn_factor * inv_dt;
-    }
-    else
-    {
-        *fuel_source = 0.0f;
-        *smoke_source = 0.0f;
-        *temperature_source = 0.0f;
-        *flame_source = 0.0f;
-    }
+    const float temperature_factor =
+        smoothstep(
+            fuel_ignition_temperature,
+            fuel_ignition_temperature + ignition_temperature_width,
+            T
+        );
+
+
+    const float available_reactant =
+        fmin(
+            fuel_concentration,
+            oxygen_concentration / oxygen_per_fuel
+        );
+
+    const float effective_burn_rate =
+        fuel_burn_rate * temperature_factor;
+
+    const float burn_fraction =
+        clamp(
+            1.0f - exp(-effective_burn_rate * dt),
+            0.0f,
+            1.0f
+        );
+
+    const float burned_fuel =
+        available_reactant * burn_fraction;
+
+    const float reaction_rate =
+        burned_fuel / dt;
+
+    *fuel_source =
+        -reaction_rate;
+
+    *oxygen_source =
+        -oxygen_per_fuel * reaction_rate;
+
+    *smoke_source =
+        smoke_production_rate * reaction_rate;
+
+    *temperature_source =
+        temperature_production_rate * reaction_rate;
+
+    *flame_source =
+        reaction_rate;
 }
 
 
@@ -45,6 +91,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     __global const float *T,
     __global const float *smoke,
     __global const float *fuel,
+    __global const float *oxygen,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -52,6 +99,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     __global float *predictor_T,
     __global float *predictor_smoke,
     __global float *predictor_fuel,
+    __global float *predictor_oxygen,
     const float delta,
     const int n_substeps,
     const float t_reference,
@@ -131,6 +179,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     float sampled_T;
     float sampled_smoke;
     float sampled_fuel;
+    float sampled_oxygen;
 
     int fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1, fuel_z1;
     float fuel_tx, fuel_ty, fuel_tz;
@@ -161,6 +210,13 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         fuel_tx, fuel_ty, fuel_tz,
         0.0f, tiles_y, tiles_z
     );
+    sampled_oxygen = sample_trilinear_inner_sparse(
+        oxygen, index_tile_map,
+        fuel_x0, fuel_y0, fuel_z0,
+        fuel_x1, fuel_y1, fuel_z1,
+        fuel_tx, fuel_ty, fuel_tz,
+        100.0f, tiles_y, tiles_z
+    );
     const int index =
         ((tile_index * TILE_SIZE + local_i)
         * TILE_SIZE + local_j)
@@ -169,6 +225,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
     predictor_T[index] = sampled_T;
     predictor_smoke[index] = sampled_smoke;
     predictor_fuel[index] = sampled_fuel;
+    predictor_oxygen[index] = sampled_oxygen;
 }
 
 
@@ -176,9 +233,11 @@ __kernel void update_scalar_fields_maccormack(
     __global const float *T,
     __global const float *smoke,
     __global const float *fuel,
+    __global const float *oxygen,
     __global const float *predictor_T,
     __global const float *predictor_smoke,
     __global const float *predictor_fuel,
+    __global const float *predictor_oxygen,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -186,6 +245,7 @@ __kernel void update_scalar_fields_maccormack(
     __global float *T_out,
     __global float *smoke_out,
     __global float *fuel_out,
+    __global float *oxygen_out,
     __global float *flame_out,
     const float delta,
     const int n_substeps,
@@ -339,6 +399,9 @@ __kernel void update_scalar_fields_maccormack(
     const float fuel_advected =
         predictor_fuel[index];
 
+    const float oxygen_advected =
+        predictor_oxygen[index];
+
     // ---------------------------------------------------------
     // Reverse sample
     // ---------------------------------------------------------
@@ -346,6 +409,7 @@ __kernel void update_scalar_fields_maccormack(
     float T_reverse;
     float smoke_reverse;
     float fuel_reverse;
+    float oxygen_reverse;
 
     sample_trilinear_vec3_sparse(
         predictor_T,
@@ -367,6 +431,17 @@ __kernel void update_scalar_fields_maccormack(
         &smoke_reverse,
         &fuel_reverse
     );
+    oxygen_reverse = sample_trilinear_inner_sparse(
+        predictor_oxygen, index_tile_map,
+        (int)floor(x_forward), (int)floor(y_forward), (int)floor(z_forward),
+        min((int)floor(x_forward) + 1, nx - 1),
+        min((int)floor(y_forward) + 1, ny - 1),
+        min((int)floor(z_forward) + 1, nz - 1),
+        x_forward - floor(x_forward),
+        y_forward - floor(y_forward),
+        z_forward - floor(z_forward),
+        100.0f, tiles_y, tiles_z
+    );
 
     // ---------------------------------------------------------
     // MacCormack correction
@@ -383,6 +458,10 @@ __kernel void update_scalar_fields_maccormack(
     float fuel_corrected =
         fuel_advected
         + 0.5f * (fuel[index] - fuel_reverse);
+
+    float oxygen_corrected =
+        oxygen_advected
+        + 0.5f * (oxygen[index] - oxygen_reverse);
 
     // ---------------------------------------------------------
     // Departure cell
@@ -432,6 +511,9 @@ __kernel void update_scalar_fields_maccormack(
     float fuel_lower;
     float fuel_upper;
 
+    float oxygen_lower;
+    float oxygen_upper;
+
     sample_cell_extrema_inner_sparse(
         T,
         index_tile_map,
@@ -480,6 +562,11 @@ __kernel void update_scalar_fields_maccormack(
         &fuel_upper
     );
 
+    sample_cell_extrema_inner_sparse(
+        oxygen, index_tile_map, x0, y0, z0, x1, y1, z1,
+        100.0f, tiles_y, tiles_z, &oxygen_lower, &oxygen_upper
+    );
+
     T_corrected =
         clamp_value(
             T_corrected,
@@ -501,6 +588,10 @@ __kernel void update_scalar_fields_maccormack(
             fuel_upper
         );
 
+    oxygen_corrected = clamp_value(
+        oxygen_corrected, oxygen_lower, oxygen_upper
+    );
+
     // ---------------------------------------------------------
     // Combustion
     // ---------------------------------------------------------
@@ -508,11 +599,13 @@ __kernel void update_scalar_fields_maccormack(
     float temperature_burn_source;
     float smoke_burn_source;
     float fuel_burn_source;
+    float oxygen_burn_source;
     float flame_burn_source;
 
     compute_combustion_sources(
         T_corrected,
         fuel_corrected,
+        oxygen_corrected,
         dt,
         temperature_production_rate,
         smoke_production_rate,
@@ -521,6 +614,7 @@ __kernel void update_scalar_fields_maccormack(
         &temperature_burn_source,
         &smoke_burn_source,
         &fuel_burn_source,
+        &oxygen_burn_source,
         &flame_burn_source
     );
 
@@ -560,6 +654,10 @@ __kernel void update_scalar_fields_maccormack(
         + dt * fuel_burn_source
         + dt * fuel_dissipation;
 
+    const float oxygen_updated =
+        oxygen_corrected
+        + dt * oxygen_burn_source;
+
     T_out[index] =
         fmax(
             T_updated,
@@ -574,6 +672,8 @@ __kernel void update_scalar_fields_maccormack(
         );
 
     fuel_out[index] = clamp(fuel_updated, 0.0f, 100.0f);
+
+    oxygen_out[index] = clamp(oxygen_updated, 0.0f, 100.0f);
 
     flame_out[index] =
         fmax(

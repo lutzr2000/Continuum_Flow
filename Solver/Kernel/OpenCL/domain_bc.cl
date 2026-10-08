@@ -12,6 +12,7 @@ inline void apply_face_state(
     __global float *T,
     __global float *smoke,
     __global float *fuel,
+    __global float *oxygen,
     __global const int *index_tile_map,
     const float ref_temp,
     const float u_initial,
@@ -57,6 +58,7 @@ inline void apply_face_state(
     float neighbor_T;
     float neighbor_smoke;
     float neighbor_fuel;
+    float neighbor_oxygen;
 
     if (src_tile_index == -1)
     {
@@ -69,6 +71,7 @@ inline void apply_face_state(
 
         neighbor_smoke = 0.0f;
         neighbor_fuel = 0.0f;
+        neighbor_oxygen = 100.0f;
     }
     else
     {
@@ -93,6 +96,7 @@ inline void apply_face_state(
         neighbor_T = T[src_index];
         neighbor_smoke = smoke[src_index];
         neighbor_fuel = fuel[src_index];
+        neighbor_oxygen = oxygen[src_index];
     }
 
     const int dst_tile_i =
@@ -196,6 +200,7 @@ inline void apply_face_state(
 
     smoke[dst_index] = neighbor_smoke;
     fuel[dst_index] = neighbor_fuel;
+    oxygen[dst_index] = neighbor_oxygen;
 }
 
 
@@ -207,6 +212,7 @@ __kernel void domain_bc(
     __global float *T,
     __global float *smoke,
     __global float *fuel,
+    __global float *oxygen,
     __global const int *index_tile_map,
     const float ref_temp,
     const float u_initial,
@@ -283,7 +289,7 @@ __kernel void domain_bc(
     if (i == 0)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,
@@ -305,7 +311,7 @@ __kernel void domain_bc(
     else if (i == nx - 1)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,
@@ -328,7 +334,7 @@ __kernel void domain_bc(
     if (j == 0)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,
@@ -350,7 +356,7 @@ __kernel void domain_bc(
     else if (j == ny - 1)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,
@@ -373,7 +379,7 @@ __kernel void domain_bc(
     if (k == 0)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,
@@ -395,7 +401,7 @@ __kernel void domain_bc(
     else if (k == nz - 1)
     {
         apply_face_state(
-            u, v, w, p, T, smoke, fuel,
+            u, v, w, p, T, smoke, fuel, oxygen,
             index_tile_map,
             ref_temp,
             u_initial,

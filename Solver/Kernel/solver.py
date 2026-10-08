@@ -479,12 +479,14 @@ def solver(config: dict):
     temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
     smoke = helper.zeros_device(context, sparse_pool_shape)
     fuel = helper.zeros_device(context, sparse_pool_shape)
+    oxygen = helper.full_device(context, sparse_pool_shape, 100.0)
 
     temperature_work = helper.full_device(
         context, sparse_pool_shape, reference_temperature
     )
     smoke_work = helper.zeros_device(context, sparse_pool_shape)
     fuel_work = helper.zeros_device(context, sparse_pool_shape)
+    oxygen_work = helper.full_device(context, sparse_pool_shape, 100.0)
 
     # flame
     flame = helper.zeros_device(context, sparse_pool_shape)
@@ -496,6 +498,7 @@ def solver(config: dict):
     scratch_A = helper.full_device(context, sparse_pool_shape, reference_temperature)
     scratch_B = helper.zeros_device(context, sparse_pool_shape)
     scratch_C = helper.zeros_device(context, sparse_pool_shape)
+    scratch_D = helper.full_device(context, sparse_pool_shape, 100.0)
 
     # pressure
     p = helper.zeros_device(context, sparse_pool_shape)
@@ -696,7 +699,7 @@ def solver(config: dict):
         # ------------Clear scratch-------------------
         sparse_managment.reset_pools(
             queue,
-            (scratch_A, scratch_B, scratch_C),
+            (scratch_A, scratch_B, scratch_C, scratch_D),
             zero_pool,
         )
 
@@ -854,14 +857,17 @@ def solver(config: dict):
                         (scratch_A, reference_temperature, FIELD_DTYPE),
                         (scratch_B, 0.0, FIELD_DTYPE),
                         (scratch_C, 0.0, FIELD_DTYPE),
+                        (scratch_D, 100.0, FIELD_DTYPE),
                         (p, 0.0, FIELD_DTYPE),
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
                         (fuel, 0.0, FIELD_DTYPE),
+                        (oxygen, 100.0, FIELD_DTYPE),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
                         (fuel_work, 0.0, FIELD_DTYPE),
+                        (oxygen_work, 100.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
@@ -891,14 +897,17 @@ def solver(config: dict):
                     scratch_A,
                     scratch_B,
                     scratch_C,
+                    scratch_D,
                     p,
                     pressure_rhs,
                     temperature,
                     smoke,
                     fuel,
+                    oxygen,
                     temperature_work,
                     smoke_work,
                     fuel_work,
+                    oxygen_work,
                     flame,
                     zero_pool,
                     vorticity_magnitude,
@@ -917,14 +926,17 @@ def solver(config: dict):
                         (scratch_A, reference_temperature, FIELD_DTYPE),
                         (scratch_B, 0.0, FIELD_DTYPE),
                         (scratch_C, 0.0, FIELD_DTYPE),
+                        (scratch_D, 100.0, FIELD_DTYPE),
                         (p, 0.0, FIELD_DTYPE),
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
                         (fuel, 0.0, FIELD_DTYPE),
+                        (oxygen, 100.0, FIELD_DTYPE),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
                         (fuel_work, 0.0, FIELD_DTYPE),
+                        (oxygen_work, 100.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
                         (zero_pool, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
@@ -1068,7 +1080,7 @@ def solver(config: dict):
         # ------------Domain BC-------------------
         bc_config = simulation.get("domain", {}).get("boundary_conditions", {})
 
-        u, v, w, p, temperature, smoke, fuel = domain_bc.domain_bc(
+        u, v, w, p, temperature, smoke, fuel, oxygen = domain_bc.domain_bc(
             queue,
             domain_bc_kernels,
             u,
@@ -1078,6 +1090,7 @@ def solver(config: dict):
             temperature,
             smoke,
             fuel,
+            oxygen,
             bc_config,
             index_tile_map,
             tile_shape,
@@ -1263,6 +1276,7 @@ def solver(config: dict):
             w,
             smoke,
             fuel,
+            oxygen,
             flame,
             obstacle_mask,
             scratch_A,
@@ -1277,7 +1291,7 @@ def solver(config: dict):
         # ------------Clear scratch-------------------
         sparse_managment.reset_pools(
             queue,
-            (scratch_A, scratch_B, scratch_C),
+            (scratch_A, scratch_B, scratch_C, scratch_D),
             zero_pool,
         )
 
@@ -1499,6 +1513,7 @@ def solver(config: dict):
             temperature,
             smoke,
             fuel,
+            oxygen,
             u,
             v,
             w,
@@ -1506,6 +1521,7 @@ def solver(config: dict):
             scratch_A,
             scratch_B,
             scratch_C,
+            scratch_D,
             np.float32(delta),
             np.int32(advection_substeps),
             np.float32(reference_temperature),
@@ -1528,9 +1544,11 @@ def solver(config: dict):
             temperature,
             smoke,
             fuel,
+            oxygen,
             scratch_A,
             scratch_B,
             scratch_C,
+            scratch_D,
             u,
             v,
             w,
@@ -1538,6 +1556,7 @@ def solver(config: dict):
             temperature_work,
             smoke_work,
             fuel_work,
+            oxygen_work,
             flame,
             np.float32(delta),
             np.int32(advection_substeps),
@@ -1565,6 +1584,7 @@ def solver(config: dict):
         temperature, temperature_work = temperature_work, temperature
         smoke, smoke_work = smoke_work, smoke
         fuel, fuel_work = fuel_work, fuel
+        oxygen, oxygen_work = oxygen_work, oxygen
 
         # ------------time update-------------------
         t = t + dt
