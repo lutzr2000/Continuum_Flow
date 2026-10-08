@@ -15,6 +15,7 @@ inline void compute_combustion_sources(
     const float smoke_production_rate,
     const float fuel_burn_rate,
     const float fuel_ignition_temperature,
+    const float ignition_temperature_width,
     __private float *temperature_source,
     __private float *smoke_source,
     __private float *fuel_source,
@@ -29,8 +30,6 @@ inline void compute_combustion_sources(
     *flame_source = 0.0f;
 
     const float oxygen_per_fuel = 1.0f; 
-    const float ignition_temperature_width = 50.0f;
-    
     if (
         fuel_concentration <= 0.0f ||
         oxygen_concentration <= 0.0f ||
@@ -41,11 +40,13 @@ inline void compute_combustion_sources(
     }
 
     const float temperature_factor =
-        smoothstep(
+        ignition_temperature_width > 0.0f
+        ? smoothstep(
             fuel_ignition_temperature,
             fuel_ignition_temperature + ignition_temperature_width,
             T
-        );
+        )
+        : step(fuel_ignition_temperature, T);
 
 
     const float available_reactant =
@@ -256,6 +257,7 @@ __kernel void update_scalar_fields_maccormack(
     const float fuel_dissipation_rate,
     const float fuel_burn_rate,
     const float fuel_ignition_temperature,
+    const float fuel_ignition_temperature_width,
     const float t_reference,
     __global const int *index_tile_map,
     const float u_initial,
@@ -611,6 +613,7 @@ __kernel void update_scalar_fields_maccormack(
         smoke_production_rate,
         fuel_burn_rate,
         fuel_ignition_temperature,
+        fuel_ignition_temperature_width,
         &temperature_burn_source,
         &smoke_burn_source,
         &fuel_burn_source,

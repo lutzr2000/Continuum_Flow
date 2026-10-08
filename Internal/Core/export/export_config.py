@@ -22,6 +22,7 @@ ANIMATABLE_PROPERTIES = {
         "fuel_dissipation",
         "fuel_burn_rate",
         "fuel_ignition_temperature",
+        "fuel_ignition_temperature_width",
         "vorticity",
     ),
     "CONTINUUM_FLOW_SOURCE_NODE": (
@@ -420,6 +421,9 @@ def build_physics_node_entries(node, start_frame, end_frame, fps):
             "dissipation": physics_value(node, "fuel_dissipation"),
             "burn_rate": physics_value(node, "fuel_burn_rate"),
             "ignition_temperature": physics_value(node, "fuel_ignition_temperature"),
+            "ignition_temperature_width": physics_value(
+                node, "fuel_ignition_temperature_width"
+            ),
         },
         "extras": {
             "vorticity": physics_value(node, "vorticity"),

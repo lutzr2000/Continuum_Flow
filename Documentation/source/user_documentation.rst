@@ -138,6 +138,9 @@ This node controls the general physics parameters of the simulation.
 **Fuel Ignition Temperature**
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
+**Fuel Ignition Temperature Tolerance**
+    Temperature range over which combustion ramps from unlit to its full burn rate.
+
 **Vorticity**
     Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
     

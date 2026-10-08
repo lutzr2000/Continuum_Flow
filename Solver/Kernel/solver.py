@@ -120,6 +120,7 @@ def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any
             "dissipation": "fuel_dissipation",
             "burn_rate": "fuel_burn_rate",
             "ignition_temperature": "fuel_ignition_temperature",
+            "ignition_temperature_width": "fuel_ignition_temperature_width",
         },
         "extras": {"vorticity": "vorticity"},
     }
@@ -1567,6 +1568,7 @@ def solver(config: dict):
             np.float32(physics_values["fuel"]["dissipation"]),
             np.float32(physics_values["fuel"]["burn_rate"]),
             np.float32(physics_values["fuel"]["ignition_temperature"]),
+            np.float32(physics_values["fuel"]["ignition_temperature_width"]),
             np.float32(reference_temperature),
             index_tile_map,
             np.float32(u_initial),
