@@ -24,7 +24,7 @@ inline void compute_combustion_sources(
 
     if (T > fuel_ignition_temperature)
     {
-        float burn_factor = 1.0f;
+        float burn_factor = 1.0f; // this should be tied to temperature and maybe also fake oxygen (oxygen = 1-fuel_concentration-smoke_concentration)
 
         *fuel_source = -fuel_burn_rate * burn_factor * inv_dt;
         *smoke_source = smoke_production_rate * burn_factor * inv_dt;
@@ -44,7 +44,7 @@ inline void compute_combustion_sources(
 __kernel void predict_scalar_fields_semi_lagrangian(
     __global const float *T,
     __global const float *smoke,
-    __global const uchar *fuel,
+    __global const float *fuel,
     __global const float *u,
     __global const float *v,
     __global const float *w,
@@ -154,7 +154,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
         fuel_tx, fuel_ty, fuel_tz,
         0.0f, tiles_y, tiles_z
     );
-    sampled_fuel = sample_trilinear_inner_sparse_uint8(
+    sampled_fuel = sample_trilinear_inner_sparse(
         fuel, index_tile_map,
         fuel_x0, fuel_y0, fuel_z0,
         fuel_x1, fuel_y1, fuel_z1,
@@ -175,7 +175,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(
 __kernel void update_scalar_fields_maccormack(
     __global const float *T,
     __global const float *smoke,
-    __global const uchar *fuel,
+    __global const float *fuel,
     __global const float *predictor_T,
     __global const float *predictor_smoke,
     __global const float *predictor_fuel,
@@ -185,7 +185,7 @@ __kernel void update_scalar_fields_maccormack(
     const float dt,
     __global float *T_out,
     __global float *smoke_out,
-    __global uchar *fuel_out,
+    __global float *fuel_out,
     __global float *flame_out,
     const float delta,
     const int n_substeps,
@@ -382,7 +382,7 @@ __kernel void update_scalar_fields_maccormack(
 
     float fuel_corrected =
         fuel_advected
-        + 0.5f * ((float)fuel[index] - fuel_reverse);
+        + 0.5f * (fuel[index] - fuel_reverse);
 
     // ---------------------------------------------------------
     // Departure cell
@@ -464,7 +464,7 @@ __kernel void update_scalar_fields_maccormack(
         &smoke_upper
     );
 
-    sample_cell_extrema_inner_sparse_uint8(
+    sample_cell_extrema_inner_sparse(
         fuel,
         index_tile_map,
         x0,
@@ -573,9 +573,7 @@ __kernel void update_scalar_fields_maccormack(
             100.0f
         );
 
-    fuel_out[index] = convert_uchar_rte(
-        clamp(fuel_updated, 0.0f, 255.0f)
-    );
+    fuel_out[index] = clamp(fuel_updated, 0.0f, 100.0f);
 
     flame_out[index] =
         fmax(

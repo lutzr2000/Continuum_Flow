@@ -33,13 +33,7 @@ def get_source_values(
     property_map = {
         "temperature": ("temperature", "value", None, FIELD_DTYPE, 1.0),
         "smoke": ("smoke", "value", None, FIELD_DTYPE, 1.0),
-        "fuel": (
-            "fuel",
-            "value",
-            None,
-            FIELD_DTYPE,
-            2.55,
-        ),  # convert from 0-100 to 0-255 range
+        "fuel": ("fuel", "value", None, FIELD_DTYPE, 1.0),
         "randomness_scale": ("noise", "scale", None, FIELD_DTYPE, 1.0),
         "randomness_seed": ("noise", "seed", None, np.int32, 1.0),
         "temperature_randomness": (
@@ -484,13 +478,13 @@ def solver(config: dict):
     # scalars
     temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
     smoke = helper.zeros_device(context, sparse_pool_shape)
-    fuel = helper.zeros_device(context, sparse_pool_shape, dtype=np.uint8)
+    fuel = helper.zeros_device(context, sparse_pool_shape)
 
     temperature_work = helper.full_device(
         context, sparse_pool_shape, reference_temperature
     )
     smoke_work = helper.zeros_device(context, sparse_pool_shape)
-    fuel_work = helper.zeros_device(context, sparse_pool_shape, dtype=np.uint8)
+    fuel_work = helper.zeros_device(context, sparse_pool_shape)
 
     # flame
     flame = helper.zeros_device(context, sparse_pool_shape)
@@ -864,10 +858,10 @@ def solver(config: dict):
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
-                        (fuel, 0, np.uint8),
+                        (fuel, 0.0, FIELD_DTYPE),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
-                        (fuel_work, 0, np.uint8),
+                        (fuel_work, 0.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
@@ -927,10 +921,10 @@ def solver(config: dict):
                         (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
-                        (fuel, 0, np.uint8),
+                        (fuel, 0.0, FIELD_DTYPE),
                         (temperature_work, reference_temperature, FIELD_DTYPE),
                         (smoke_work, 0.0, FIELD_DTYPE),
-                        (fuel_work, 0, np.uint8),
+                        (fuel_work, 0.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
                         (zero_pool, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),

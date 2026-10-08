@@ -132,6 +132,7 @@ def create_output(
             ("pressure", "pressure", kernel_config.FIELD_DTYPE),
             ("temperature", "temperature", kernel_config.FIELD_DTYPE),
             ("smoke", "smoke", kernel_config.FIELD_DTYPE),
+            ("fuel", "fuel", kernel_config.FIELD_DTYPE),
             ("flame", "flame", kernel_config.FIELD_DTYPE),
         )
         if bool((configured_fields.get(spec[0]) or {}).get("enabled", False))

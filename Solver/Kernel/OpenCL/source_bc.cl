@@ -10,7 +10,7 @@ __kernel void source_bc(
     __global float *w,
     __global float *T,
     __global float *smoke,
-    __global uchar *fuel,
+    __global float *fuel,
     __global const int *index_tile_map,
     __global const uchar *source_mask,
     const float temperature_value,
@@ -162,12 +162,9 @@ __kernel void source_bc(
         100.0f
     );
 
-    fuel[index] = convert_uchar_rte(
-        clamp(
-            (float)fuel[index] +
-            fuel_value * fuel_multiplier * dt,
-            0.0f,
-            255.0f
-        )
+    fuel[index] = clamp(
+        fuel[index] + fuel_value * fuel_multiplier * dt,
+        0.0f,
+        100.0f
     );
 }
