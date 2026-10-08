@@ -527,6 +527,12 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
 
 
 def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
+    geometry_nodes = [
+        geometry_node
+        for geometry_node in geometry_nodes
+        if getattr(geometry_node, "source_object", None) is not None
+    ]
+
     transform_samples = get_geometry_transforms(
         geometry_nodes,
         start_frame,
@@ -792,12 +798,12 @@ def get_geometry_nodes(node_tree):
         if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_GEOMETRY_NODE":
             continue
         source_object = getattr(node, "source_object", None)
+        if source_object is None:
+            continue
         geometry_entries.append(
             {
                 "node_name": node.name,
-                "object_name": (
-                    source_object.name if source_object is not None else None
-                ),
+                "object_name": source_object.name,
             }
         )
     return geometry_entries
