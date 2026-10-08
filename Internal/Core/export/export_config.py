@@ -44,12 +44,6 @@ ANIMATABLE_PROPERTIES = {
         "fz",
     ),
     "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE": ("amplitude",),
-    "CONTINUUM_FLOW_FORCE_SWIRL_NODE": (
-        "strength",
-        "origin",
-        "axis",
-        "radius",
-    ),
 }
 
 PERCENTAGE_MAPPING = {

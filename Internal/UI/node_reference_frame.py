@@ -31,6 +31,7 @@ class ContinuumFlowReferenceFrameNode(node_base.ContinuumFlowBaseNode):
         min=-1.0,
         max=1.0,
         description="Amount of reference-frame velocity transferred to the fluid",
+        options=set(),
     )  # type: ignore
 
     def _sync_node(self):

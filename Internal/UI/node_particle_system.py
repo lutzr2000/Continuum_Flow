@@ -42,6 +42,7 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
         unit="LENGTH",
         subtype="DISTANCE",
         description="Radius of the particles in meters",
+        options=set(),
     )  # type: ignore
     velocity_transfer: FloatProperty(
         name="Velocity Transfer",
@@ -50,6 +51,7 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
         soft_max=100.0,
         subtype="PERCENTAGE",
         description="Percentage of particle velocity transferred to the fluid",
+        options=set(),
     )  # type: ignore
 
     def _sync_node(self):
