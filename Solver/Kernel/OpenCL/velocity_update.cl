@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "advection_schemes.cl"
 #include "forces.cl"
 #include "sparse_managment.cl"
@@ -26,6 +22,11 @@ __kernel void advect_velocity_semi_lagrangian(__global const float *u,
                                               const int tiles_x,
                                               const int tiles_y,
                                               const int tiles_z) {
+    /*
+    This kernel performs semi-lagrangian advection for the velocity field.
+    It essentially asks: Going back by u*dt what velocity was at
+    that position? The sampled velocity is then moved to the current cell.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -70,42 +71,45 @@ __kernel void advect_velocity_semi_lagrangian(__global const float *u,
 }
 
 inline float3 apply_force_acceleration(__global const float *u,
-                           __global const float *v,
-                           __global const float *w,
-                           __global const uchar *obstacle_mask,
-                           __global const float *vorticity_magnitude,
-                           const float vorticity_strength,
-                           __global const float *temperature,
-                           const float buoyancy_factor,
-                           const float t_reference,
-                           const float gravity_x,
-                           const float gravity_y,
-                           const float gravity_z,
-                           __global const int *index_tile_map,
-                           const float fx_const,
-                           const float fy_const,
-                           const float fz_const,
-                           const int has_swirl_nodes,
-                           __global const float *swirl_config,
-                           const int swirl_count,
-                           const float origin_x,
-                           const float origin_y,
-                           const float origin_z,
-                           const int has_turbulence_nodes,
-                           __global const float *turbulence_config,
-                           const int turbulence_count,
-                           const int i,
-                           const int j,
-                           const int k,
-                           const float delta,
-                           const float u_initial,
-                           const float v_initial,
-                           const float w_initial,
-                           const int nx,
-                           const int ny,
-                           const int nz,
-                           const int tiles_y,
-                           const int tiles_z) {
+                                       __global const float *v,
+                                       __global const float *w,
+                                       __global const uchar *obstacle_mask,
+                                       __global const float *vorticity_magnitude,
+                                       const float vorticity_strength,
+                                       __global const float *temperature,
+                                       const float buoyancy_factor,
+                                       const float t_reference,
+                                       const float gravity_x,
+                                       const float gravity_y,
+                                       const float gravity_z,
+                                       __global const int *index_tile_map,
+                                       const float fx_const,
+                                       const float fy_const,
+                                       const float fz_const,
+                                       const int has_swirl_nodes,
+                                       __global const float *swirl_config,
+                                       const int swirl_count,
+                                       const float origin_x,
+                                       const float origin_y,
+                                       const float origin_z,
+                                       const int has_turbulence_nodes,
+                                       __global const float *turbulence_config,
+                                       const int turbulence_count,
+                                       const int i,
+                                       const int j,
+                                       const int k,
+                                       const float delta,
+                                       const float u_initial,
+                                       const float v_initial,
+                                       const float w_initial,
+                                       const int nx,
+                                       const int ny,
+                                       const int nz,
+                                       const int tiles_y,
+                                       const int tiles_z) {
+    /*
+    This kernel applies the acceleartion acting on the fluid based on the forces.
+    */
     float ax = 0.0f;
     float ay = 0.0f;
     float az = 0.0f;
@@ -171,6 +175,11 @@ inline float3 diffusion(__global const float *u,
                         const float w_initial,
                         const int tiles_y,
                         const int tiles_z) {
+    /*
+    This function performs one iteration of implicit velocity diffusion.
+    It uses the velocities of the six neighboring cells to smooth out
+    velocity differences, simulating viscosity (internal fluid friction).
+    */
     const float u_neighbor_sum = get_pool_value(u, index_tile_map, i + 1, j, k, u_initial, tiles_y, tiles_z) +
                                  get_pool_value(u, index_tile_map, i - 1, j, k, u_initial, tiles_y, tiles_z) +
                                  get_pool_value(u, index_tile_map, i, j + 1, k, u_initial, tiles_y, tiles_z) +
@@ -242,6 +251,22 @@ __kernel void update_velocity_maccormack(__global const float *u,
                                          const int tiles_x,
                                          const int tiles_y,
                                          const int tiles_z) {
+    /*
+    This kernel performs the main update of the velocity field. It receives the
+    predicted values from advect_velocity_semi_lagrangian and applies
+    MacCormack's correction.
+
+    Semi-Lagrangian advection introduces numerical diffusion, which smoothes
+    out sharp features in the velocity field. MacCormack reduces this error
+    by advecting the predicted field backward in time and comparing the
+    result with the original field. Half of this difference is then added
+    to the predicted velocity.
+
+    A limiter is applied to prevent overshooting and undershooting.
+
+    Additionally diffusion is computed and accelerations due to forces
+    are taken into account.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -305,14 +330,6 @@ __kernel void update_velocity_maccormack(__global const float *u,
                                   &z_forward);
 
     // ---------------------------------------------------------
-    // Predictor
-    // ---------------------------------------------------------
-
-    const float advected_u = predictor_u[index];
-    const float advected_v = predictor_v[index];
-    const float advected_w = predictor_w[index];
-
-    // ---------------------------------------------------------
     // Reverse sample
     // ---------------------------------------------------------
 
@@ -328,9 +345,9 @@ __kernel void update_velocity_maccormack(__global const float *u,
     // MacCormack correction
     // ---------------------------------------------------------
 
-    float corrected_u = advected_u + 0.5f * (u_center - reverse_u);
-    float corrected_v = advected_v + 0.5f * (v_center - reverse_v);
-    float corrected_w = advected_w + 0.5f * (w_center - reverse_w);
+    float corrected_u = predictor_u[index] + 0.5f * (u_center - reverse_u);
+    float corrected_v = predictor_v[index] + 0.5f * (v_center - reverse_v);
+    float corrected_w = predictor_w[index] + 0.5f * (w_center - reverse_w);
 
     // ---------------------------------------------------------
     // Departure cell
@@ -386,9 +403,8 @@ __kernel void update_velocity_maccormack(__global const float *u,
         swirl_count, origin_x, origin_y, origin_z, has_turbulence_nodes, turbulence_config, turbulence_count, i, j, k,
         delta, u_initial, v_initial, w_initial, nx, ny, nz, tiles_y, tiles_z);
 
-    const float3 rhs =
-        (float3)(corrected_u + force_coeff * acceleration.x, corrected_v + force_coeff * acceleration.y,
-                 corrected_w + force_coeff * acceleration.z);
+    const float3 rhs = (float3)(corrected_u + force_coeff * acceleration.x, corrected_v + force_coeff * acceleration.y,
+                                corrected_w + force_coeff * acceleration.z);
 
     // ---------------------------------------------------------
     // Diffusion

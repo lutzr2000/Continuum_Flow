@@ -1,10 +1,6 @@
 #ifndef SPARSE_MANAGMENT_CL
 #define SPARSE_MANAGMENT_CL
 
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 inline float get_pool_value(__global const float *field,
                             __global const int *index_tile_map,
                             const int i,
@@ -13,6 +9,9 @@ inline float get_pool_value(__global const float *field,
                             const float default_value,
                             const int tiles_y,
                             const int tiles_z) {
+    /*
+    Helper device kernel for accessing a cells value in the tile pool
+    */
     const int tile_i = i / TILE_SIZE;
     const int tile_j = j / TILE_SIZE;
     const int tile_k = k / TILE_SIZE;
@@ -46,6 +45,10 @@ __kernel void build_activity_mask(__global const float *smoke,
                                   const int tile_count_x,
                                   const int tile_count_y,
                                   const int tile_count_z) {
+    /*
+    Determine activity based on fuel, smoke and flame.
+    Sources activate the flow too.
+    */
     const int tile_i = get_global_id(0);
     const int tile_j = get_global_id(1);
     const int tile_k = get_global_id(2);
@@ -107,6 +110,11 @@ __kernel void dilate_activity_x(__global const uchar *src,
                                 const int tiles_x,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    Since the flow needs to be able to move out of the active region
+    the activity map needs to be dilated. This kernel dilates in the
+    x-direciton.
+    */
     const int x = get_global_id(0);
     const int y = get_global_id(1);
     const int z = get_global_id(2);
@@ -132,6 +140,9 @@ __kernel void dilate_activity_y(__global const uchar *src,
                                 const int tiles_x,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    Same as dilate_activity_x but in the y-direction
+    */
     const int x = get_global_id(0);
     const int y = get_global_id(1);
     const int z = get_global_id(2);
@@ -157,6 +168,9 @@ __kernel void dilate_activity_z(__global const uchar *src,
                                 const int tiles_x,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    Same as dilate_activity_x but in the z-direction
+    */
     const int x = get_global_id(0);
     const int y = get_global_id(1);
     const int z = get_global_id(2);
@@ -187,6 +201,9 @@ __kernel void activate_tiles_with_reuse(__global const uchar *activity_map,
                                         const int tiles_x,
                                         const int tiles_y,
                                         const int tiles_z) {
+    /*
+    Allocate pool slots for active tiles. Reuse released slots before growing the tile pool.
+    */
     const int tile_i = get_global_id(0);
     const int tile_j = get_global_id(1);
     const int tile_k = get_global_id(2);
@@ -227,6 +244,9 @@ __kernel void fill_sparse_tile_slots(__global float *pool,
                                      __global const int *slot_indices,
                                      const int slot_count,
                                      const float fill_value) {
+    /*
+    Initialize every cell in the specified floating-point tile pool slots with a constant value.
+    */
     const int flat_index = get_global_id(0);
 
     const int cells_per_tile = TILE_SIZE * TILE_SIZE * TILE_SIZE;
@@ -259,6 +279,9 @@ __kernel void fill_sparse_tile_slots_uchar(__global uchar *pool,
                                            __global const int *slot_indices,
                                            const int slot_count,
                                            const uchar fill_value) {
+    /*
+    Initialize every cell in the specified unsigned-byte tile pool slots with a constant value.
+    */
     const int flat_index = get_global_id(0);
 
     const int cells_per_tile = TILE_SIZE * TILE_SIZE * TILE_SIZE;
@@ -294,6 +317,9 @@ __kernel void release_inactive_tile_slots(__global const uchar *activity_map,
                                           const int tiles_x,
                                           const int tiles_y,
                                           const int tiles_z) {
+    /*
+    Release pool slots belonging to inactive tiles and add them to the reusable free-slot list.
+    */
     const int tile_i = get_global_id(0);
     const int tile_j = get_global_id(1);
     const int tile_k = get_global_id(2);

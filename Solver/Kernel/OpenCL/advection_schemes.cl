@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "sparse_managment.cl"
 
 inline float clamp_value(const float value, const float lower, const float upper) {

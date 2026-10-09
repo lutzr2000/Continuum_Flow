@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 __kernel void mark_source_tiles(__global uchar *source_tile_mask,
                                 const int size_x,
                                 const int size_y,
@@ -9,6 +5,9 @@ __kernel void mark_source_tiles(__global uchar *source_tile_mask,
                                 const int offset_i,
                                 const int offset_j,
                                 const int offset_k) {
+    /*
+    Kernel used for marking tiles as active which contain sources.
+    */
     int i = get_global_id(0) + offset_i;
     int j = get_global_id(1) + offset_j;
     int k = get_global_id(2) + offset_k;
@@ -44,6 +43,12 @@ __kernel void update_source_masks(__global uchar *mask,
                                   const int local_size_x,
                                   const int local_size_y,
                                   const int local_size_z) {
+    /*
+    This kernel updates the global source mask using a local source mask.
+    Each global cell is transformed into the local coordinate system of
+    the source. If the corresponding local mask cell is active, the
+    global cell is marked as active.
+    */
     const int ti = get_group_id(0) + offset_i;
     const int tj = get_group_id(1) + offset_j;
     const int tk = get_group_id(2) + offset_k;
@@ -117,6 +122,9 @@ __kernel void update_source_velocity(__global float *velocity_x,
                                      const int local_size_x,
                                      const int local_size_y,
                                      const int local_size_z) {
+    /*
+    This kernel is used to set the source velocity into scratch arrays.
+    */
     const int ti = get_group_id(0) + offset_i;
     const int tj = get_group_id(1) + offset_j;
     const int tk = get_group_id(2) + offset_k;
@@ -198,6 +206,9 @@ __kernel void update_obstacle_mask(__global uchar *mask,
                                    const int local_size_x,
                                    const int local_size_y,
                                    const int local_size_z) {
+    /*
+    Similar to update_source_masks.
+    */
     const int ti = get_group_id(0) + offset_i;
     const int tj = get_group_id(1) + offset_j;
     const int tk = get_group_id(2) + offset_k;

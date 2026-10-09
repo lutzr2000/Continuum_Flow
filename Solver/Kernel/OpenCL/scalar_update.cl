@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "advection_schemes.cl"
 #include "sparse_managment.cl"
 
@@ -19,6 +15,10 @@ inline void compute_combustion_sources(const float T,
                                        __private float *fuel_source,
                                        __private float *oxygen_source,
                                        __private float *flame_source) {
+    /*
+    This kernel computes the combustion behaviour of the solver. Combustion requieres
+    oxygen, fuel and temperature larger than the threshold.
+    */
     *temperature_source = 0.0f;
     *smoke_source = 0.0f;
     *fuel_source = 0.0f;
@@ -73,6 +73,11 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
                                                     const int tiles_x,
                                                     const int tiles_y,
                                                     const int tiles_z) {
+    /*
+    This kernel performs semi-lagrangian advection for the scalar fields fuel, oxygen,
+    smoke and temeprature. It essentially asks: Going back by u*dt what quantity was at
+    that position? The sampled quantity is then moved to the current cell.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -95,6 +100,10 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
 
+    // ---------------------------------------------------------
+    // Backtrace
+    // ---------------------------------------------------------
+
     float x_depart;
     float y_depart;
     float z_depart;
@@ -109,8 +118,15 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
 
     int fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1, fuel_z1;
     float fuel_tx, fuel_ty, fuel_tz;
+
+    // prepare data used for trilinear interpolation
     prepare_trilinear_coords(x_depart, y_depart, z_depart, nx, ny, nz, &fuel_x0, &fuel_y0, &fuel_z0, &fuel_x1, &fuel_y1,
                              &fuel_z1, &fuel_tx, &fuel_ty, &fuel_tz);
+
+    // ---------------------------------------------------------
+    // Trilinear sampling
+    // ---------------------------------------------------------
+
     sampled_T = sample_trilinear_inner_sparse(T, index_tile_map, fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1, fuel_z1,
                                               fuel_tx, fuel_ty, fuel_tz, t_reference, tiles_y, tiles_z);
     sampled_smoke = sample_trilinear_inner_sparse(smoke, index_tile_map, fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1,
@@ -119,6 +135,7 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
                                                  fuel_z1, fuel_tx, fuel_ty, fuel_tz, 0.0f, tiles_y, tiles_z);
     sampled_oxygen = sample_trilinear_inner_sparse(oxygen, index_tile_map, fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1,
                                                    fuel_z1, fuel_tx, fuel_ty, fuel_tz, 100.0f, tiles_y, tiles_z);
+
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
     predictor_T[index] = sampled_T;
@@ -165,6 +182,19 @@ __kernel void update_scalar_fields_maccormack(__global const float *T,
                                               const int tiles_x,
                                               const int tiles_y,
                                               const int tiles_z) {
+    /*
+    This kernel performs the main update of the scalar fields. It receives the
+    predicted values from predict_scalar_fields_semi_lagrangian and applies
+    MacCormack's correction.
+
+    Semi-Lagrangian advection introduces numerical diffusion, which smoothes
+    out sharp features in the scalar fields. MacCormack reduces this error
+    by advecting the predicted field backward in time and comparing the
+    result with the original field. Half of this difference is then added
+    to the predicted values.
+
+    A limiter is applied to prevent overshooting and undershooting.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -218,15 +248,6 @@ __kernel void update_scalar_fields_maccormack(__global const float *T,
                                   &z_forward);
 
     // ---------------------------------------------------------
-    // Predictor
-    // ---------------------------------------------------------
-
-    const float T_advected = predictor_T[index];
-    const float smoke_advected = predictor_smoke[index];
-    const float fuel_advected = predictor_fuel[index];
-    const float oxygen_advected = predictor_oxygen[index];
-
-    // ---------------------------------------------------------
     // Reverse sample
     // ---------------------------------------------------------
 
@@ -235,23 +256,45 @@ __kernel void update_scalar_fields_maccormack(__global const float *T,
     float fuel_reverse;
     float oxygen_reverse;
 
-    sample_trilinear_vec3_sparse(predictor_T, predictor_smoke, predictor_fuel, index_tile_map, x_forward, y_forward,
-                                 z_forward, nx, ny, nz, t_reference, 0.0f, 0.0f, tiles_y, tiles_z, &T_reverse,
-                                 &smoke_reverse, &fuel_reverse);
-    oxygen_reverse = sample_trilinear_inner_sparse(
-        predictor_oxygen, index_tile_map, (int)floor(x_forward), (int)floor(y_forward), (int)floor(z_forward),
-        min((int)floor(x_forward) + 1, nx - 1), min((int)floor(y_forward) + 1, ny - 1),
-        min((int)floor(z_forward) + 1, nz - 1), x_forward - floor(x_forward), y_forward - floor(y_forward),
-        z_forward - floor(z_forward), 100.0f, tiles_y, tiles_z);
+    int forward_x0;
+    int forward_y0;
+    int forward_z0;
+
+    int forward_x1;
+    int forward_y1;
+    int forward_z1;
+
+    float forward_tx;
+    float forward_ty;
+    float forward_tz;
+
+    prepare_trilinear_coords(x_forward, y_forward, z_forward, nx, ny, nz, &forward_x0, &forward_y0, &forward_z0,
+                             &forward_x1, &forward_y1, &forward_z1, &forward_tx, &forward_ty, &forward_tz);
+
+    T_reverse = sample_trilinear_inner_sparse(predictor_T, index_tile_map, forward_x0, forward_y0, forward_z0,
+                                              forward_x1, forward_y1, forward_z1, forward_tx, forward_ty, forward_tz,
+                                              t_reference, tiles_y, tiles_z);
+
+    smoke_reverse = sample_trilinear_inner_sparse(predictor_smoke, index_tile_map, forward_x0, forward_y0, forward_z0,
+                                                  forward_x1, forward_y1, forward_z1, forward_tx, forward_ty,
+                                                  forward_tz, 0.0f, tiles_y, tiles_z);
+
+    fuel_reverse = sample_trilinear_inner_sparse(predictor_fuel, index_tile_map, forward_x0, forward_y0, forward_z0,
+                                                 forward_x1, forward_y1, forward_z1, forward_tx, forward_ty, forward_tz,
+                                                 0.0f, tiles_y, tiles_z);
+
+    oxygen_reverse = sample_trilinear_inner_sparse(predictor_oxygen, index_tile_map, forward_x0, forward_y0, forward_z0,
+                                                   forward_x1, forward_y1, forward_z1, forward_tx, forward_ty,
+                                                   forward_tz, 100.0f, tiles_y, tiles_z);
 
     // ---------------------------------------------------------
     // MacCormack correction
     // ---------------------------------------------------------
 
-    float T_corrected = T_advected + 0.5f * (T[index] - T_reverse);
-    float smoke_corrected = smoke_advected + 0.5f * (smoke[index] - smoke_reverse);
-    float fuel_corrected = fuel_advected + 0.5f * (fuel[index] - fuel_reverse);
-    float oxygen_corrected = oxygen_advected + 0.5f * (oxygen[index] - oxygen_reverse);
+    float T_corrected = predictor_T[index] + 0.5f * (T[index] - T_reverse);
+    float smoke_corrected = predictor_smoke[index] + 0.5f * (smoke[index] - smoke_reverse);
+    float fuel_corrected = predictor_fuel[index] + 0.5f * (fuel[index] - fuel_reverse);
+    float oxygen_corrected = predictor_oxygen[index] + 0.5f * (oxygen[index] - oxygen_reverse);
 
     // ---------------------------------------------------------
     // Departure cell

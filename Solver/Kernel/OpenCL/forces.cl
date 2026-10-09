@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "noise.cl"
 #include "sparse_managment.cl"
 

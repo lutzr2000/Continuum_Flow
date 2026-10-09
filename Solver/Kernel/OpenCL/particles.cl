@@ -1,12 +1,11 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 inline float3 interpolated_particle_vector(__global const float *current_values,
                                            __global const float *next_values,
                                            const int sample_index,
                                            const int next_count,
                                            const float alpha) {
+    /*
+    Interpolates a particle vector between two frames to avoid abrupt changes.
+    */
     int index = sample_index * 3;
 
     float px = current_values[index + 0];
@@ -24,6 +23,9 @@ inline float3 interpolated_particle_vector(__global const float *current_values,
 
 inline float point_segment_distance_squared(
     float px, float py, float pz, float ax, float ay, float az, float bx, float by, float bz) {
+    /*
+    Computes the squared shortest distance from a point to a finite line segment.
+    */
     float abx = bx - ax;
     float aby = by - ay;
     float abz = bz - az;
@@ -66,6 +68,9 @@ inline void particle_grid_bounds(float px,
                                  int *max_i,
                                  int *max_j,
                                  int *max_k) {
+    /*
+    Computes the clamped grid bounds covered by a particle and its radius.
+    */
     *min_i = max((int)floor((px - radius - origin_x) / spacing), 0);
     *min_j = max((int)floor((py - radius - origin_y) / spacing), 0);
     *min_k = max((int)floor((pz - radius - origin_z) / spacing), 0);
@@ -76,6 +81,9 @@ inline void particle_grid_bounds(float px,
 
 inline void linear_to_grid_index(
     int linear_index, int min_i, int min_j, int min_k, int count_j, int count_k, int *i, int *j, int *k) {
+    /*
+    Converts a linear index within a bounded grid region to three-dimensional grid coordinates.
+    */
     int entries_per_i = count_j * count_k;
     int local_i = linear_index / entries_per_i;
     int remainder = linear_index - local_i * entries_per_i;
@@ -88,6 +96,9 @@ inline void linear_to_grid_index(
 }
 
 inline void atomic_add_float(volatile __global float *address, float value) {
+    /*
+    Atomically adds a floating-point value by using an integer compare-and-swap loop.
+    */
     union {
         unsigned int int_value;
         float float_value;
@@ -120,6 +131,9 @@ __kernel void sample_interpolated_vectors(__global float *output,
                                           const int count,
                                           const int next_count,
                                           const float alpha) {
+    /*
+    Samples interpolated particle vectors for a position between the current and next frame.
+    */
     int sample_index = get_global_id(0);
 
     if (sample_index >= count)
@@ -147,6 +161,9 @@ __kernel void mark_particle_tiles(__global uchar *tile_mask,
                                   const int size_x,
                                   const int size_y,
                                   const int size_z) {
+    /*
+    Marks every grid tile touched by a particle's swept path between two frames.
+    */
     int sample_index = get_group_id(0);
 
     if (sample_index >= count)
@@ -235,6 +252,9 @@ __kernel void rasterize_particle_spheres(__global uchar *source_mask,
                                          const int tile_count_x,
                                          const int tile_count_y,
                                          const int tile_count_z) {
+    /*
+    Rasterizes each particle's swept sphere into the cells of the allocated grid tiles.
+    */
     int sample_index = get_group_id(0);
 
     if (sample_index >= count)
@@ -339,6 +359,9 @@ __kernel void reset_particle_velocity_kernel(__global float *u,
                                              const int tile_count_x,
                                              const int tile_count_y,
                                              const int tile_count_z) {
+    /*
+    Clears the grid velocity components inside each interpolated particle sphere.
+    */
     int sample_index = get_group_id(0);
 
     if (sample_index >= count)
@@ -424,6 +447,9 @@ __kernel void transfer_particle_velocities(__global float *u,
                                            const int tile_count_x,
                                            const int tile_count_y,
                                            const int tile_count_z) {
+    /*
+    Adds interpolated particle velocities to the grid cells inside each particle sphere.
+    */
     int sample_index = get_group_id(0);
 
     if (sample_index >= count)

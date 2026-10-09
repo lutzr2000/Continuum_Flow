@@ -8,6 +8,9 @@ __kernel void surface(__global const float *triangles,
                       const float ox,
                       const float oy,
                       const float oz) {
+    /*
+    Voxelise a meshes surface
+    */
     const int i = get_global_id(0);
     const int j = get_global_id(1);
     const int k = get_global_id(2);

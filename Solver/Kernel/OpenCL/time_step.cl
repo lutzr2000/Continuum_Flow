@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 __kernel void velocity_maxima_partial(__global const float *u,
                                       __global const float *v,
                                       __global const float *w,
@@ -13,6 +9,9 @@ __kernel void velocity_maxima_partial(__global const float *u,
                                       __local float *s_u,
                                       __local float *s_v,
                                       __local float *s_w) {
+    /*
+    Helper kernel for determining the maximum velocity
+    */
     const int tid = get_local_id(0);
     const int local_size = get_local_size(0);
 
@@ -87,6 +86,9 @@ __kernel void velocity_maxima_final(__global const float *partial_maxima,
                                     __local float *s_u,
                                     __local float *s_v,
                                     __local float *s_w) {
+    /*
+    Final kernel for determining the maximum velocity
+    */
     const int tid = get_local_id(0);
     const int local_size = get_local_size(0);
 

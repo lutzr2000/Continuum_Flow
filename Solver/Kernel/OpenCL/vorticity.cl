@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "sparse_managment.cl"
 
 __kernel void compute_vorticity(__global const float *u,
@@ -20,6 +16,9 @@ __kernel void compute_vorticity(__global const float *u,
                                 const int tiles_x,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    Compute the magnitude of vorticity (rotation of the velocity field) with central differences
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -106,9 +105,15 @@ inline void apply_vorticity_confinement(__global const float *u,
                                         const int nz,
                                         const int tiles_y,
                                         const int tiles_z,
-                                        float *fx,
-                                        float *fy,
-                                        float *fz) {
+                                        float *ax,
+                                        float *ay,
+                                        float *az) {
+    /*
+    Numerical methods for computing flow can be more diffusive. To allow for
+    more swirl in the flow and aritistical control a vorticity force is added.
+    It is proportional to the rotation of the velocity field scaled by the magnitude
+    of vorticity.
+    */
     const int tile_i = i / TILE_SIZE;
     const int tile_j = j / TILE_SIZE;
     const int tile_k = k / TILE_SIZE;
@@ -122,18 +127,18 @@ inline void apply_vorticity_confinement(__global const float *u,
     const int tile_index = index_tile_map[tile_map_index];
 
     if (tile_index == -1) {
-        *fx = 0.0f;
-        *fy = 0.0f;
-        *fz = 0.0f;
+        *ax = 0.0f;
+        *ay = 0.0f;
+        *az = 0.0f;
         return;
     }
 
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
     if (i < 2 || j < 2 || k < 2 || i >= nx - 2 || j >= ny - 2 || k >= nz - 2 || obstacle_mask[index]) {
-        *fx = 0.0f;
-        *fy = 0.0f;
-        *fz = 0.0f;
+        *ax = 0.0f;
+        *ay = 0.0f;
+        *az = 0.0f;
         return;
     }
 
@@ -154,9 +159,9 @@ inline void apply_vorticity_confinement(__global const float *u,
     const float grad_length = sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z);
 
     if (grad_length <= 1.0e-12f) {
-        *fx = 0.0f;
-        *fy = 0.0f;
-        *fz = 0.0f;
+        *ax = 0.0f;
+        *ay = 0.0f;
+        *az = 0.0f;
         return;
     }
 
@@ -192,7 +197,7 @@ inline void apply_vorticity_confinement(__global const float *u,
     const float wy = du_dz - dw_dx;
     const float wz = dv_dx - du_dy;
 
-    *fx = vorticity_strength * (ny_dir * wz - nz_dir * wy);
-    *fy = vorticity_strength * (nz_dir * wx - nx_dir * wz);
-    *fz = vorticity_strength * (nx_dir * wy - ny_dir * wx);
+    *ax = vorticity_strength * (ny_dir * wz - nz_dir * wy);
+    *ay = vorticity_strength * (nz_dir * wx - nx_dir * wz);
+    *az = vorticity_strength * (nx_dir * wy - ny_dir * wx);
 }

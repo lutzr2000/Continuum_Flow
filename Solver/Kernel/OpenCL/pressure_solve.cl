@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "noise.cl"
 
 #include "sparse_managment.cl"
@@ -21,6 +17,11 @@ __kernel void project_velocity_kernel(__global float *u,
                                       const int tiles_x,
                                       const int tiles_y,
                                       const int tiles_z) {
+    /*
+    In this solver the Navier-Stokes equations are solved according to Chorins projection.
+    After computing a pressure field we correct the intermediate velocity field by the pressure gradient.
+    The pressure gradient is computed with central differences.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -82,6 +83,10 @@ __kernel void pressure_equation_right_side(__global const float *u,
                                            const int tiles_x,
                                            const int tiles_y,
                                            const int tiles_z) {
+    /*
+    This kernel computes the right hand side (rhs or b) of the pressure poisson equation.
+    In Chorins projections this is simply the divergence of the intermediate velocity field.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -138,6 +143,9 @@ __kernel void reset_inactive_pressure(__global float *p,
                                       const int tiles_x,
                                       const int tiles_y,
                                       const int tiles_z) {
+    /*
+    Reset inactive pressure cells to 0
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -167,14 +175,6 @@ __kernel void reset_inactive_pressure(__global float *p,
     }
 }
 
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
-#ifndef REDUCTION_THREADS_PER_BLOCK
-#define REDUCTION_THREADS_PER_BLOCK 256
-#endif
-
 __kernel void rhs_sum_count_partial_kernel(__global const float *b,
                                            __global const int *index_tile_map,
                                            __global float *partial_sums,
@@ -184,6 +184,9 @@ __kernel void rhs_sum_count_partial_kernel(__global const float *b,
                                            const int nz,
                                            const int tiles_y,
                                            const int tiles_z) {
+    /*
+    Helper kernel for computing the mean of the right hand side (rhs or b)
+    */
     const int interior_nx = nx - 2;
     const int interior_ny = ny - 2;
     const int interior_nz = nz - 2;
@@ -267,6 +270,9 @@ __kernel void rhs_mean_kernel(__global const float *partial_sums,
                               __global const float *partial_counts,
                               const int partial_count,
                               __global float *rhs_mean) {
+    /*
+    Compute the mean of the rhs of the pressure poisson equation
+    */
     const int tid = get_local_id(0);
 
     const int local_size = get_local_size(0);
@@ -326,6 +332,11 @@ __kernel void subtract_rhs_mean_kernel(__global float *b,
                                        const int tiles_x,
                                        const int tiles_y,
                                        const int tiles_z) {
+    /*
+    The mean of b is substracted because the pressure only has Neumann boundary conditions.
+    This makes the absolute value of p undefined hence the mean is subsrtacted to avoud "drifting"
+    of the pressure field and to improve solver convergence.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -369,6 +380,10 @@ __kernel void add_thermal_divergence(__global const float *T,
                                      const int tiles_x,
                                      const int tiles_y,
                                      const int tiles_z) {
+    /*
+    This kernel adds artificial divergence based on the expansion rate and temperature difference
+    to the reference temperature.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -418,6 +433,10 @@ __kernel void add_source_extra_pressure(__global const uchar *source_mask,
                                         const int tiles_x,
                                         const int tiles_y,
                                         const int tiles_z) {
+    /*
+    This kernel adds extra divergence ("pressure" is technically not 100% correct here) to
+    the flow.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);

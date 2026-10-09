@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 __kernel void obstacle_bc(__global float *u,
                           __global float *v,
                           __global float *w,

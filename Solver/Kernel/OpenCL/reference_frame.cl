@@ -1,7 +1,3 @@
-#ifndef TILE_SIZE
-#define TILE_SIZE 4
-#endif
-
 #include "sparse_managment.cl"
 
 __kernel void transfer_velocity(__global float *u,
@@ -29,6 +25,9 @@ __kernel void transfer_velocity(__global float *u,
                                 const int nz,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    This kernel transfers the reference frame velocity to the flow
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);

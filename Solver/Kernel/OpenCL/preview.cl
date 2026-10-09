@@ -1,4 +1,3 @@
-// Pack active smoke and flame tiles into an atlas owned by the preview.
 __kernel void pack_preview(__global const int *index_tile_map,
                            __global const float *smoke,
                            __global const float *flame,
@@ -12,6 +11,9 @@ __kernel void pack_preview(__global const int *index_tile_map,
                            const int atlas_tiles_x,
                            const int atlas_tiles_y,
                            const int tile_size) {
+    /*
+    This kernel packs the data used by the life preview
+    */
     const int tile_x = get_global_id(0);
     const int tile_y = get_global_id(1);
     const int tile_z = get_global_id(2);

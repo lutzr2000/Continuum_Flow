@@ -36,6 +36,9 @@ __kernel void source_bc(__global float *u,
                         const int tiles_x,
                         const int tiles_y,
                         const int tiles_z) {
+    /*
+    Apply the source boundary conditions
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -66,11 +69,13 @@ __kernel void source_bc(__global float *u,
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
     float noise = 0.0f;
+
     if (temperature_randomness != 0.0f || smoke_randomness != 0.0f || fuel_randomness != 0.0f ||
         velocity_randomness != 0.0f) {
         noise = gradient_noise_3d(origin_x + (float)i * delta, origin_y + (float)j * delta, origin_z + (float)k * delta,
                                   randomness_seed, randomness_scale);
     }
+
     // Reuse this source's one procedural sample for every emitted field.
     const float temperature_multiplier = noise_amplitude_multiplier(noise, temperature_randomness);
     const float smoke_multiplier = noise_amplitude_multiplier(noise, smoke_randomness);
@@ -102,8 +107,6 @@ __kernel void source_bc(__global float *u,
     }
 
     T[index] = fmax(temperature_value * temperature_multiplier, 0.0f);
-
     smoke[index] = fmin(fmax(smoke[index] + smoke_value * smoke_multiplier * dt, 0.0f), 100.0f);
-
     fuel[index] = clamp(fuel[index] + fuel_value * fuel_multiplier * dt, 0.0f, 100.0f);
 }
