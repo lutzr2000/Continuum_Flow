@@ -6,6 +6,11 @@ from bpy.props import FloatProperty
 from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
+from bpy.props import BoolVectorProperty
+
+
+def _default_device_selection():
+    return (True,) + (False,) * (solver_status.MAX_SELECTABLE_DEVICES - 1)
 
 
 def _update_simulation_start_frame(self, _context):
@@ -59,6 +64,19 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     advection_substeps: IntProperty(name="Advection Substeps", default=1, min=1, soft_min=1, soft_max=10, description="Number of integration substeps used for advection tracing", options=set())  # type: ignore
     simulate_sparsely: BoolProperty(name="Adaptive Domain", default=True, description="Domain adapts to the smoke and flame field to save computational cost", options=set())  # type: ignore
     adaptive_domain_threshold: FloatProperty(name="Threshold", default=0.01, min=0.0, precision=6, description="Cells containing more smoke, fuel or flame than this are considered active", options=set())  # type: ignore
+    cpu_devices: BoolVectorProperty(name="CPU Devices", size=solver_status.MAX_SELECTABLE_DEVICES, default=_default_device_selection(), options=set())  # type: ignore
+    gpu_devices: BoolVectorProperty(name="GPU Devices", size=solver_status.MAX_SELECTABLE_DEVICES, default=_default_device_selection(), options=set())  # type: ignore
+
+    def selected_opencl_devices(self, backend=None):
+        backend = str(backend or self.solver_backend).upper()
+        devices = solver_status.opencl_devices.get(backend, ())
+        selection = self.gpu_devices if backend == "GPU" else self.cpu_devices
+        return [
+            dict(device) for index, device in enumerate(devices) if selection[index]
+        ]
+
+    def has_selected_opencl_device(self):
+        return bool(self.selected_opencl_devices())
 
     def _ensure_input_socket(self, name, *, multi_input=False):
         socket_type = (
@@ -111,14 +129,23 @@ class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
         solver_row.prop_enum(self, "solver_backend", "CPU")
 
         gpu_row = solver_row.row(align=True)
-        gpu_row.enabled = solver_status.gpu_available
         gpu_row.prop_enum(self, "solver_backend", "GPU")
 
-        backend_unavailable = (
-            self.solver_backend == "GPU" and not solver_status.gpu_available
-        )
-        if backend_unavailable:
-            self.solver_backend = "CPU"
+        backend = str(self.solver_backend).upper()
+        devices = solver_status.opencl_devices.get(backend, ())
+        selection_property = "gpu_devices" if backend == "GPU" else "cpu_devices"
+        device_box = layout.box()
+        device_box.label(text=f"{backend} Devices")
+        if not devices:
+            device_box.label(text="No device found", icon="ERROR")
+        else:
+            for index, device in enumerate(devices):
+                device_box.prop(
+                    self,
+                    selection_property,
+                    index=index,
+                    text=device["device_name"],
+                )
 
         for title, property_names in self.property_groups:
             self._draw_group(layout, title, property_names)

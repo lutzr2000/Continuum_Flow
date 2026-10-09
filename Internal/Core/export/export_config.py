@@ -275,6 +275,7 @@ def build_entries(simulation_node, context):
         "node_name": simulation_node.name,
         "settings": {
             "solver_backend": str(getattr(simulation_node, "solver_backend", "CPU")),
+            "compute_devices": simulation_node.selected_opencl_devices(),
             "start_frame": start_frame,
             "end_frame": end_frame,
             "simulation_length": simulation_length,

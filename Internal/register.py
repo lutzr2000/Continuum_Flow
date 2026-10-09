@@ -145,7 +145,7 @@ def safe_register_class(cls):
 
 
 def register():
-    solver_status.gpu_available = solver_status.detect_gpu_available()
+    solver_status.refresh_opencl_devices()
 
     for cls in classes:
         safe_register_class(cls)
@@ -204,6 +204,8 @@ def unregister():
     solver_manager.shutdown()
     volume_renderer.clear_live_preview()
     solver_status.gpu_available = False
+    solver_status.cpu_available = False
+    solver_status.opencl_devices = {"CPU": [], "GPU": []}
 
     if hasattr(bpy.types.WindowManager, "continuum_flow_bake_progress"):
         del bpy.types.WindowManager.continuum_flow_bake_progress

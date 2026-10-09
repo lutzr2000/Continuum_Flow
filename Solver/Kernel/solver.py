@@ -210,22 +210,36 @@ def compute_inital_velocity(
     return total_u * inv_count, total_v * inv_count, total_w * inv_count
 
 
+def select_opencl_device(settings: dict[str, Any]):
+    """Resolve the first UI-selected OpenCL device from exported indices."""
+    backend = str(settings.get("solver_backend", "GPU")).upper()
+    device_type = {
+        "CPU": cl.device_type.CPU,
+        "GPU": cl.device_type.GPU,
+    }.get(backend)
+
+    selected_devices = settings.get("compute_devices") or ()
+    selected = selected_devices[0]
+    platform_index = int(selected["platform_index"])
+    device_index = int(selected["device_index"])
+    platforms = cl.get_platforms()
+    platform = platforms[platform_index]
+    device = platform.get_devices(device_type=device_type)[device_index]
+
+    return device
+
+
 def solver(config: dict):
     preview.configure(config)
+    simulation = config.get("simulation") or {}
+    settings = simulation.get("settings") or {}
 
     # ------------device-------------------
-    device = None
-
-    for platform in cl.get_platforms():
-        devices = platform.get_devices(device_type=cl.device_type.GPU)
-
-        if devices:
-            device = devices[0]
-            break
+    device = select_opencl_device(settings)
 
     # ------------context-------------------
     context = cl.Context([device])
-    queue = cl.CommandQueue(context)
+    queue = cl.CommandQueue(context, device=device)
 
     kernel_path = Path(__file__).parent / "OpenCL"
 
@@ -303,13 +317,12 @@ def solver(config: dict):
         context,
         kernel_path / "preview.cl",
     )
-    preview_transfer_queue = cl.CommandQueue(context)
+    preview_transfer_queue = cl.CommandQueue(context, device=device)
 
     print("################################################################")
     print(f"Running on: {device.name}")
 
     # ------------config-------------------
-    simulation = config.get("simulation") or {}
     cancel_flag_path = (
         (config.get("meta") or {}).get("cancel_flag_path") or ""
     ).strip()

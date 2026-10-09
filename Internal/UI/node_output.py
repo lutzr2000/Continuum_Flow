@@ -151,6 +151,10 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         if physics_socket is None or not physics_socket.is_linked:
             return "Bake disabled: simulation has no physics node"
 
+        if not simulation_node.has_selected_opencl_device():
+            backend = str(getattr(simulation_node, "solver_backend", "CPU"))
+            return f"Bake disabled: no {backend} device selected"
+
         return None
 
     def draw_buttons(self, context, layout):

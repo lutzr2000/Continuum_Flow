@@ -67,11 +67,7 @@ def main(config: dict[str, Any]) -> None:
             .upper()
         )
 
-        if solver_backend == "CPU":
-            print("CPU solver is not implemented.")
-            return
-
-        elif solver_backend == "GPU":
+        if solver_backend in {"CPU", "GPU"}:
             import Solver.Kernel.solver as solver_kernel_module
 
             return solver_kernel_module.solver(config)
