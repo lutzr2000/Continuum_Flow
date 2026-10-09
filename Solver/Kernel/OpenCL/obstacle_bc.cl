@@ -1,3 +1,5 @@
+#include "sparse_managment.cl"
+
 __kernel void obstacle_bc(__global float *u,
                           __global float *v,
                           __global float *w,
@@ -18,28 +20,12 @@ __kernel void obstacle_bc(__global float *u,
     zero within an obstacle. The velocity is set to the computed obstacle velocity.
     Pressure and temperature are not touched by the obstacle.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    if (local_i >= TILE_SIZE || local_j >= TILE_SIZE || local_k >= TILE_SIZE)
-        return;
-
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     if (!mask[index])
         return;

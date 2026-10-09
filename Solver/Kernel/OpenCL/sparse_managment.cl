@@ -1,6 +1,76 @@
 #ifndef SPARSE_MANAGMENT_CL
 #define SPARSE_MANAGMENT_CL
 
+typedef struct {
+    int i;
+    int j;
+    int k;
+    int tile_index;
+    int cell_index;
+    int valid;
+} SparseCell;
+
+inline SparseCell get_sparse_cell_at(
+    __global const int *index_tile_map, const int i, const int j, const int k, const int tiles_y, const int tiles_z) {
+    /*
+    Resolve explicit grid coordinates to their sparse tile and pool indices.
+    */
+    SparseCell cell;
+    cell.valid = 0;
+
+    if (i < 0 || j < 0 || k < 0)
+        return cell;
+
+    const int tile_i = i / TILE_SIZE;
+    const int tile_j = j / TILE_SIZE;
+    const int tile_k = k / TILE_SIZE;
+
+    const int local_i = i - tile_i * TILE_SIZE;
+    const int local_j = j - tile_j * TILE_SIZE;
+    const int local_k = k - tile_k * TILE_SIZE;
+
+    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+    cell.tile_index = index_tile_map[tile_map_index];
+
+    if (cell.tile_index == -1)
+        return cell;
+
+    cell.i = i;
+    cell.j = j;
+    cell.k = k;
+    cell.cell_index = ((cell.tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    cell.valid = 1;
+
+    return cell;
+}
+
+inline SparseCell
+get_sparse_cell(__global const int *index_tile_map, const int tiles_x, const int tiles_y, const int tiles_z) {
+    /*
+    Resolve the current work-item to its cell coordinates and sparse pool indices.
+    */
+    SparseCell cell;
+    cell.valid = 0;
+
+    const int tile_i = get_group_id(0);
+    const int tile_j = get_group_id(1);
+    const int tile_k = get_group_id(2);
+
+    const int local_k = get_local_id(0);
+    const int local_j = get_local_id(1);
+    const int local_i = get_local_id(2);
+
+    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z || local_i >= TILE_SIZE || local_j >= TILE_SIZE ||
+        local_k >= TILE_SIZE)
+        return cell;
+
+    const int i = tile_i * TILE_SIZE + local_i;
+    const int j = tile_j * TILE_SIZE + local_j;
+    const int k = tile_k * TILE_SIZE + local_k;
+
+    return get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+}
+
 inline float get_pool_value(__global const float *field,
                             __global const int *index_tile_map,
                             const int i,
@@ -12,24 +82,12 @@ inline float get_pool_value(__global const float *field,
     /*
     Helper device kernel for accessing a cells value in the tile pool
     */
-    const int tile_i = i / TILE_SIZE;
-    const int tile_j = j / TILE_SIZE;
-    const int tile_k = k / TILE_SIZE;
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
+    if (!cell.valid)
         return default_value;
 
-    const int local_i = i - tile_i * TILE_SIZE;
-    const int local_j = j - tile_j * TILE_SIZE;
-    const int local_k = k - tile_k * TILE_SIZE;
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-    return field[index];
+    return field[cell.cell_index];
 }
 
 __kernel void build_activity_mask(__global const float *smoke,

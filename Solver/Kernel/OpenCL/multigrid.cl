@@ -103,24 +103,14 @@ inline float residual_sparse(__global const float *p,
     the residual r = b - A*p. In the code the right hand side (rhs) is b and A*p is the discreate
     laplacian with central differences.
     */
-    const int tile_i = i / TILE_SIZE;
-    const int tile_j = j / TILE_SIZE;
-    const int tile_k = k / TILE_SIZE;
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1) {
+    if (!cell.valid) {
         *valid = 0;
         return 0.0f;
     }
 
-    const int local_i = i - tile_i * TILE_SIZE;
-    const int local_j = j - tile_j * TILE_SIZE;
-    const int local_k = k - tile_k * TILE_SIZE;
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     const float laplace =
         (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
@@ -184,11 +174,9 @@ __kernel void restrict_residual_sparse(__global const float *fine_p,
     if (I >= coarse_nx || J >= coarse_ny || K >= coarse_nz)
         return;
 
-    const int coarse_tile_map_index = (coarse_tile_i * coarse_tiles_y + coarse_tile_j) * coarse_tiles_z + coarse_tile_k;
+    const SparseCell coarse_cell = get_sparse_cell_at(coarse_tile_map, I, J, K, coarse_tiles_y, coarse_tiles_z);
 
-    const int coarse_tile_index = coarse_tile_map[coarse_tile_map_index];
-
-    if (coarse_tile_index == -1)
+    if (!coarse_cell.valid)
         return;
 
     const float inv_delta2 = 1.0f / (fine_delta * fine_delta);
@@ -225,7 +213,7 @@ __kernel void restrict_residual_sparse(__global const float *fine_p,
         }
     }
 
-    const int index = ((coarse_tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = coarse_cell.cell_index;
 
     coarse_p[index] = 0.0f;
 
@@ -279,18 +267,14 @@ __kernel void prolongate_sparse(__global const float *coarse_e,
     if (I >= coarse_nx || J >= coarse_ny || K >= coarse_nz)
         return;
 
-    const int coarse_tile_map_index = (coarse_tile_i * coarse_tiles_y + coarse_tile_j) * coarse_tiles_z + coarse_tile_k;
+    const SparseCell coarse_cell = get_sparse_cell_at(coarse_tile_map, I, J, K, coarse_tiles_y, coarse_tiles_z);
 
-    const int coarse_tile_index = coarse_tile_map[coarse_tile_map_index];
-
-    if (coarse_tile_index == -1)
+    if (!coarse_cell.valid)
         return;
 
-    const int coarse_index = ((coarse_tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
     const float error =
-        0.25f * coarse_e[coarse_index]; // !!! The *0.25 is only there for stability reasons, the multigird diverges
-                                        // with higher values, mathematical default would be 1 !!!
+        0.25f * coarse_e[coarse_cell.cell_index]; // !!! The *0.25 is only there for stability reasons, the multigird
+                                                  // diverges with higher values, mathematical default would be 1 !!!
 
     const int fine_i_start = 2 * I;
     const int fine_j_start = 2 * J;
@@ -306,26 +290,12 @@ __kernel void prolongate_sparse(__global const float *coarse_e,
                 if (i >= fine_nx || j >= fine_ny || k >= fine_nz)
                     continue;
 
-                const int fine_tile_i = i / TILE_SIZE;
-                const int fine_tile_j = j / TILE_SIZE;
-                const int fine_tile_k = k / TILE_SIZE;
+                const SparseCell fine_cell = get_sparse_cell_at(fine_tile_map, i, j, k, fine_tiles_y, fine_tiles_z);
 
-                const int fine_tile_map_index = (fine_tile_i * fine_tiles_y + fine_tile_j) * fine_tiles_z + fine_tile_k;
-
-                const int fine_tile_index = fine_tile_map[fine_tile_map_index];
-
-                if (fine_tile_index == -1)
+                if (!fine_cell.valid)
                     continue;
 
-                const int fine_local_i = i - fine_tile_i * TILE_SIZE;
-                const int fine_local_j = j - fine_tile_j * TILE_SIZE;
-                const int fine_local_k = k - fine_tile_k * TILE_SIZE;
-
-                const int fine_index =
-                    ((fine_tile_index * TILE_SIZE + fine_local_i) * TILE_SIZE + fine_local_j) * TILE_SIZE +
-                    fine_local_k;
-
-                fine_p[fine_index] += error;
+                fine_p[fine_cell.cell_index] += error;
             }
         }
     }
@@ -364,16 +334,14 @@ __kernel void rbgs_step_sparse(__global float *p,
     const int tile_j = active_tiles[active_tile_index + 1];
     const int tile_k = active_tiles[active_tile_index + 2];
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
     const int i = tile_i * TILE_SIZE + local_i;
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
+
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
@@ -383,7 +351,7 @@ __kernel void rbgs_step_sparse(__global float *p,
 
     const float delta2 = delta * delta;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     p[index] =
         (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
@@ -441,13 +409,12 @@ __kernel void coarse_smooth(__global float *p,
                 if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1 || ((i + j + k) & 1) != parity)
                     continue;
 
-                const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-                const int tile_index = index_tile_map[tile_map_index];
+                const SparseCell sparse_cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-                if (tile_index == -1)
+                if (!sparse_cell.valid)
                     continue;
 
-                const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+                const int index = sparse_cell.cell_index;
 
                 p[index] = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
                             get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
@@ -489,23 +456,21 @@ __kernel void rbgs_step_level_0(__global float *p,
     if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
     const int i = tile_i * TILE_SIZE + local_i;
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
+
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1 || ((i + j + k) & 1) != parity)
         return;
 
     const float delta2 = delta * delta;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     const float center = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
                           get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
@@ -566,23 +531,14 @@ __kernel void pressure_poisson_neumann(__global float *p,
         k = local_index < face_area ? 0 : nz - 1;
     }
 
-    const int tile_i = i / TILE_SIZE;
-    const int tile_j = j / TILE_SIZE;
-    const int tile_k = k / TILE_SIZE;
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-    const int tile_index = index_tile_map[tile_map_index];
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    if (tile_index == -1)
+    if (!cell.valid)
         return;
-
-    const int local_i = i - tile_i * TILE_SIZE;
-    const int local_j = j - tile_j * TILE_SIZE;
-    const int local_k = k - tile_k * TILE_SIZE;
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
     const int source_i = clamp(i, 1, nx - 2);
     const int source_j = clamp(j, 1, ny - 2);
     const int source_k = clamp(k, 1, nz - 2);
 
-    p[index] = get_pool_value(p, index_tile_map, source_i, source_j, source_k, 0.0f, tiles_y, tiles_z);
+    p[cell.cell_index] = get_pool_value(p, index_tile_map, source_i, source_j, source_k, 0.0f, tiles_y, tiles_z);
 }

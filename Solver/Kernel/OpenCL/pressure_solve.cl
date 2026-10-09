@@ -1,6 +1,6 @@
 #include "noise.cl"
 
-#include "sparse_managment.cl"
+#include "helper.cl"
 
 __kernel void project_velocity_kernel(__global float *u,
                                       __global float *v,
@@ -22,48 +22,31 @@ __kernel void project_velocity_kernel(__global float *u,
     After computing a pressure field we correct the intermediate velocity field by the pressure gradient.
     The pressure gradient is computed with central differences.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     if (obstacle_mask[index])
         return;
 
-    const float pressure_coeff = dt / (2.0f * rho * delta);
+    const float half_inv_delta = 0.5f / delta;
+    const float pressure_coeff = dt / rho;
+    const float3 pressure_gradient =
+        central_gradient_sparse(p, index_tile_map, i, j, k, half_inv_delta, 0.0f, tiles_y, tiles_z);
 
-    const float px1 = get_pool_value(p, index_tile_map, i + 1, j, k, 0.0f, tiles_y, tiles_z);
-    const float px0 = get_pool_value(p, index_tile_map, i - 1, j, k, 0.0f, tiles_y, tiles_z);
-    const float py1 = get_pool_value(p, index_tile_map, i, j + 1, k, 0.0f, tiles_y, tiles_z);
-    const float py0 = get_pool_value(p, index_tile_map, i, j - 1, k, 0.0f, tiles_y, tiles_z);
-    const float pz1 = get_pool_value(p, index_tile_map, i, j, k + 1, 0.0f, tiles_y, tiles_z);
-    const float pz0 = get_pool_value(p, index_tile_map, i, j, k - 1, 0.0f, tiles_y, tiles_z);
-
-    u[index] -= pressure_coeff * (px1 - px0);
-    v[index] -= pressure_coeff * (py1 - py0);
-    w[index] -= pressure_coeff * (pz1 - pz0);
+    u[index] -= pressure_coeff * pressure_gradient.x;
+    v[index] -= pressure_coeff * pressure_gradient.y;
+    w[index] -= pressure_coeff * pressure_gradient.z;
 }
 
 __kernel void pressure_equation_right_side(__global const float *u,
@@ -87,29 +70,15 @@ __kernel void pressure_equation_right_side(__global const float *u,
     This kernel computes the right hand side (rhs or b) of the pressure poisson equation.
     In Chorins projections this is simply the divergence of the intermediate velocity field.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
+    const int index = cell.cell_index;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1) {
         b[index] = 0.0f;
@@ -120,17 +89,12 @@ __kernel void pressure_equation_right_side(__global const float *u,
 
     const float rho_over_dt = rho / dt;
 
-    const float du_dx = (get_pool_value(u, index_tile_map, i + 1, j, k, u_initial, tiles_y, tiles_z) -
-                         get_pool_value(u, index_tile_map, i - 1, j, k, u_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dv_dy = (get_pool_value(v, index_tile_map, i, j + 1, k, v_initial, tiles_y, tiles_z) -
-                         get_pool_value(v, index_tile_map, i, j - 1, k, v_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dw_dz = (get_pool_value(w, index_tile_map, i, j, k + 1, w_initial, tiles_y, tiles_z) -
-                         get_pool_value(w, index_tile_map, i, j, k - 1, w_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
+    const float du_dx = central_difference_sparse(u, index_tile_map, i, j, k, (int3)(1, 0, 0), half_inv_delta,
+                                                  u_initial, tiles_y, tiles_z);
+    const float dv_dy = central_difference_sparse(v, index_tile_map, i, j, k, (int3)(0, 1, 0), half_inv_delta,
+                                                  v_initial, tiles_y, tiles_z);
+    const float dw_dz = central_difference_sparse(w, index_tile_map, i, j, k, (int3)(0, 0, 1), half_inv_delta,
+                                                  w_initial, tiles_y, tiles_z);
 
     b[index] = rho_over_dt * (du_dx + dv_dy + dw_dz);
 }
@@ -146,32 +110,17 @@ __kernel void reset_inactive_pressure(__global float *p,
     /*
     Reset inactive pressure cells to 0
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1) {
-        const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-        p[index] = 0.0f;
+        p[cell.cell_index] = 0.0f;
     }
 }
 
@@ -216,22 +165,10 @@ __kernel void rhs_sum_count_partial_kernel(__global const float *b,
         const int j = remainder / interior_nz + 1;
         const int k = remainder % interior_nz + 1;
 
-        const int tile_i = i / TILE_SIZE;
-        const int tile_j = j / TILE_SIZE;
-        const int tile_k = k / TILE_SIZE;
+        const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-        const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-        const int tile_index = index_tile_map[tile_map_index];
-
-        if (tile_index != -1) {
-            const int local_i = i % TILE_SIZE;
-            const int local_j = j % TILE_SIZE;
-            const int local_k = k % TILE_SIZE;
-
-            const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-            local_sum += b[index];
+        if (cell.valid) {
+            local_sum += b[cell.cell_index];
             local_count += 1.0f;
         }
 
@@ -337,34 +274,19 @@ __kernel void subtract_rhs_mean_kernel(__global float *b,
     This makes the absolute value of p undefined hence the mean is subsrtacted to avoud "drifting"
     of the pressure field and to improve solver convergence.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-    b[index] -= rhs_mean[0];
+    b[cell.cell_index] -= rhs_mean[0];
 }
 
 __kernel void add_thermal_divergence(__global const float *T,
@@ -395,21 +317,19 @@ __kernel void add_thermal_divergence(__global const float *T,
     if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
     const int i = tile_i * TILE_SIZE + local_i;
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
 
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
+
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     b[index] -= (rho / dt) * expansion_rate * (T[index] - t_reference);
 }
@@ -448,21 +368,19 @@ __kernel void add_source_extra_pressure(__global const uchar *source_mask,
     if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
     const int i = tile_i * TILE_SIZE + local_i;
     const int j = tile_j * TILE_SIZE + local_j;
     const int k = tile_k * TILE_SIZE + local_k;
 
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
+
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     float extra_pressure_term = 0.0f;
 

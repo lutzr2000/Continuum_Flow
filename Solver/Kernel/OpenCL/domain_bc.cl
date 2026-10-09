@@ -29,13 +29,8 @@ inline void apply_face_state(__global float *u,
                              const int use_temp,
                              const int tiles_y,
                              const int tiles_z) {
-    const int neighbor_tile_i = neighbor_i / TILE_SIZE;
-    const int neighbor_tile_j = neighbor_j / TILE_SIZE;
-    const int neighbor_tile_k = neighbor_k / TILE_SIZE;
-
-    const int neighbor_tile_map_index = (neighbor_tile_i * tiles_y + neighbor_tile_j) * tiles_z + neighbor_tile_k;
-
-    const int neighbor_tile_index = index_tile_map[neighbor_tile_map_index];
+    const SparseCell neighbor_cell =
+        get_sparse_cell_at(index_tile_map, neighbor_i, neighbor_j, neighbor_k, tiles_y, tiles_z);
 
     float neighbor_u;
     float neighbor_v;
@@ -45,7 +40,7 @@ inline void apply_face_state(__global float *u,
     float neighbor_fuel;
     float neighbor_oxygen;
 
-    if (neighbor_tile_index == -1) {
+    if (!neighbor_cell.valid) {
         neighbor_u = u_initial;
         neighbor_v = v_initial;
         neighbor_w = w_initial;
@@ -56,13 +51,7 @@ inline void apply_face_state(__global float *u,
         neighbor_fuel = 0.0f;
         neighbor_oxygen = 100.0f;
     } else {
-        const int neighbor_local_i = neighbor_i - neighbor_tile_i * TILE_SIZE;
-        const int neighbor_local_j = neighbor_j - neighbor_tile_j * TILE_SIZE;
-        const int neighbor_local_k = neighbor_k - neighbor_tile_k * TILE_SIZE;
-
-        const int neighbor_index =
-            ((neighbor_tile_index * TILE_SIZE + neighbor_local_i) * TILE_SIZE + neighbor_local_j) * TILE_SIZE +
-            neighbor_local_k;
+        const int neighbor_index = neighbor_cell.cell_index;
 
         neighbor_u = u[neighbor_index];
         neighbor_v = v[neighbor_index];
@@ -74,23 +63,12 @@ inline void apply_face_state(__global float *u,
         neighbor_oxygen = oxygen[neighbor_index];
     }
 
-    const int dst_tile_i = i / TILE_SIZE;
-    const int dst_tile_j = j / TILE_SIZE;
-    const int dst_tile_k = k / TILE_SIZE;
+    const SparseCell destination_cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    const int dst_tile_map_index = (dst_tile_i * tiles_y + dst_tile_j) * tiles_z + dst_tile_k;
-
-    const int dst_tile_index = index_tile_map[dst_tile_map_index];
-
-    if (dst_tile_index == -1)
+    if (!destination_cell.valid)
         return;
 
-    const int dst_local_i = i - dst_tile_i * TILE_SIZE;
-    const int dst_local_j = j - dst_tile_j * TILE_SIZE;
-    const int dst_local_k = k - dst_tile_k * TILE_SIZE;
-
-    const int dst_index =
-        ((dst_tile_index * TILE_SIZE + dst_local_i) * TILE_SIZE + dst_local_j) * TILE_SIZE + dst_local_k;
+    const int dst_index = destination_cell.cell_index;
 
     // ---------------------------------------------------------
     // Apply boundary conditions

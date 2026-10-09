@@ -43,18 +43,16 @@ __kernel void transfer_velocity(__global float *u,
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
+    if (!cell.valid)
         return;
 
     const float x = origin_x + (float)i * delta;
     const float y = origin_y + (float)j * delta;
     const float z = origin_z + (float)k * delta;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     u[index] = get_pool_value(u, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z) + a00 * x + a01 * y + a02 * z + a03;
     v[index] = get_pool_value(v, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z) + a10 * x + a11 * y + a12 * z + a13;

@@ -1,3 +1,5 @@
+#include "sparse_managment.cl"
+
 inline float3 interpolated_particle_vector(__global const float *current_values,
                                            __global const float *next_values,
                                            const int sample_index,
@@ -319,23 +321,10 @@ __kernel void rasterize_particle_spheres(__global uchar *source_mask,
 
         if (point_segment_distance_squared(cell_x, cell_y, cell_z, previous_px, previous_py, previous_pz, px, py, pz) <=
             radius_squared) {
-            int ti = i / TILE_SIZE;
-            int tj = j / TILE_SIZE;
-            int tk = k / TILE_SIZE;
+            const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tile_count_y, tile_count_z);
 
-            int tile_map_index = (ti * tile_count_y + tj) * tile_count_z + tk;
-
-            int pool_index = index_tile_map[tile_map_index];
-
-            if (pool_index >= 0) {
-                int local_i = i - ti * TILE_SIZE;
-                int local_j = j - tj * TILE_SIZE;
-                int local_k = k - tk * TILE_SIZE;
-
-                int index = ((pool_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-                source_mask[index] = 1;
-            }
+            if (cell.valid)
+                source_mask[cell.cell_index] = 1;
         }
 
         linear_index += get_local_size(0);
@@ -402,24 +391,12 @@ __kernel void reset_particle_velocity_kernel(__global float *u,
         float dz = origin_z + ((float)k + 0.5f) * delta - pz;
 
         if (dx * dx + dy * dy + dz * dz <= radius_squared) {
-            int ti = i / TILE_SIZE;
-            int tj = j / TILE_SIZE;
-            int tk = k / TILE_SIZE;
+            const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tile_count_y, tile_count_z);
 
-            int tile_map_index = (ti * tile_count_y + tj) * tile_count_z + tk;
-
-            int pool_index = index_tile_map[tile_map_index];
-
-            if (pool_index >= 0) {
-                int local_i = i - ti * TILE_SIZE;
-                int local_j = j - tj * TILE_SIZE;
-                int local_k = k - tk * TILE_SIZE;
-
-                int index = ((pool_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-                u[index] = 0.0f;
-                v[index] = 0.0f;
-                w[index] = 0.0f;
+            if (cell.valid) {
+                u[cell.cell_index] = 0.0f;
+                v[cell.cell_index] = 0.0f;
+                w[cell.cell_index] = 0.0f;
             }
         }
 
@@ -497,24 +474,12 @@ __kernel void transfer_particle_velocities(__global float *u,
         float dz = origin_z + ((float)k + 0.5f) * delta - pz;
 
         if (dx * dx + dy * dy + dz * dz <= radius_squared) {
-            int ti = i / TILE_SIZE;
-            int tj = j / TILE_SIZE;
-            int tk = k / TILE_SIZE;
+            const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tile_count_y, tile_count_z);
 
-            int tile_map_index = (ti * tile_count_y + tj) * tile_count_z + tk;
-
-            int pool_index = index_tile_map[tile_map_index];
-
-            if (pool_index >= 0) {
-                int local_i = i - ti * TILE_SIZE;
-                int local_j = j - tj * TILE_SIZE;
-                int local_k = k - tk * TILE_SIZE;
-
-                int index = ((pool_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
-
-                atomic_add_float(&u[index], vx);
-                atomic_add_float(&v[index], vy);
-                atomic_add_float(&w[index], vz);
+            if (cell.valid) {
+                atomic_add_float(&u[cell.cell_index], vx);
+                atomic_add_float(&v[cell.cell_index], vy);
+                atomic_add_float(&w[cell.cell_index], vz);
             }
         }
 

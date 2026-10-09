@@ -1,3 +1,5 @@
+#include "sparse_managment.cl"
+
 __kernel void mark_source_tiles(__global uchar *source_tile_mask,
                                 const int size_x,
                                 const int size_y,
@@ -60,19 +62,17 @@ __kernel void update_source_masks(__global uchar *mask,
     if (ti >= tiles_x || tj >= tiles_y || tk >= tiles_z)
         return;
 
-    const int tile_map_index = (ti * tiles_y + tj) * tiles_z + tk;
-
-    const int tile = index_tile_map[tile_map_index];
-
-    if (tile < 0)
-        return;
-
     if (i >= TILE_SIZE || j >= TILE_SIZE || k >= TILE_SIZE)
         return;
 
     const int gi = ti * TILE_SIZE + i;
     const int gj = tj * TILE_SIZE + j;
     const int gk = tk * TILE_SIZE + k;
+
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, gi, gj, gk, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
 
     const float fi = a00 * gi + a01 * gj + a02 * gk + c0;
     const float fj = a10 * gi + a11 * gj + a12 * gk + c1;
@@ -86,9 +86,7 @@ __kernel void update_source_masks(__global uchar *mask,
         const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
         if (local_mask[local_mask_index]) {
-            const int mask_index = ((tile * TILE_SIZE + i) * TILE_SIZE + j) * TILE_SIZE + k;
-
-            mask[mask_index] = 1;
+            mask[cell.cell_index] = 1;
         }
     }
 }
@@ -136,19 +134,17 @@ __kernel void update_source_velocity(__global float *velocity_x,
     if (ti >= tiles_x || tj >= tiles_y || tk >= tiles_z)
         return;
 
-    const int tile_map_index = (ti * tiles_y + tj) * tiles_z + tk;
-
-    const int tile = index_tile_map[tile_map_index];
-
-    if (tile < 0)
-        return;
-
     if (i >= TILE_SIZE || j >= TILE_SIZE || k >= TILE_SIZE)
         return;
 
     const int gi = ti * TILE_SIZE + i;
     const int gj = tj * TILE_SIZE + j;
     const int gk = tk * TILE_SIZE + k;
+
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, gi, gj, gk, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
 
     const int bi = (int)floor(a00 * gi + a01 * gj + a02 * gk + c0 + 0.5f);
     const int bj = (int)floor(a10 * gi + a11 * gj + a12 * gk + c1 + 0.5f);
@@ -158,11 +154,9 @@ __kernel void update_source_velocity(__global float *velocity_x,
         const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
         if (local_mask[local_mask_index]) {
-            const int index = ((tile * TILE_SIZE + i) * TILE_SIZE + j) * TILE_SIZE + k;
-
-            velocity_x[index] = source_u;
-            velocity_y[index] = source_v;
-            velocity_z[index] = source_w;
+            velocity_x[cell.cell_index] = source_u;
+            velocity_y[cell.cell_index] = source_v;
+            velocity_z[cell.cell_index] = source_w;
         }
     }
 }
@@ -220,19 +214,17 @@ __kernel void update_obstacle_mask(__global uchar *mask,
     if (ti >= tiles_x || tj >= tiles_y || tk >= tiles_z)
         return;
 
-    const int tile_map_index = (ti * tiles_y + tj) * tiles_z + tk;
-
-    const int tile = index_tile_map[tile_map_index];
-
-    if (tile < 0)
-        return;
-
     if (i >= TILE_SIZE || j >= TILE_SIZE || k >= TILE_SIZE)
         return;
 
     const int gi = ti * TILE_SIZE + i;
     const int gj = tj * TILE_SIZE + j;
     const int gk = tk * TILE_SIZE + k;
+
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, gi, gj, gk, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return;
 
     const float fi = a00 * gi + a01 * gj + a02 * gk + c0;
     const float fj = a10 * gi + a11 * gj + a12 * gk + c1;
@@ -250,7 +242,7 @@ __kernel void update_obstacle_mask(__global uchar *mask,
     if (!local_mask[local_mask_index])
         return;
 
-    const int index = ((tile * TILE_SIZE + i) * TILE_SIZE + j) * TILE_SIZE + k;
+    const int index = cell.cell_index;
 
     mask[index] = 1;
 

@@ -78,27 +78,15 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
     smoke and temeprature. It essentially asks: Going back by u*dt what quantity was at
     that position? The sampled quantity is then moved to the current cell.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
+    const int index = cell.cell_index;
 
     // ---------------------------------------------------------
     // Backtrace
@@ -135,8 +123,6 @@ __kernel void predict_scalar_fields_semi_lagrangian(__global const float *T,
                                                  fuel_z1, fuel_tx, fuel_ty, fuel_tz, 0.0f, tiles_y, tiles_z);
     sampled_oxygen = sample_trilinear_inner_sparse(oxygen, index_tile_map, fuel_x0, fuel_y0, fuel_z0, fuel_x1, fuel_y1,
                                                    fuel_z1, fuel_tx, fuel_ty, fuel_tz, 100.0f, tiles_y, tiles_z);
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
     predictor_T[index] = sampled_T;
     predictor_smoke[index] = sampled_smoke;
@@ -195,32 +181,19 @@ __kernel void update_scalar_fields_maccormack(__global const float *T,
 
     A limiter is applied to prevent overshooting and undershooting.
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1)
         return;
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     const float dt_over_delta = dt / delta;
 

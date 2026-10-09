@@ -1,4 +1,4 @@
-#include "sparse_managment.cl"
+#include "helper.cl"
 
 __kernel void compute_vorticity(__global const float *u,
                                 __global const float *v,
@@ -19,29 +19,15 @@ __kernel void compute_vorticity(__global const float *u,
     /*
     Compute the magnitude of vorticity (rotation of the velocity field) with central differences
     */
-    const int tile_i = get_group_id(0);
-    const int tile_j = get_group_id(1);
-    const int tile_k = get_group_id(2);
+    const SparseCell cell = get_sparse_cell(index_tile_map, tiles_x, tiles_y, tiles_z);
 
-    const int local_k = get_local_id(0);
-    const int local_j = get_local_id(1);
-    const int local_i = get_local_id(2);
-
-    if (tile_i >= tiles_x || tile_j >= tiles_y || tile_k >= tiles_z)
+    if (!cell.valid)
         return;
 
-    const int i = tile_i * TILE_SIZE + local_i;
-    const int j = tile_j * TILE_SIZE + local_j;
-    const int k = tile_k * TILE_SIZE + local_k;
-
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1)
-        return;
-
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int i = cell.i;
+    const int j = cell.j;
+    const int k = cell.k;
+    const int index = cell.cell_index;
 
     if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1) {
         vorticity_magnitude[index] = 0.0f;
@@ -55,35 +41,10 @@ __kernel void compute_vorticity(__global const float *u,
 
     const float half_inv_delta = 0.5f / delta;
 
-    const float du_dy = (get_pool_value(u, index_tile_map, i, j + 1, k, u_initial, tiles_y, tiles_z) -
-                         get_pool_value(u, index_tile_map, i, j - 1, k, u_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
+    const float3 omega = curl_sparse(u, v, w, index_tile_map, i, j, k, half_inv_delta, u_initial, v_initial, w_initial,
+                                     tiles_y, tiles_z);
 
-    const float du_dz = (get_pool_value(u, index_tile_map, i, j, k + 1, u_initial, tiles_y, tiles_z) -
-                         get_pool_value(u, index_tile_map, i, j, k - 1, u_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dv_dx = (get_pool_value(v, index_tile_map, i + 1, j, k, v_initial, tiles_y, tiles_z) -
-                         get_pool_value(v, index_tile_map, i - 1, j, k, v_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dv_dz = (get_pool_value(v, index_tile_map, i, j, k + 1, v_initial, tiles_y, tiles_z) -
-                         get_pool_value(v, index_tile_map, i, j, k - 1, v_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dw_dx = (get_pool_value(w, index_tile_map, i + 1, j, k, w_initial, tiles_y, tiles_z) -
-                         get_pool_value(w, index_tile_map, i - 1, j, k, w_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dw_dy = (get_pool_value(w, index_tile_map, i, j + 1, k, w_initial, tiles_y, tiles_z) -
-                         get_pool_value(w, index_tile_map, i, j - 1, k, w_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float wx = dw_dy - dv_dz;
-    const float wy = du_dz - dw_dx;
-    const float wz = dv_dx - du_dy;
-
-    vorticity_magnitude[index] = sqrt(wx * wx + wy * wy + wz * wz);
+    vorticity_magnitude[index] = length(omega);
 }
 
 inline void apply_vorticity_confinement(__global const float *u,
@@ -114,26 +75,16 @@ inline void apply_vorticity_confinement(__global const float *u,
     It is proportional to the rotation of the velocity field scaled by the magnitude
     of vorticity.
     */
-    const int tile_i = i / TILE_SIZE;
-    const int tile_j = j / TILE_SIZE;
-    const int tile_k = k / TILE_SIZE;
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
 
-    const int local_i = i - tile_i * TILE_SIZE;
-    const int local_j = j - tile_j * TILE_SIZE;
-    const int local_k = k - tile_k * TILE_SIZE;
-
-    const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
-
-    const int tile_index = index_tile_map[tile_map_index];
-
-    if (tile_index == -1) {
+    if (!cell.valid) {
         *ax = 0.0f;
         *ay = 0.0f;
         *az = 0.0f;
         return;
     }
 
-    const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+    const int index = cell.cell_index;
 
     if (i < 2 || j < 2 || k < 2 || i >= nx - 2 || j >= ny - 2 || k >= nz - 2 || obstacle_mask[index]) {
         *ax = 0.0f;
@@ -144,19 +95,10 @@ inline void apply_vorticity_confinement(__global const float *u,
 
     const float half_inv_delta = 0.5f / delta;
 
-    const float grad_x = (get_pool_value(omega_magnitude, index_tile_map, i + 1, j, k, 0.0f, tiles_y, tiles_z) -
-                          get_pool_value(omega_magnitude, index_tile_map, i - 1, j, k, 0.0f, tiles_y, tiles_z)) *
-                         half_inv_delta;
+    const float3 gradient =
+        central_gradient_sparse(omega_magnitude, index_tile_map, i, j, k, half_inv_delta, 0.0f, tiles_y, tiles_z);
 
-    const float grad_y = (get_pool_value(omega_magnitude, index_tile_map, i, j + 1, k, 0.0f, tiles_y, tiles_z) -
-                          get_pool_value(omega_magnitude, index_tile_map, i, j - 1, k, 0.0f, tiles_y, tiles_z)) *
-                         half_inv_delta;
-
-    const float grad_z = (get_pool_value(omega_magnitude, index_tile_map, i, j, k + 1, 0.0f, tiles_y, tiles_z) -
-                          get_pool_value(omega_magnitude, index_tile_map, i, j, k - 1, 0.0f, tiles_y, tiles_z)) *
-                         half_inv_delta;
-
-    const float grad_length = sqrt(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z);
+    const float grad_length = length(gradient);
 
     if (grad_length <= 1.0e-12f) {
         *ax = 0.0f;
@@ -165,39 +107,14 @@ inline void apply_vorticity_confinement(__global const float *u,
         return;
     }
 
-    const float nx_dir = grad_x / grad_length;
-    const float ny_dir = grad_y / grad_length;
-    const float nz_dir = grad_z / grad_length;
+    const float3 normal = gradient / grad_length;
 
-    const float du_dy = (get_pool_value(u, index_tile_map, i, j + 1, k, u_initial, tiles_y, tiles_z) -
-                         get_pool_value(u, index_tile_map, i, j - 1, k, u_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
+    const float3 omega = curl_sparse(u, v, w, index_tile_map, i, j, k, half_inv_delta, u_initial, v_initial, w_initial,
+                                     tiles_y, tiles_z);
 
-    const float du_dz = (get_pool_value(u, index_tile_map, i, j, k + 1, u_initial, tiles_y, tiles_z) -
-                         get_pool_value(u, index_tile_map, i, j, k - 1, u_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
+    const float3 acceleration = vorticity_strength * cross(normal, omega);
 
-    const float dv_dx = (get_pool_value(v, index_tile_map, i + 1, j, k, v_initial, tiles_y, tiles_z) -
-                         get_pool_value(v, index_tile_map, i - 1, j, k, v_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dv_dz = (get_pool_value(v, index_tile_map, i, j, k + 1, v_initial, tiles_y, tiles_z) -
-                         get_pool_value(v, index_tile_map, i, j, k - 1, v_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dw_dx = (get_pool_value(w, index_tile_map, i + 1, j, k, w_initial, tiles_y, tiles_z) -
-                         get_pool_value(w, index_tile_map, i - 1, j, k, w_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float dw_dy = (get_pool_value(w, index_tile_map, i, j + 1, k, w_initial, tiles_y, tiles_z) -
-                         get_pool_value(w, index_tile_map, i, j - 1, k, w_initial, tiles_y, tiles_z)) *
-                        half_inv_delta;
-
-    const float wx = dw_dy - dv_dz;
-    const float wy = du_dz - dw_dx;
-    const float wz = dv_dx - du_dy;
-
-    *ax = vorticity_strength * (ny_dir * wz - nz_dir * wy);
-    *ay = vorticity_strength * (nz_dir * wx - nx_dir * wz);
-    *az = vorticity_strength * (nx_dir * wy - ny_dir * wx);
+    *ax = acceleration.x;
+    *ay = acceleration.y;
+    *az = acceleration.z;
 }
