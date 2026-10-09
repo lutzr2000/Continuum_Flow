@@ -236,6 +236,10 @@ def solver(config: dict):
 
     # ------------device-------------------
     device = select_opencl_device(settings)
+    kernel_config.configure_for_device(
+        device,
+        settings.get("solver_backend", "GPU"),
+    )
 
     # ------------context-------------------
     context = cl.Context([device])
@@ -317,10 +321,32 @@ def solver(config: dict):
         context,
         kernel_path / "preview.cl",
     )
+
+    kernel_sets = (
+        voxelise_mesh_kernels,
+        update_masks_kernels,
+        particles_kernels,
+        sparse_managment_kernels,
+        time_step_kernels,
+        reference_frame_kernels,
+        domain_bc_kernels,
+        source_bc_kernels,
+        obstacle_bc_kernels,
+        vorticity_kernels,
+        velocity_update_kernels,
+        scalar_update_kernels,
+        pressure_solve_kernels,
+        multigrid_kernels,
+        preview_kernels,
+    )
+
+    kernel_config.constrain_to_compiled_kernels(
+        (kernel for kernel_set in kernel_sets for kernel in kernel_set.values()),
+        device,
+    )
     preview_transfer_queue = cl.CommandQueue(context, device=device)
 
     print("################################################################")
-    print(f"Running on: {device.name}")
 
     # ------------config-------------------
     cancel_flag_path = (
@@ -486,7 +512,7 @@ def solver(config: dict):
     velocity_maxima = helper.zeros_device(context, 3)
 
     partial_velocity_maxima = helper.device_array(
-        context, (kernel_config.REDUCTION_THREADS_PER_BLOCK, 3), FIELD_DTYPE
+        context, (kernel_config.MAX_REDUCTION_BLOCKS, 3), FIELD_DTYPE
     )
 
     # scalars

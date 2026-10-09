@@ -499,22 +499,7 @@ def smooth(
             np.int32(tile_shape[2]),
         )
 
-    program = multigrid_kernels[rbgs_kernel_name].program
-
-    red_kernel = cl.Kernel(program, rbgs_kernel_name)
-    black_kernel = cl.Kernel(program, rbgs_kernel_name)
-
-    red_kernel.set_args(
-        *kernel_args[:3],
-        np.int32(0),
-        *kernel_args[3:],
-    )
-
-    black_kernel.set_args(
-        *kernel_args[:3],
-        np.int32(1),
-        *kernel_args[3:],
-    )
+    rbgs_kernel = multigrid_kernels[rbgs_kernel_name]
 
     boundary_local_work_size = (kernel_config.REDUCTION_THREADS_PER_BLOCK,)
     boundary_cell_count = (
@@ -540,15 +525,25 @@ def smooth(
     )
 
     for _ in range(iterations):
-        cl.enqueue_nd_range_kernel(
-            queue,
-            red_kernel,
-            rbgs_global_work_size,
-            rbgs_local_work_size,
+        rbgs_kernel.set_args(
+            *kernel_args[:3],
+            np.int32(0),
+            *kernel_args[3:],
         )
         cl.enqueue_nd_range_kernel(
             queue,
-            black_kernel,
+            rbgs_kernel,
+            rbgs_global_work_size,
+            rbgs_local_work_size,
+        )
+        rbgs_kernel.set_args(
+            *kernel_args[:3],
+            np.int32(1),
+            *kernel_args[3:],
+        )
+        cl.enqueue_nd_range_kernel(
+            queue,
+            rbgs_kernel,
             rbgs_global_work_size,
             rbgs_local_work_size,
         )
