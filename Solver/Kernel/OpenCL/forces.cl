@@ -54,33 +54,33 @@ inline void apply_swirl_forces(__global const float *swirl_config,
         const float oy = swirl_config[offset + 2];
         const float oz = swirl_config[offset + 3];
 
-        float ax = swirl_config[offset + 4];
-        float ay = swirl_config[offset + 5];
-        float az = swirl_config[offset + 6];
+        float axis_x = swirl_config[offset + 4];
+        float axis_y = swirl_config[offset + 5];
+        float axis_z = swirl_config[offset + 6];
 
         const float radius = swirl_config[offset + 7];
 
         if (radius <= 0.0f || strength == 0.0f)
             continue;
 
-        const float axis_len = sqrt(ax * ax + ay * ay + az * az);
+        const float axis_len = sqrt(axis_x * axis_x + axis_y * axis_y + axis_z * axis_z);
 
         if (axis_len <= 1.0e-8f)
             continue;
 
-        ax /= axis_len;
-        ay /= axis_len;
-        az /= axis_len;
+        axis_x /= axis_len;
+        axis_y /= axis_len;
+        axis_z /= axis_len;
 
         const float rx = px - ox;
         const float ry = py - oy;
         const float rz = pz - oz;
 
-        const float projection = rx * ax + ry * ay + rz * az;
+        const float projection = rx * axis_x + ry * axis_y + rz * axis_z;
 
-        const float closest_x = ox + projection * ax;
-        const float closest_y = oy + projection * ay;
-        const float closest_z = oz + projection * az;
+        const float closest_x = ox + projection * axis_x;
+        const float closest_y = oy + projection * axis_y;
+        const float closest_z = oz + projection * axis_z;
 
         const float radial_x = px - closest_x;
         const float radial_y = py - closest_y;
@@ -93,9 +93,9 @@ inline void apply_swirl_forces(__global const float *swirl_config,
         if (dist_sq > radius_sq || dist_sq <= 1.0e-12f)
             continue;
 
-        float tx = ay * radial_z - az * radial_y;
-        float ty = az * radial_x - ax * radial_z;
-        float tz = ax * radial_y - ay * radial_x;
+        float tx = axis_y * radial_z - axis_z * radial_y;
+        float ty = axis_z * radial_x - axis_x * radial_z;
+        float tz = axis_x * radial_y - axis_y * radial_x;
 
         const float t_len = sqrt(tx * tx + ty * ty + tz * tz);
 
