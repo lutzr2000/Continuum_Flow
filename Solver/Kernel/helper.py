@@ -1,4 +1,5 @@
 import os
+import warnings
 import numpy as np
 import pyopencl as cl
 from pathlib import Path
@@ -35,17 +36,19 @@ def load_program(
 
     OPENCL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    program = cl.Program(
-        context,
-        path.read_text(encoding="utf-8"),
-    ).build(
-        options=[
-            f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
-            f"-DREDUCTION_THREADS_PER_BLOCK={kernel_config.REDUCTION_THREADS_PER_BLOCK}",
-            f"-I{path.parent}",
-        ],
-        cache_dir=str(OPENCL_CACHE_DIR),
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", cl.CompilerWarning)
+        program = cl.Program(
+            context,
+            path.read_text(encoding="utf-8"),
+        ).build(
+            options=[
+                f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
+                f"-DREDUCTION_THREADS_PER_BLOCK={kernel_config.REDUCTION_THREADS_PER_BLOCK}",
+                f"-I{path.parent}",
+            ],
+            cache_dir=str(OPENCL_CACHE_DIR),
+        )
 
     kernels = {kernel.function_name: kernel for kernel in program.all_kernels()}
     PROGRAM_CACHE[cache_key] = kernels

@@ -61,10 +61,6 @@ def ensure_node_proxy_id(node):
     if node.get("continuum_flow_animation_id"):
         return
 
-    # Names can be reused after deleting a node, and Blender copies custom
-    # properties when duplicating one. A random persistent ID prevents a new
-    # node from inheriting an unrelated scene proxy solely because its name
-    # matches an older node.
     node["continuum_flow_animation_id"] = uuid.uuid4().hex
 
 
@@ -81,6 +77,7 @@ def ensure_scene_proxy(scene, node, property_name):
     metadata = {"description": rna_property.description}
     unit = str(getattr(rna_property, "unit", "") or "")
     subtype = UNIT_SUBTYPES.get(unit)
+
     if subtype is None:
         subtype = str(getattr(rna_property, "subtype", "") or "")
     if subtype in VALID_SUBTYPES:
