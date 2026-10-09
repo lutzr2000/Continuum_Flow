@@ -7,6 +7,7 @@ import Solver.Kernel.kernel_config as kernel_config
 import Solver.Kernel.helper as helper
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
+PERSISTENT_COARSE_MAX_CELLS = 32**3
 
 
 def create_multigrid_levels(
@@ -206,7 +207,7 @@ def v_cycle(
     delta_levels: list[float],
     pre_smooth: int,
     post_smooth: int,
-    coarse_smooth: int,
+    coarse_smooth_iterations: int,
     nx: int,
     ny: int,
     nz: int,
@@ -280,6 +281,43 @@ def v_cycle(
         current_active_tile_count = multigrid_active_tile_counts[current_level]
         current_shape = multigrid_level_shapes[current_level]
 
+    last_level = len(p_levels)
+
+    if level == last_level:
+        use_persistent_coarse = (
+            current_active_tiles is not None
+            and int(np.prod(current_shape)) <= PERSISTENT_COARSE_MAX_CELLS
+        )
+
+        # on the coarsest level, only a single persistent kernel is launched to reduce launch overhead
+        if use_persistent_coarse:
+            coarse_smooth(
+                multigrid_kernels,
+                queue,
+                p,
+                b,
+                delta,
+                pre_smooth + coarse_smooth_iterations,
+                current_tile_map,
+                current_active_tiles,
+                current_active_tile_count,
+                current_shape,
+            )
+        else:
+            smooth(
+                multigrid_kernels,
+                queue,
+                p,
+                b,
+                delta,
+                pre_smooth + coarse_smooth_iterations,
+                index_tile_map=current_tile_map,
+                active_tiles=current_active_tiles,
+                active_tile_count=current_active_tile_count,
+                field_shape=current_shape,
+            )
+        return
+
     smooth(
         multigrid_kernels,
         queue,
@@ -292,23 +330,6 @@ def v_cycle(
         active_tile_count=current_active_tile_count,
         field_shape=current_shape,
     )
-
-    last_level = len(p_levels)
-
-    if level == last_level:
-        smooth(
-            multigrid_kernels,
-            queue,
-            p,
-            b,
-            delta,
-            coarse_smooth,
-            index_tile_map=current_tile_map,
-            active_tiles=current_active_tiles,
-            active_tile_count=current_active_tile_count,
-            field_shape=current_shape,
-        )
-        return
 
     coarse_level = level
 
@@ -379,7 +400,7 @@ def v_cycle(
         delta_levels,
         pre_smooth,
         post_smooth,
-        coarse_smooth,
+        coarse_smooth_iterations,
         nx,
         ny,
         nz,
@@ -524,6 +545,47 @@ def smooth(
             rbgs_global_work_size,
             rbgs_local_work_size,
         )
+
+
+def coarse_smooth(
+    multigrid_kernels: dict[str, cl.Kernel],
+    queue: cl.CommandQueue,
+    p: Any,
+    b: Any,
+    delta: float,
+    iterations: int,
+    index_tile_map: Any,
+    active_tiles: Any,
+    active_tile_count: Any,
+    field_shape: tuple[int, int, int],
+) -> None:
+    """Smooth the smallest sparse level inside one synchronized workgroup."""
+    nx, ny, nz = field_shape
+    tile_shape = tuple(
+        (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+        for size in field_shape
+    )
+    active_tile_capacity = active_tiles.size // (3 * np.dtype(np.int32).itemsize)
+    threads = kernel_config.REDUCTION_THREADS_PER_BLOCK
+
+    multigrid_kernels["coarse_smooth"](
+        queue,
+        (threads,),
+        (threads,),
+        p,
+        b,
+        np.float32(delta),
+        index_tile_map,
+        active_tiles,
+        active_tile_count,
+        np.int32(active_tile_capacity),
+        np.int32(iterations),
+        np.int32(nx),
+        np.int32(ny),
+        np.int32(nz),
+        np.int32(tile_shape[1]),
+        np.int32(tile_shape[2]),
+    )
 
 
 def apply_neumann_boundary(

@@ -367,6 +367,70 @@ __kernel void rbgs_step_sparse(__global float *p,
         6.0f;
 }
 
+__kernel void coarse_smooth(__global float *p,
+                                           __global const float *b,
+                                           const float delta,
+                                           __global const int *index_tile_map,
+                                           __global const int *active_tiles,
+                                           __global const int *active_tile_count,
+                                           const int active_tile_capacity,
+                                           const int iterations,
+                                           const int nx,
+                                           const int ny,
+                                           const int nz,
+                                           const int tiles_y,
+                                           const int tiles_z) {
+    /* Exactly one workgroup processes the complete coarse grid, making these
+       barriers global synchronization points for all participating cells. */
+    const int thread_index = get_local_id(0);
+    const int thread_count = get_local_size(0);
+    const int tile_count = min(active_tile_count[0], active_tile_capacity);
+    const int cells_per_tile = TILE_SIZE * TILE_SIZE * TILE_SIZE;
+    const int cell_count = tile_count * cells_per_tile;
+    const float delta2 = delta * delta;
+
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        for (int parity = 0; parity < 2; ++parity) {
+            for (int cell = thread_index; cell < cell_count; cell += thread_count) {
+                const int active_index = cell / cells_per_tile;
+                const int local_index = cell - active_index * cells_per_tile;
+                const int local_i = local_index / (TILE_SIZE * TILE_SIZE);
+                const int local_j = (local_index / TILE_SIZE) % TILE_SIZE;
+                const int local_k = local_index % TILE_SIZE;
+                const int active_tile_index = active_index * 3;
+                const int tile_i = active_tiles[active_tile_index + 0];
+                const int tile_j = active_tiles[active_tile_index + 1];
+                const int tile_k = active_tiles[active_tile_index + 2];
+                const int i = tile_i * TILE_SIZE + local_i;
+                const int j = tile_j * TILE_SIZE + local_j;
+                const int k = tile_k * TILE_SIZE + local_k;
+
+                if (i < 1 || j < 1 || k < 1 || i >= nx - 1 || j >= ny - 1 || k >= nz - 1 || ((i + j + k) & 1) != parity)
+                    continue;
+
+                const int tile_map_index = (tile_i * tiles_y + tile_j) * tiles_z + tile_k;
+                const int tile_index = index_tile_map[tile_map_index];
+
+                if (tile_index == -1)
+                    continue;
+
+                const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
+
+                p[index] = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+                            get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+                            get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+                            get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+                            get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
+                            get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) -
+                            delta2 * b[index]) /
+                           6.0f;
+            }
+
+            barrier(CLK_GLOBAL_MEM_FENCE);
+        }
+    }
+}
+
 __kernel void rbgs_step_level_0(__global float *p,
                                 __global const float *b,
                                 const float delta,

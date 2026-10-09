@@ -280,7 +280,7 @@ def pressure_poisson_multigrid(
             delta_levels,
             pre_smooth=2,
             post_smooth=4,
-            coarse_smooth=20,
+            coarse_smooth_iterations=20,
             nx=nx,
             ny=ny,
             nz=nz,
