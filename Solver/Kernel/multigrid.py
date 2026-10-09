@@ -411,7 +411,7 @@ def v_cycle(
         multigrid_level_shapes,
     )
 
-    multigrid_kernels["prolongate_add_nearest_sparse"](
+    multigrid_kernels["prolongate_sparse"](
         queue,
         global_work_size,
         local_work_size,

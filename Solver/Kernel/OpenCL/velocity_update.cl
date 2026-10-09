@@ -69,7 +69,7 @@ __kernel void advect_velocity_semi_lagrangian(__global const float *u,
     advected_w[index] = sampled_w;
 }
 
-inline float3 apply_forces(__global const float *u,
+inline float3 apply_force_acceleration(__global const float *u,
                            __global const float *v,
                            __global const float *w,
                            __global const uchar *obstacle_mask,
@@ -106,54 +106,54 @@ inline float3 apply_forces(__global const float *u,
                            const int nz,
                            const int tiles_y,
                            const int tiles_z) {
-    float Fx = 0.0f;
-    float Fy = 0.0f;
-    float Fz = 0.0f;
+    float ax = 0.0f;
+    float ay = 0.0f;
+    float az = 0.0f;
 
     if (vorticity_strength > 0.0f) {
         apply_vorticity_confinement(u, v, w, obstacle_mask, vorticity_magnitude, i, j, k, delta, vorticity_strength,
-                                    index_tile_map, u_initial, v_initial, w_initial, nx, ny, nz, tiles_y, tiles_z, &Fx,
-                                    &Fy, &Fz);
+                                    index_tile_map, u_initial, v_initial, w_initial, nx, ny, nz, tiles_y, tiles_z, &ax,
+                                    &ay, &az);
     }
 
     if (has_swirl_nodes && swirl_count > 0) {
-        float swirl_fx;
-        float swirl_fy;
-        float swirl_fz;
+        float swirl_ax;
+        float swirl_ay;
+        float swirl_az;
 
-        apply_swirl_forces(swirl_config, swirl_count, i, j, k, delta, origin_x, origin_y, origin_z, &swirl_fx,
-                           &swirl_fy, &swirl_fz);
+        apply_swirl_forces(swirl_config, swirl_count, i, j, k, delta, origin_x, origin_y, origin_z, &swirl_ax,
+                           &swirl_ay, &swirl_az);
 
-        Fx += swirl_fx;
-        Fy += swirl_fy;
-        Fz += swirl_fz;
+        ax += swirl_ax;
+        ay += swirl_ay;
+        az += swirl_az;
     }
 
     if (has_turbulence_nodes && turbulence_count > 0) {
-        float turbulence_fx;
-        float turbulence_fy;
-        float turbulence_fz;
+        float turbulence_ax;
+        float turbulence_ay;
+        float turbulence_az;
 
         apply_turbulence_forces(turbulence_config, turbulence_count, i, j, k, delta, origin_x, origin_y, origin_z,
-                                &turbulence_fx, &turbulence_fy, &turbulence_fz);
+                                &turbulence_ax, &turbulence_ay, &turbulence_az);
 
-        Fx += turbulence_fx;
-        Fy += turbulence_fy;
-        Fz += turbulence_fz;
+        ax += turbulence_ax;
+        ay += turbulence_ay;
+        az += turbulence_az;
     }
 
-    Fx += fx_const * 0.1f;
-    Fy += fy_const * 0.1f;
-    Fz += fz_const * 0.1f;
+    ax += fx_const * 0.1f;
+    ay += fy_const * 0.1f;
+    az += fz_const * 0.1f;
 
-    const float buoyancy =
-        buoyancy_approximation(temperature, index_tile_map, i, j, k, buoyancy_factor, t_reference, tiles_y, tiles_z);
+    const float buoyancy_value =
+        buoyancy(temperature, index_tile_map, i, j, k, buoyancy_factor, t_reference, tiles_y, tiles_z);
 
-    Fx += gravity_x * buoyancy;
-    Fy += gravity_y * buoyancy;
-    Fz += gravity_z * buoyancy;
+    ax += gravity_x * buoyancy_value;
+    ay += gravity_y * buoyancy_value;
+    az += gravity_z * buoyancy_value;
 
-    return (float3)(Fx, Fy, Fz);
+    return (float3)(ax, ay, az);
 }
 
 inline float3 diffusion(__global const float *u,
@@ -380,14 +380,15 @@ __kernel void update_velocity_maccormack(__global const float *u,
     // Forces
     // ---------------------------------------------------------
 
-    const float3 force = apply_forces(
+    const float3 acceleration = apply_force_acceleration(
         u, v, w, obstacle_mask, vorticity_magnitude, vorticity_strength, temperature, buoyancy_factor, t_reference,
         gravity_x, gravity_y, gravity_z, index_tile_map, fx_const, fy_const, fz_const, has_swirl_nodes, swirl_config,
         swirl_count, origin_x, origin_y, origin_z, has_turbulence_nodes, turbulence_config, turbulence_count, i, j, k,
         delta, u_initial, v_initial, w_initial, nx, ny, nz, tiles_y, tiles_z);
 
-    const float3 rhs = (float3)(corrected_u + force_coeff * force.x, corrected_v + force_coeff * force.y,
-                                corrected_w + force_coeff * force.z);
+    const float3 rhs =
+        (float3)(corrected_u + force_coeff * acceleration.x, corrected_v + force_coeff * acceleration.y,
+                 corrected_w + force_coeff * acceleration.z);
 
     // ---------------------------------------------------------
     // Diffusion

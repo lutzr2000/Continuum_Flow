@@ -5,15 +5,18 @@
 #include "noise.cl"
 #include "sparse_managment.cl"
 
-inline float buoyancy_approximation(__global const float *T,
-                                    __global const int *index_tile_map,
-                                    const int i,
-                                    const int j,
-                                    const int k,
-                                    const float buoyancy_factor,
-                                    const float t_reference,
-                                    const int tiles_y,
-                                    const int tiles_z) {
+inline float buoyancy(__global const float *T,
+                      __global const int *index_tile_map,
+                      const int i,
+                      const int j,
+                      const int k,
+                      const float buoyancy_factor,
+                      const float t_reference,
+                      const int tiles_y,
+                      const int tiles_z) {
+    /*
+    Compute the buoyancy effect of the flow
+    */
     const float temperature = get_pool_value(T, index_tile_map, i, j, k, t_reference, tiles_y, tiles_z);
 
     return buoyancy_factor * (temperature - t_reference);
@@ -28,12 +31,15 @@ inline void apply_swirl_forces(__global const float *swirl_config,
                                const float origin_x,
                                const float origin_y,
                                const float origin_z,
-                               float *Fx,
-                               float *Fy,
-                               float *Fz) {
-    *Fx = 0.0f;
-    *Fy = 0.0f;
-    *Fz = 0.0f;
+                               float *ax,
+                               float *ay,
+                               float *az) {
+    /*
+    Compute the acceleration due to the swirl force
+    */
+    *ax = 0.0f;
+    *ay = 0.0f;
+    *az = 0.0f;
 
     const float px = origin_x + (float)i * delta;
     const float py = origin_y + (float)j * delta;
@@ -104,9 +110,9 @@ inline void apply_swirl_forces(__global const float *swirl_config,
 
         const float falloff = 1.0f - dist / radius;
 
-        *Fx += strength * falloff * tx;
-        *Fy += strength * falloff * ty;
-        *Fz += strength * falloff * tz;
+        *ax += strength * falloff * tx;
+        *ay += strength * falloff * ty;
+        *az += strength * falloff * tz;
     }
 }
 
@@ -119,10 +125,13 @@ inline void apply_turbulence_forces(__global const float *turbulence_config,
                                     const float origin_x,
                                     const float origin_y,
                                     const float origin_z,
-                                    float *Fx,
-                                    float *Fy,
-                                    float *Fz) {
-    float force = 0.0f;
+                                    float *ax,
+                                    float *ay,
+                                    float *az) {
+    /*
+    Compute the acceleration due to the turbulence force
+    */
+    float acceleration = 0.0f;
 
     for (int index = 0; index < turbulence_count; ++index) {
         const int offset = index * 4;
@@ -133,10 +142,10 @@ inline void apply_turbulence_forces(__global const float *turbulence_config,
         const float noise = gradient_noise_3d(origin_x + (float)i * delta, origin_y + (float)j * delta,
                                               origin_z + (float)k * delta, seed, scale);
 
-        force = mad(amplitude * frequency_factor, noise, force);
+        acceleration = mad(amplitude * frequency_factor, noise, acceleration);
     }
 
-    *Fx = force;
-    *Fy = force;
-    *Fz = force;
+    *ax = acceleration;
+    *ay = acceleration;
+    *az = acceleration;
 }

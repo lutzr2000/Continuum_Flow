@@ -20,9 +20,9 @@ inline void apply_face_state(__global float *u,
                              const int i,
                              const int j,
                              const int k,
-                             const int src_i,
-                             const int src_j,
-                             const int src_k,
+                             const int neighbor_i,
+                             const int neighbor_j,
+                             const int neighbor_k,
                              const int axis,
                              const int side_index,
                              const int bc_mode,
@@ -33,13 +33,13 @@ inline void apply_face_state(__global float *u,
                              const int use_temp,
                              const int tiles_y,
                              const int tiles_z) {
-    const int src_tile_i = src_i / TILE_SIZE;
-    const int src_tile_j = src_j / TILE_SIZE;
-    const int src_tile_k = src_k / TILE_SIZE;
+    const int neighbor_tile_i = neighbor_i / TILE_SIZE;
+    const int neighbor_tile_j = neighbor_j / TILE_SIZE;
+    const int neighbor_tile_k = neighbor_k / TILE_SIZE;
 
-    const int src_tile_map_index = (src_tile_i * tiles_y + src_tile_j) * tiles_z + src_tile_k;
+    const int neighbor_tile_map_index = (neighbor_tile_i * tiles_y + neighbor_tile_j) * tiles_z + neighbor_tile_k;
 
-    const int src_tile_index = index_tile_map[src_tile_map_index];
+    const int neighbor_tile_index = index_tile_map[neighbor_tile_map_index];
 
     float neighbor_u;
     float neighbor_v;
@@ -49,7 +49,7 @@ inline void apply_face_state(__global float *u,
     float neighbor_fuel;
     float neighbor_oxygen;
 
-    if (src_tile_index == -1) {
+    if (neighbor_tile_index == -1) {
         neighbor_u = u_initial;
         neighbor_v = v_initial;
         neighbor_w = w_initial;
@@ -60,21 +60,22 @@ inline void apply_face_state(__global float *u,
         neighbor_fuel = 0.0f;
         neighbor_oxygen = 100.0f;
     } else {
-        const int src_local_i = src_i - src_tile_i * TILE_SIZE;
-        const int src_local_j = src_j - src_tile_j * TILE_SIZE;
-        const int src_local_k = src_k - src_tile_k * TILE_SIZE;
+        const int neighbor_local_i = neighbor_i - neighbor_tile_i * TILE_SIZE;
+        const int neighbor_local_j = neighbor_j - neighbor_tile_j * TILE_SIZE;
+        const int neighbor_local_k = neighbor_k - neighbor_tile_k * TILE_SIZE;
 
-        const int src_index =
-            ((src_tile_index * TILE_SIZE + src_local_i) * TILE_SIZE + src_local_j) * TILE_SIZE + src_local_k;
+        const int neighbor_index =
+            ((neighbor_tile_index * TILE_SIZE + neighbor_local_i) * TILE_SIZE + neighbor_local_j) * TILE_SIZE +
+            neighbor_local_k;
 
-        neighbor_u = u[src_index];
-        neighbor_v = v[src_index];
-        neighbor_w = w[src_index];
+        neighbor_u = u[neighbor_index];
+        neighbor_v = v[neighbor_index];
+        neighbor_w = w[neighbor_index];
 
-        neighbor_T = T[src_index];
-        neighbor_smoke = smoke[src_index];
-        neighbor_fuel = fuel[src_index];
-        neighbor_oxygen = oxygen[src_index];
+        neighbor_T = T[neighbor_index];
+        neighbor_smoke = smoke[neighbor_index];
+        neighbor_fuel = fuel[neighbor_index];
+        neighbor_oxygen = oxygen[neighbor_index];
     }
 
     const int dst_tile_i = i / TILE_SIZE;
@@ -95,7 +96,11 @@ inline void apply_face_state(__global float *u,
     const int dst_index =
         ((dst_tile_index * TILE_SIZE + dst_local_i) * TILE_SIZE + dst_local_j) * TILE_SIZE + dst_local_k;
 
-    if (bc_mode == 0) {
+    // ---------------------------------------------------------
+    // Apply boundary conditions
+    // ---------------------------------------------------------
+
+    if (bc_mode == 0) { // outflow (Neumann with blocked back flow)
         u[dst_index] = neighbor_u;
         v[dst_index] = neighbor_v;
         w[dst_index] = neighbor_w;
@@ -107,15 +112,15 @@ inline void apply_face_state(__global float *u,
         } else {
             w[dst_index] = side_index == 0 ? fmin(neighbor_w, 0.0f) : fmax(neighbor_w, 0.0f);
         }
-    } else if (bc_mode == 1) {
+    } else if (bc_mode == 1) { // inflow (Dirichlet)
         u[dst_index] = u_value;
         v[dst_index] = v_value;
         w[dst_index] = w_value;
-    } else if (bc_mode == 2) {
+    } else if (bc_mode == 2) { // Wall (no slip)
         u[dst_index] = 0.0f;
         v[dst_index] = 0.0f;
         w[dst_index] = 0.0f;
-    } else {
+    } else { // wall (slip)
         u[dst_index] = axis == 0 ? 0.0f : neighbor_u;
 
         v[dst_index] = axis == 1 ? 0.0f : neighbor_v;
@@ -123,7 +128,7 @@ inline void apply_face_state(__global float *u,
         w[dst_index] = axis == 2 ? 0.0f : neighbor_w;
     }
 
-    p[dst_index] = get_pool_value(p, index_tile_map, src_i, src_j, src_k, 0.0f, tiles_y, tiles_z);
+    p[dst_index] = get_pool_value(p, index_tile_map, neighbor_i, neighbor_j, neighbor_k, 0.0f, tiles_y, tiles_z);
 
     T[dst_index] = use_temp ? temp_value : neighbor_T;
 
@@ -193,6 +198,9 @@ __kernel void domain_bc(__global float *u,
                         const int nz,
                         const int tiles_y,
                         const int tiles_z) {
+    /*
+    unified kernel for applying the domain boundary conditions to all six sides.
+    */
     const int i = get_global_id(0);
     const int j = get_global_id(1);
     const int k = get_global_id(2);
@@ -203,31 +211,35 @@ __kernel void domain_bc(__global float *u,
     if (i > 0 && i < nx - 1 && j > 0 && j < ny - 1 && k > 0 && k < nz - 1)
         return;
 
-    if (i == 0) {
+    // ---------------------------------------------------------
+    // Apply boundary conditions to all sides
+    // ---------------------------------------------------------
+
+    if (i == 0) { // xlow
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, 1, j, k, 0, 0, x_low_mode, x_low_u, x_low_v, x_low_w, x_low_temp, x_low_use_temp,
                          tiles_y, tiles_z);
-    } else if (i == nx - 1) {
+    } else if (i == nx - 1) { // xhigh
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, nx - 2, j, k, 0, 1, x_high_mode, x_high_u, x_high_v, x_high_w, x_high_temp,
                          x_high_use_temp, tiles_y, tiles_z);
     }
 
-    if (j == 0) {
+    if (j == 0) { // ylow
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, i, 1, k, 1, 0, y_low_mode, y_low_u, y_low_v, y_low_w, y_low_temp, y_low_use_temp,
                          tiles_y, tiles_z);
-    } else if (j == ny - 1) {
+    } else if (j == ny - 1) { // yhigh
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, i, ny - 2, k, 1, 1, y_high_mode, y_high_u, y_high_v, y_high_w, y_high_temp,
                          y_high_use_temp, tiles_y, tiles_z);
     }
 
-    if (k == 0) {
+    if (k == 0) { // zlow
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, i, j, 1, 2, 0, z_low_mode, z_low_u, z_low_v, z_low_w, z_low_temp, z_low_use_temp,
                          tiles_y, tiles_z);
-    } else if (k == nz - 1) {
+    } else if (k == nz - 1) { // zhigh
         apply_face_state(u, v, w, p, T, smoke, fuel, oxygen, index_tile_map, ref_temp, u_initial, v_initial, w_initial,
                          i, j, k, i, j, nz - 2, 2, 1, z_high_mode, z_high_u, z_high_v, z_high_w, z_high_temp,
                          z_high_use_temp, tiles_y, tiles_z);

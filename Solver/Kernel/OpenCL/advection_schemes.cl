@@ -5,6 +5,9 @@
 #include "sparse_managment.cl"
 
 inline float clamp_value(const float value, const float lower, const float upper) {
+    /*
+    Clamp a value to a given range.
+    */
     if (value < lower)
         return lower;
 
@@ -29,6 +32,9 @@ inline void prepare_trilinear_coords(float x,
                                      float *tx,
                                      float *ty,
                                      float *tz) {
+    /*
+    Compute clamped grid indices and interpolation weights for trilinear sampling.
+    */
     if (x < 0.0f)
         x = 0.0f;
     else if (x > nx - 1)
@@ -80,6 +86,10 @@ inline float sample_trilinear_inner_sparse(__global const float *field,
                                            const float default_value,
                                            const int tiles_y,
                                            const int tiles_z) {
+    /*
+    Compute trilinear weighted average for a position. A backtraced position rarely ends up directly at a cell center.
+    Hence interpolation is needed. Trilinear sampling is simply a weighted average.
+    */
     const float c000 = get_pool_value(field, index_tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
     const float c100 = get_pool_value(field, index_tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
     const float c010 = get_pool_value(field, index_tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
@@ -112,6 +122,11 @@ inline void sample_cell_extrema_inner_sparse(__global const float *field,
                                              const int tiles_z,
                                              float *lower,
                                              float *upper) {
+    /*
+    Find the minimum and maximum values among the eight cells surrounding
+    the sample position. These bounds are used by the MacCormack limiter
+    to prevent the corrected value from creating new extrema.
+    */
     const float c000 = get_pool_value(field, index_tile_map, x0, y0, z0, default_value, tiles_y, tiles_z);
     const float c100 = get_pool_value(field, index_tile_map, x1, y0, z0, default_value, tiles_y, tiles_z);
     const float c010 = get_pool_value(field, index_tile_map, x0, y1, z0, default_value, tiles_y, tiles_z);
@@ -144,6 +159,9 @@ inline void sample_trilinear_vec3_sparse(__global const float *field_x,
                                          float *sample_x,
                                          float *sample_y,
                                          float *sample_z) {
+    /*
+    Same as sample_trilinear_inner_sparse just for a vector instead of a scalar.
+    */
     int x0;
     int y0;
     int z0;
@@ -187,6 +205,11 @@ inline void backtrace_position_sparse(__global const float *u,
                                       float *x_result,
                                       float *y_result,
                                       float *z_result) {
+    /*
+    Backtracing for the advection. We essentially ask: where was the flow dt seconds ago?
+    To find this we simply go from our current position x - dt*u to figure out the start position.
+    Substepping allows for a curved path by stopping in between and finding a new velocity.
+    */
     const float substep_dt = dt_over_delta / (float)n_substeps;
 
     float x_pos = x_start;
@@ -231,6 +254,10 @@ inline void forward_trace_position_sparse(__global const float *u,
                                           float *x_result,
                                           float *y_result,
                                           float *z_result) {
+    /*
+    Trace a position forward through the velocity field by reusing backtrace_position_sparse with a negative timestep.
+    A forward trace is simply a backward trace in the opposite direction
+    */
     backtrace_position_sparse(u, v, w, index_tile_map, x_start, y_start, z_start, -dt_over_delta, n_substeps, nx, ny,
                               nz, u_initial, v_initial, w_initial, tiles_y, tiles_z, x_result, y_result, z_result);
 }

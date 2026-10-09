@@ -15,6 +15,9 @@ __kernel void build_coarse_tile_level(__global const int *fine_tile_map,
                                       const int coarse_tiles_x,
                                       const int coarse_tiles_y,
                                       const int coarse_tiles_z) {
+    /*
+    Build the sparse tile structure for coarser multigrid levels
+    */
     const int coarse_i = get_global_id(0);
     const int coarse_j = get_global_id(1);
     const int coarse_k = get_global_id(2);
@@ -80,6 +83,7 @@ __kernel void build_coarse_tile_level(__global const int *fine_tile_map,
     coarse_active_tiles[active_index + 1] = coarse_j;
     coarse_active_tiles[active_index + 2] = coarse_k;
 }
+
 inline float residual_sparse(__global const float *p,
                              __global const float *b,
                              const float inv_delta2,
@@ -93,6 +97,12 @@ inline float residual_sparse(__global const float *p,
                              const int tiles_y,
                              const int tiles_z,
                              int *valid) {
+    /*
+    Compute the residual of the pressure equation. In general we solver laplace(p)=b.
+    In discretized form this is A*p = b with a beeing the coefficent matrix. Rearranging yields
+    the residual r = b - A*p. In the code the right hand side (rhs) is b and A*p is the discreate
+    laplacian with central differences.
+    */
     const int tile_i = i / TILE_SIZE;
     const int tile_j = j / TILE_SIZE;
     const int tile_k = k / TILE_SIZE;
@@ -147,6 +157,11 @@ __kernel void restrict_residual_sparse(__global const float *fine_p,
                                        const int fine_tiles_z,
                                        const int coarse_tiles_y,
                                        const int coarse_tiles_z) {
+    /*
+    When moving between grid levels a transfer from fine to coarse is done. This is called restriciton.
+    In this case a coarser cell contains 8 (2x2x2) finer cells. There residual is averaged for the residual
+    on the coarser level
+    */
     const int coarse_pool_index = get_group_id(0);
 
     if (coarse_pool_index >= coarse_active_tile_count[0])
@@ -221,22 +236,27 @@ __kernel void restrict_residual_sparse(__global const float *fine_p,
     }
 }
 
-__kernel void prolongate_add_nearest_sparse(__global const float *coarse_e,
-                                            __global float *fine_p,
-                                            __global const int *coarse_tile_map,
-                                            __global const int *fine_tile_map,
-                                            __global const int *coarse_active_tiles,
-                                            __global const int *coarse_active_tile_count,
-                                            const int coarse_nx,
-                                            const int coarse_ny,
-                                            const int coarse_nz,
-                                            const int fine_nx,
-                                            const int fine_ny,
-                                            const int fine_nz,
-                                            const int coarse_tiles_y,
-                                            const int coarse_tiles_z,
-                                            const int fine_tiles_y,
-                                            const int fine_tiles_z) {
+__kernel void prolongate_sparse(__global const float *coarse_e,
+                                __global float *fine_p,
+                                __global const int *coarse_tile_map,
+                                __global const int *fine_tile_map,
+                                __global const int *coarse_active_tiles,
+                                __global const int *coarse_active_tile_count,
+                                const int coarse_nx,
+                                const int coarse_ny,
+                                const int coarse_nz,
+                                const int fine_nx,
+                                const int fine_ny,
+                                const int fine_nz,
+                                const int coarse_tiles_y,
+                                const int coarse_tiles_z,
+                                const int fine_tiles_y,
+                                const int fine_tiles_z) {
+    /*
+    Now we have the opposite situation from restrict_residual_sparse. We now want to move
+    from coarse to fine. We computed an error on the coarser level and now want to correct
+    by this error on the finer level.
+    */
     const int coarse_pool_index = get_group_id(0);
 
     if (coarse_pool_index >= coarse_active_tile_count[0])
@@ -268,7 +288,9 @@ __kernel void prolongate_add_nearest_sparse(__global const float *coarse_e,
 
     const int coarse_index = ((coarse_tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
-    const float error = 0.25f * coarse_e[coarse_index];
+    const float error =
+        0.25f * coarse_e[coarse_index]; // !!! The *0.25 is only there for stability reasons, the multigird diverges
+                                        // with higher values, mathematical default would be 1 !!!
 
     const int fine_i_start = 2 * I;
     const int fine_j_start = 2 * J;
@@ -321,6 +343,12 @@ __kernel void rbgs_step_sparse(__global float *p,
                                const int nz,
                                const int tiles_y,
                                const int tiles_z) {
+    /*
+    Perform a red black Gauss Seidel step. The equation is obtained by rearanging
+    the discrete version of laplace(p) = b. Red and black Gauss Seidel updates
+    in a checkerboard pattern. In a red run all values are independent and can be
+    computed in parallel, same in the black case.
+    */
     const int active_index = get_group_id(0);
 
     if (active_index >= active_tile_count[0])
@@ -368,20 +396,25 @@ __kernel void rbgs_step_sparse(__global float *p,
 }
 
 __kernel void coarse_smooth(__global float *p,
-                                           __global const float *b,
-                                           const float delta,
-                                           __global const int *index_tile_map,
-                                           __global const int *active_tiles,
-                                           __global const int *active_tile_count,
-                                           const int active_tile_capacity,
-                                           const int iterations,
-                                           const int nx,
-                                           const int ny,
-                                           const int nz,
-                                           const int tiles_y,
-                                           const int tiles_z) {
-    /* Exactly one workgroup processes the complete coarse grid, making these
-       barriers global synchronization points for all participating cells. */
+                            __global const float *b,
+                            const float delta,
+                            __global const int *index_tile_map,
+                            __global const int *active_tiles,
+                            __global const int *active_tile_count,
+                            const int active_tile_capacity,
+                            const int iterations,
+                            const int nx,
+                            const int ny,
+                            const int nz,
+                            const int tiles_y,
+                            const int tiles_z) {
+    /*
+    Perform multiple Red-Black Gauss-Seidel iterations on the coarsest
+    multigrid level within a single kernel launch to reduce overhead.
+    The entire coarse grid is processed by a single work-group,
+    allowing barriers to synchronize all participating work-items
+    between red and black updates.
+    */
     const int thread_index = get_local_id(0);
     const int thread_count = get_local_size(0);
     const int tile_count = min(active_tile_count[0], active_tile_capacity);
@@ -442,6 +475,9 @@ __kernel void rbgs_step_level_0(__global float *p,
                                 const int tiles_x,
                                 const int tiles_y,
                                 const int tiles_z) {
+    /*
+    Essentially the same as rbgs_step_sparse just for the coarsest level.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);
@@ -490,6 +526,9 @@ __kernel void pressure_poisson_neumann(__global float *p,
                                        const int nz,
                                        const int tiles_y,
                                        const int tiles_z) {
+    /*
+    Apply Neumann boundary conditions for pressure on the six domain sides.
+    */
     const int boundary_index = get_global_id(0);
     const int x_face_count = 2 * ny * nz;
     const int y_face_count = 2 * max(nx - 2, 0) * nz;

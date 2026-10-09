@@ -17,6 +17,11 @@ __kernel void obstacle_bc(__global float *u,
                           const int tiles_x,
                           const int tiles_y,
                           const int tiles_z) {
+    /*
+    Apply boundary conditions for obstacles. Fuel, smoke, oxygen and flame are
+    zero within an obstacle. The velocity is set to the computed obstacle velocity.
+    Pressure and temperature are not touched by the obstacle.
+    */
     const int tile_i = get_group_id(0);
     const int tile_j = get_group_id(1);
     const int tile_k = get_group_id(2);

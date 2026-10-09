@@ -9,6 +9,9 @@ inline uint gradient_noise_hash_3d(const int x, const int y, const int z, const 
 }
 
 inline float gradient_noise_dot(const uint hash, const float x, const float y, const float z) {
+    /*
+    Random gradinet noise
+    */
     const uint h = hash & 15u;
     const float u = h < 8u ? x : y;
     const float v = h < 4u ? y : (h == 12u || h == 14u ? x : z);
@@ -17,6 +20,9 @@ inline float gradient_noise_dot(const uint hash, const float x, const float y, c
 }
 
 inline float gradient_noise_3d(const float x, const float y, const float z, const int seed, const float scale) {
+    /*
+    Random gradinet noise in 3d space
+    */
     const float safe_scale = fmax(fabs(scale), 1.0e-6f);
 
     const float px = x / safe_scale;
