@@ -291,4 +291,12 @@ def pressure_poisson_multigrid(
             multigrid_level_shapes=multigrid_level_shapes,
         )
 
+    multigrid.apply_neumann_boundary(
+        multigrid_kernels,
+        queue,
+        p,
+        index_tile_map,
+        (nx, ny, nz),
+    )
+
     return p

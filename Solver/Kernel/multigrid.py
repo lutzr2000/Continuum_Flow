@@ -501,29 +501,6 @@ def smooth(
 
     rbgs_kernel = multigrid_kernels[rbgs_kernel_name]
 
-    boundary_local_work_size = (kernel_config.REDUCTION_THREADS_PER_BLOCK,)
-    boundary_cell_count = (
-        2 * ny * nz + 2 * max(nx - 2, 0) * nz + 2 * max(nx - 2, 0) * max(ny - 2, 0)
-    )
-    boundary_global_work_size = (
-        (
-            (boundary_cell_count + boundary_local_work_size[0] - 1)
-            // boundary_local_work_size[0]
-        )
-        * boundary_local_work_size[0],
-    )
-
-    boundary_kernel = multigrid_kernels["pressure_poisson_neumann"]
-    boundary_kernel.set_args(
-        p,
-        index_tile_map,
-        np.int32(nx),
-        np.int32(ny),
-        np.int32(nz),
-        np.int32(tile_shape[1]),
-        np.int32(tile_shape[2]),
-    )
-
     for _ in range(iterations):
         rbgs_kernel.set_args(
             *kernel_args[:3],
@@ -547,9 +524,39 @@ def smooth(
             rbgs_global_work_size,
             rbgs_local_work_size,
         )
-        cl.enqueue_nd_range_kernel(
-            queue,
-            boundary_kernel,
-            boundary_global_work_size,
-            boundary_local_work_size,
-        )
+
+
+def apply_neumann_boundary(
+    multigrid_kernels: dict[str, cl.Kernel],
+    queue: cl.CommandQueue,
+    p: Any,
+    index_tile_map: Any,
+    field_shape: tuple[int, int, int],
+) -> None:
+    """Write physical pressure boundary values once for downstream kernels."""
+    nx, ny, nz = field_shape
+    tile_shape = tuple(
+        (size + kernel_config.TILE_SIZE - 1) // kernel_config.TILE_SIZE
+        for size in field_shape
+    )
+    local_work_size = (kernel_config.REDUCTION_THREADS_PER_BLOCK,)
+    boundary_cell_count = (
+        2 * ny * nz + 2 * max(nx - 2, 0) * nz + 2 * max(nx - 2, 0) * max(ny - 2, 0)
+    )
+    global_work_size = (
+        ((boundary_cell_count + local_work_size[0] - 1) // local_work_size[0])
+        * local_work_size[0],
+    )
+
+    multigrid_kernels["pressure_poisson_neumann"](
+        queue,
+        global_work_size,
+        local_work_size,
+        p,
+        index_tile_map,
+        np.int32(nx),
+        np.int32(ny),
+        np.int32(nz),
+        np.int32(tile_shape[1]),
+        np.int32(tile_shape[2]),
+    )

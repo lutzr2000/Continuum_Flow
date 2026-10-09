@@ -87,6 +87,9 @@ inline float residual_sparse(__global const float *p,
                              const int i,
                              const int j,
                              const int k,
+                             const int nx,
+                             const int ny,
+                             const int nz,
                              const int tiles_y,
                              const int tiles_z,
                              int *valid) {
@@ -109,13 +112,14 @@ inline float residual_sparse(__global const float *p,
 
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
-    const float laplace = (get_pool_value(p, index_tile_map, i + 1, j, k, 0.0f, tiles_y, tiles_z) +
-                           get_pool_value(p, index_tile_map, i - 1, j, k, 0.0f, tiles_y, tiles_z) +
-                           get_pool_value(p, index_tile_map, i, j + 1, k, 0.0f, tiles_y, tiles_z) +
-                           get_pool_value(p, index_tile_map, i, j - 1, k, 0.0f, tiles_y, tiles_z) +
-                           get_pool_value(p, index_tile_map, i, j, k + 1, 0.0f, tiles_y, tiles_z) +
-                           get_pool_value(p, index_tile_map, i, j, k - 1, 0.0f, tiles_y, tiles_z) - 6.0f * p[index]) *
-                          inv_delta2;
+    const float laplace =
+        (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) - 6.0f * p[index]) *
+        inv_delta2;
 
     const float rhs = b[index];
 
@@ -193,8 +197,9 @@ __kernel void restrict_residual_sparse(__global const float *fine_p,
 
                 int valid;
 
-                const float residual_value = residual_sparse(fine_p, fine_b, inv_delta2, fine_tile_map, i, j, k,
-                                                             fine_tiles_y, fine_tiles_z, &valid);
+                const float residual_value =
+                    residual_sparse(fine_p, fine_b, inv_delta2, fine_tile_map, i, j, k, fine_nx, fine_ny, fine_nz,
+                                    fine_tiles_y, fine_tiles_z, &valid);
 
                 if (!valid)
                     continue;
@@ -352,13 +357,14 @@ __kernel void rbgs_step_sparse(__global float *p,
 
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
-    p[index] = (get_pool_value(p, index_tile_map, i + 1, j, k, 0.0f, tiles_y, tiles_z) +
-                get_pool_value(p, index_tile_map, i - 1, j, k, 0.0f, tiles_y, tiles_z) +
-                get_pool_value(p, index_tile_map, i, j + 1, k, 0.0f, tiles_y, tiles_z) +
-                get_pool_value(p, index_tile_map, i, j - 1, k, 0.0f, tiles_y, tiles_z) +
-                get_pool_value(p, index_tile_map, i, j, k + 1, 0.0f, tiles_y, tiles_z) +
-                get_pool_value(p, index_tile_map, i, j, k - 1, 0.0f, tiles_y, tiles_z) - delta2 * b[index]) /
-               6.0f;
+    p[index] =
+        (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
+         get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) - delta2 * b[index]) /
+        6.0f;
 }
 
 __kernel void rbgs_step_level_0(__global float *p,
@@ -401,12 +407,12 @@ __kernel void rbgs_step_level_0(__global float *p,
 
     const int index = ((tile_index * TILE_SIZE + local_i) * TILE_SIZE + local_j) * TILE_SIZE + local_k;
 
-    const float center = (get_pool_value(p, index_tile_map, i + 1, j, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i - 1, j, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j + 1, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j - 1, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j, k + 1, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j, k - 1, 0.0f, tiles_y, tiles_z) -
+    const float center = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+                          get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
+                          get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+                          get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
+                          get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
+                          get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) -
                           delta2 * get_pool_value(b, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z)) /
                          6.0f;
 
