@@ -242,7 +242,7 @@
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
 <p>In general, Continuum Flow’s workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.</p>
 <p>The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.</p>
-<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, swirl settings, and turbulence amplitude. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well.</p>
+<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well.</p>
 </section>
 <section id="nodes">
 <h2>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">¶</a></h2>
@@ -344,12 +344,7 @@ Wall: wall with friction.</p>
 </dd>
 <dt><strong>Fuel Ignition Temperature</strong></dt><dd><p>If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.</p>
 </dd>
-</dl>
-<p>The following two settings control the random variation of combustion:</p>
-<dl class="simple">
-<dt><strong>Scale</strong></dt><dd><p>Spatial scale of the randomness applied to the combustion process.</p>
-</dd>
-<dt><strong>Amplitude</strong></dt><dd><p>Strength of the random modulation of the local fuel burn rate. Higher values produce greater spatial variation in combustion.</p>
+<dt><strong>Fuel Ignition Temperature Tolerance</strong></dt><dd><p>Temperature range over which combustion ramps from unlit to its full burn rate.</p>
 </dd>
 <dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.</p>
 </dd>
@@ -423,15 +418,13 @@ Press Esc during an active bake to stop.</p>
 </dd>
 <dt><strong>Extra Pressure</strong></dt><dd><p>Additional pressure created. Positive values push flow away, negative values suck the flow in.</p>
 </dd>
-<dt><strong>Source Noise</strong></dt><dd><p>Activates random spatial variations of temperature, smoke emission, fuel emission, and extra pressure to create more dynamic flow. Source velocity is not affected.</p>
+<dt><strong>Randomness Scale / Seed</strong></dt><dd><p>Define one shared, world-space gradient-noise field for the source.</p>
 </dd>
-<dt><strong>Scale</strong></dt><dd><p>Scale of the random variation. Larger values produce broader variations.</p>
-</dd>
-<dt><strong>Seed</strong></dt><dd><p>Random seed used to produce a repeatable source-noise pattern.</p>
-</dd>
-<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of the noise. The emission of smoke and fuel is still always capped at 100%.</p>
+<dt><strong>Fuel / Smoke / Temperature / Extra Pressure Randomness</strong></dt><dd><p>Control how strongly the shared noise field modulates each source value from zero to one hundred percent.</p>
 </dd>
 <dt><strong>World/local Space</strong></dt><dd><p>In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.</p>
+</dd>
+<dt><strong>Velocity Randomness</strong></dt><dd><p>Controls how strongly the shared source noise field modulates velocity from zero to one hundred percent.</p>
 </dd>
 <dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>
@@ -455,7 +448,7 @@ Press Esc during an active bake to stop.</p>
 <dl class="simple">
 <dt><strong>Radius</strong></dt><dd><p>Radius aroung each particle in which a voxel is considered a source.</p>
 </dd>
-<dt><strong>Velocity Transfer</strong></dt><dd><p>How much of the particles velocity is transfered to the flow. Zero means no transfer, one means the flow has the same velocity as the particle. Negative one means velocity in the opposite direction.</p>
+<dt><strong>Velocity Transfer</strong></dt><dd><p>Percentage of the particle velocity transferred to the flow. Values above 100% can be entered manually.</p>
 </dd>
 </dl>
 </section>
@@ -477,19 +470,15 @@ Press Esc during an active bake to stop.</p>
 </section>
 <section id="force-turbulence">
 <h3>Force-Turbulence<a class="headerlink" href="#force-turbulence" title="Link to this heading">¶</a></h3>
-<figure class="align-default">
-<a class="block-image-left reference internal image-reference" href="_images/force_turbulence_node.jpg"><img alt="_images/force_turbulence_node.jpg" class="block-image-left" src="_images/force_turbulence_node.jpg" style="width: 300px;" />
-</a>
-</figure>
-<p>Adds turbulent forcing to the domain.</p>
+<p>Adds gradient-noise forcing to the domain.</p>
 <dl class="simple">
-<dt><strong>Scale</strong></dt><dd><p>Controls the scale of the introduced turbulence, larger values mean larger turbulent structures.</p>
+<dt><strong>Scale</strong></dt><dd><p>Spatial scale of the turbulence field in world units, independent of grid resolution.</p>
 </dd>
-<dt><strong>Frequency</strong></dt><dd><p>How quickly the turbulence field alternates. Larger values alternate more quickly.</p>
+<dt><strong>Seed</strong></dt><dd><p>Seed used to generate the turbulence field.</p>
 </dd>
-<dt><strong>Amplitude</strong></dt><dd><p>Amplitude of the turbulence.</p>
+<dt><strong>Amplitude</strong></dt><dd><p>Strength applied to the generated noise value.</p>
 </dd>
-<dt><strong>Seed</strong></dt><dd><p>Random seed for turbulence field generation.</p>
+<dt><strong>Frequency</strong></dt><dd><p>Controls the animated <code class="docutils literal notranslate"><span class="pre">sin(time</span> <span class="pre">*</span> <span class="pre">frequency)</span></code> force multiplier.</p>
 </dd>
 </dl>
 </section>

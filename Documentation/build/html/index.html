@@ -240,7 +240,7 @@
 <p>Bringing the fun of flow simulation to Blender!</p>
 <section id="general">
 <h2>General<a class="headerlink" href="#general" title="Link to this heading">¶</a></h2>
-<p>This add-on allows for CPU- and NVIDIA GPU-based flow simulations within Blender. It is free and open source. The goal is to make simulating things like smoke and fire in Blender faster, more intuitive, and therefore more fun. The solver can be somewhere around 4 times faster on the CPU and be roughly 20 times faster on the GPU than Blender’s native solver. The add-on is integrated into Blender and comes with its own custom node tree. The solver started from this great tutorial (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) by Prof. Dr. Zhengtao Gao.</p>
+<p>This add-on allows for CPU- and GPU-based flow simulations within Blender. It is free and open source. The goal is to make simulating things like smoke and fire in Blender faster, more intuitive, and therefore more fun. The solver can be somewhere around 8 times faster on the CPU and roughly 60 times faster on the GPU than Blender’s native solver (depends from case to case and hardware). The add-on is integrated into Blender and comes with its own custom node tree. The solver started from this great tutorial (<a class="reference external" href="https://drzgan.github.io/Python_CFD/intro.html">https://drzgan.github.io/Python_CFD/intro.html</a>) by Prof. Dr. Zhengtao Gao.</p>
 </section>
 <section id="features">
 <h2>Features<a class="headerlink" href="#features" title="Link to this heading">¶</a></h2>
@@ -249,14 +249,14 @@
 <li><p>Greatly improved performance compared to Blender’s native solver</p></li>
 <li><p>Directly integrated into Blender</p></li>
 <li><p>Interaction with obstacles (stationary and movable)</p></li>
-<li><p>Simple combustion model</p></li>
+<li><p>Particle systems can be used as sources</p></li>
+<li><p>Combustion model</p></li>
 <li><p>Easy to set up</p></li>
 </ul>
 </section>
 <section id="limitations">
 <h2>Limitations<a class="headerlink" href="#limitations" title="Link to this heading">¶</a></h2>
 <ul class="simple">
-<li><p>GPU is only supported for NVIDIA GPUs</p></li>
 <li><p>No interaction with Blender’s native force fields</p></li>
 <li><p>Obstacles cannot deform (shape keys or armatures have no effect)</p></li>
 </ul>
@@ -264,15 +264,13 @@
 <section id="disclaimers">
 <h2>Disclaimers<a class="headerlink" href="#disclaimers" title="Link to this heading">¶</a></h2>
 <ul class="simple">
-<li><p>This is a hobby project. Continued development is not guaranteed, but others are invited to participate.</p></li>
-<li><p>I am not a professional developer. Large parts were developed with the support of CODEX (AI).</p></li>
-<li><p>The software is currently in alpha, so there will be bugs.</p></li>
-<li><p>Some things in the software might change in the future. Currently I can not guarantee compatibility between versions.</p></li>
+<li><p>The software is currently in alpha, so bugs can be expected. Please report them on GitHub.</p></li>
+<li><p>Some things in the software might change in the future. Currently compatibility between versions is not guranteed.</p></li>
 </ul>
 </section>
 <section id="getting-started">
 <h2>Getting started<a class="headerlink" href="#getting-started" title="Link to this heading">¶</a></h2>
-<p>You can start by following the installation instructions in the corresponding section. The code from the Git repository also contains example files you can start with. If you find bugs or other issues, please report them in the GitHub issue tracker.</p>
+<p>You can start by following the installation instructions in the corresponding section. The code from the Git repository also contains example files you can start with.</p>
 </section>
 <section id="further-sections">
 <h2>Further sections<a class="headerlink" href="#further-sections" title="Link to this heading">¶</a></h2>
