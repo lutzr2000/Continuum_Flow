@@ -24,6 +24,56 @@ inline float central_difference_sparse(__global const float *field,
     return (upper - lower) * half_inv_delta;
 }
 
+inline float neighbor_sum_sparse(__global const float *field,
+                                 __global const int *index_tile_map,
+                                 const int i,
+                                 const int j,
+                                 const int k,
+                                 const float default_value,
+                                 const int nx,
+                                 const int ny,
+                                 const int nz,
+                                 const int tiles_y,
+                                 const int tiles_z) {
+    /*
+    Sum the six axis-aligned neighbours used by the 3D seven-point stencil.
+    Clamping to the closest interior cell implements the pressure solver's
+    homogeneous Neumann condition at the domain boundary.
+    */
+    return get_pool_value(field, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, default_value, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, default_value, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, default_value, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, default_value, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), default_value, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), default_value, tiles_y, tiles_z);
+}
+
+inline float laplacian_sparse(__global const float *field,
+                              __global const int *index_tile_map,
+                              const int i,
+                              const int j,
+                              const int k,
+                              const float inv_delta2,
+                              const float default_value,
+                              const int nx,
+                              const int ny,
+                              const int nz,
+                              const int tiles_y,
+                              const int tiles_z) {
+    /*
+    Compute the 3D seven-point discrete Laplacian.
+    */
+    const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
+
+    if (!cell.valid)
+        return 0.0f;
+
+    const float neighbour_sum =
+        neighbor_sum_sparse(field, index_tile_map, i, j, k, default_value, nx, ny, nz, tiles_y, tiles_z);
+
+    return (neighbour_sum - 6.0f * field[cell.cell_index]) * inv_delta2;
+}
+
 inline float3 central_gradient_sparse(__global const float *field,
                                       __global const int *index_tile_map,
                                       const int i,

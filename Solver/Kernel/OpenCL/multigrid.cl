@@ -2,7 +2,7 @@
 #define TILE_SIZE 4
 #endif
 
-#include "sparse_managment.cl"
+#include "helper.cl"
 
 __kernel void build_coarse_tile_level(__global const int *fine_tile_map,
                                       __global int *coarse_tile_map,
@@ -98,9 +98,9 @@ inline float residual_sparse(__global const float *p,
                              const int tiles_z,
                              int *valid) {
     /*
-    Compute the residual of the pressure equation. In general we solver laplace(p)=b.
-    In discretized form this is A*p = b with a beeing the coefficent matrix. Rearranging yields
-    the residual r = b - A*p. In the code the right hand side (rhs) is b and A*p is the discreate
+    Compute the residual of the pressure equation. In general we solve laplace(p)=b.
+    In discretized form this is A*p = b with A beeing the coefficent matrix. Rearranging yields
+    the residual r = b - A*p. In the code the right hand side (rhs) is b and A*p is the discrete
     laplacian with central differences.
     */
     const SparseCell cell = get_sparse_cell_at(index_tile_map, i, j, k, tiles_y, tiles_z);
@@ -112,14 +112,8 @@ inline float residual_sparse(__global const float *p,
 
     const int index = cell.cell_index;
 
-    const float laplace =
-        (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) - 6.0f * p[index]) *
-        inv_delta2;
+    const float laplace = laplacian_sparse(p, index_tile_map, i, j, k, inv_delta2, 0.0f,
+                                           nx, ny, nz, tiles_y, tiles_z);
 
     const float rhs = b[index];
 
@@ -353,14 +347,10 @@ __kernel void rbgs_step_sparse(__global float *p,
 
     const int index = cell.cell_index;
 
-    p[index] =
-        (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
-         get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) - delta2 * b[index]) /
-        6.0f;
+    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
+                                                     nx, ny, nz, tiles_y, tiles_z);
+
+    p[index] = (neighbour_sum - delta2 * b[index]) / 6.0f;
 }
 
 __kernel void coarse_smooth(__global float *p,
@@ -416,14 +406,10 @@ __kernel void coarse_smooth(__global float *p,
 
                 const int index = sparse_cell.cell_index;
 
-                p[index] = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-                            get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-                            get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-                            get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-                            get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
-                            get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) -
-                            delta2 * b[index]) /
-                           6.0f;
+                const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
+                                                                 nx, ny, nz, tiles_y, tiles_z);
+
+                p[index] = (neighbour_sum - delta2 * b[index]) / 6.0f;
             }
 
             barrier(CLK_GLOBAL_MEM_FENCE);
@@ -472,12 +458,9 @@ __kernel void rbgs_step_level_0(__global float *p,
 
     const int index = cell.cell_index;
 
-    const float center = (get_pool_value(p, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) +
-                          get_pool_value(p, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), 0.0f, tiles_y, tiles_z) -
+    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
+                                                     nx, ny, nz, tiles_y, tiles_z);
+    const float center = (neighbour_sum -
                           delta2 * get_pool_value(b, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z)) /
                          6.0f;
 
