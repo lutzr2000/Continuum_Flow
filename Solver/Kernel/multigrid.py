@@ -3,8 +3,8 @@ from typing import Any
 import numpy as np
 import pyopencl as cl
 
-import Solver.Kernel.kernel_config as kernel_config
-import Solver.Kernel.helper as helper
+from . import kernel_config
+from . import helper
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 PERSISTENT_COARSE_MAX_CELLS = 32**3

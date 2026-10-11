@@ -1,7 +1,6 @@
 from typing import Any, Callable
 
 from time import perf_counter
-import sys
 import threading
 
 
@@ -46,20 +45,12 @@ def main(config: dict[str, Any]) -> None:
     """
     Configure the runtime environment and execute the requested solver backend.
 
-    Parent import paths from the job metadata are prepended to ``sys.path``
-    before the configured backend is normalized and dispatched.
-
     Total bake time is printed from a ``finally`` block, so timing information
     is emitted after both successful runs and failures.
     """
     total_start_time = perf_counter()
 
     try:
-        extra_paths = (config.get("meta") or {}).get("parent_sys_path") or ()
-        for path in reversed(extra_paths):
-            if path and path not in sys.path:
-                sys.path.insert(0, path)
-
         simulation_cfg = config.get("simulation") or {}
         solver_backend = (
             str((simulation_cfg.get("settings") or {}).get("solver_backend", "GPU"))
@@ -68,7 +59,7 @@ def main(config: dict[str, Any]) -> None:
         )
 
         if solver_backend in {"CPU", "GPU"}:
-            import Solver.Kernel.solver as solver_kernel_module
+            from ..Kernel import solver as solver_kernel_module
 
             return solver_kernel_module.solver(config)
 

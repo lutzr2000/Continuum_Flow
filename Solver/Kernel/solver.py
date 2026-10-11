@@ -4,21 +4,20 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Any
 from pathlib import Path
-from Solver.General.main import emit_message
-from Solver.Kernel import preview
-from Solver.Kernel import output
-import Solver.General.forces as forces
-
-import Solver.Kernel.kernel_config as kernel_config
-import Solver.Kernel.voxelise_mesh as voxelise_mesh
-import Solver.Kernel.multigrid as multigrid
-import Solver.Kernel.particles as particles
-import Solver.Kernel.update_masks as update_masks
-import Solver.Kernel.time_step as time_step
-import Solver.Kernel.helper as helper
-import Solver.Kernel.sparse_managment as sparse_managment
-import Solver.Kernel.domain_bc as domain_bc
-import Solver.Kernel.pressure_solve as pressure_solve
+from ..General.main import emit_message
+from ..General import forces
+from . import preview
+from . import output
+from . import kernel_config
+from . import voxelise_mesh
+from . import multigrid
+from . import particles
+from . import update_masks
+from . import time_step
+from . import helper
+from . import sparse_managment
+from . import domain_bc
+from . import pressure_solve
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 

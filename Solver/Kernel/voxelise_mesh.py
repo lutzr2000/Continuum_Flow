@@ -5,7 +5,7 @@ import numpy as np
 import pyopencl as cl
 import trimesh
 
-import Solver.Kernel.helper as helper
+from . import helper
 
 
 def voxelise_all_meshes(

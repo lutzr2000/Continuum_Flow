@@ -6,7 +6,7 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from Solver.Kernel import preview
+from ...Solver.Kernel import preview
 from . import reference_frame
 
 SHADER_DIRECTORY = Path(__file__).resolve().parent / "shaders"

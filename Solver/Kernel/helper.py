@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from numpy.typing import NDArray
 
-import Solver.Kernel.kernel_config as kernel_config
+from . import kernel_config
 
 mf = cl.mem_flags
 
@@ -45,7 +45,7 @@ def load_program(
             options=[
                 f"-DTILE_SIZE={kernel_config.TILE_SIZE}",
                 f"-DREDUCTION_THREADS_PER_BLOCK={kernel_config.REDUCTION_THREADS_PER_BLOCK}",
-                f"-I{path.parent}",
+                f'-I "{path.parent}"',
             ],
             cache_dir=str(OPENCL_CACHE_DIR),
         )

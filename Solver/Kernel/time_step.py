@@ -3,7 +3,7 @@ import pyopencl as cl
 
 from typing import Any
 
-import Solver.Kernel.kernel_config as kernel_config
+from . import kernel_config
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 

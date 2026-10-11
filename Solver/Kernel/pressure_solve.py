@@ -3,8 +3,8 @@ import pyopencl as cl
 
 from typing import Any
 
-import Solver.Kernel.kernel_config as kernel_config
-import Solver.Kernel.multigrid as multigrid
+from . import kernel_config
+from . import multigrid
 
 
 def remove_rhs_mean(

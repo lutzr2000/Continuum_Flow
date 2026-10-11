@@ -4,8 +4,8 @@ import pyopencl as cl
 from pathlib import Path
 from typing import Any
 
-import Solver.Kernel.helper as helper
-import Solver.Kernel.kernel_config as kernel_config
+from . import helper
+from . import kernel_config
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 

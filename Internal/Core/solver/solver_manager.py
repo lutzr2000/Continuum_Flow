@@ -1,12 +1,5 @@
-﻿import sys
 import threading
 import traceback
-from pathlib import Path
-
-ADDON_ROOT = Path(__file__).resolve().parents[3]
-
-if str(ADDON_ROOT) not in sys.path:
-    sys.path.insert(0, str(ADDON_ROOT))
 
 
 class SolverManager:
@@ -74,7 +67,7 @@ class SolverManager:
         clear_callback = None
 
         try:
-            from Solver.General.main import (
+            from ....Solver.General.main import (
                 main,
                 set_message_callback,
                 clear_message_callback,
@@ -108,7 +101,7 @@ class SolverManager:
             if clear_callback is not None:
                 clear_callback()
 
-            from Solver.Kernel import preview
+            from ....Solver.Kernel import preview
 
             preview.close()
 
@@ -137,7 +130,7 @@ class SolverManager:
         return
 
     def shutdown(self):
-        from Solver.Kernel import preview
+        from ....Solver.Kernel import preview
 
         preview.close()
         with self._lock:

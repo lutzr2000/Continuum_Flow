@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 import pyopencl as cl
 
-from Solver.Kernel import writer
-import Solver.Kernel.kernel_config as kernel_config
+from . import writer
+from . import kernel_config
 
 WRITER_COUNT = 2
 PINNED_MEMORY_SLOTS = WRITER_COUNT + 1

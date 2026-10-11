@@ -3,7 +3,7 @@ import numpy as np
 
 from typing import Any
 
-import Solver.Kernel.kernel_config as kernel_config
+from . import kernel_config
 
 # Boundary mode encoding:
 # 0 = outflow, 1 = inflow, 2 = no-slip wall, 3 = slip wall

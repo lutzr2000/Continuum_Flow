@@ -1,7 +1,6 @@
 import bpy
 import shutil
 import threading
-import sys
 from pathlib import Path
 
 from .export import export_config
@@ -301,7 +300,6 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
         meta_config = config_dict.setdefault("meta", {})
         meta_config["cancel_flag_path"] = str(self.cancel_flag_path)
-        meta_config["parent_sys_path"] = list(sys.path)
 
         output_config = simulation_config["outputs"][0]
         self.has_enabled_output_fields = output_enabled(output_config)

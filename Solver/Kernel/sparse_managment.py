@@ -3,8 +3,8 @@ import numpy as np
 
 from typing import Any
 
-import Solver.Kernel.kernel_config as kernel_config
-import Solver.Kernel.helper as helper
+from . import kernel_config
+from . import helper
 
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
