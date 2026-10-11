@@ -132,6 +132,14 @@ def output_directory_has_vdbs(output_directory):
     )
 
 
+def output_enabled(output_config):
+    fields = (output_config or {}).get("fields") or {}
+    return any(
+        bool((field_config or {}).get("enabled", False))
+        for field_config in fields.values()
+    )
+
+
 # -------------- bake ----------------
 class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_idname = "continuum_flow.bake"
@@ -144,6 +152,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         self.job_result = None
         self.bake_directory = None
         self.output_directory = None
+        self.has_enabled_output_fields = False
         self.cancel_flag_path = None
         self.cleanup_done = False
         self.cleanup_lock = threading.Lock()
@@ -221,7 +230,11 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
                 except OSError:
                     pass
 
-            if should_load_result and self.output_directory is not None:
+            if (
+                should_load_result
+                and self.has_enabled_output_fields
+                and self.output_directory is not None
+            ):
                 VDBResults.load_bake(
                     self.output_directory,
                     start_frame_index=self.start_frame,
@@ -230,12 +243,15 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
             if self.bake_directory is not None:
                 bake_directory = Path(self.bake_directory).resolve()
-                for temporary_directory_name in ("geometry", "particles"):
-                    temporary_directory = bake_directory / temporary_directory_name
-                    if temporary_directory.is_dir():
-                        shutil.rmtree(temporary_directory)
+                if self.has_enabled_output_fields:
+                    for temporary_directory_name in ("geometry", "particles"):
+                        temporary_directory = bake_directory / temporary_directory_name
+                        if temporary_directory.is_dir():
+                            shutil.rmtree(temporary_directory)
+                elif bake_directory.is_dir():
+                    shutil.rmtree(bake_directory)
 
-            if self.output_directory is not None:
+            if self.has_enabled_output_fields and self.output_directory is not None:
                 self.output_node.last_bake_directory = str(self.output_directory)
             set_bake_progress(0, 0)
             clear_status_progress(bpy.context)
@@ -288,6 +304,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         meta_config["parent_sys_path"] = list(sys.path)
 
         output_config = simulation_config["outputs"][0]
+        self.has_enabled_output_fields = output_enabled(output_config)
         simulation_settings = simulation_config.get("settings") or {}
         start_frame = int(simulation_settings.get("start_frame", 1))
         self.start_frame = start_frame
