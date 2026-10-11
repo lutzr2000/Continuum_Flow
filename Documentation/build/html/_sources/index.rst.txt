@@ -10,6 +10,7 @@ Features
 --------
 - Simulating velocity, pressure, fire, smoke and temperature
 - Greatly improved performance compared to Blender's native solver
+- GPU based simulations
 - Directly integrated into Blender
 - Interaction with obstacles (stationary and movable)
 - Particle systems can be used as sources

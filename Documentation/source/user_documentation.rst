@@ -8,7 +8,7 @@ In general, Continuum Flow's workflow is node-based. After installation, there w
 
 The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
-Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well.
+Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations are animated as well.
 
 Nodes
 -----
@@ -26,6 +26,9 @@ This is the core node of every simulation. It controls the frame range for your 
 
 **CPU/GPU**
     Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.
+
+**Device**
+    If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if now compatible device is found.
 
 **Start Frame**
     The frame at which the simulation starts.
@@ -59,7 +62,7 @@ Reference Frame
 By default the domain is placed at the worlds center. If you want to move the domain you can use this node. The domain will follow the position of the selected objects origin. This is essentially like "parenting".
 
 **Velocity Transfer**
-    If the selected object moves during simulation this determines how much the flow is affected by this. A value of zero means now effect.
+    If the selected object moves during simulation this determines how much the flow is affected by this. A value of zero means now transfer.
 
 
 Domain
@@ -139,10 +142,10 @@ This node controls the general physics parameters of the simulation.
     If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.
 
 **Fuel Ignition Temperature Tolerance**
-    Temperature range over which combustion ramps from unlit to its full burn rate.
+    Temperature range over which combustion ramps from unlit to its full burn rate. A value of zero means a sharp edge where ignition starts.
 
 **Vorticity**
-    Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.
+    Amount of extra vorticity in the simulation. Higher values results in more swirly flow.
     
 
 Viewer
@@ -189,10 +192,10 @@ This node lets you specify the output of your simulation. It is worth paying som
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
 **Fields**
-    Lets you select which fields to save: velocity, pressure, temperature, density, fuel, and flame. Density and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead.
+    Lets you select which fields to save: velocity, pressure, temperature, smoke, fuel, and flame. Smoke and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead. You can change the ouput names in the text fields to the left. The default naming follows Blenders naming convention.
 
 **Path**
-    Path on your disk where to save the data.
+    Path on your disk where to save the data. You can use the file browser by pressing the small button on the right.
 
 **Bake/Free Bake**
     Bake: starts the simulation.
@@ -219,29 +222,20 @@ Source
 
 The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node or a particle node as input and accepts multiple inputs.
 
-**Fuel Emission**
-    Amount of fuel emitted within the source over time.
+**Scale**
+    Scale of the random emission
 
-**Smoke Emission**
-    Amount of smoke emitted within the source over time.
+**Seed**
+    Seed for random emission
 
-**Temperature**
-    Temperature present within the source.
+**Value**
+    Determines how much of a specific quantity should be spawned.
 
-**Extra Pressure**
-    Additional pressure created. Positive values push flow away, negative values suck the flow in.
-
-**Randomness Scale / Seed**
-    Define one shared, world-space gradient-noise field for the source.
-
-**Fuel / Smoke / Temperature / Extra Pressure Randomness**
-    Control how strongly the shared noise field modulates each source value from zero to one hundred percent.
+**Randomness**
+    For all fields a randomness setting is present. This describes how random the emission of that quantity is going to be. The noise is defined above by seed and scale. A randomness values of 0% means constant emission in space.
 
 **World/local Space**
     In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.
-
-**Velocity Randomness**
-    Controls how strongly the shared source noise field modulates velocity from zero to one hundred percent.
 
 **Velocity**
     Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.
@@ -280,7 +274,7 @@ Force-Constant
    :class: block-image-left
    :width: 300px
 
-Adds constant forcing to the whole domain.
+Adds constant forcing to the whole domain. If this node is selected a preview can be seen in the 3d viewport.
 
 **Fx**
     Strength of the force in the x-direction.
@@ -295,7 +289,11 @@ Adds constant forcing to the whole domain.
 Force-Turbulence
 ~~~~~~~~~~~~~~~~
 
-Adds gradient-noise forcing to the domain.
+.. figure:: ../images/force_turbulence_node.jpg
+   :class: block-image-left
+   :width: 300px
+
+Adds gradient-noise forcing to the domain. If this node is selected a preview can be seen in the 3d viewport.
 
 **Scale**
     Spatial scale of the turbulence field in world units, independent of grid resolution.
@@ -307,7 +305,7 @@ Adds gradient-noise forcing to the domain.
     Strength applied to the generated noise value.
 
 **Frequency**
-    Controls the animated ``sin(time * frequency)`` force multiplier.
+    Controls how quickly the force alternates.
 
 
 Force-Swirl
@@ -317,7 +315,7 @@ Force-Swirl
    :class: block-image-left
    :width: 300px
 
-Adds swirly forcing to your simulation.
+Adds swirly forcing to your simulation. If this node is selected a preview can be seen in the 3d viewport.
 
 **Strength**
     How strong the swirl is supposed to be.

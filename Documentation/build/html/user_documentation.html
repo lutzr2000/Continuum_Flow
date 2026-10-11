@@ -242,7 +242,7 @@
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
 <p>In general, Continuum Flow’s workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.</p>
 <p>The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.</p>
-<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Please note that the animated values in the UI will not create appear in the timeline, graph editor or dope sheet. Nonetheless they work and the simulation will react to the animated change. Source and obstacle object transformations are animated as well.</p>
+<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations are animated as well.</p>
 </section>
 <section id="nodes">
 <h2>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">¶</a></h2>
@@ -256,6 +256,8 @@
 <p>This is the core node of every simulation. It controls the frame range for your simulation and general solver parameters.</p>
 <dl class="simple">
 <dt><strong>CPU/GPU</strong></dt><dd><p>Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.</p>
+</dd>
+<dt><strong>Device</strong></dt><dd><p>If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if now compatible device is found.</p>
 </dd>
 <dt><strong>Start Frame</strong></dt><dd><p>The frame at which the simulation starts.</p>
 </dd>
@@ -281,7 +283,7 @@
 </figure>
 <p>By default the domain is placed at the worlds center. If you want to move the domain you can use this node. The domain will follow the position of the selected objects origin. This is essentially like “parenting”.</p>
 <dl class="simple">
-<dt><strong>Velocity Transfer</strong></dt><dd><p>If the selected object moves during simulation this determines how much the flow is affected by this. A value of zero means now effect.</p>
+<dt><strong>Velocity Transfer</strong></dt><dd><p>If the selected object moves during simulation this determines how much the flow is affected by this. A value of zero means now transfer.</p>
 </dd>
 </dl>
 </section>
@@ -344,9 +346,9 @@ Wall: wall with friction.</p>
 </dd>
 <dt><strong>Fuel Ignition Temperature</strong></dt><dd><p>If a cell contains fuel and the temperature is higher than this value, the fuel will ignite and produce flame and smoke.</p>
 </dd>
-<dt><strong>Fuel Ignition Temperature Tolerance</strong></dt><dd><p>Temperature range over which combustion ramps from unlit to its full burn rate.</p>
+<dt><strong>Fuel Ignition Temperature Tolerance</strong></dt><dd><p>Temperature range over which combustion ramps from unlit to its full burn rate. A value of zero means a sharp edge where ignition starts.</p>
 </dd>
-<dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Zero is physically accurate, but usually an extra amount looks better.</p>
+<dt><strong>Vorticity</strong></dt><dd><p>Amount of extra vorticity in the simulation. Higher values results in more swirly flow.</p>
 </dd>
 </dl>
 </section>
@@ -384,9 +386,9 @@ Wall: wall with friction.</p>
 </dd>
 <dt><strong>Precision</strong></dt><dd><p>The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.</p>
 </dd>
-<dt><strong>Fields</strong></dt><dd><p>Lets you select which fields to save: velocity, pressure, temperature, density, fuel, and flame. Density and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead.</p>
+<dt><strong>Fields</strong></dt><dd><p>Lets you select which fields to save: velocity, pressure, temperature, smoke, fuel, and flame. Smoke and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead. You can change the ouput names in the text fields to the left. The default naming follows Blenders naming convention.</p>
 </dd>
-<dt><strong>Path</strong></dt><dd><p>Path on your disk where to save the data.</p>
+<dt><strong>Path</strong></dt><dd><p>Path on your disk where to save the data. You can use the file browser by pressing the small button on the right.</p>
 </dd>
 <dt><strong>Bake/Free Bake</strong></dt><dd><p>Bake: starts the simulation.
 Free Bake: deletes the baked data.
@@ -410,21 +412,15 @@ Press Esc during an active bake to stop.</p>
 </figure>
 <p>The Source node defines where fluid, smoke, temperature, pressure and velocity are spawned into the simulation. It expects a geometry node or a particle node as input and accepts multiple inputs.</p>
 <dl class="simple">
-<dt><strong>Fuel Emission</strong></dt><dd><p>Amount of fuel emitted within the source over time.</p>
+<dt><strong>Scale</strong></dt><dd><p>Scale of the random emission</p>
 </dd>
-<dt><strong>Smoke Emission</strong></dt><dd><p>Amount of smoke emitted within the source over time.</p>
+<dt><strong>Seed</strong></dt><dd><p>Seed for random emission</p>
 </dd>
-<dt><strong>Temperature</strong></dt><dd><p>Temperature present within the source.</p>
+<dt><strong>Value</strong></dt><dd><p>Determines how much of a specific quantity should be spawned.</p>
 </dd>
-<dt><strong>Extra Pressure</strong></dt><dd><p>Additional pressure created. Positive values push flow away, negative values suck the flow in.</p>
-</dd>
-<dt><strong>Randomness Scale / Seed</strong></dt><dd><p>Define one shared, world-space gradient-noise field for the source.</p>
-</dd>
-<dt><strong>Fuel / Smoke / Temperature / Extra Pressure Randomness</strong></dt><dd><p>Control how strongly the shared noise field modulates each source value from zero to one hundred percent.</p>
+<dt><strong>Randomness</strong></dt><dd><p>For all fields a randomness setting is present. This describes how random the emission of that quantity is going to be. The noise is defined above by seed and scale. A randomness values of 0% means constant emission in space.</p>
 </dd>
 <dt><strong>World/local Space</strong></dt><dd><p>In world space the velocity will be added aligned to the global coordinate system. When local is selected the velocity is aligned according to each source objects local cooordinate system. Particles are not affected by this setting.</p>
-</dd>
-<dt><strong>Velocity Randomness</strong></dt><dd><p>Controls how strongly the shared source noise field modulates velocity from zero to one hundred percent.</p>
 </dd>
 <dt><strong>Velocity</strong></dt><dd><p>Velocity vector enforced within the source. Important: if all velocity values are zero, the source does not affect the velocity field at all. When you want to enforce zero velocity somewhere, use the obstacle node.</p>
 </dd>
@@ -458,7 +454,7 @@ Press Esc during an active bake to stop.</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_constant_node.jpg"><img alt="_images/force_constant_node.jpg" class="block-image-left" src="_images/force_constant_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>Adds constant forcing to the whole domain.</p>
+<p>Adds constant forcing to the whole domain. If this node is selected a preview can be seen in the 3d viewport.</p>
 <dl class="simple">
 <dt><strong>Fx</strong></dt><dd><p>Strength of the force in the x-direction.</p>
 </dd>
@@ -470,7 +466,11 @@ Press Esc during an active bake to stop.</p>
 </section>
 <section id="force-turbulence">
 <h3>Force-Turbulence<a class="headerlink" href="#force-turbulence" title="Link to this heading">¶</a></h3>
-<p>Adds gradient-noise forcing to the domain.</p>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/force_turbulence_node.jpg"><img alt="_images/force_turbulence_node.jpg" class="block-image-left" src="_images/force_turbulence_node.jpg" style="width: 300px;" />
+</a>
+</figure>
+<p>Adds gradient-noise forcing to the domain. If this node is selected a preview can be seen in the 3d viewport.</p>
 <dl class="simple">
 <dt><strong>Scale</strong></dt><dd><p>Spatial scale of the turbulence field in world units, independent of grid resolution.</p>
 </dd>
@@ -478,7 +478,7 @@ Press Esc during an active bake to stop.</p>
 </dd>
 <dt><strong>Amplitude</strong></dt><dd><p>Strength applied to the generated noise value.</p>
 </dd>
-<dt><strong>Frequency</strong></dt><dd><p>Controls the animated <code class="docutils literal notranslate"><span class="pre">sin(time</span> <span class="pre">*</span> <span class="pre">frequency)</span></code> force multiplier.</p>
+<dt><strong>Frequency</strong></dt><dd><p>Controls how quickly the force alternates.</p>
 </dd>
 </dl>
 </section>
@@ -488,7 +488,7 @@ Press Esc during an active bake to stop.</p>
 <a class="block-image-left reference internal image-reference" href="_images/force_swirl_node.jpg"><img alt="_images/force_swirl_node.jpg" class="block-image-left" src="_images/force_swirl_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>Adds swirly forcing to your simulation.</p>
+<p>Adds swirly forcing to your simulation. If this node is selected a preview can be seen in the 3d viewport.</p>
 <dl class="simple">
 <dt><strong>Strength</strong></dt><dd><p>How strong the swirl is supposed to be.</p>
 </dd>
