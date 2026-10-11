@@ -47,14 +47,14 @@ ANIMATABLE_PROPERTIES = {
 }
 
 PERCENTAGE_MAPPING = {
-    "temperature_dissipation": (0.0, 10),
-    "temperature_production_rate": (0.0, 1),
+    "temperature_dissipation": (0.0, 30),
+    "temperature_production_rate": (0.0, 10),
     "buoyancy": (0.0, 0.01),
     "expansion_rate": (0.0, 0.03),
     "smoke_dissipation": (0.0, 10),
-    "smoke_production_rate": (0.0, 10),
+    "smoke_production_rate": (0.0, 2),
     "fuel_dissipation": (0.0, 10),
-    "fuel_burn_rate": (0.0, 1),
+    "fuel_burn_rate": (0.0, 10),
     "vorticity": (0.0, 1.0),
 }
 
