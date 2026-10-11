@@ -47,7 +47,7 @@ ANIMATABLE_PROPERTIES = {
 }
 
 PERCENTAGE_MAPPING = {
-    "temperature_dissipation": (0.0, 30),
+    "temperature_dissipation": (0.0, 3),
     "temperature_production_rate": (0.0, 10),
     "buoyancy": (0.0, 0.01),
     "expansion_rate": (0.0, 0.03),
