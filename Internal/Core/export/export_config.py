@@ -362,7 +362,7 @@ def build_reference_frame_entry(node, start_frame, end_frame):
     return {
         "node_name": node.name,
         "object_name": object_name,
-        "velocity_transfer": float(getattr(node, "velocity_transfer", 0.0)),
+        "velocity_transfer": float(getattr(node, "velocity_transfer", 0.0)) / 100.0,
         "transform_animation": transform_samples.get(object_name, {}),
     }
 

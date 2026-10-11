@@ -28,9 +28,10 @@ class ContinuumFlowReferenceFrameNode(node_base.ContinuumFlowBaseNode):
     velocity_transfer: FloatProperty(
         name="Velocity Transfer",
         default=0.0,
-        min=-1.0,
-        max=1.0,
-        description="Amount of reference-frame velocity transferred to the fluid",
+        soft_min=-100.0,
+        soft_max=100.0,
+        subtype="PERCENTAGE",
+        description="Percentage of reference-frame velocity transferred to the fluid; values beyond +/-100% can be entered manually",
         options=set(),
     )  # type: ignore
 
