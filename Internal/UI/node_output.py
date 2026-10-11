@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import bpy
 from . import sockets
 from . import node_base
@@ -7,6 +10,44 @@ from bpy.props import IntProperty
 from bpy.props import EnumProperty
 from bpy.props import BoolProperty
 from bpy.props import StringProperty
+
+INVALID_OUTPUT_PATH_MESSAGE = "Bake disabled: invalid output path"
+
+
+def output_path_valid(path_value):
+    path_text = str(path_value or "").strip()
+    if not path_text:
+        return INVALID_OUTPUT_PATH_MESSAGE
+    if "\0" in path_text:
+        return INVALID_OUTPUT_PATH_MESSAGE
+
+    try:
+        output_path = Path(bpy.path.abspath(path_text)).expanduser().resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return INVALID_OUTPUT_PATH_MESSAGE
+
+    try:
+        if output_path.exists():
+            if not output_path.is_dir():
+                return INVALID_OUTPUT_PATH_MESSAGE
+            if not os.access(output_path, os.W_OK):
+                return INVALID_OUTPUT_PATH_MESSAGE
+            return None
+
+        existing_parent = output_path.parent
+        while (
+            not existing_parent.exists() and existing_parent != existing_parent.parent
+        ):
+            existing_parent = existing_parent.parent
+
+        if not existing_parent.is_dir():
+            return INVALID_OUTPUT_PATH_MESSAGE
+        if not os.access(existing_parent, os.W_OK):
+            return INVALID_OUTPUT_PATH_MESSAGE
+    except (OSError, ValueError):
+        return INVALID_OUTPUT_PATH_MESSAGE
+
+    return None
 
 
 class CONTINUUM_FLOW_OT_output_bake_button(bpy.types.Operator):
@@ -135,6 +176,10 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         return None
 
     def _bake_disable_reason(self):
+        path_disable_reason = output_path_valid(self.output_path)
+        if path_disable_reason is not None:
+            return path_disable_reason
+
         node_tree = getattr(self, "id_data", None)
         if sockets.node_tree_has_invalid_links(node_tree):
             return "Bake disabled: node tree has invalid connections"
