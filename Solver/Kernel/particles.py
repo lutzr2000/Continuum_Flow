@@ -75,6 +75,12 @@ def load_particle_sources(
 
             max_frame_count = int(frame_counts.max()) if frame_counts.size else 0
 
+            # OpenCL does not allow zero-sized buffers. An evaluated mesh or
+            # particle system may legitimately contain no elements for the
+            # complete exported timeline, so simply ignore that empty input.
+            if max_frame_count <= 0:
+                continue
+
             buffer_shape = (
                 max_frame_count,
                 3,

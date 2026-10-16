@@ -258,7 +258,7 @@ Particle System
    :class: block-image-left
    :width: 300px
 
-This node lets you first select an object and then a particle system belonging to that object. The particle system can act as a source for the simulation when plugged into the source node. 
+This node lets you first select an object and then a particle system belonging to that object. The particle system can act as a source for the simulation when plugged into the source node. If no particle system is selected on a mesh object, the vertices of its evaluated mesh are used as particles instead. This includes the object's modifiers and Geometry Nodes and supports a changing vertex count over time.
 
 **Radius**
     Radius aroung each particle in which a voxel is considered a source.

@@ -133,7 +133,7 @@ def export_geomtry_stls(config_dict, export_directory):
 
 def export_particle_system_npzs(config_dict, export_directory):
     """
-    Export every particle system linked to a source as an uncompressed NPZ file.
+    Export every particle-system or evaluated-mesh input as an uncompressed NPZ.
     """
     simulation = config_dict["simulation"]
     settings = simulation.get("settings") or {}
@@ -151,12 +151,7 @@ def export_particle_system_npzs(config_dict, export_directory):
             particle_file = particle_input.get("particle_file")
             key = (object_name, particle_system_name, particle_file)
 
-            if (
-                not object_name
-                or not particle_system_name
-                or not particle_file
-                or key in seen
-            ):
+            if not object_name or not particle_file or key in seen:
                 continue
 
             seen.add(key)
@@ -592,7 +587,11 @@ def build_particle_system_entries(particle_system_nodes):
                 / 100.0,
                 "particle_file": (
                     f"particles/{particle_file_name}"
-                    if source_object is not None and particle_system_name
+                    if source_object is not None
+                    and (
+                        particle_system_name
+                        or getattr(source_object, "type", None) == "MESH"
+                    )
                     else None
                 ),
                 "particle_format": "npz",

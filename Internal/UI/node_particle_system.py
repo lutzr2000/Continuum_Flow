@@ -63,8 +63,7 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         layout.prop(self, "source_object", text="Object")
-        particle_systems = getattr(self.source_object, "particle_systems", ())
-        if particle_systems:
+        if self.source_object is not None:
             layout.prop_search(
                 self,
                 "particle_system",
@@ -72,7 +71,14 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
                 "particle_systems",
                 text="Particle System",
             )
-        elif self.source_object is not None:
-            layout.label(text="No particle systems", icon="INFO")
+            if (
+                not self.particle_system
+                and getattr(self.source_object, "type", None) == "MESH"
+            ):
+                layout.label(text="Using vertices as particles", icon="INFO")
+        else:
+            row = layout.row()
+            row.enabled = False
+            row.prop(self, "particle_system", text="Particle System")
         layout.prop(self, "radius")
         layout.prop(self, "velocity_transfer", slider=True)
