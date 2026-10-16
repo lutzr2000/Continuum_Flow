@@ -10,6 +10,26 @@ FIELD_DTYPE = kernel_config.FIELD_DTYPE
 PERSISTENT_COARSE_MAX_CELLS = 32**3
 
 
+def release_multigrid_levels(
+    p_levels: list[Any],
+    b_levels: list[Any],
+    tile_maps: list[Any],
+    active_tiles: list[Any],
+    active_tile_counts: list[Any],
+) -> None:
+    """Release every device buffer owned by a multigrid hierarchy."""
+    for buffers in (
+        p_levels,
+        b_levels,
+        tile_maps,
+        active_tiles,
+        active_tile_counts,
+    ):
+        for buffer in buffers:
+            buffer.release()
+        buffers.clear()
+
+
 def create_multigrid_levels(
     context: cl.Context,
     shape: tuple[int, int, int],

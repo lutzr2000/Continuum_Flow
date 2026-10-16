@@ -990,7 +990,16 @@ def solver(config: dict):
 
                 sparse_tile_capacity = next_sparse_tile_capacity
 
-                # needed for growning the coarse capacities simply by recreating them
+                # release the old multigrid levels to avoid (V)RAM spike
+                multigrid.release_multigrid_levels(
+                    p_levels,
+                    b_levels,
+                    multigrid_tile_maps,
+                    multigrid_active_tiles,
+                    multigrid_active_tile_counts,
+                )
+
+                # Grow the coarse capacities by recreating the hierarchy.
                 (
                     p_levels,
                     b_levels,
