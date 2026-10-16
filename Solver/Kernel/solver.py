@@ -495,8 +495,6 @@ def solver(config: dict):
         kernel_config.TILE_SIZE,
     )  # shape of the sparse pool
 
-    zero_pool = helper.zeros_device(context, sparse_pool_shape)
-
     # velocity
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
@@ -739,7 +737,6 @@ def solver(config: dict):
         sparse_managment.reset_pools(
             queue,
             (scratch_A, scratch_B, scratch_C, scratch_D),
-            zero_pool,
         )
 
         # ------------sparse managmentk-------------------
@@ -948,7 +945,6 @@ def solver(config: dict):
                     fuel_work,
                     oxygen_work,
                     flame,
-                    zero_pool,
                     vorticity_magnitude,
                     obstacle_mask,
                     *resized_source_masks,
@@ -977,7 +973,6 @@ def solver(config: dict):
                         (fuel_work, 0.0, FIELD_DTYPE),
                         (oxygen_work, 100.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
-                        (zero_pool, 0.0, FIELD_DTYPE),
                         (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
@@ -1149,7 +1144,6 @@ def solver(config: dict):
                 sparse_managment.reset_pools(
                     queue,
                     (scratch_A, scratch_B, scratch_C),
-                    zero_pool,
                 )
 
                 update_masks.update_source_velocity(
@@ -1331,7 +1325,6 @@ def solver(config: dict):
         sparse_managment.reset_pools(
             queue,
             (scratch_A, scratch_B, scratch_C, scratch_D),
-            zero_pool,
         )
 
         # ------------Vorticity-------------------

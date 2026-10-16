@@ -9,15 +9,17 @@ from . import helper
 FIELD_DTYPE = kernel_config.FIELD_DTYPE
 
 
-def reset_pools(queue: cl.CommandQueue, dst_pools: Any, fill_pool: Any) -> None:
-    """
-    Reset scratch pools from a shared fill pool.
-    """
+def reset_pools(queue: cl.CommandQueue, dst_pools: Any) -> None:
+    """Reset float scratch pools directly on the device."""
+    zero = np.asarray(0.0, dtype=FIELD_DTYPE)
+
     for dst_pool in dst_pools:
-        cl.enqueue_copy(
+        cl.enqueue_fill_buffer(
             queue,
             dst_pool,
-            fill_pool,
+            zero,
+            0,
+            dst_pool.size,
         )
 
 
