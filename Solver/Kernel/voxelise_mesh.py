@@ -1,5 +1,6 @@
 from typing import Any
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import pyopencl as cl
@@ -80,17 +81,27 @@ def voxelize_triangles(
         dtype=np.float32,
     )
 
+    # OpenCL commands are asynchronous. Synchronize on both sides so this
+    # measures the complete GPU voxelization rather than only kernel dispatch.
+    queue.finish()
+    voxelize_start = perf_counter()
+
     triangles_gpu = helper.to_device(context, triangles)
+
+    voxel_count = int(np.prod(shape))
+    mask_word_count = (voxel_count + 31) // 32
 
     mask = helper.zeros_device(
         context,
-        shape,
-        dtype=np.uint8,
+        (mask_word_count,),
+        # Pack 32 voxels per word. This permits portable atomic writes from
+        # overlapping triangles and uses 1/8 of the old uchar-mask memory.
+        dtype=np.uint32,
     )
 
     surface_kernel(
         queue,
-        shape,
+        (int(triangles.shape[0]),),
         None,
         triangles_gpu,
         mask,
@@ -102,6 +113,15 @@ def voxelize_triangles(
         np.float32(origin[0]),
         np.float32(origin[1]),
         np.float32(origin[2]),
+    )
+
+    queue.finish()
+    voxelize_seconds = perf_counter() - voxelize_start
+    print(
+        "Triangle voxelization: "
+        f"{triangles.shape[0]:,} triangles, "
+        f"{shape[0]}x{shape[1]}x{shape[2]} ({voxel_count:,} voxels), "
+        f"{voxelize_seconds * 1000.0:.3f} ms"
     )
 
     return {

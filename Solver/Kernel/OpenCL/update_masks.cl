@@ -1,5 +1,10 @@
 #include "sparse_managment.cl"
 
+inline int local_mask_is_set(__global const uint *mask, const int index) {
+    // Read one voxel from the bit-packed local mask (32 voxels per uint).
+    return (mask[index >> 5] & (1u << (index & 31))) != 0u;
+}
+
 __kernel void mark_source_tiles(__global uchar *source_tile_mask,
                                 const int size_x,
                                 const int size_y,
@@ -23,7 +28,7 @@ __kernel void mark_source_tiles(__global uchar *source_tile_mask,
 
 __kernel void update_source_masks(__global uchar *mask,
                                   __global const int *index_tile_map,
-                                  __global const uchar *local_mask,
+                                  __global const uint *local_mask,
                                   const float c0,
                                   const float c1,
                                   const float c2,
@@ -85,7 +90,7 @@ __kernel void update_source_masks(__global uchar *mask,
     if (bi >= 0 && bi < local_size_x && bj >= 0 && bj < local_size_y && bk >= 0 && bk < local_size_z) {
         const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
-        if (local_mask[local_mask_index]) {
+        if (local_mask_is_set(local_mask, local_mask_index)) {
             mask[cell.cell_index] = 1;
         }
     }
@@ -95,7 +100,7 @@ __kernel void update_source_velocity(__global float *velocity_x,
                                      __global float *velocity_y,
                                      __global float *velocity_z,
                                      __global const int *index_tile_map,
-                                     __global const uchar *local_mask,
+                                     __global const uint *local_mask,
                                      const float c0,
                                      const float c1,
                                      const float c2,
@@ -153,7 +158,7 @@ __kernel void update_source_velocity(__global float *velocity_x,
     if (bi >= 0 && bi < local_size_x && bj >= 0 && bj < local_size_y && bk >= 0 && bk < local_size_z) {
         const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
-        if (local_mask[local_mask_index]) {
+        if (local_mask_is_set(local_mask, local_mask_index)) {
             velocity_x[cell.cell_index] = source_u;
             velocity_y[cell.cell_index] = source_v;
             velocity_z[cell.cell_index] = source_w;
@@ -166,7 +171,7 @@ __kernel void update_obstacle_mask(__global uchar *mask,
                                    __global float *velocity_y,
                                    __global float *velocity_z,
                                    __global const int *index_tile_map,
-                                   __global const uchar *local_mask,
+                                   __global const uint *local_mask,
                                    const float c0,
                                    const float c1,
                                    const float c2,
@@ -239,7 +244,7 @@ __kernel void update_obstacle_mask(__global uchar *mask,
 
     const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
-    if (!local_mask[local_mask_index])
+    if (!local_mask_is_set(local_mask, local_mask_index))
         return;
 
     const int index = cell.cell_index;
