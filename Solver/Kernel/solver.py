@@ -528,18 +528,23 @@ def solver(config: dict):
     # flame
     flame = helper.zeros_device(context, sparse_pool_shape)
 
-    # vorticity
-    vorticity_magnitude = helper.zeros_device(context, sparse_pool_shape)
-
     # scratch
     scratch_A = helper.full_device(context, sparse_pool_shape, reference_temperature)
     scratch_B = helper.zeros_device(context, sparse_pool_shape)
     scratch_C = helper.zeros_device(context, sparse_pool_shape)
     scratch_D = helper.full_device(context, sparse_pool_shape, 100.0)
 
+    # Scratch-buffer lifecycle within each time-loop iteration:
+    #   A-C: source/obstacle velocities -> velocity predictor -> scalar predictor
+    #   A:   pressure RHS between the velocity and scalar predictor phases
+    #   D:   vorticity magnitude during velocity update -> scalar predictor
+    # Each arrow marks the point after which the previous contents are dead.
+
     # pressure
     p = helper.zeros_device(context, sparse_pool_shape)
-    pressure_rhs = helper.zeros_device(context, sparse_pool_shape)
+
+    pressure_rhs = scratch_A
+    vorticity_magnitude = scratch_D
 
     rhs_partial_sums = helper.zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
     rhs_partial_counts = helper.zeros_device(
@@ -895,7 +900,6 @@ def solver(config: dict):
                         (scratch_C, 0.0, FIELD_DTYPE),
                         (scratch_D, 100.0, FIELD_DTYPE),
                         (p, 0.0, FIELD_DTYPE),
-                        (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
                         (fuel, 0.0, FIELD_DTYPE),
@@ -905,7 +909,6 @@ def solver(config: dict):
                         (fuel_work, 0.0, FIELD_DTYPE),
                         (oxygen_work, 100.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
-                        (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
                         *[(mask, False, np.bool_) for mask in particle_source_masks],
@@ -935,7 +938,6 @@ def solver(config: dict):
                     scratch_C,
                     scratch_D,
                     p,
-                    pressure_rhs,
                     temperature,
                     smoke,
                     fuel,
@@ -945,7 +947,6 @@ def solver(config: dict):
                     fuel_work,
                     oxygen_work,
                     flame,
-                    vorticity_magnitude,
                     obstacle_mask,
                     *resized_source_masks,
                 ) = sparse_managment.ensure_pool_capacities(
@@ -963,7 +964,6 @@ def solver(config: dict):
                         (scratch_C, 0.0, FIELD_DTYPE),
                         (scratch_D, 100.0, FIELD_DTYPE),
                         (p, 0.0, FIELD_DTYPE),
-                        (pressure_rhs, 0.0, FIELD_DTYPE),
                         (temperature, reference_temperature, FIELD_DTYPE),
                         (smoke, 0.0, FIELD_DTYPE),
                         (fuel, 0.0, FIELD_DTYPE),
@@ -973,7 +973,6 @@ def solver(config: dict):
                         (fuel_work, 0.0, FIELD_DTYPE),
                         (oxygen_work, 100.0, FIELD_DTYPE),
                         (flame, 0.0, FIELD_DTYPE),
-                        (vorticity_magnitude, 0.0, FIELD_DTYPE),
                         (obstacle_mask, False, np.bool_),
                         *[(mask, False, np.bool_) for mask in geometry_source_masks],
                         *[(mask, False, np.bool_) for mask in particle_source_masks],
@@ -981,6 +980,9 @@ def solver(config: dict):
                     sparse_tile_capacity,
                     next_sparse_tile_capacity,
                 )
+
+                pressure_rhs = scratch_A
+                vorticity_magnitude = scratch_D
 
                 source_count = len(sources)
                 geometry_source_masks = resized_source_masks[:source_count]
