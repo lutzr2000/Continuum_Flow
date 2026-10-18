@@ -12,7 +12,7 @@ class ContinuumFlowNodeTree(bpy.types.NodeTree):
     """
 
     bl_idname = NODE_TREE_ID
-    bl_label = "Continuum Flow Nodes"
+    bl_label = "Continuum Flow"
     bl_icon = "FORCE_WIND"
 
 
