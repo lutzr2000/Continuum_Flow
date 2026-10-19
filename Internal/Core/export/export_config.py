@@ -108,28 +108,32 @@ def export_geometry_usd(config_dict, export_directory):
     simulation = config_dict["simulation"]
     settings = simulation.get("settings") or {}
 
-    seen = set()
+    objects_to_export = {}
 
     for group_name in ("sources", "obstacles"):
         for entry in simulation.get(group_name, []):
             for geometry_input in entry.get("geometry_inputs", []):
                 object_name = geometry_input.get("object_name")
 
-                if not object_name or object_name in seen:
+                if not object_name:
                     continue
 
-                seen.add(object_name)
+                objects_to_export[object_name] = objects_to_export.get(
+                    object_name, False
+                ) or bool(geometry_input.get("deforming", False))
 
-                source_object = bpy.data.objects.get(object_name)
-                if source_object is None:
-                    continue
+    for object_name, deforming in objects_to_export.items():
+        source_object = bpy.data.objects.get(object_name)
+        if source_object is None:
+            continue
 
-                export_geometry.export_object_as_usdc(
-                    source_object,
-                    geometry_dir,
-                    int(settings.get("start_frame", 1)),
-                    int(settings.get("end_frame", 2)),
-                )
+        export_geometry.export_object_as_usdc(
+            source_object,
+            geometry_dir,
+            int(settings.get("start_frame", 1)),
+            int(settings.get("end_frame", 2)),
+            deforming=deforming,
+        )
 
 
 def export_particle_system_npzs(config_dict, export_directory):

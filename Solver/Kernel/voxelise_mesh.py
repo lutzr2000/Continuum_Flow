@@ -7,6 +7,109 @@ import pyopencl as cl
 from . import helper
 
 
+def triangulate_faces(points, face_counts, face_indices, hole_indices=()):
+    """Triangulate USD polygon faces once, using the first point sample."""
+    triangles = []
+    offset = 0
+    holes = set(int(index) for index in hole_indices)
+
+    for face_index, count in enumerate(face_counts):
+        count = int(count)
+        face = [int(index) for index in face_indices[offset : offset + count]]
+        offset += count
+
+        if face_index in holes or count < 3:
+            continue
+        if count == 3:
+            triangles.append(face)
+            continue
+
+        triangles.extend(triangulate_polygon(points, face))
+
+    if offset != len(face_indices):
+        raise ValueError("Invalid USD mesh topology: face counts do not match indices")
+
+    return np.ascontiguousarray(triangles, dtype=np.int32).reshape(-1, 3)
+
+
+def triangulate_polygon(points, face):
+    """Ear-clip one planar polygon, including concave Blender/USD faces."""
+    polygon = np.asarray(points[face], dtype=np.float64)
+
+    # Newell's method gives a stable face normal without assuming a triangle.
+    following = np.roll(polygon, -1, axis=0)
+    normal = np.array(
+        [
+            np.sum(
+                (polygon[:, 1] - following[:, 1]) * (polygon[:, 2] + following[:, 2])
+            ),
+            np.sum(
+                (polygon[:, 2] - following[:, 2]) * (polygon[:, 0] + following[:, 0])
+            ),
+            np.sum(
+                (polygon[:, 0] - following[:, 0]) * (polygon[:, 1] + following[:, 1])
+            ),
+        ]
+    )
+    drop_axis = int(np.argmax(np.abs(normal)))
+    projected = np.delete(polygon, drop_axis, axis=1)
+    signed_area = np.sum(
+        projected[:, 0] * np.roll(projected[:, 1], -1)
+        - np.roll(projected[:, 0], -1) * projected[:, 1]
+    )
+    orientation = 1.0 if signed_area >= 0.0 else -1.0
+    scale = max(float(np.ptp(projected, axis=0).max()), 1.0)
+    epsilon = np.finfo(np.float64).eps * scale * scale * 32.0
+
+    remaining = list(range(len(face)))
+    result = []
+    while len(remaining) > 3:
+        ear_found = False
+        for position, current in enumerate(remaining):
+            previous = remaining[position - 1]
+            following_index = remaining[(position + 1) % len(remaining)]
+            a, b, c = projected[[previous, current, following_index]]
+            cross = _cross_2d(b - a, c - b)
+            if orientation * cross <= epsilon:
+                continue
+
+            others = [
+                index
+                for index in remaining
+                if index not in (previous, current, following_index)
+            ]
+            if any(
+                _point_in_triangle(projected[index], a, b, c, orientation, epsilon)
+                for index in others
+            ):
+                continue
+
+            result.append([face[previous], face[current], face[following_index]])
+            del remaining[position]
+            ear_found = True
+            break
+
+        if not ear_found:
+            raise ValueError(
+                "Cannot triangulate a degenerate or self-intersecting USD face"
+            )
+
+    result.append([face[index] for index in remaining])
+    return result
+
+
+def _point_in_triangle(point, a, b, c, orientation, epsilon):
+    edges = ((a, b), (b, c), (c, a))
+    return all(
+        orientation * _cross_2d(end - start, point - start) >= -epsilon
+        for start, end in edges
+    )
+
+
+def _cross_2d(a, b):
+    return a[0] * b[1] - a[1] * b[0]
+
+
 def load_usdc(path: Path) -> dict[str, Any]:
     from pxr import Usd, UsdGeom
 
@@ -27,8 +130,9 @@ def load_usdc(path: Path) -> dict[str, Any]:
     )
 
     indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=np.int32)
-
-    face_triangles = np.ascontiguousarray(indices.reshape(-1, 3), dtype=np.int32)
+    face_counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=np.int32)
+    hole_indices = mesh.GetHoleIndicesAttr().Get() or ()
+    face_triangles = triangulate_faces(points[0], face_counts, indices, hole_indices)
 
     times_per_second = float(stage.GetTimeCodesPerSecond()) or 24.0
     start_code = float(stage.GetStartTimeCode())

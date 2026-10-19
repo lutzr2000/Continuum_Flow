@@ -3,8 +3,10 @@ from pathlib import Path
 import bpy
 
 
-def export_object_as_usdc(source_object, target_dir, start_frame, end_frame):
-    """Export one animated object as USD while retaining polygon topology."""
+def export_object_as_usdc(
+    source_object, target_dir, start_frame, end_frame, deforming=False
+):
+    """Export an object's polygon topology and, when needed, deformed points."""
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     file_path = target_dir / f"{source_object.name}.usdc"
@@ -17,14 +19,17 @@ def export_object_as_usdc(source_object, target_dir, start_frame, end_frame):
 
     try:
         scene.frame_start = int(start_frame)
-        scene.frame_end = max(int(start_frame), int(end_frame) - 1)
+        scene.frame_end = (
+            max(int(start_frame), int(end_frame) - 1) if deforming else int(start_frame)
+        )
+        scene.frame_set(int(start_frame))
         bpy.ops.object.select_all(action="DESELECT")
         source_object.select_set(True)
         bpy.context.view_layer.objects.active = source_object
         bpy.ops.wm.usd_export(
             filepath=str(file_path),
             selected_objects_only=True,
-            export_animation=True,
+            export_animation=bool(deforming),
             export_materials=False,
             export_uvmaps=False,
             export_mesh_colors=False,
@@ -38,7 +43,7 @@ def export_object_as_usdc(source_object, target_dir, start_frame, end_frame):
             export_curves=False,
             export_points=False,
             export_volumes=False,
-            triangulate_meshes=True,
+            triangulate_meshes=False,
             evaluation_mode="RENDER",
         )
     finally:
@@ -50,3 +55,4 @@ def export_object_as_usdc(source_object, target_dir, start_frame, end_frame):
         scene.frame_start = current_start
         scene.frame_end = current_end
         scene.frame_set(current_frame)
+    return file_path
