@@ -4,6 +4,7 @@ import pyopencl as cl
 
 from . import kernel_config
 from . import helper
+from . import voxelise_mesh
 
 
 def update_source_tile_mask(
@@ -34,6 +35,41 @@ def update_source_tile_mask(
 
     for base_masks in source_base_masks:
         for entry in base_masks:
+            if entry["mesh_object"].get("deforming", False):
+                triangles, _, _ = voxelise_mesh.world_triangles(entry, t)
+                vertices = triangles.reshape(-1, 3)
+                bounds_min = vertices.min(axis=0)
+                bounds_max = vertices.max(axis=0)
+                tile_min = np.maximum(
+                    np.floor_divide(
+                        np.floor((bounds_min - origin) / delta).astype(np.int32),
+                        kernel_config.TILE_SIZE,
+                    ),
+                    0,
+                )
+                tile_max = np.minimum(
+                    np.floor_divide(
+                        np.ceil((bounds_max - origin) / delta).astype(np.int32),
+                        kernel_config.TILE_SIZE,
+                    ),
+                    np.asarray(tile_shape) - 1,
+                )
+                if np.any(tile_min > tile_max):
+                    continue
+                mark_source_tiles_kernel(
+                    queue,
+                    tuple(int(tile_max[i] - tile_min[i] + 1) for i in range(3)),
+                    None,
+                    source_tile_mask,
+                    np.int32(tile_shape[0]),
+                    np.int32(tile_shape[1]),
+                    np.int32(tile_shape[2]),
+                    np.int32(tile_min[0]),
+                    np.int32(tile_min[1]),
+                    np.int32(tile_min[2]),
+                )
+                continue
+
             voxels = entry["voxels"]
 
             matrix, _ = helper.get_matrix_data(
@@ -102,6 +138,7 @@ def update_source_tile_mask(
 def update_source_masks(
     queue: cl.CommandQueue,
     update_masks_kernels: dict[str, cl.Kernel],
+    voxelise_deforming_kernel: cl.Kernel,
     source_masks: Any,
     source_base_masks: Any,
     animated_sources: Any,
@@ -139,6 +176,22 @@ def update_source_masks(
         )
 
         for entry in base_masks:
+            if entry["mesh_object"].get("deforming", False):
+                triangles, _, _ = voxelise_mesh.world_triangles(entry, t)
+
+                voxelise_mesh.voxelise_deforming(
+                    queue.context,
+                    queue,
+                    voxelise_deforming_kernel,
+                    triangles,
+                    source_mask,
+                    index_tile_map,
+                    tile_shape,
+                    delta,
+                    (origin_x, origin_y, origin_z),
+                )
+                continue
+
             voxels = entry["voxels"]
 
             matrix, _ = helper.get_matrix_data(
@@ -402,6 +455,8 @@ def prepare_cell_transform(
 def update_source_velocity(
     queue: cl.CommandQueue,
     update_masks_kernels: dict[str, cl.Kernel],
+    voxelise_deforming_kernel: cl.Kernel,
+    source_mask: Any,
     base_masks: Any,
     t: float,
     delta: float,
@@ -428,6 +483,32 @@ def update_source_velocity(
     )
 
     for entry in base_masks:
+        if entry["mesh_object"].get("deforming", False):
+            triangles, matrix, _ = voxelise_mesh.world_triangles(entry, t)
+            linear = np.asarray(matrix[:3, :3], dtype=np.float32)
+            axis_lengths = np.linalg.norm(linear, axis=0)
+            rotation = linear.copy()
+            for axis in range(3):
+                if axis_lengths[axis] > 1.0e-8:
+                    rotation[:, axis] /= axis_lengths[axis]
+            coefficients = np.zeros((3, 4), dtype=np.float32)
+            coefficients[:, 3] = rotation @ local_velocity
+
+            voxelise_mesh.voxelise_deforming(
+                queue.context,
+                queue,
+                voxelise_deforming_kernel,
+                triangles,
+                source_mask,
+                index_tile_map,
+                tile_shape,
+                delta,
+                (origin_x, origin_y, origin_z),
+                (velocity_x, velocity_y, velocity_z),
+                coefficients,
+            )
+            continue
+
         voxels = entry["voxels"]
 
         matrix, _ = helper.get_matrix_data(
@@ -531,6 +612,7 @@ def update_source_velocity(
 def update_obstacle_mask(
     queue: cl.CommandQueue,
     obstacle_kernels: dict[str, cl.Kernel],
+    voxelise_deforming_kernel: cl.Kernel,
     obstacle_mask: Any,
     obstacle_base_masks: Any,
     t: float,
@@ -558,6 +640,34 @@ def update_obstacle_mask(
     )
 
     for entry in obstacle_base_masks:
+        if entry["mesh_object"].get("deforming", False):
+            triangles, matrix, rate = voxelise_mesh.world_triangles(entry, t)
+            coefficients = np.zeros((3, 4), dtype=np.float32)
+            if rate is not None:
+                velocity_transform = np.asarray(
+                    rate @ np.linalg.inv(matrix), dtype=np.float32
+                )
+                coefficients[:, :3] = velocity_transform[:3, :3] * np.float32(delta)
+                coefficients[:, 3] = (
+                    velocity_transform[:3, :3]
+                    @ np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
+                    + velocity_transform[:3, 3]
+                )
+            voxelise_mesh.voxelise_deforming(
+                queue.context,
+                queue,
+                voxelise_deforming_kernel,
+                triangles,
+                obstacle_mask,
+                index_tile_map,
+                tile_shape,
+                delta,
+                (origin_x, origin_y, origin_z),
+                (velocity_x, velocity_y, velocity_z),
+                coefficients,
+            )
+            continue
+
         voxels = entry["voxels"]
 
         matrix, rate = helper.get_matrix_data(

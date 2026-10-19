@@ -20,7 +20,6 @@ license = [
 
 wheels = [
     "./wheels/numpy-2.4.6-cp313-cp313-win_amd64.whl",
-    "./wheels/trimesh-4.12.2-py3-none-any.whl",
     "./wheels/pyopencl-2026.1.4-cp313-cp313-win_amd64.whl",
     "./wheels/pytools-2026.1.1-py3-none-any.whl",
     "./wheels/siphash24-1.9-cp313-cp313-win_amd64.whl",

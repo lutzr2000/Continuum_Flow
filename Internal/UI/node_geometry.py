@@ -1,7 +1,7 @@
 from . import sockets
 from . import node_base
 import bpy
-from bpy.props import PointerProperty
+from bpy.props import BoolProperty, PointerProperty
 
 
 class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
@@ -17,6 +17,11 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
     bl_width_max = 360.0
 
     source_object: PointerProperty(name="Object", type=bpy.types.Object)  # type: ignore
+    deforming: BoolProperty(
+        name="Deforming",
+        description="If a mesh is deforming (Armature, shape keys) this should be selected. With dense meshes this will degrade performance",
+        default=False,
+    )  # type: ignore
 
     def _sync_node(self):
         self._ensure_named_output(
@@ -26,3 +31,4 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         layout.prop(self, "source_object", text="Object")
+        layout.prop(self, "deforming")

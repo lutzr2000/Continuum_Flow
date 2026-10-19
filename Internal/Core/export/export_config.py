@@ -62,14 +62,14 @@ PERCENTAGE_MAPPING = {
 # -------------- export ----------------
 def export_config_dict(config_dict):
     """
-    Prepare a fresh bake subfolder and export the STL geometry assets into it.
+    Prepare a fresh bake subfolder and export the USD geometry assets into it.
     """
     export_root_directory = Path(config_dict["simulation"]["outputs"][0]["output_path"])
     export_root_directory.mkdir(parents=True, exist_ok=True)
 
     export_directory = create_bake_subdirectory(export_root_directory, config_dict)
     set_subdirectory_paths(config_dict, export_directory)
-    export_geomtry_stls(config_dict, export_directory)
+    export_geometry_usd(config_dict, export_directory)
     export_particle_system_npzs(config_dict, export_directory)
 
     return export_directory, config_dict
@@ -101,12 +101,12 @@ def set_subdirectory_paths(config_dict, bake_directory):
         output_entry["output_path"] = bake_directory
 
 
-def export_geomtry_stls(config_dict, export_directory):
+def export_geometry_usd(config_dict, export_directory):
     geometry_dir = Path(export_directory) / "geometry"
     geometry_dir.mkdir(parents=True, exist_ok=True)
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
     simulation = config_dict["simulation"]
+    settings = simulation.get("settings") or {}
 
     seen = set()
 
@@ -124,10 +124,11 @@ def export_geomtry_stls(config_dict, export_directory):
                 if source_object is None:
                     continue
 
-                export_geometry.export_object_as_local_stl(
+                export_geometry.export_object_as_usdc(
                     source_object,
                     geometry_dir,
-                    depsgraph=depsgraph,
+                    int(settings.get("start_frame", 1)),
+                    int(settings.get("end_frame", 2)),
                 )
 
 
@@ -537,6 +538,7 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
                 "name",
                 None,
             ),
+            "deforming": bool(getattr(geometry_node, "deforming", False)),
         }
         for geometry_node in geometry_nodes
     ]
@@ -544,9 +546,9 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
     for geometry_input in geometry_inputs:
         object_name = geometry_input.get("object_name")
         geometry_input["mesh_file"] = (
-            f"geometry/{object_name}.stl" if object_name else None
+            f"geometry/{object_name}.usdc" if object_name else None
         )
-        geometry_input["mesh_format"] = "stl"
+        geometry_input["mesh_format"] = "usdc"
         geometry_input["transform_animation"] = transform_samples.get(object_name, {})
 
     return {

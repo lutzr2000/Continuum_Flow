@@ -155,6 +155,8 @@ def is_animated(base_masks: list[dict[str, Any]]) -> bool:
     as static.
     """
     for entry in base_masks:
+        if entry["mesh_object"].get("deforming", False):
+            return True
         matrices = np.asarray(entry.get("matrix_matrices", ()))
         if matrices.size == 0:
             mesh_object = entry["mesh_object"]
@@ -584,7 +586,7 @@ def solver(config: dict):
         base_masks = voxelise_mesh.voxelise_all_meshes(
             context,
             queue,
-            voxelise_mesh_kernels["surface"],
+            voxelise_mesh_kernels["voxelise_static"],
             delta,
             source.get("geometry_inputs"),
             bake_path,
@@ -648,7 +650,7 @@ def solver(config: dict):
         base_masks = voxelise_mesh.voxelise_all_meshes(
             context,
             queue,
-            voxelise_mesh_kernels["surface"],
+            voxelise_mesh_kernels["voxelise_static"],
             delta,
             obstacle.get("geometry_inputs"),
             bake_path,
@@ -1027,6 +1029,7 @@ def solver(config: dict):
             update_masks.update_source_masks(
                 queue,
                 update_masks_kernels,
+                voxelise_mesh_kernels["voxelise_deforming"],
                 geometry_source_masks,
                 source_base_masks,
                 animated_sources,
@@ -1160,6 +1163,8 @@ def solver(config: dict):
                 update_masks.update_source_velocity(
                     queue,
                     update_masks_kernels,
+                    voxelise_mesh_kernels["voxelise_deforming"],
+                    source_mask,
                     source_base_masks[source_idx],
                     t,
                     delta,
@@ -1296,6 +1301,7 @@ def solver(config: dict):
             update_masks.update_obstacle_mask(
                 queue,
                 update_masks_kernels,
+                voxelise_mesh_kernels["voxelise_deforming"],
                 obstacle_mask,
                 obstacle_base_masks,
                 t,

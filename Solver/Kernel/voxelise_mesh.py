@@ -3,9 +3,50 @@ from pathlib import Path
 
 import numpy as np
 import pyopencl as cl
-import trimesh
 
 from . import helper
+
+
+def load_usdc(path: Path) -> dict[str, Any]:
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.Open(str(path))
+
+    mesh = next(
+        (UsdGeom.Mesh(prim) for prim in stage.Traverse() if prim.IsA(UsdGeom.Mesh)),
+        None,
+    )
+
+    points_attr = mesh.GetPointsAttr()
+    sample_codes = points_attr.GetTimeSamples()
+
+    points = (
+        [np.asarray(points_attr.Get(code), dtype=np.float32) for code in sample_codes]
+        if sample_codes
+        else [np.asarray(points_attr.Get(), dtype=np.float32)]
+    )
+
+    indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=np.int32)
+
+    face_triangles = np.ascontiguousarray(indices.reshape(-1, 3), dtype=np.int32)
+
+    times_per_second = float(stage.GetTimeCodesPerSecond()) or 24.0
+    start_code = float(stage.GetStartTimeCode())
+
+    times = np.asarray(
+        (
+            [(float(code) - start_code) / times_per_second for code in sample_codes]
+            if sample_codes
+            else [0.0]
+        ),
+        dtype=np.float64,
+    )
+
+    return {
+        "times": times,
+        "points": points,
+        "triangles": face_triangles,
+    }
 
 
 def voxelise_all_meshes(
@@ -25,14 +66,16 @@ def voxelise_all_meshes(
             continue
 
         path = Path(bake_path) / mesh_object.get("mesh_file")
-        mesh = trimesh.load_mesh(str(path), process=False)
-
+        mesh = load_usdc(path)
         triangles = np.ascontiguousarray(
-            mesh.vertices[mesh.faces],
-            dtype=np.float32,
+            mesh["points"][0][mesh["triangles"]], dtype=np.float32
         )
 
-        voxels = voxelize_triangles(
+        if mesh_object.get("deforming", False):
+            base_masks.append({"mesh_object": mesh_object, "mesh": mesh})
+            continue
+
+        voxels = voxelise_static(
             context,
             queue,
             surface_kernel,
@@ -51,7 +94,79 @@ def voxelise_all_meshes(
     return base_masks
 
 
-def voxelize_triangles(
+def interpolated_triangles(entry: dict[str, Any], t: float) -> np.ndarray:
+    mesh = entry["mesh"]
+    times = mesh["times"]
+    points = mesh["points"]
+    if len(points) == 1 or t <= times[0]:
+        vertices = points[0]
+    elif t >= times[-1]:
+        vertices = points[-1]
+    else:
+        upper = int(np.searchsorted(times, t, side="right"))
+        lower = upper - 1
+        factor = np.float32((t - times[lower]) / (times[upper] - times[lower]))
+        vertices = points[lower] + factor * (points[upper] - points[lower])
+    return np.ascontiguousarray(vertices[mesh["triangles"]], dtype=np.float32)
+
+
+def world_triangles(entry: dict[str, Any], t: float):
+    triangles = interpolated_triangles(entry, t)
+    matrix, rate = helper.get_matrix_data(
+        entry["matrix_times"], entry["matrix_matrices"], entry["matrix_rates"], t
+    )
+    flat = triangles.reshape(-1, 3)
+    world = flat @ np.asarray(matrix[:3, :3], dtype=np.float32).T + matrix[:3, 3]
+    return np.ascontiguousarray(world.reshape(-1, 3, 3), dtype=np.float32), matrix, rate
+
+
+def voxelise_deforming(
+    context,
+    queue,
+    kernel,
+    triangles,
+    target_mask,
+    index_tile_map,
+    tile_shape,
+    delta,
+    origin,
+    velocity_fields=None,
+    velocity_coefficients=None,
+) -> None:
+    if triangles.size == 0:
+        return
+    triangles_gpu = helper.to_device(context, triangles)
+    if velocity_fields is None:
+        velocity_fields = (target_mask, target_mask, target_mask)
+        velocity_coefficients = np.zeros((3, 4), dtype=np.float32)
+        write_velocity = 0
+    else:
+        write_velocity = 1
+    coefficients = np.asarray(velocity_coefficients, dtype=np.float32).reshape(12)
+    kernel(
+        queue,
+        (int(triangles.shape[0]),),
+        None,
+        triangles_gpu,
+        target_mask,
+        velocity_fields[0],
+        velocity_fields[1],
+        velocity_fields[2],
+        index_tile_map,
+        np.int32(triangles.shape[0]),
+        np.int32(tile_shape[0]),
+        np.int32(tile_shape[1]),
+        np.int32(tile_shape[2]),
+        np.float32(delta),
+        np.float32(origin[0]),
+        np.float32(origin[1]),
+        np.float32(origin[2]),
+        np.int32(write_velocity),
+        *[np.float32(value) for value in coefficients],
+    )
+
+
+def voxelise_static(
     context: cl.Context,
     queue: cl.CommandQueue,
     surface_kernel: cl.Kernel,
