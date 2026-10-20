@@ -206,8 +206,11 @@ void main()
     vec4 accumulated =
         vec4(0.0);
 
-    float first_contribution_distance =
+    float occlusion_distance =
         hit.y;
+
+    float strongest_visible_contribution =
+        0.0;
 
     bool has_contribution =
         false;
@@ -294,15 +297,6 @@ void main()
         }
 
 
-        if (!has_contribution) {
-            first_contribution_distance =
-                distance_along_ray;
-
-            has_contribution =
-                true;
-        }
-
-
         float smoke_alpha =
             1.0 -
             exp(
@@ -355,6 +349,31 @@ void main()
             accumulated.a;
 
 
+        float visible_contribution =
+            transmittance *
+            max(
+                smoke_alpha,
+                flame_emission
+            );
+
+
+        if (
+            visible_contribution >
+            strongest_visible_contribution
+        )
+        {
+            strongest_visible_contribution =
+                visible_contribution;
+
+            occlusion_distance =
+                distance_along_ray;
+        }
+
+
+        has_contribution =
+            true;
+
+
         accumulated.rgb +=
             transmittance *
             (
@@ -378,24 +397,24 @@ void main()
     }
 
 
-    vec3 first_contribution_position =
+    vec3 occlusion_position =
         volume_parameters.camera_position_and_step_size.xyz +
         ray_direction *
-        first_contribution_distance;
+        occlusion_distance;
 
 
-    vec4 first_contribution_clip =
+    vec4 occlusion_clip =
         view_projection_matrix *
         model_matrix *
         vec4(
-            first_contribution_position,
+            occlusion_position,
             1.0
         );
 
 
     gl_FragDepth =
-        first_contribution_clip.z /
-        first_contribution_clip.w *
+        occlusion_clip.z /
+        occlusion_clip.w *
         0.5 +
         0.5;
 
