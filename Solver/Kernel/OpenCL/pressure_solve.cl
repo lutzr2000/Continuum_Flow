@@ -41,8 +41,9 @@ __kernel void project_velocity_kernel(__global float *u,
 
     const float half_inv_delta = 0.5f / delta;
     const float pressure_coeff = dt / rho;
+    const float pressure_center = p[index];
     const float3 pressure_gradient =
-        central_gradient_sparse(p, index_tile_map, i, j, k, half_inv_delta, 0.0f, tiles_y, tiles_z);
+        central_gradient_sparse(p, index_tile_map, i, j, k, half_inv_delta, pressure_center, tiles_y, tiles_z);
 
     u[index] -= pressure_coeff * pressure_gradient.x;
     v[index] -= pressure_coeff * pressure_gradient.y;

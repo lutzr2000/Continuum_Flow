@@ -38,14 +38,18 @@ inline float neighbor_sum_sparse(__global const float *field,
     /*
     Sum the six axis-aligned neighbours used by the 3D seven-point stencil.
     Clamping to the closest interior cell implements the pressure solver's
-    homogeneous Neumann condition at the domain boundary.
+    homogeneous Neumann condition at the domain boundary. Missing sparse
+    neighbours use the center value for the same zero-normal-gradient
+    condition at the edge of the allocated pressure field.
     */
-    return get_pool_value(field, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, default_value, tiles_y, tiles_z) +
-           get_pool_value(field, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, default_value, tiles_y, tiles_z) +
-           get_pool_value(field, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, default_value, tiles_y, tiles_z) +
-           get_pool_value(field, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, default_value, tiles_y, tiles_z) +
-           get_pool_value(field, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), default_value, tiles_y, tiles_z) +
-           get_pool_value(field, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), default_value, tiles_y, tiles_z);
+    const float center = get_pool_value(field, index_tile_map, i, j, k, default_value, tiles_y, tiles_z);
+
+    return get_pool_value(field, index_tile_map, clamp(i + 1, 1, nx - 2), j, k, center, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, clamp(i - 1, 1, nx - 2), j, k, center, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, clamp(j + 1, 1, ny - 2), k, center, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, clamp(j - 1, 1, ny - 2), k, center, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, j, clamp(k + 1, 1, nz - 2), center, tiles_y, tiles_z) +
+           get_pool_value(field, index_tile_map, i, j, clamp(k - 1, 1, nz - 2), center, tiles_y, tiles_z);
 }
 
 inline float laplacian_sparse(__global const float *field,
