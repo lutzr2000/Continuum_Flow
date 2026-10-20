@@ -176,7 +176,7 @@ def export_particle_system_npzs(config_dict, export_directory):
 
 
 # -------------- build ----------------
-def build_config_dict(context, simulation_node):
+def build_config_dict(context, simulation_node, preview_enabled=False):
     """
     Build the genetal simulation config
     """
@@ -188,14 +188,14 @@ def build_config_dict(context, simulation_node):
             "node_tree_name": node_tree.name,
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
         },
-        "simulation": build_entries(simulation_node, context),
+        "simulation": build_entries(simulation_node, context, preview_enabled),
         "geometry_nodes": get_geometry_nodes(node_tree),
         "particle_system_nodes": get_particle_system_nodes(node_tree),
     }
     return config_dict
 
 
-def build_entries(simulation_node, context):
+def build_entries(simulation_node, context, preview_enabled=False):
     """
     Build a grouped config for the connected nodes
     """
@@ -246,15 +246,6 @@ def build_entries(simulation_node, context):
             for node in result_nodes
             if node.bl_idname == "CONTINUUM_FLOW_OUTPUT_NODE"
         ),
-    )
-
-    viewer_node = next(
-        (
-            node
-            for node in result_nodes
-            if node.bl_idname == "CONTINUUM_FLOW_VIEWER_NODE"
-            and bool(getattr(node, "live_preview", False))
-        ),
         None,
     )
 
@@ -296,7 +287,7 @@ def build_entries(simulation_node, context):
             "times": simulation_times,
         },
         "preview": {
-            "enabled": viewer_node is not None,
+            "enabled": bool(preview_enabled),
         },
         "reference_frame": build_reference_frame_entry(
             reference_frame_node,
@@ -339,7 +330,11 @@ def build_entries(simulation_node, context):
             )
             for node in force_nodes
         ],
-        "outputs": [build_output_node_entries(output_node)],
+        "outputs": (
+            [build_output_node_entries(output_node)]
+            if output_node is not None
+            else [{"fps": int(round(simulation_fps)), "fields": {}, "output_path": ""}]
+        ),
     }
 
 

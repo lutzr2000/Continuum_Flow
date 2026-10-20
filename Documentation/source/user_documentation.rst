@@ -160,8 +160,8 @@ This node lets you view the simulation domain in the viewport.
 **Show/Hide Domain**
     Shows or hides a viewport wireframe preview of the domain.
 
-**Live Preview**
-    If active a live preview of the simulation is shown in the viewport. Please note that this option can reduce the solvers performance.
+**Play / Stop**
+    Play starts a continuous live simulation preview in the viewport. The preview does not write VDB output and keeps running until Stop is pressed or Esc is used. Baking is separate and writes the configured fields to disk without showing a live preview.
 
 **Smoke Density**
     Density of the preview smoke. Only affects the preview not the final output!

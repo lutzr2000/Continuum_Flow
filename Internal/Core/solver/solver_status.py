@@ -50,6 +50,8 @@ refresh_opencl_devices()
 bake_running = False
 bake_available = False
 active_bake_operator = None
+preview_running = False
+active_preview_operator = None
 last_output_directory = None
 progress = 0.0
 progress_current_frames = 0

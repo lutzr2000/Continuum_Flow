@@ -226,7 +226,11 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         )
 
         button_row = layout.row()
-        button_row.enabled = disable_reason is None and not solver_status.bake_running
+        button_row.enabled = (
+            disable_reason is None
+            and not solver_status.bake_running
+            and not solver_status.preview_running
+        )
         if is_free_bake:
             button_row.operator(
                 "continuum_flow.output_free_bake_button", text="Free Bake", icon="TRASH"
@@ -240,3 +244,5 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
             layout.label(text=disable_reason, icon="INFO")
         elif solver_status.bake_running:
             layout.label(text="Bake is running", icon="INFO")
+        elif solver_status.preview_running:
+            layout.label(text="Stop the live preview before baking", icon="INFO")

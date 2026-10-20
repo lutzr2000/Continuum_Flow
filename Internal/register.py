@@ -49,6 +49,7 @@ from .Core.export.export_config import (
 from .Core import forces, volume_renderer
 from .Core.solver.solver_manager import solver_manager
 from .Core.viewer import ContinuumFlow_OT_viewer_toggle_domain
+from .Core.preview import CONTINUUM_FLOW_OT_viewer_preview, request_preview_stop
 from .Core.solver import solver_status
 from .UI import animation_proxy
 
@@ -79,18 +80,10 @@ classes = (
     ContinuumFlowForceTurbulenceNode,
     ContinuumFlow_OT_add_basic_setup,
     ContinuumFlow_OT_viewer_toggle_domain,
+    CONTINUUM_FLOW_OT_viewer_preview,
     CONTINUUM_FLOW_OT_free_bake,
     CONTINUUM_FLOW_OT_bake,
 )
-
-
-def preload_solver_backends():
-    """Start the persistent worker and warm available solver runtimes."""
-    solver_manager.request_preload("CPU")
-    if solver_status.gpu_available:
-        solver_manager.request_preload("GPU")
-
-    return None
 
 
 @persistent
@@ -170,9 +163,6 @@ def register():
 
     volume_renderer.ensure_update_live_preview()
 
-    if not bpy.app.timers.is_registered(preload_solver_backends):
-        bpy.app.timers.register(preload_solver_backends, first_interval=0.1)
-
     if not bpy.app.timers.is_registered(animation_proxy.maintain_animation_proxies):
         bpy.app.timers.register(
             animation_proxy.maintain_animation_proxies,
@@ -192,14 +182,12 @@ def register():
 
 
 def unregister():
+    request_preview_stop()
     if bpy.app.timers.is_registered(animation_proxy.maintain_animation_proxies):
         bpy.app.timers.unregister(animation_proxy.maintain_animation_proxies)
 
     if bpy.app.timers.is_registered(volume_renderer.update_live_preview):
         bpy.app.timers.unregister(volume_renderer.update_live_preview)
-
-    if bpy.app.timers.is_registered(preload_solver_backends):
-        bpy.app.timers.unregister(preload_solver_backends)
 
     solver_manager.shutdown()
     volume_renderer.clear_live_preview()

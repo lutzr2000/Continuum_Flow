@@ -12,8 +12,6 @@ class SolverManager:
         self._next_job_id = 1
 
         self._stats = {}
-        self._compiling_backend = None
-        self._compiled_backends = set()
 
     def start_job(self, config):
         from .. import volume_renderer
@@ -43,6 +41,10 @@ class SolverManager:
         thread.start()
 
         return job_id
+
+    def is_busy(self):
+        with self._lock:
+            return self._active_job_id is not None
 
     def _handle_message(self, message):
         if not isinstance(message, dict):
@@ -119,15 +121,9 @@ class SolverManager:
         with self._lock:
             return self._job_results.pop(int(job_id), None)
 
-    def is_compiling(self):
-        return False
-
     def get_stats(self):
         with self._lock:
             return dict(self._stats)
-
-    def request_preload(self, backend, config=None):
-        return
 
     def shutdown(self):
         from ....Solver.Kernel import preview

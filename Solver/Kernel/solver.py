@@ -353,6 +353,8 @@ def solver(config: dict):
     cancel_flag_path = (
         (config.get("meta") or {}).get("cancel_flag_path") or ""
     ).strip()
+    cancel_event = (config.get("meta") or {}).get("cancel_event")
+    continuous_preview = bool(settings.get("continuous_preview", False))
     cancel_requested = False
 
     bake_path = simulation["outputs"][0]["output_path"]
@@ -709,7 +711,11 @@ def solver(config: dict):
     output_index = 0
     time_step_count = 0
 
-    while t < t_max:
+    while continuous_preview or t < t_max:
+        if cancel_event is not None and cancel_event.is_set():
+            cancel_requested = True
+            print("Preview stop requested. Stopping the simulation cleanly...")
+            break
         if cancel_flag_path and Path(cancel_flag_path).exists():
             cancel_requested = True
             print("Bake cancellation requested. Stopping the simulation cleanly...")

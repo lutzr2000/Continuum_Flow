@@ -112,8 +112,7 @@ inline float residual_sparse(__global const float *p,
 
     const int index = cell.cell_index;
 
-    const float laplace = laplacian_sparse(p, index_tile_map, i, j, k, inv_delta2, 0.0f,
-                                           nx, ny, nz, tiles_y, tiles_z);
+    const float laplace = laplacian_sparse(p, index_tile_map, i, j, k, inv_delta2, 0.0f, nx, ny, nz, tiles_y, tiles_z);
 
     const float rhs = b[index];
 
@@ -347,8 +346,7 @@ __kernel void rbgs_step_sparse(__global float *p,
 
     const int index = cell.cell_index;
 
-    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
-                                                     nx, ny, nz, tiles_y, tiles_z);
+    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f, nx, ny, nz, tiles_y, tiles_z);
 
     p[index] = (neighbour_sum - delta2 * b[index]) / 6.0f;
 }
@@ -406,8 +404,8 @@ __kernel void coarse_smooth(__global float *p,
 
                 const int index = sparse_cell.cell_index;
 
-                const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
-                                                                 nx, ny, nz, tiles_y, tiles_z);
+                const float neighbour_sum =
+                    neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f, nx, ny, nz, tiles_y, tiles_z);
 
                 p[index] = (neighbour_sum - delta2 * b[index]) / 6.0f;
             }
@@ -458,11 +456,9 @@ __kernel void rbgs_step_level_0(__global float *p,
 
     const int index = cell.cell_index;
 
-    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f,
-                                                     nx, ny, nz, tiles_y, tiles_z);
-    const float center = (neighbour_sum -
-                          delta2 * get_pool_value(b, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z)) /
-                         6.0f;
+    const float neighbour_sum = neighbor_sum_sparse(p, index_tile_map, i, j, k, 0.0f, nx, ny, nz, tiles_y, tiles_z);
+    const float center =
+        (neighbour_sum - delta2 * get_pool_value(b, index_tile_map, i, j, k, 0.0f, tiles_y, tiles_z)) / 6.0f;
 
     p[index] = center;
 }

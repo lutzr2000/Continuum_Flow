@@ -145,6 +145,10 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
     bl_label = "Bake"
 
     def execute(self, context):
+        if solver_status.preview_running or solver_manager.is_busy():
+            self.report({"ERROR"}, "Stop the live preview before baking.")
+            return {"CANCELLED"}
+
         self.output_node = get_output_node(context)
         self.simulation_node = get_connected_simulation_node(self.output_node)
         self.job_id = None
@@ -289,7 +293,9 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
 
     def run_bake(self, context):
         config_dict = export_config.build_config_dict(
-            context=context, simulation_node=self.simulation_node
+            context=context,
+            simulation_node=self.simulation_node,
+            preview_enabled=False,
         )
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 

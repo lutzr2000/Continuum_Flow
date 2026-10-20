@@ -40,7 +40,9 @@ class ContinuumFlowBaseNode(bpy.types.Node):
         self._sync_node()
 
     def _set_layout_enabled(self, context, layout):
-        layout.enabled = not solver_status.bake_running
+        layout.enabled = not (
+            solver_status.bake_running or solver_status.preview_running
+        )
 
     def _draw_group(self, layout, title, property_names):
         box = layout.box()

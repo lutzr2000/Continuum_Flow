@@ -256,12 +256,20 @@ def load_viewer_settings():
     if result_socket is None:
         return
 
+    from .solver import solver_status
+
+    active_operator = solver_status.active_preview_operator
+    active_reference = getattr(active_operator, "viewer_reference", None)
     viewer_node = next(
         (
             link.to_node
             for link in result_socket.links
             if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
-            and bool(getattr(link.to_node, "live_preview", False))
+            and (
+                str(getattr(getattr(link.to_node, "id_data", None), "name", "")),
+                str(getattr(link.to_node, "name", "")),
+            )
+            == active_reference
         ),
         None,
     )
