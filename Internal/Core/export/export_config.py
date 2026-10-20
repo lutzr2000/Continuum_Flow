@@ -124,7 +124,7 @@ def export_geometry_usd(config_dict, export_directory):
 
     for object_name, deforming in objects_to_export.items():
         source_object = bpy.data.objects.get(object_name)
-        if source_object is None:
+        if not valid_mesh_geometry(source_object):
             continue
 
         export_geometry.export_object_as_usdc(
@@ -525,7 +525,7 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
     geometry_nodes = [
         geometry_node
         for geometry_node in geometry_nodes
-        if getattr(geometry_node, "source_object", None) is not None
+        if valid_mesh_geometry(getattr(geometry_node, "source_object", None))
     ]
 
     transform_samples = get_geometry_transforms(
@@ -559,6 +559,30 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
         "geometry_inputs": geometry_inputs,
         "shape": "mesh" if geometry_inputs else "empty",
     }
+
+
+def valid_mesh_geometry(source_object):
+    """Return whether an object evaluates to a mesh containing polygons."""
+    if source_object is None or getattr(source_object, "type", None) != "MESH":
+        return False
+
+    object_eval = None
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        object_eval = source_object.evaluated_get(depsgraph)
+        evaluated_mesh = object_eval.to_mesh(
+            preserve_all_data_layers=False,
+            depsgraph=depsgraph,
+        )
+        return evaluated_mesh is not None and len(evaluated_mesh.polygons) > 0
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+    finally:
+        if object_eval is not None:
+            try:
+                object_eval.to_mesh_clear()
+            except (AttributeError, ReferenceError, RuntimeError):
+                pass
 
 
 def build_particle_system_entries(particle_system_nodes):
@@ -798,7 +822,7 @@ def get_geometry_nodes(node_tree):
         if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_GEOMETRY_NODE":
             continue
         source_object = getattr(node, "source_object", None)
-        if source_object is None:
+        if not valid_mesh_geometry(source_object):
             continue
         geometry_entries.append(
             {
