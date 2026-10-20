@@ -88,6 +88,7 @@ def load_particle_sources(
 
             source_entries.append(
                 {
+                    "node_name": particle_input.get("node_name"),
                     "times": times,
                     "offsets": offsets,
                     "positions": positions,

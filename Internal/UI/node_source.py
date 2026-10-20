@@ -1,5 +1,6 @@
 from . import sockets
 from . import node_base
+from ..Core.solver import solver_status
 from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import FloatVectorProperty
@@ -58,7 +59,7 @@ class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
         self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Source")
 
     def draw_buttons(self, context, layout):
-        self._set_layout_enabled(context, layout)
+        layout.enabled = not solver_status.bake_running
 
         randomness_box = layout.box()
         randomness_col = randomness_box.column(align=True)

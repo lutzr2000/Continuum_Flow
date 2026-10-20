@@ -8,6 +8,21 @@ from . import volume_renderer
 from .export import export_config
 from .solver import solver_status
 from .solver.solver_manager import solver_manager
+from ..UI import animation_proxy
+
+
+class PreviewUpdateChannel:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._values = None
+
+    def publish(self, values):
+        with self._lock:
+            self._values = values
+
+    def values(self):
+        with self._lock:
+            return self._values
 
 
 def node_reference(node):
@@ -67,6 +82,7 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
         self.temporary_directory = None
         self.cleanup_done = False
         self.last_timeline_frame = None
+        self.update_channel = PreviewUpdateChannel()
 
         try:
             config = export_config.build_config_dict(
@@ -92,6 +108,7 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
                     field["enabled"] = False
 
             config.setdefault("meta", {})["cancel_event"] = self.stop_event
+            config["meta"]["preview_update_channel"] = self.update_channel
 
             solver_status.preview_running = True
             solver_status.active_preview_operator = self
@@ -113,6 +130,7 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
 
         if event.type == "TIMER" and self.job_id is not None:
             self.update_timeline(context)
+            self.publish_live_values(context)
             result = solver_manager.get_job_result(self.job_id)
             if result is not None:
                 self.cleanup(context)
@@ -139,6 +157,109 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
         if scene is not None:
             scene.frame_set(timeline_frame)
             self.last_timeline_frame = timeline_frame
+
+    def publish_live_values(self, context):
+        node_tree = bpy.data.node_groups.get(self.viewer_reference[0])
+        if node_tree is None:
+            return
+
+        viewer_node = node_tree.nodes.get(self.viewer_reference[1])
+        simulation_node = get_simulation_node(viewer_node)
+        if simulation_node is None:
+            return
+
+        scene = getattr(context, "scene", None)
+        source_nodes = export_config.multiple_linked_nodes(
+            simulation_node, "Source", direction="input"
+        )
+        source_values = {}
+        for node in source_nodes:
+
+            def current(property_name):
+                return animation_proxy.scene_proxy_value(scene, node, property_name)
+
+            source_values[node.name] = {
+                "noise": {
+                    "scale": float(node.randomness_scale),
+                    "seed": int(node.randomness_seed),
+                },
+                "fuel": {
+                    "value": float(current("fuel")),
+                    "randomness": float(node.fuel_randomness),
+                },
+                "smoke": {
+                    "value": float(current("smoke")),
+                    "randomness": float(node.smoke_randomness),
+                },
+                "temperature": {
+                    "value": float(current("temperature")),
+                    "randomness": float(node.temperature_randomness),
+                },
+                "extra_pressure": {
+                    "value": float(current("extra_pressure")),
+                    "randomness": float(node.extra_pressure_randomness),
+                },
+                "velocity": {
+                    "value": [float(value) for value in current("velocity")],
+                    "space": str(node.velocity_space),
+                    "randomness": float(node.velocity_randomness),
+                },
+            }
+
+        physics_node = export_config.linked_node(
+            simulation_node, "Physics", direction="input"
+        )
+        physics_values = {}
+        if physics_node is not None:
+            for section_name, property_names in physics_node.property_groups:
+                if section_name == "Fluid":
+                    continue
+                section_key = section_name.lower()
+                physics_values[section_key] = {}
+                for property_name in property_names:
+                    value = float(
+                        animation_proxy.scene_proxy_value(
+                            scene, physics_node, property_name
+                        )
+                    )
+                    if property_name in export_config.PERCENTAGE_MAPPING:
+                        minimum, maximum = export_config.PERCENTAGE_MAPPING[
+                            property_name
+                        ]
+                        value = minimum + (value / 100.0) * (maximum - minimum)
+                    config_name = {
+                        "temperature_dissipation": "dissipation",
+                        "temperature_production_rate": "production_rate",
+                        "reference_temperature": "reference_temperature",
+                        "buoyancy": "buoyancy",
+                        "expansion_rate": "expansion_rate",
+                        "smoke_dissipation": "dissipation",
+                        "smoke_production_rate": "production_rate",
+                        "fuel_dissipation": "dissipation",
+                        "fuel_burn_rate": "burn_rate",
+                        "fuel_ignition_temperature": "ignition_temperature",
+                        "fuel_ignition_temperature_width": "ignition_temperature_width",
+                        "vorticity": "vorticity",
+                    }[property_name]
+                    physics_values[section_key][config_name] = value
+
+        particle_values = {}
+        for source_node in source_nodes:
+            for particle_node in export_config.multiple_linked_nodes(
+                source_node, "Particle Systems", direction="input"
+            ):
+                particle_values[particle_node.name] = {
+                    "radius": float(particle_node.radius),
+                    "velocity_transfer": float(particle_node.velocity_transfer) / 100.0,
+                }
+
+        self.update_channel.publish(
+            {
+                "sources": source_values,
+                "physics": physics_values,
+                "particles": particle_values,
+            }
+        )
 
     def cleanup(self, context):
         if self.cleanup_done:

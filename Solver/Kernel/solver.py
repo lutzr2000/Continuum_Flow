@@ -25,6 +25,7 @@ FIELD_DTYPE = kernel_config.FIELD_DTYPE
 def get_source_values(
     simulation: dict[str, Any],
     t: float,
+    live_source_values: dict[str, Any] | None = None,
 ) -> dict[str, NDArray]:
     """Resolve all source properties at the animation sample nearest to ``t``."""
     source_entries = simulation.get("sources") or []
@@ -70,9 +71,17 @@ def get_source_values(
         scale,
     ) in property_map.items():
         for source_idx, source_entry in enumerate(source_entries):
-            value = (source_entry.get(section_name) or {}).get(property_name, 0.0)
+            live_source = (live_source_values or {}).get(
+                source_entry.get("node_name"), {}
+            )
+            live_section = live_source.get(section_name) or {}
+            has_live_value = property_name in live_section
+            value = live_section.get(
+                property_name,
+                (source_entry.get(section_name) or {}).get(property_name, 0.0),
+            )
             animation_values = ()
-            if property_name == "value":
+            if property_name == "value" and not has_live_value:
                 animation_values = (
                     (source_entry.get("animations") or {}).get(section_name) or {}
                 ).get("values") or ()
@@ -89,7 +98,16 @@ def get_source_values(
 
     values["velocity_local"] = np.asarray(
         [
-            str((source.get("velocity") or {}).get("space", "WORLD")).upper() == "LOCAL"
+            str(
+                (
+                    ((live_source_values or {}).get(source.get("node_name"), {})).get(
+                        "velocity"
+                    )
+                    or source.get("velocity")
+                    or {}
+                ).get("space", "WORLD")
+            ).upper()
+            == "LOCAL"
             for source in source_entries
         ],
         dtype=np.bool_,
@@ -97,7 +115,11 @@ def get_source_values(
     return values
 
 
-def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any]:
+def get_simulation_values(
+    simulation: dict[str, Any],
+    t: float,
+    live_physics_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Resolve all physics values at the animation sample nearest to ``t``."""
     physics = simulation.get("physics") or {}
     animation_times = (simulation.get("animation_timeline") or {}).get("times") or ()
@@ -129,12 +151,14 @@ def get_simulation_values(simulation: dict[str, Any], t: float) -> dict[str, Any
         static_section = physics.get(section_name) or {}
         values[section_name] = {}
         for value_name, animation_name in section_properties.items():
-            value = static_section.get(value_name, 0.0)
+            live_section = (live_physics_values or {}).get(section_name) or {}
+            has_live_value = value_name in live_section
+            value = live_section.get(value_name, static_section.get(value_name, 0.0))
             animation_values = (animations.get(animation_name) or {}).get(
                 "values"
             ) or ()
             sample_count = min(len(animation_times), len(animation_values))
-            if sample_count > 0:
+            if sample_count > 0 and not has_live_value:
                 nearest_time_idx = min(
                     range(sample_count),
                     key=lambda idx: abs(float(animation_times[idx]) - float(t)),
@@ -354,6 +378,7 @@ def solver(config: dict):
         (config.get("meta") or {}).get("cancel_flag_path") or ""
     ).strip()
     cancel_event = (config.get("meta") or {}).get("cancel_event")
+    preview_update_channel = (config.get("meta") or {}).get("preview_update_channel")
     continuous_preview = bool(settings.get("continuous_preview", False))
     cancel_requested = False
 
@@ -721,8 +746,28 @@ def solver(config: dict):
             print("Bake cancellation requested. Stopping the simulation cleanly...")
             break
 
-        physics_values = get_simulation_values(simulation, t)
-        source_values = get_source_values(simulation, t)
+        live_values = (
+            preview_update_channel.values()
+            if preview_update_channel is not None
+            else None
+        )
+        physics_values = get_simulation_values(
+            simulation, t, (live_values or {}).get("physics")
+        )
+        reference_temperature = physics_values["temperature"]["reference_temperature"]
+        live_source_values = (live_values or {}).get("sources")
+        source_values = get_source_values(simulation, t, live_source_values)
+
+        for source_entries in particle_sources:
+            for particle_entry in source_entries:
+                live_particle = ((live_values or {}).get("particles") or {}).get(
+                    particle_entry.get("node_name")
+                )
+                if live_particle is not None:
+                    particle_entry["radius"] = np.float32(live_particle["radius"])
+                    particle_entry["velocity_transfer"] = np.float32(
+                        live_particle["velocity_transfer"]
+                    )
 
         # ------------reference frame-------------------
         if has_reference_frame:

@@ -3,6 +3,7 @@ from bpy.props import FloatProperty, PointerProperty, StringProperty
 
 from . import node_base
 from . import sockets
+from ..Core.solver import solver_status
 
 
 def clear_particle_system(self, context):
@@ -61,10 +62,13 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
         )
 
     def draw_buttons(self, context, layout):
-        self._set_layout_enabled(context, layout)
-        layout.prop(self, "source_object", text="Object")
+        locked_settings = layout.column()
+        locked_settings.enabled = not (
+            solver_status.bake_running or solver_status.preview_running
+        )
+        locked_settings.prop(self, "source_object", text="Object")
         if self.source_object is not None:
-            layout.prop_search(
+            locked_settings.prop_search(
                 self,
                 "particle_system",
                 self.source_object,
@@ -75,10 +79,13 @@ class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
                 not self.particle_system
                 and getattr(self.source_object, "type", None) == "MESH"
             ):
-                layout.label(text="Using vertices as particles", icon="INFO")
+                locked_settings.label(text="Using vertices as particles", icon="INFO")
         else:
-            row = layout.row()
+            row = locked_settings.row()
             row.enabled = False
             row.prop(self, "particle_system", text="Particle System")
-        layout.prop(self, "radius")
-        layout.prop(self, "velocity_transfer", slider=True)
+
+        live_settings = layout.column()
+        live_settings.enabled = not solver_status.bake_running
+        live_settings.prop(self, "radius")
+        live_settings.prop(self, "velocity_transfer", slider=True)

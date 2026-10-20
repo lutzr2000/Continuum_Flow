@@ -1,5 +1,6 @@
 from . import sockets
 from . import node_base
+from ..Core.solver import solver_status
 from bpy.props import FloatProperty
 
 
@@ -74,6 +75,12 @@ class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
         self._ensure_named_output(sockets.ContinuumFlowIntSocket.bl_idname, "Physics")
 
     def draw_buttons(self, context, layout):
-        self._set_layout_enabled(context, layout)
         for title, property_names in self.property_groups:
-            self._draw_group(layout, title, property_names)
+            box = layout.box()
+            box.enabled = not solver_status.bake_running and not (
+                solver_status.preview_running and title == "Fluid"
+            )
+            box.label(text=title)
+            col = box.column(align=True)
+            for property_name in property_names:
+                self._draw_property(col, property_name)
