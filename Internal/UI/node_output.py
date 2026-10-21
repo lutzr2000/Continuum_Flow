@@ -112,6 +112,12 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     export_smoke: BoolProperty(name="smoke", default=True, options=set())  # type: ignore
     export_fuel: BoolProperty(name="fuel", default=False, options=set())  # type: ignore
     export_flame: BoolProperty(name="flame", default=True, options=set())  # type: ignore
+    bake_preview: BoolProperty(
+        name="Preview",
+        description="Show the simulation in the viewport while baking",
+        default=True,
+        options=set(),
+    )  # type: ignore
     velocity_field_name: StringProperty(name="Field Name", default="velocity", options=set())  # type: ignore
     pressure_field_name: StringProperty(name="Field Name", default="pressure", options=set())  # type: ignore
     temperature_field_name: StringProperty(name="Field Name", default="temperature", options=set())  # type: ignore
@@ -224,6 +230,8 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
             bake_main.output_node_has_baked_data(self)
             and not solver_status.bake_running
         )
+
+        layout.prop(self, "bake_preview")
 
         button_row = layout.row()
         button_row.enabled = (

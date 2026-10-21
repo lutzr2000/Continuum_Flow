@@ -266,10 +266,13 @@ def load_viewer_settings():
             for link in result_socket.links
             if getattr(link.to_node, "bl_idname", "") == "CONTINUUM_FLOW_VIEWER_NODE"
             and (
-                str(getattr(getattr(link.to_node, "id_data", None), "name", "")),
-                str(getattr(link.to_node, "name", "")),
+                active_reference is None
+                or (
+                    str(getattr(getattr(link.to_node, "id_data", None), "name", "")),
+                    str(getattr(link.to_node, "name", "")),
+                )
+                == active_reference
             )
-            == active_reference
         ),
         None,
     )

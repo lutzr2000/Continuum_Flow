@@ -19,6 +19,12 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     bl_width_min = 240.0
     bl_width_max = 520.0
     domain_preview_active: BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})  # type: ignore
+    preview_loop: BoolProperty(
+        name="Loop",
+        description="Loop the timeline during the live preview",
+        default=False,
+        options=set(),
+    )  # type: ignore
     preview_smoke_density: FloatProperty(name="Smoke Density", default=2.0, min=0.0, options=set())  # type: ignore
     preview_smoke_color: FloatVectorProperty(name="Smoke Color", default=(0.32, 0.34, 0.38), size=3, min=0.0, max=1.0, subtype="COLOR", options=set())  # type: ignore
     preview_flame_density: FloatProperty(name="Flame Density", default=5.0, min=0.0, options=set())  # type: ignore
@@ -58,6 +64,11 @@ class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
             text="Stop" if is_live_preview_active else "Play",
             icon="PAUSE" if is_live_preview_active else "PLAY",
         )
+        loop_row = col.row()
+        loop_row.enabled = not (
+            solver_status.bake_running or solver_status.preview_running
+        )
+        loop_row.prop(self, "preview_loop")
 
         col.separator()
         settings = col.column(align=True)

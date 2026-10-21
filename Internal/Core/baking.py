@@ -295,7 +295,7 @@ class CONTINUUM_FLOW_OT_bake(bpy.types.Operator):
         config_dict = export_config.build_config_dict(
             context=context,
             simulation_node=self.simulation_node,
-            preview_enabled=False,
+            preview_enabled=bool(getattr(self.output_node, "bake_preview", True)),
         )
         bake_directory, config_dict = export_config.export_config_dict(config_dict)
 

@@ -100,8 +100,13 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
             export_config.export_particle_system_npzs(config, work_directory)
 
             simulation = config["simulation"]
+            self.loop_preview = bool(getattr(viewer_node, "preview_loop", False))
             simulation["settings"]["continuous_preview"] = True
+            simulation["settings"]["loop_preview"] = self.loop_preview
             self.start_frame = int(simulation["settings"].get("start_frame", 1))
+            self.end_frame = int(
+                simulation["settings"].get("end_frame", self.start_frame + 1)
+            )
 
             for output in simulation.get("outputs", []):
                 for field in (output.get("fields") or {}).values():
@@ -150,6 +155,11 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
             return
 
         timeline_frame = self.start_frame + int(solver_frame) - 1
+        if self.loop_preview:
+            frame_count = max(1, self.end_frame - self.start_frame)
+            timeline_frame = self.start_frame + (
+                (timeline_frame - self.start_frame) % frame_count
+            )
         if timeline_frame == self.last_timeline_frame:
             return
 

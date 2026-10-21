@@ -380,6 +380,7 @@ def solver(config: dict):
     cancel_event = (config.get("meta") or {}).get("cancel_event")
     preview_update_channel = (config.get("meta") or {}).get("preview_update_channel")
     continuous_preview = bool(settings.get("continuous_preview", False))
+    loop_preview = bool(settings.get("loop_preview", False))
     cancel_requested = False
 
     bake_path = simulation["outputs"][0]["output_path"]
@@ -1737,6 +1738,11 @@ def solver(config: dict):
                     "total_cells": total_tile_count * kernel_config.TILE_SIZE**3,
                 }
             )
+
+        if loop_preview and t_max > 0.0 and t >= t_max:
+            t = t % t_max
+            next_output_time = 0.0
+            output_index = 0
 
     output.close_output(output_manager)
 
