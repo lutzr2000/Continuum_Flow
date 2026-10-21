@@ -3,6 +3,8 @@ import math
 
 import numpy as np
 
+from ..Kernel.helper import nearest_sample_index
+
 
 def _get_animation_times(container: Any) -> Any:
     """
@@ -15,7 +17,12 @@ def _get_animation_times(container: Any) -> Any:
 
 
 def get_animated_node_value(
-    node: Any, var_name: str, t: float, default: Any = 0.0, animation_times: Any = ()
+    node: Any,
+    var_name: str,
+    t: float,
+    default: Any = 0.0,
+    animation_times: Any = (),
+    nearest_indices: dict[tuple[int, int], int] | None = None,
 ) -> Any:
     """
     Resolve a node property at the animation sample nearest to ``t``.
@@ -32,10 +39,13 @@ def get_animated_node_value(
     sample_count = min(len(times), len(values))
 
     if sample_count > 0:
-        nearest_idx = min(
-            range(sample_count),
-            key=lambda i: abs(float(times[i]) - float(t)),
-        )
+        timeline_key = (id(times), sample_count)
+        if nearest_indices is not None and timeline_key in nearest_indices:
+            nearest_idx = nearest_indices[timeline_key]
+        else:
+            nearest_idx = nearest_sample_index(times, t, sample_count)
+            if nearest_indices is not None:
+                nearest_indices[timeline_key] = nearest_idx
         value = values[nearest_idx]
 
     return default if value is None else value
@@ -52,19 +62,35 @@ def constant_force(simulation: dict[str, Any], t: float) -> Any:
     fy = 0.0
     fz = 0.0
     animation_times = _get_animation_times(simulation)
+    nearest_indices: dict[tuple[int, int], int] = {}
 
     for force_node in simulation.get("forces", []):
         if force_node.get("node_type") == "CONTINUUM_FLOW_FORCE_CONSTANT_NODE":
             force = force_node.get("force") or {}
 
             fx += get_animated_node_value(
-                force_node, "fx", t, force.get("x", 0.0), animation_times
+                force_node,
+                "fx",
+                t,
+                force.get("x", 0.0),
+                animation_times,
+                nearest_indices,
             )
             fy += get_animated_node_value(
-                force_node, "fy", t, force.get("y", 0.0), animation_times
+                force_node,
+                "fy",
+                t,
+                force.get("y", 0.0),
+                animation_times,
+                nearest_indices,
             )
             fz += get_animated_node_value(
-                force_node, "fz", t, force.get("z", 0.0), animation_times
+                force_node,
+                "fz",
+                t,
+                force.get("z", 0.0),
+                animation_times,
+                nearest_indices,
             )
 
     return fx, fy, fz
@@ -79,19 +105,24 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
     """
     swirl_nodes = []
     animation_times = _get_animation_times(simulation)
+    nearest_indices: dict[tuple[int, int], int] = {}
 
     for node in simulation.get("forces", []):
         if node.get("node_type") != "CONTINUUM_FLOW_FORCE_SWIRL_NODE":
             continue
 
-        strength = get_animated_node_value(node, "strength", t, 0.0, animation_times)
+        strength = get_animated_node_value(
+            node, "strength", t, 0.0, animation_times, nearest_indices
+        )
         origin = get_animated_node_value(
-            node, "origin", t, [0.0, 0.0, 0.0], animation_times
+            node, "origin", t, [0.0, 0.0, 0.0], animation_times, nearest_indices
         )
         axis = get_animated_node_value(
-            node, "axis", t, [0.0, 0.0, 1.0], animation_times
+            node, "axis", t, [0.0, 0.0, 1.0], animation_times, nearest_indices
         )
-        radius = get_animated_node_value(node, "radius", t, 0.0, animation_times)
+        radius = get_animated_node_value(
+            node, "radius", t, 0.0, animation_times, nearest_indices
+        )
 
         origin = np.asarray(origin, dtype=np.float32)
         axis = np.asarray(axis, dtype=np.float32)
@@ -117,12 +148,15 @@ def swirl_force(simulation: dict[str, Any], t: float) -> Any:
 def turbulence_force(simulation: dict[str, Any], t: float) -> Any:
     turbulence_nodes = []
     animation_times = _get_animation_times(simulation)
+    nearest_indices: dict[tuple[int, int], int] = {}
 
     for node in simulation.get("forces", []):
         if node.get("node_type") != "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE":
             continue
 
-        amplitude = get_animated_node_value(node, "amplitude", t, 0.0, animation_times)
+        amplitude = get_animated_node_value(
+            node, "amplitude", t, 0.0, animation_times, nearest_indices
+        )
         frequency = max(abs(float(node.get("frequency", 1.0))), 1.0e-6)
 
         turbulence_nodes.append(

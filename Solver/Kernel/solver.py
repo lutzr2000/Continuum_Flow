@@ -62,6 +62,7 @@ def get_source_values(
         name: np.zeros(len(source_entries), dtype=dtype)
         for name, (_, _, _, dtype, _) in property_map.items()
     }
+    nearest_indices: dict[int, int] = {}
 
     for value_name, (
         section_name,
@@ -87,10 +88,11 @@ def get_source_values(
                 ).get("values") or ()
             sample_count = min(len(animation_times), len(animation_values))
             if sample_count > 0:
-                nearest_time_idx = min(
-                    range(sample_count),
-                    key=lambda idx: abs(float(animation_times[idx]) - float(t)),
-                )
+                if sample_count not in nearest_indices:
+                    nearest_indices[sample_count] = helper.nearest_sample_index(
+                        animation_times, t, sample_count
+                    )
+                nearest_time_idx = nearest_indices[sample_count]
                 value = animation_values[nearest_time_idx]
             if component is not None:
                 value = value[component] if value is not None else 0.0
@@ -147,6 +149,7 @@ def get_simulation_values(
     }
 
     values = {}
+    nearest_indices: dict[int, int] = {}
     for section_name, section_properties in property_map.items():
         static_section = physics.get(section_name) or {}
         values[section_name] = {}
@@ -159,10 +162,11 @@ def get_simulation_values(
             ) or ()
             sample_count = min(len(animation_times), len(animation_values))
             if sample_count > 0 and not has_live_value:
-                nearest_time_idx = min(
-                    range(sample_count),
-                    key=lambda idx: abs(float(animation_times[idx]) - float(t)),
-                )
+                if sample_count not in nearest_indices:
+                    nearest_indices[sample_count] = helper.nearest_sample_index(
+                        animation_times, t, sample_count
+                    )
+                nearest_time_idx = nearest_indices[sample_count]
                 value = animation_values[nearest_time_idx]
             values[section_name][value_name] = float(value)
 
@@ -528,41 +532,46 @@ def solver(config: dict):
     # velocity
     u_initial, v_initial, w_initial = compute_inital_velocity(simulation)
 
-    u = helper.full_device(context, sparse_pool_shape, u_initial)
-    v = helper.full_device(context, sparse_pool_shape, v_initial)
-    w = helper.full_device(context, sparse_pool_shape, w_initial)
+    u = helper.full_device(context, sparse_pool_shape, u_initial, queue=queue)
+    v = helper.full_device(context, sparse_pool_shape, v_initial, queue=queue)
+    w = helper.full_device(context, sparse_pool_shape, w_initial, queue=queue)
 
-    u_work = helper.full_device(context, sparse_pool_shape, u_initial)
-    v_work = helper.full_device(context, sparse_pool_shape, v_initial)
-    w_work = helper.full_device(context, sparse_pool_shape, w_initial)
+    u_work = helper.full_device(context, sparse_pool_shape, u_initial, queue=queue)
+    v_work = helper.full_device(context, sparse_pool_shape, v_initial, queue=queue)
+    w_work = helper.full_device(context, sparse_pool_shape, w_initial, queue=queue)
 
-    velocity_maxima = helper.zeros_device(context, 3)
+    velocity_maxima = helper.full_device(context, 3, 0, queue=queue)
+    velocity_maxima_host = np.empty(3, dtype=FIELD_DTYPE)
 
     partial_velocity_maxima = helper.device_array(
         context, (kernel_config.MAX_REDUCTION_BLOCKS, 3), FIELD_DTYPE
     )
 
     # scalars
-    temperature = helper.full_device(context, sparse_pool_shape, reference_temperature)
-    smoke = helper.zeros_device(context, sparse_pool_shape)
-    fuel = helper.zeros_device(context, sparse_pool_shape)
-    oxygen = helper.full_device(context, sparse_pool_shape, 100.0)
+    temperature = helper.full_device(
+        context, sparse_pool_shape, reference_temperature, queue=queue
+    )
+    smoke = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    fuel = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    oxygen = helper.full_device(context, sparse_pool_shape, 100.0, queue=queue)
 
     temperature_work = helper.full_device(
-        context, sparse_pool_shape, reference_temperature
+        context, sparse_pool_shape, reference_temperature, queue=queue
     )
-    smoke_work = helper.zeros_device(context, sparse_pool_shape)
-    fuel_work = helper.zeros_device(context, sparse_pool_shape)
-    oxygen_work = helper.full_device(context, sparse_pool_shape, 100.0)
+    smoke_work = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    fuel_work = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    oxygen_work = helper.full_device(context, sparse_pool_shape, 100.0, queue=queue)
 
     # flame
-    flame = helper.zeros_device(context, sparse_pool_shape)
+    flame = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
 
     # scratch
-    scratch_A = helper.full_device(context, sparse_pool_shape, reference_temperature)
-    scratch_B = helper.zeros_device(context, sparse_pool_shape)
-    scratch_C = helper.zeros_device(context, sparse_pool_shape)
-    scratch_D = helper.full_device(context, sparse_pool_shape, 100.0)
+    scratch_A = helper.full_device(
+        context, sparse_pool_shape, reference_temperature, queue=queue
+    )
+    scratch_B = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    scratch_C = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
+    scratch_D = helper.full_device(context, sparse_pool_shape, 100.0, queue=queue)
 
     # Scratch-buffer lifecycle within each time-loop iteration:
     #   A-C: source/obstacle velocities -> velocity predictor -> scalar predictor
@@ -571,16 +580,18 @@ def solver(config: dict):
     # Each arrow marks the point after which the previous contents are dead.
 
     # pressure
-    p = helper.zeros_device(context, sparse_pool_shape)
+    p = helper.full_device(context, sparse_pool_shape, 0, queue=queue)
 
     pressure_rhs = scratch_A
     vorticity_magnitude = scratch_D
 
-    rhs_partial_sums = helper.zeros_device(context, kernel_config.MAX_REDUCTION_BLOCKS)
-    rhs_partial_counts = helper.zeros_device(
-        context, kernel_config.MAX_REDUCTION_BLOCKS
+    rhs_partial_sums = helper.full_device(
+        context, kernel_config.MAX_REDUCTION_BLOCKS, 0, queue=queue
     )
-    rhs_mean_buffer = helper.zeros_device(context, 1)
+    rhs_partial_counts = helper.full_device(
+        context, kernel_config.MAX_REDUCTION_BLOCKS, 0, queue=queue
+    )
+    rhs_mean_buffer = helper.full_device(context, 1, 0, queue=queue)
 
     # ------------reference frame------------------
     reference_frame = simulation.get("reference_frame") or {}
@@ -639,19 +650,24 @@ def solver(config: dict):
 
         # geometry source mask
         geometry_source_masks.append(
-            helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+            helper.full_device(
+                context, sparse_pool_shape, False, dtype=np.bool_, queue=queue
+            )
         )
 
     animated_sources = [is_animated(base_masks) for base_masks in source_base_masks]
     has_animated_sources = any(animated_sources)
 
-    source_tile_mask = helper.zeros_device(
-        context, tile_shape, dtype=np.bool_
+    source_tile_mask = helper.full_device(
+        context, tile_shape, False, dtype=np.bool_, queue=queue
     )  # determines which tiles are active due to source activity
 
     # ------------source particles------------------
     particle_source_masks = [
-        helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_) for _ in sources
+        helper.full_device(
+            context, sparse_pool_shape, False, dtype=np.bool_, queue=queue
+        )
+        for _ in sources
     ]
 
     has_particle_sources = any(
@@ -700,7 +716,9 @@ def solver(config: dict):
 
         obstacle_base_masks.extend(base_masks)
 
-    obstacle_mask = helper.zeros_device(context, sparse_pool_shape, dtype=np.bool_)
+    obstacle_mask = helper.full_device(
+        context, sparse_pool_shape, False, dtype=np.bool_, queue=queue
+    )
 
     # ------------multigrid------------------
     (
@@ -729,6 +747,22 @@ def solver(config: dict):
         tile_shape=tile_shape,
         voxel_size=delta,
         origin=origin,
+    )
+
+    force_nodes = simulation.get("forces") or ()
+    swirl_capacity = sum(
+        node.get("node_type") == "CONTINUUM_FLOW_FORCE_SWIRL_NODE"
+        for node in force_nodes
+    )
+    turbulence_capacity = sum(
+        node.get("node_type") == "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"
+        for node in force_nodes
+    )
+    swirl_config_device = helper.device_array(
+        context, (max(1, swirl_capacity), 8), FIELD_DTYPE
+    )
+    turbulence_config_device = helper.device_array(
+        context, (max(1, turbulence_capacity), 4), FIELD_DTYPE
     )
 
     # ------------time loop------------------
@@ -1125,6 +1159,7 @@ def solver(config: dict):
             delta,
             cfl,
             output_time_step,
+            maxima_host=velocity_maxima_host,
         )
         # ------------Reference Frame Velocity Transfer-------------------
         if reference_velocity_transfer != 0.0 and reference_frame_animated:
@@ -1425,25 +1460,24 @@ def solver(config: dict):
         swirl_config, has_swirl_nodes = forces.swirl_force(simulation, t)
         turbulence_config, has_turbulence_nodes = forces.turbulence_force(simulation, t)
 
-        swirl_config_device = helper.to_device(
-            context,
-            np.ascontiguousarray(
-                np.asarray(
-                    swirl_config,
-                    dtype=FIELD_DTYPE,
-                ).reshape((-1, 8))
-            ),
+        swirl_config_host = np.ascontiguousarray(
+            np.asarray(swirl_config, dtype=FIELD_DTYPE).reshape((-1, 8))
+        )
+        turbulence_config_host = np.ascontiguousarray(
+            np.asarray(turbulence_config, dtype=FIELD_DTYPE).reshape((-1, 4))
         )
 
-        turbulence_config_device = helper.to_device(
-            context,
-            np.ascontiguousarray(
-                np.asarray(
-                    turbulence_config,
-                    dtype=FIELD_DTYPE,
-                ).reshape((-1, 4))
-            ),
-        )
+        if swirl_config_host.size:
+            cl.enqueue_copy(
+                queue, swirl_config_device, swirl_config_host, is_blocking=False
+            )
+        if turbulence_config_host.size:
+            cl.enqueue_copy(
+                queue,
+                turbulence_config_device,
+                turbulence_config_host,
+                is_blocking=False,
+            )
 
         swirl_count = len(swirl_config)
         turbulence_count = len(turbulence_config)

@@ -23,6 +23,20 @@ OPENCL_CACHE_DIR = (
 PROGRAM_CACHE: dict[tuple[int, Path], dict[str, cl.Kernel]] = {}
 
 
+def nearest_sample_index(times: Any, t: float, sample_count: int) -> int:
+    """Return the nearest index in a sorted timeline, preferring ties left."""
+    insertion = int(np.searchsorted(times[:sample_count], t, side="left"))
+    if insertion <= 0:
+        return 0
+    if insertion >= sample_count:
+        return sample_count - 1
+
+    before = insertion - 1
+    if float(t) - float(times[before]) <= float(times[insertion]) - float(t):
+        return before
+    return insertion
+
+
 def load_program(
     context: cl.Context,
     path: Path,
@@ -93,12 +107,14 @@ def fill_device(queue, buffer, value, dtype=FIELD_DTYPE):
     )
 
 
-def zeros_device(context, shape, dtype=FIELD_DTYPE):
-    return to_device(context, np.zeros(shape, dtype=dtype))
+def full_device(context, shape, value, dtype=FIELD_DTYPE, *, queue=None):
+    """Allocate and fill a device buffer without a full-sized host staging array."""
+    if queue is None:
+        return to_device(context, np.full(shape, value, dtype=dtype))
 
-
-def full_device(context, shape, value, dtype=FIELD_DTYPE):
-    return to_device(context, np.full(shape, value, dtype=dtype))
+    buffer = device_array(context, shape, dtype)
+    fill_device(queue, buffer, value, dtype=dtype)
+    return buffer
 
 
 def transform_source_velocities(

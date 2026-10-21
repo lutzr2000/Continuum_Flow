@@ -22,6 +22,7 @@ def compute_new_timestep(
     delta: float,
     cfl_max: float,
     max_dt: float | None = None,
+    maxima_host: np.ndarray | None = None,
 ) -> float:
     r"""
     Compute a stable timestep from the component-wise velocity maxima.
@@ -74,10 +75,8 @@ def compute_new_timestep(
         cl.LocalMemory(local_memory_size),
     )
 
-    maxima_host = np.empty(
-        3,
-        dtype=FIELD_DTYPE,
-    )
+    if maxima_host is None:
+        maxima_host = np.empty(3, dtype=FIELD_DTYPE)
 
     cl.enqueue_copy(
         queue,
