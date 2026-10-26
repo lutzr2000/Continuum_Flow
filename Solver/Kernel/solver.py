@@ -740,6 +740,7 @@ def solver(config: dict):
     # ------------output------------------
     output_cfg = ((simulation.get("outputs") or [None])[0]) or {}
     output_time_step = 1.0 / int(output_cfg.get("fps", 24))
+    output_start_frame = max(1, int(output_cfg.get("start_frame", 1)))
     output_manager = output.create_output(
         context=context,
         output_config=output_cfg,
@@ -1731,7 +1732,7 @@ def solver(config: dict):
             output_index += 1
             next_output_time += output_time_step
 
-            if output_manager["enabled"]:
+            if output_manager["enabled"] and output_index >= output_start_frame:
                 output.submit_output(
                     output_manager,
                     queue=queue,

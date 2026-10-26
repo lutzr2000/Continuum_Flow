@@ -89,6 +89,14 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     )
 
     fps: IntProperty(name="FPS", default=24, min=1, soft_min=1, description="Output frame rate", options=set())  # type: ignore
+    output_start_frame: IntProperty(
+        name="Output Start Frame",
+        default=1,
+        min=1,
+        soft_min=1,
+        description="First output frame written to disk",
+        options=set(),
+    )  # type: ignore
     output_precision: EnumProperty(  # type: ignore
         name="Precision",
         items=(
@@ -212,6 +220,7 @@ class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
         self._set_layout_enabled(context, layout)
 
         layout.prop(self, "fps")
+        layout.prop(self, "output_start_frame")
         layout.prop(self, "output_precision")
 
         layout.separator()

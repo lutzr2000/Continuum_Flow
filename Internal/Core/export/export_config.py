@@ -680,6 +680,7 @@ def build_output_node_entries(node):
     output_path = bpy.path.abspath(node.output_path) if node.output_path else ""
     return {
         "fps": int(node.fps),
+        "start_frame": max(1, int(getattr(node, "output_start_frame", 1))),
         "precision": str(getattr(node, "output_precision", "float16")),
         "fields": {
             "velocity": {

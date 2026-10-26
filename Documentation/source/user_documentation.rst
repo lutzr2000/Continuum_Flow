@@ -188,6 +188,9 @@ This node lets you specify the output of your simulation. It is worth paying som
 **FPS**
     The frame rate at which data is saved. Defaults to your scene frame rate.
 
+**Output Start Frame**
+    The first frame for which data is written.
+
 **Precision**
     The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.
 
