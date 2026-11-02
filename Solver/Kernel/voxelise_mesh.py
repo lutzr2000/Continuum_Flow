@@ -9,34 +9,114 @@ from . import helper
 
 def triangulate_faces(points, face_counts, face_indices, hole_indices=()):
     """Triangulate USD polygon faces once, using the first point sample."""
-    triangles = []
-    offset = 0
-    holes = set(int(index) for index in hole_indices)
+    points = np.asarray(points)
+    face_counts = np.asarray(face_counts, dtype=np.int64)
+    face_indices = np.asarray(face_indices, dtype=np.int32)
+    offsets = np.empty(len(face_counts), dtype=np.int64)
+    if len(face_counts):
+        offsets[0] = 0
+        np.cumsum(face_counts[:-1], out=offsets[1:])
 
-    for face_index, count in enumerate(face_counts):
-        count = int(count)
-        face = [int(index) for index in face_indices[offset : offset + count]]
-        offset += count
+    included = face_counts >= 3
+    if len(hole_indices):
+        holes = np.asarray(hole_indices, dtype=np.int64)
+        holes = holes[(holes >= 0) & (holes < len(face_counts))]
+        included[holes] = False
 
-        if face_index in holes or count < 3:
-            continue
-        if count == 3:
-            triangles.append(face)
-            continue
+    triangle_groups = []
 
-        triangles.extend(triangulate_polygon(points, face))
+    triangle_faces = np.flatnonzero(included & (face_counts == 3))
 
-    if offset != len(face_indices):
-        raise ValueError("Invalid USD mesh topology: face counts do not match indices")
+    if triangle_faces.size:
+        positions = offsets[triangle_faces, None] + np.arange(3)
+        triangle_groups.append(face_indices[positions])
 
-    return np.ascontiguousarray(triangles, dtype=np.int32).reshape(-1, 3)
+    quad_faces = np.flatnonzero(included & (face_counts == 4))
+
+    if quad_faces.size:
+        positions = offsets[quad_faces, None] + np.arange(4)
+        quads = face_indices[positions]
+        triangle_groups.append(_triangulate_quads(points, quads))
+
+    for face_index in np.flatnonzero(included & (face_counts > 4)):
+        offset = offsets[face_index]
+        count = face_counts[face_index]
+        face = face_indices[offset : offset + count].tolist()
+        triangle_groups.append(
+            np.asarray(triangulate_polygon(points, face), dtype=np.int32)
+        )
+
+    if not triangle_groups:
+        return np.empty((0, 3), dtype=np.int32)
+
+    return np.ascontiguousarray(np.concatenate(triangle_groups), dtype=np.int32)
+
+
+def _triangulate_quads(points, quads):
+    """Triangulate simple quads in one vectorized batch, including concave ones."""
+    polygons = np.asarray(points[quads], dtype=np.float64)
+    following = np.roll(polygons, -1, axis=1)
+    normals = np.stack(
+        (
+            np.sum(
+                (polygons[:, :, 1] - following[:, :, 1])
+                * (polygons[:, :, 2] + following[:, :, 2]),
+                axis=1,
+            ),
+            np.sum(
+                (polygons[:, :, 2] - following[:, :, 2])
+                * (polygons[:, :, 0] + following[:, :, 0]),
+                axis=1,
+            ),
+            np.sum(
+                (polygons[:, :, 0] - following[:, :, 0])
+                * (polygons[:, :, 1] + following[:, :, 1]),
+                axis=1,
+            ),
+        ),
+        axis=1,
+    )
+    drop_axes = np.argmax(np.abs(normals), axis=1)
+    projection_axes = np.asarray(((1, 2), (0, 2), (0, 1)))
+    projected = np.take_along_axis(
+        polygons, projection_axes[drop_axes, None, :], axis=2
+    )
+
+    next_points = np.roll(projected, -1, axis=1)
+    signed_area = np.sum(
+        projected[:, :, 0] * next_points[:, :, 1]
+        - next_points[:, :, 0] * projected[:, :, 1],
+        axis=1,
+    )
+    orientation = np.where(signed_area >= 0.0, 1.0, -1.0)
+    previous = np.roll(projected, 1, axis=1)
+    edge_in = projected - previous
+    edge_out = next_points - projected
+    corner_cross = (
+        edge_in[:, :, 0] * edge_out[:, :, 1] - edge_in[:, :, 1] * edge_out[:, :, 0]
+    )
+    concave = corner_cross * orientation[:, None] < 0.0
+    scale = np.maximum(np.ptp(projected, axis=1).max(axis=1), 1.0)
+    epsilon = np.finfo(np.float64).eps * scale * scale * 32.0
+    valid = (np.abs(signed_area) > epsilon) & (concave.sum(axis=1) <= 1)
+    starts = np.where(np.any(concave, axis=1), np.argmax(concave, axis=1), 0)
+
+    order = (starts[:, None] + np.arange(4)) % 4
+    ordered = np.take_along_axis(quads, order, axis=1)
+    result = np.empty((len(quads), 2, 3), dtype=np.int32)
+    result[:, 0] = ordered[:, (0, 1, 2)]
+    result[:, 1] = ordered[:, (0, 2, 3)]
+
+    for index in np.flatnonzero(~valid):
+        result[index] = triangulate_polygon(points, quads[index].tolist())
+
+    return result.reshape(-1, 3)
 
 
 def triangulate_polygon(points, face):
     """Ear-clip one planar polygon, including concave Blender/USD faces."""
     polygon = np.asarray(points[face], dtype=np.float64)
 
-    # Newell's method gives a stable face normal without assuming a triangle.
     following = np.roll(polygon, -1, axis=0)
     normal = np.array(
         [
@@ -63,8 +143,8 @@ def triangulate_polygon(points, face):
 
     remaining = list(range(len(face)))
     result = []
+
     while len(remaining) > 3:
-        ear_found = False
         for position, current in enumerate(remaining):
             previous = remaining[position - 1]
             following_index = remaining[(position + 1) % len(remaining)]
@@ -86,13 +166,7 @@ def triangulate_polygon(points, face):
 
             result.append([face[previous], face[current], face[following_index]])
             del remaining[position]
-            ear_found = True
             break
-
-        if not ear_found:
-            raise ValueError(
-                "Cannot triangulate a degenerate or self-intersecting USD face"
-            )
 
     result.append([face[index] for index in remaining])
     return result
