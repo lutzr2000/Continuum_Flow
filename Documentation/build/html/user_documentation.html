@@ -196,7 +196,6 @@
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">User Documentation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
-<li class="toctree-l1"><a class="reference internal" href="best_practice.html">Best Practice</a></li>
 </ul>
 
 </div>
@@ -242,7 +241,7 @@
 <h2>General Workflow<a class="headerlink" href="#general-workflow" title="Link to this heading">¶</a></h2>
 <p>In general, Continuum Flow’s workflow is node-based. After installation, there will be a new editor in the editor options at the top left, where you also find things like the UV Editor. Go there and create a new node tree. Then you can start setting up your simulation.</p>
 <p>The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.</p>
-<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations are animated as well.</p>
+<p>Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations can be animated as well.</p>
 </section>
 <section id="nodes">
 <h2>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">¶</a></h2>
@@ -257,7 +256,7 @@
 <dl class="simple">
 <dt><strong>CPU/GPU</strong></dt><dd><p>Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.</p>
 </dd>
-<dt><strong>Device</strong></dt><dd><p>If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if now compatible device is found.</p>
+<dt><strong>Device</strong></dt><dd><p>If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if no compatible device is found.</p>
 </dd>
 <dt><strong>Start Frame</strong></dt><dd><p>The frame at which the simulation starts.</p>
 </dd>
@@ -358,11 +357,13 @@ Wall: wall with friction.</p>
 <a class="block-image-left reference internal image-reference" href="_images/viewer_node.jpg"><img alt="_images/viewer_node.jpg" class="block-image-left" src="_images/viewer_node.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>This node lets you view the simulation domain in the viewport.</p>
+<p>This node lets you view the simulation domain in the viewport. You can start the preview with the play button. During this you can interact with the simulation parameters. When you press stop the live preview is stopped. No data is saved to disk in this mode.</p>
 <dl class="simple">
 <dt><strong>Show/Hide Domain</strong></dt><dd><p>Shows or hides a viewport wireframe preview of the domain.</p>
 </dd>
-<dt><strong>Live Preview</strong></dt><dd><p>If active a live preview of the simulation is shown in the viewport. Please note that this option can reduce the solvers performance.</p>
+<dt><strong>Play / Stop</strong></dt><dd><p>Play starts a continuous live simulation preview in the viewport. The preview does not write VDB output and keeps running until Stop is pressed.</p>
+</dd>
+<dt><strong>Loop</strong></dt><dd><p>If enabled, the live preview will loop back to the start frame when the end frame is reached.</p>
 </dd>
 <dt><strong>Smoke Density</strong></dt><dd><p>Density of the preview smoke. Only affects the preview not the final output!</p>
 </dd>
@@ -384,11 +385,15 @@ Wall: wall with friction.</p>
 <dl class="simple">
 <dt><strong>FPS</strong></dt><dd><p>The frame rate at which data is saved. Defaults to your scene frame rate.</p>
 </dd>
+<dt><strong>Output Start Frame</strong></dt><dd><p>The first frame for which data is written.</p>
+</dd>
 <dt><strong>Precision</strong></dt><dd><p>The floating point precision of the saved data. Usually float16 is fine. Only in rare occasions float32 might be necessary.</p>
 </dd>
 <dt><strong>Fields</strong></dt><dd><p>Lets you select which fields to save: velocity, pressure, temperature, smoke, fuel, and flame. Smoke and flame are enabled by default; the other fields are disabled by default. Enabling fewer fields reduces storage use and output overhead. You can change the ouput names in the text fields to the left. The default naming follows Blenders naming convention.</p>
 </dd>
 <dt><strong>Path</strong></dt><dd><p>Path on your disk where to save the data. You can use the file browser by pressing the small button on the right.</p>
+</dd>
+<dt><strong>Preview</strong></dt><dd><p>If this is on you can see the simulation in the viewport during baking. Turning this off slightly improves performance and reduces memory usage.</p>
 </dd>
 <dt><strong>Bake/Free Bake</strong></dt><dd><p>Bake: starts the simulation.
 Free Bake: deletes the baked data.
@@ -433,6 +438,18 @@ Press Esc during an active bake to stop.</p>
 </a>
 </figure>
 <p>Node that lets you pick geometry. It can be plugged into the source or obstacle node.</p>
+<dl class="simple">
+<dt><strong>Deforming</strong></dt><dd><p>If this is on the geometries deformation is taken into account. Only turn this on where deformation is actually happening and important because it can decrease solver performance.</p>
+</dd>
+</dl>
+</section>
+<section id="collection">
+<h3>Collection<a class="headerlink" href="#collection" title="Link to this heading">¶</a></h3>
+<figure class="align-default">
+<a class="block-image-left reference internal image-reference" href="_images/obstacle_node.jpg"><img alt="_images/obstacle_node.jpg" class="block-image-left" src="_images/obstacle_node.jpg" style="width: 300px;" />
+</a>
+</figure>
+<p>All meshes in the selected collection can be used as sources or obstacles.</p>
 </section>
 <section id="particle-system">
 <h3>Particle System<a class="headerlink" href="#particle-system" title="Link to this heading">¶</a></h3>
@@ -440,7 +457,7 @@ Press Esc during an active bake to stop.</p>
 <a class="block-image-left reference internal image-reference" href="_images/particle_system.jpg"><img alt="_images/particle_system.jpg" class="block-image-left" src="_images/particle_system.jpg" style="width: 300px;" />
 </a>
 </figure>
-<p>This node lets you first select an object and then a particle system belonging to that object. The particle system can act as a source for the simulation when plugged into the source node.</p>
+<p>This node lets you first select an object and then a particle system belonging to that object. The particle system can act as a source for the simulation when plugged into the source node. If no particle system is selected on a mesh object, the vertices of its evaluated mesh are used as particles instead. This includes the object’s modifiers and Geometry Nodes and supports a changing vertex count over time.</p>
 <dl class="simple">
 <dt><strong>Radius</strong></dt><dd><p>Radius aroung each particle in which a voxel is considered a source.</p>
 </dd>
@@ -570,6 +587,7 @@ Press Esc during an active bake to stop.</p>
 <li><a class="reference internal" href="#obstacle">Obstacle</a></li>
 <li><a class="reference internal" href="#source">Source</a></li>
 <li><a class="reference internal" href="#geometry">Geometry</a></li>
+<li><a class="reference internal" href="#collection">Collection</a></li>
 <li><a class="reference internal" href="#particle-system">Particle System</a></li>
 <li><a class="reference internal" href="#force-constant">Force-Constant</a></li>
 <li><a class="reference internal" href="#force-turbulence">Force-Turbulence</a></li>

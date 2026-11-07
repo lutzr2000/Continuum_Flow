@@ -12,7 +12,7 @@ Features
 - Greatly improved performance compared to Blender's native solver
 - GPU based simulations
 - Directly integrated into Blender
-- Interaction with obstacles (stationary and movable)
+- Interaction with obstacles (stationary, movable and deformable)
 - Particle systems can be used as sources
 - Combustion model
 - Easy to set up
@@ -20,12 +20,10 @@ Features
 Limitations
 -----------
 - No interaction with Blender's native force fields
-- Obstacles cannot deform (shape keys or armatures have no effect)
 
 Disclaimers
 -----------
-- The software is currently in alpha, so bugs can be expected. Please report them on GitHub.
-- Some things in the software might change in the future. Currently compatibility between versions is not guranteed.
+- This is a solo hobby project. Things can be buggy, please report any issues on GitHub.
 
 Getting started
 ---------------
@@ -41,4 +39,3 @@ Further sections
    install
    user_documentation
    examples
-   best_practice

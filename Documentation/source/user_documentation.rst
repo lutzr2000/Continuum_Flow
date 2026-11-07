@@ -8,7 +8,7 @@ In general, Continuum Flow's workflow is node-based. After installation, there w
 
 The solver simulates multiple fields. Things like velocity, pressure, and temperature are self-explanatory. One additional field transported by the flow is fuel, which can lead to burning when a high enough temperature is reached. Another is smoke, which can either be spawned by a source or be created through burning. Flames are also created during burning and produce additional temperature.
 
-Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations are animated as well.
+Many simulation settings can be animated. This includes physics values, source temperature, smoke, fuel, extra pressure and velocity, constant-force components, and swirl settings. Source and obstacle object transformations can be animated as well.
 
 Nodes
 -----
@@ -28,7 +28,7 @@ This is the core node of every simulation. It controls the frame range for your 
     Lets you choose whether you want to simulate on the CPU or GPU. Only NVIDIA GPUs are supported. If no compatible GPU is found, the GPU button will be unavailable.
 
 **Device**
-    If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if now compatible device is found.
+    If you select CPU or GPU above a list of all available devices of that type is shown (most Desktop computers only have one CPU or GPU). You can choose the desired device from that list. The solver will display if no compatible device is found.
 
 **Start Frame**
     The frame at which the simulation starts.
@@ -155,13 +155,16 @@ Viewer
    :class: block-image-left
    :width: 300px
 
-This node lets you view the simulation domain in the viewport.
+This node lets you view the simulation domain in the viewport. You can start the preview with the play button. During this you can interact with the simulation parameters. When you press stop the live preview is stopped. No data is saved to disk in this mode.
 
 **Show/Hide Domain**
     Shows or hides a viewport wireframe preview of the domain.
 
 **Play / Stop**
-    Play starts a continuous live simulation preview in the viewport. The preview does not write VDB output and keeps running until Stop is pressed or Esc is used. Baking is separate and writes the configured fields to disk without showing a live preview.
+    Play starts a continuous live simulation preview in the viewport. The preview does not write VDB output and keeps running until Stop is pressed. 
+
+**Loop**
+    If enabled, the live preview will loop back to the start frame when the end frame is reached.
 
 **Smoke Density**
     Density of the preview smoke. Only affects the preview not the final output!
@@ -199,6 +202,9 @@ This node lets you specify the output of your simulation. It is worth paying som
 
 **Path**
     Path on your disk where to save the data. You can use the file browser by pressing the small button on the right.
+
+**Preview**
+    If this is on you can see the simulation in the viewport during baking. Turning this off slightly improves performance and reduces memory usage.
 
 **Bake/Free Bake**
     Bake: starts the simulation.
@@ -253,11 +259,14 @@ Geometry
 
 Node that lets you pick geometry. It can be plugged into the source or obstacle node.
 
+**Deforming**
+    If this is on the geometries deformation is taken into account. Only turn this on where deformation is actually happening and important because it can decrease solver performance.
+
 
 Collection
 ~~~~~~~~~~
 
-.. figure:: ../images/geometry_node.jpg
+.. figure:: ../images/obstacle_node.jpg
    :class: block-image-left
    :width: 300px
 
