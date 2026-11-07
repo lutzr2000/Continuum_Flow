@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import PointerProperty
+from bpy.props import FloatProperty, PointerProperty
 
 from . import node_base
 from . import sockets
@@ -20,6 +20,15 @@ class ContinuumFlowCollectionNode(node_base.ContinuumFlowBaseNode):
         type=bpy.types.Collection,
         description="Collection whose mesh objects are used as geometry",
     )  # type: ignore
+    velocity_transfer: FloatProperty(
+        name="Velocity Transfer",
+        default=0.0,
+        min=0.0,
+        soft_max=100.0,
+        subtype="PERCENTAGE",
+        description="Percentage of object motion transferred to the fluid when used as a source",
+        options=set(),
+    )  # type: ignore
 
     def _sync_node(self):
         self._ensure_named_output(
@@ -30,3 +39,4 @@ class ContinuumFlowCollectionNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         layout.prop(self, "source_collection", text="Collection")
+        layout.prop(self, "velocity_transfer", slider=True)

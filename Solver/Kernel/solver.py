@@ -1244,7 +1244,12 @@ def solver(config: dict):
         # ------------Source BC-------------------
         for source_idx, source_mask in enumerate(geometry_source_masks):
             velocity_local = bool(source_values["velocity_local"][source_idx])
-            if velocity_local:
+            has_mesh_velocity_transfer = any(
+                float(entry["mesh_object"].get("velocity_transfer", 0.0)) != 0.0
+                for entry in source_base_masks[source_idx]
+            )
+            use_velocity_field = velocity_local or has_mesh_velocity_transfer
+            if use_velocity_field:
                 sparse_managment.reset_pools(
                     queue,
                     (scratch_A, scratch_B, scratch_C),
@@ -1269,6 +1274,7 @@ def solver(config: dict):
                     source_values["velocity_x"][source_idx],
                     source_values["velocity_y"][source_idx],
                     source_values["velocity_z"][source_idx],
+                    velocity_local,
                 )
 
             source_bc_kernels["source_bc"](
@@ -1289,7 +1295,7 @@ def solver(config: dict):
                 np.float32(source_values["velocity_x"][source_idx]),
                 np.float32(source_values["velocity_y"][source_idx]),
                 np.float32(source_values["velocity_z"][source_idx]),
-                np.int32(velocity_local),
+                np.int32(use_velocity_field),
                 scratch_A,
                 scratch_B,
                 scratch_C,

@@ -113,9 +113,18 @@ __kernel void update_source_velocity(__global float *velocity_x,
                                      const float a20,
                                      const float a21,
                                      const float a22,
-                                     const float source_u,
-                                     const float source_v,
-                                     const float source_w,
+                                     const float vx_i,
+                                     const float vx_j,
+                                     const float vx_k,
+                                     const float vx_c,
+                                     const float vy_i,
+                                     const float vy_j,
+                                     const float vy_k,
+                                     const float vy_c,
+                                     const float vz_i,
+                                     const float vz_j,
+                                     const float vz_k,
+                                     const float vz_c,
                                      const int offset_i,
                                      const int offset_j,
                                      const int offset_k,
@@ -159,9 +168,9 @@ __kernel void update_source_velocity(__global float *velocity_x,
         const int local_mask_index = (bi * local_size_y + bj) * local_size_z + bk;
 
         if (local_mask_is_set(local_mask, local_mask_index)) {
-            velocity_x[cell.cell_index] = source_u;
-            velocity_y[cell.cell_index] = source_v;
-            velocity_z[cell.cell_index] = source_w;
+            velocity_x[cell.cell_index] = vx_i * i + vx_j * j + vx_k * k + vx_c;
+            velocity_y[cell.cell_index] = vy_i * i + vy_j * j + vy_k * k + vy_c;
+            velocity_z[cell.cell_index] = vz_i * i + vz_j * j + vz_k * k + vz_c;
         }
     }
 }

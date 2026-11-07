@@ -471,8 +471,9 @@ def update_source_velocity(
     local_velocity_x: float,
     local_velocity_y: float,
     local_velocity_z: float,
+    velocity_local: bool = True,
 ) -> None:
-    """Write one source's per-mesh local velocity into shared scratch fields."""
+    """Write configured and mesh-motion source velocities into scratch fields."""
     local_velocity = np.asarray(
         (
             local_velocity_x,
@@ -483,8 +484,11 @@ def update_source_velocity(
     )
 
     for entry in base_masks:
+        velocity_transfer = np.float32(
+            entry["mesh_object"].get("velocity_transfer", 0.0)
+        )
         if entry["mesh_object"].get("deforming", False):
-            triangles, matrix, _ = voxelise_mesh.world_triangles(entry, t)
+            triangles, matrix, rate = voxelise_mesh.world_triangles(entry, t)
             linear = np.asarray(matrix[:3, :3], dtype=np.float32)
             axis_lengths = np.linalg.norm(linear, axis=0)
             rotation = linear.copy()
@@ -492,7 +496,21 @@ def update_source_velocity(
                 if axis_lengths[axis] > 1.0e-8:
                     rotation[:, axis] /= axis_lengths[axis]
             coefficients = np.zeros((3, 4), dtype=np.float32)
-            coefficients[:, 3] = rotation @ local_velocity
+            coefficients[:, 3] = (
+                rotation @ local_velocity if velocity_local else local_velocity
+            )
+            if rate is not None and velocity_transfer != 0.0:
+                velocity_transform = np.asarray(
+                    rate @ np.linalg.inv(matrix), dtype=np.float32
+                )
+                coefficients[:, :3] += (
+                    velocity_transform[:3, :3] * np.float32(delta) * velocity_transfer
+                )
+                coefficients[:, 3] += (
+                    velocity_transform[:3, :3]
+                    @ np.asarray((origin_x, origin_y, origin_z), dtype=np.float32)
+                    + velocity_transform[:3, 3]
+                ) * velocity_transfer
 
             voxelise_mesh.voxelise_deforming(
                 queue.context,
@@ -511,7 +529,7 @@ def update_source_velocity(
 
         voxels = entry["voxels"]
 
-        matrix, _ = helper.get_matrix_data(
+        matrix, rate = helper.get_matrix_data(
             entry["matrix_times"],
             entry["matrix_matrices"],
             entry["matrix_rates"],
@@ -536,7 +554,22 @@ def update_source_velocity(
             if axis_lengths[axis] > 1.0e-8:
                 rotation[:, axis] /= axis_lengths[axis]
 
-        world_velocity = rotation @ local_velocity
+        world_velocity = rotation @ local_velocity if velocity_local else local_velocity
+
+        velocity_transform = np.asarray(rate @ inv, dtype=np.float32)
+        velocity_transform *= velocity_transfer
+
+        d = np.float32(delta)
+        ox = np.float32(origin_x)
+        oy = np.float32(origin_y)
+        oz = np.float32(origin_z)
+
+        velocity_coefficients = velocity_transform[:3, :3] * d
+        velocity_constants = (
+            velocity_transform[:3, :3] @ np.asarray((ox, oy, oz), dtype=np.float32)
+            + velocity_transform[:3, 3]
+            + world_velocity
+        )
 
         transform = prepare_cell_transform(
             inv,
@@ -594,9 +627,18 @@ def update_source_velocity(
             index_tile_map,
             voxels["mask"],
             *[np.float32(value) for value in transform],
-            np.float32(world_velocity[0]),
-            np.float32(world_velocity[1]),
-            np.float32(world_velocity[2]),
+            np.float32(velocity_coefficients[0, 0]),
+            np.float32(velocity_coefficients[0, 1]),
+            np.float32(velocity_coefficients[0, 2]),
+            np.float32(velocity_constants[0]),
+            np.float32(velocity_coefficients[1, 0]),
+            np.float32(velocity_coefficients[1, 1]),
+            np.float32(velocity_coefficients[1, 2]),
+            np.float32(velocity_constants[1]),
+            np.float32(velocity_coefficients[2, 0]),
+            np.float32(velocity_coefficients[2, 1]),
+            np.float32(velocity_coefficients[2, 2]),
+            np.float32(velocity_constants[2]),
             np.int32(tile_min[0]),
             np.int32(tile_min[1]),
             np.int32(tile_min[2]),

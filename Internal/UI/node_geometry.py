@@ -1,7 +1,7 @@
 from . import sockets
 from . import node_base
 import bpy
-from bpy.props import BoolProperty, PointerProperty
+from bpy.props import BoolProperty, FloatProperty, PointerProperty
 
 
 class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
@@ -22,6 +22,15 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
         description="If a mesh is deforming (Armature, shape keys) this should be selected. With dense meshes this will degrade performance",
         default=False,
     )  # type: ignore
+    velocity_transfer: FloatProperty(
+        name="Velocity Transfer",
+        default=0.0,
+        min=0.0,
+        soft_max=100.0,
+        subtype="PERCENTAGE",
+        description="Percentage of object motion transferred to the fluid when used as a source",
+        options=set(),
+    )  # type: ignore
 
     def _sync_node(self):
         self._ensure_named_output(
@@ -32,3 +41,4 @@ class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
         self._set_layout_enabled(context, layout)
         layout.prop(self, "source_object", text="Object")
         layout.prop(self, "deforming")
+        layout.prop(self, "velocity_transfer", slider=True)

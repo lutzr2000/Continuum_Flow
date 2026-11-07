@@ -540,6 +540,8 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
                 None,
             ),
             "deforming": bool(getattr(geometry_node, "deforming", False)),
+            "velocity_transfer": float(getattr(geometry_node, "velocity_transfer", 0.0))
+            / 100.0,
         }
         for geometry_node in geometry_nodes
     ]
@@ -579,6 +581,9 @@ def expand_geometry_nodes(nodes):
                         name=f"{node.name}: {source_object.name}",
                         source_object=source_object,
                         deforming=False,
+                        velocity_transfer=float(
+                            getattr(node, "velocity_transfer", 0.0)
+                        ),
                     )
                 )
             continue
