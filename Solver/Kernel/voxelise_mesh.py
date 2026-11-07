@@ -231,6 +231,7 @@ def voxelise_all_meshes(
     context: cl.Context,
     queue: cl.CommandQueue,
     surface_kernel: cl.Kernel,
+    volume_kernel: cl.Kernel,
     delta: float,
     geometry_inputs: list[dict[str, Any]] | None,
     bake_path: str,
@@ -257,6 +258,7 @@ def voxelise_all_meshes(
             context,
             queue,
             surface_kernel,
+            volume_kernel,
             triangles,
             delta,
         )
@@ -348,12 +350,11 @@ def voxelise_static(
     context: cl.Context,
     queue: cl.CommandQueue,
     surface_kernel: cl.Kernel,
+    volume_kernel: cl.Kernel,
     triangles: np.ndarray,
     delta: float,
 ) -> dict[str, Any] | None:
-    """
-    Rasterize triangle surfaces into a padded object-local Boolean voxel mask.
-    """
+    """Rasterize a closed mesh into a filled object-local voxel mask."""
     if triangles.size == 0:
         return None
 
@@ -395,6 +396,16 @@ def voxelise_static(
         np.float32(origin[0]),
         np.float32(origin[1]),
         np.float32(origin[2]),
+    )
+
+    volume_kernel(
+        queue,
+        (int(shape[1]), int(shape[2])),
+        None,
+        mask,
+        np.int32(shape[0]),
+        np.int32(shape[1]),
+        np.int32(shape[2]),
     )
 
     return {

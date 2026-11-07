@@ -155,6 +155,49 @@ mark_voxel(volatile __global uint *mask, const int i, const int j, const int k, 
     atomic_or(mask + (index >> 5), 1u << (index & 31));
 }
 
+__kernel void fill_volume_x(volatile __global uint *mask, const int size_x, const int size_y, const int size_z) {
+    /*
+    Fill a mesh surface shell along the x-axis.
+    */
+    const int j = get_global_id(0);
+    const int k = get_global_id(1);
+
+    if (j >= size_y || k >= size_z)
+        return;
+
+    int inside = 0;
+    int previous_surface = 0;
+    int interior_start = -1;
+
+    for (int i = 0; i < size_x; ++i) {
+        const int index = (i * size_y + j) * size_z + k;
+
+        const int surface = (mask[index >> 5] & (1u << (index & 31))) != 0u;
+
+        if (surface) {
+            if (!previous_surface && inside) {
+                for (int fill_i = interior_start; fill_i < i; ++fill_i) {
+
+                    const int fill_index = (fill_i * size_y + j) * size_z + k;
+
+                    atomic_or(&mask[fill_index >> 5], 1u << (fill_index & 31));
+                }
+            }
+
+            previous_surface = 1;
+            continue;
+        }
+
+        if (previous_surface) {
+            inside = !inside;
+            previous_surface = 0;
+
+            if (inside)
+                interior_start = i;
+        }
+    }
+}
+
 __kernel void voxelise_static(__global const float *triangles,
                               volatile __global uint *mask,
                               const int triangle_count,
@@ -241,13 +284,6 @@ __kernel void voxelise_static(__global const float *triangles,
                 grid_position_3d[v_axis] = v;
 
                 mark_voxel(mask, grid_position_3d.x, grid_position_3d.y, grid_position_3d.z, size_y, size_z);
-
-                // Preserve the old one-voxel inward dilation.
-                int3 inward = grid_position_3d;
-                inward[axis] += normal[axis] > 0.0f ? -1 : 1;
-
-                if (inward[axis] >= 0 && inward[axis] < sizes[axis])
-                    mark_voxel(mask, inward.x, inward.y, inward.z, size_y, size_z);
             }
         }
     }

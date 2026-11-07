@@ -129,10 +129,6 @@ class CONTINUUM_FLOW_OT_viewer_preview(bpy.types.Operator):
             return {"CANCELLED"}
 
     def modal(self, context, event):
-        if event.type == "ESC":
-            self.request_stop()
-            return {"RUNNING_MODAL"}
-
         if event.type == "TIMER" and self.job_id is not None:
             self.update_timeline(context)
             self.publish_live_values(context)
