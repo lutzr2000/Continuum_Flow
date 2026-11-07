@@ -9,7 +9,7 @@ from bpy.props import BoolProperty, FloatProperty, FloatVectorProperty
 
 class ContinuumFlowViewerNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used as a lightweight endpoint for inspecting simulation results.
+    Node used to visualize the simulation results.
     """
 
     bl_idname = "CONTINUUM_FLOW_VIEWER_NODE"

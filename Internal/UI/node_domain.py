@@ -8,7 +8,7 @@ from bpy.props import EnumProperty
 
 class ContinuumFlowDomainNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to define the CFD domain resolution and boundary conditions.
+    This node defines the domain.
     """
 
     bl_idname = "CONTINUUM_FLOW_DOMAIN_NODE"

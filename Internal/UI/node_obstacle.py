@@ -4,7 +4,7 @@ from . import node_base
 
 class ContinuumFlowObstacleNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to define obstacle geometry inside the CFD domain.
+    Node used to define an obstacle.
     """
 
     bl_idname = "CONTINUUM_FLOW_OBSTACLE_NODE"

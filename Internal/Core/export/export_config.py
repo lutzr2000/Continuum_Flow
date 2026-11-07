@@ -2,6 +2,7 @@ from pathlib import Path
 import bpy
 import re
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from . import export_geometry, export_particles
 from .. import viewer
 from ...UI import animation_proxy
@@ -517,6 +518,7 @@ def build_obstacle_node_entries(node, start_frame, end_frame, fps):
 
 
 def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
+    geometry_nodes = expand_geometry_nodes(geometry_nodes)
     geometry_nodes = [
         geometry_node
         for geometry_node in geometry_nodes
@@ -554,6 +556,42 @@ def build_geometry_entries(geometry_nodes, start_frame, end_frame, fps):
         "geometry_inputs": geometry_inputs,
         "shape": "mesh" if geometry_inputs else "empty",
     }
+
+
+def expand_geometry_nodes(nodes):
+    """Expand collection nodes into geometry-like entries for all nested meshes."""
+    expanded = []
+    seen_objects = set()
+
+    for node in nodes:
+        if getattr(node, "bl_idname", "") == "CONTINUUM_FLOW_COLLECTION_NODE":
+            collection = getattr(node, "source_collection", None)
+            objects = getattr(collection, "all_objects", ()) if collection else ()
+            for source_object in objects:
+                if getattr(source_object, "type", None) != "MESH":
+                    continue
+                object_key = getattr(source_object, "name_full", source_object.name)
+                if object_key in seen_objects:
+                    continue
+                seen_objects.add(object_key)
+                expanded.append(
+                    SimpleNamespace(
+                        name=f"{node.name}: {source_object.name}",
+                        source_object=source_object,
+                        deforming=False,
+                    )
+                )
+            continue
+
+        source_object = getattr(node, "source_object", None)
+        object_key = getattr(source_object, "name_full", None)
+        if object_key is not None and object_key in seen_objects:
+            continue
+        if object_key is not None:
+            seen_objects.add(object_key)
+        expanded.append(node)
+
+    return expanded
 
 
 def valid_mesh_geometry(source_object):
@@ -815,17 +853,21 @@ def get_geometry_nodes(node_tree):
     """
     geometry_entries = []
     for node in node_tree.nodes:
-        if getattr(node, "bl_idname", "") != "CONTINUUM_FLOW_GEOMETRY_NODE":
+        if getattr(node, "bl_idname", "") not in {
+            "CONTINUUM_FLOW_GEOMETRY_NODE",
+            "CONTINUUM_FLOW_COLLECTION_NODE",
+        }:
             continue
-        source_object = getattr(node, "source_object", None)
-        if not valid_mesh_geometry(source_object):
-            continue
-        geometry_entries.append(
-            {
-                "node_name": node.name,
-                "object_name": source_object.name,
-            }
-        )
+        for geometry_node in expand_geometry_nodes([node]):
+            source_object = getattr(geometry_node, "source_object", None)
+            if not valid_mesh_geometry(source_object):
+                continue
+            geometry_entries.append(
+                {
+                    "node_name": geometry_node.name,
+                    "object_name": source_object.name,
+                }
+            )
     return geometry_entries
 
 

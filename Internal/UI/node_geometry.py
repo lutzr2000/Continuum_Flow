@@ -6,7 +6,7 @@ from bpy.props import BoolProperty, PointerProperty
 
 class ContinuumFlowGeometryNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to reference a Blender object as geometry inside the CFD graph.
+    Node used to select a mesh for obstacles or sources.
     """
 
     bl_idname = "CONTINUUM_FLOW_GEOMETRY_NODE"

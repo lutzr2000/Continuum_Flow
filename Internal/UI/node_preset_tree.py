@@ -30,7 +30,7 @@ def _active_continuum_flow_tree(context):
 
 class ContinuumFlow_OT_add_basic_setup(bpy.types.Operator):
     """
-    Add a ready-to-use Continuum Flow starter setup with the core nodes linked.
+    Add a ready-to-use Continuum Flow starter setup.
     """
 
     bl_idname = "continuum_flow.add_basic_setup"

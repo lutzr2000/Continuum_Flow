@@ -9,7 +9,7 @@ from bpy.props import IntProperty
 
 class ContinuumFlowSourceNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to define a generic CFD source region and its scalar and velocity targets.
+    Node used to define source for the simulation.
     """
 
     bl_idname = "CONTINUUM_FLOW_SOURCE_NODE"

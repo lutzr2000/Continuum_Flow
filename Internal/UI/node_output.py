@@ -70,7 +70,7 @@ class CONTINUUM_FLOW_OT_output_free_bake_button(bpy.types.Operator):
 
 class ContinuumFlowOutputNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to configure which simulation results should be written to disk.
+    Node used to configure the output of the simulation to disk.
     """
 
     bl_idname = "CONTINUUM_FLOW_OUTPUT_NODE"

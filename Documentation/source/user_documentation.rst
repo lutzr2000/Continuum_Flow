@@ -254,6 +254,16 @@ Geometry
 Node that lets you pick geometry. It can be plugged into the source or obstacle node.
 
 
+Collection
+~~~~~~~~~~
+
+.. figure:: ../images/geometry_node.jpg
+   :class: block-image-left
+   :width: 300px
+
+All meshes in the selected collection can be used as sources or obstacles. 
+
+
 Particle System
 ~~~~~~~~~~~~~~~
 

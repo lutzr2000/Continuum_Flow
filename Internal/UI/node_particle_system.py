@@ -15,7 +15,7 @@ def clear_particle_system(self, context):
 
 class ContinuumFlowParticleSystemNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to reference a Blender object that provides a particle system.
+    Node used to use a particle system as input for sources.
     """
 
     bl_idname = "CONTINUUM_FLOW_PARTICLE_SYSTEM_NODE"

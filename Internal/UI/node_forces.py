@@ -34,7 +34,7 @@ class _ContinuumFlowBaseForceNode(node_base.ContinuumFlowBaseNode):
 
 class ContinuumFlowForceConstantNode(_ContinuumFlowBaseForceNode):
     """
-    Node used to define a constant force vector for the CFD simulation.
+    Node used to define a constant force vector for the simulation.
     """
 
     bl_idname = "CONTINUUM_FLOW_FORCE_CONSTANT_NODE"
@@ -72,6 +72,10 @@ class ContinuumFlowForceSwirlNode(_ContinuumFlowBaseForceNode):
 
 
 class ContinuumFlowForceTurbulenceNode(_ContinuumFlowBaseForceNode):
+    """
+    Node used to define a turbulence force in the simulation.
+    """
+
     bl_idname = "CONTINUUM_FLOW_FORCE_TURBULENCE_NODE"
     bl_label = "Force Turbulence"
     bl_icon = "FORCE_TURBULENCE"

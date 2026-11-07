@@ -19,6 +19,7 @@ _SOCKET_ROLE_BY_NODE_AND_NAME = {
     ("CONTINUUM_FLOW_OUTPUT_NODE", "Result"): "result",
     ("CONTINUUM_FLOW_VIEWER_NODE", "Result"): "result",
     ("CONTINUUM_FLOW_GEOMETRY_NODE", "Geometry"): "geometry",
+    ("CONTINUUM_FLOW_COLLECTION_NODE", "Geometry"): "geometry",
     ("CONTINUUM_FLOW_SOURCE_NODE", "Geometry"): "geometry",
     ("CONTINUUM_FLOW_OBSTACLE_NODE", "Geometry"): "geometry",
     ("CONTINUUM_FLOW_PARTICLE_SYSTEM_NODE", "Particle System"): "particle_system",
@@ -30,6 +31,7 @@ _SOCKET_ROLE_BY_SOCKET_IDNAME = {
     "CONTINUUM_FLOW_FORCE_SOCKET": "forces",
     "CONTINUUM_FLOW_RESULT_SOCKET": "result",
     "CONTINUUM_FLOW_GEOMETRY_SOCKET": "geometry",
+    "CONTINUUM_FLOW_MULTI_GEOMETRY_SOCKET": "geometry",
     "CONTINUUM_FLOW_PARTICLE_SYSTEM_SOCKET": "particle_system",
 }
 
@@ -219,6 +221,21 @@ class ContinuumFlowGeometrySocket(bpy.types.NodeSocket):
         """
         Return the display color of the socket.
         """
+        if _socket_has_invalid_links(self):
+            return _INVALID_SOCKET_COLOR
+        return (0.0, 214.0 / 255.0, 163.0 / 255.0, 1.0)
+
+
+class ContinuumFlowMultiGeometrySocket(bpy.types.NodeSocket):
+    """Geometry output that represents multiple mesh objects."""
+
+    bl_idname = "CONTINUUM_FLOW_MULTI_GEOMETRY_SOCKET"
+    bl_label = "Continuum Flow Multi Geometry"
+
+    def draw(self, context, layout, node, text):
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
         if _socket_has_invalid_links(self):
             return _INVALID_SOCKET_COLOR
         return (0.0, 214.0 / 255.0, 163.0 / 255.0, 1.0)

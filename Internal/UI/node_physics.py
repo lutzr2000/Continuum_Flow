@@ -6,7 +6,7 @@ from bpy.props import FloatProperty
 
 class ContinuumFlowPhysicsNode0(node_base.ContinuumFlowBaseNode):
     """
-    Node used to store the physical coefficients of the CFD simulation.
+    Node used to define the physical parameters for the simulation.
     """
 
     bl_idname = "CONTINUUM_FLOW_PHYSICS_NODE"

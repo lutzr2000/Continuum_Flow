@@ -23,7 +23,7 @@ def _update_simulation_end_frame(self, _context):
 
 class ContinuumFlowSimulationNode(node_base.ContinuumFlowBaseNode):
     """
-    Node used to collect all simulation-wide settings and input dependencies.
+    Node used to define the main simulation parameters.
     """
 
     cpu_available = False

@@ -18,6 +18,7 @@ from .UI.sockets import (
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
     ContinuumFlowGeometrySocket,
+    ContinuumFlowMultiGeometrySocket,
     ContinuumFlowParticleSystemSocket,
 )
 
@@ -28,6 +29,7 @@ from .UI.node_forces import (
     ContinuumFlowForceTurbulenceNode,
 )
 from .UI.node_geometry import ContinuumFlowGeometryNode
+from .UI.node_collection import ContinuumFlowCollectionNode
 from .UI.node_particle_system import ContinuumFlowParticleSystemNode
 from .UI.node_reference_frame import ContinuumFlowReferenceFrameNode
 from .UI.node_obstacle import ContinuumFlowObstacleNode
@@ -62,9 +64,11 @@ classes = (
     ContinuumFlowLinkSocket,
     ContinuumFlowResultSocket,
     ContinuumFlowGeometrySocket,
+    ContinuumFlowMultiGeometrySocket,
     ContinuumFlowParticleSystemSocket,
     ContinuumFlowDomainNode,
     ContinuumFlowGeometryNode,
+    ContinuumFlowCollectionNode,
     ContinuumFlowParticleSystemNode,
     ContinuumFlowReferenceFrameNode,
     ContinuumFlowOutputNode,
