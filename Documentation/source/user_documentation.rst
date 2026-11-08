@@ -275,6 +275,9 @@ Collection
 
 All meshes in the selected collection can be used as sources or obstacles. 
 
+**Deforming**
+    If this is on, deformation is taken into account for every mesh in the collection. Only turn this on where deformation is actually happening and important because it can decrease solver performance.
+
 **Velocity Transfer**
     Percentage of each object's transform velocity transferred to the flow when the collection is used as a source. The setting applies independently to every mesh in the collection. Deformation of individual vertices is not transferred.
 

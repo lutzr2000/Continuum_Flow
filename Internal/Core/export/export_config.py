@@ -580,7 +580,7 @@ def expand_geometry_nodes(nodes):
                     SimpleNamespace(
                         name=f"{node.name}: {source_object.name}",
                         source_object=source_object,
-                        deforming=False,
+                        deforming=bool(getattr(node, "deforming", False)),
                         velocity_transfer=float(
                             getattr(node, "velocity_transfer", 0.0)
                         ),

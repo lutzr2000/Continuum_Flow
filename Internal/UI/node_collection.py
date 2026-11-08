@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import FloatProperty, PointerProperty
+from bpy.props import BoolProperty, FloatProperty, PointerProperty
 
 from . import node_base
 from . import sockets
@@ -20,6 +20,11 @@ class ContinuumFlowCollectionNode(node_base.ContinuumFlowBaseNode):
         type=bpy.types.Collection,
         description="Collection whose mesh objects are used as geometry",
     )  # type: ignore
+    deforming: BoolProperty(
+        name="Deforming",
+        description="If meshes in the collection are deforming (Armature, shape keys) this should be selected. With dense meshes this will degrade performance",
+        default=False,
+    )  # type: ignore
     velocity_transfer: FloatProperty(
         name="Velocity Transfer",
         default=0.0,
@@ -39,4 +44,5 @@ class ContinuumFlowCollectionNode(node_base.ContinuumFlowBaseNode):
     def draw_buttons(self, context, layout):
         self._set_layout_enabled(context, layout)
         layout.prop(self, "source_collection", text="Collection")
+        layout.prop(self, "deforming")
         layout.prop(self, "velocity_transfer", slider=True)
