@@ -269,7 +269,7 @@ Node that lets you pick geometry. It can be plugged into the source or obstacle 
 Collection
 ~~~~~~~~~~
 
-.. figure:: ../images/obstacle_node.jpg
+.. figure:: ../images/collection_node.jpg
    :class: block-image-left
    :width: 300px
 
