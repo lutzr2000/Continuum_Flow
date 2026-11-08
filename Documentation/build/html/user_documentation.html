@@ -441,6 +441,8 @@ Press Esc during an active bake to stop.</p>
 <dl class="simple">
 <dt><strong>Deforming</strong></dt><dd><p>If this is on the geometries deformation is taken into account. Only turn this on where deformation is actually happening and important because it can decrease solver performance.</p>
 </dd>
+<dt><strong>Velocity Transfer</strong></dt><dd><p>Percentage of the object’s transform velocity transferred to the flow when the geometry is used as a source. This includes translation and rotation. A value of 0% preserves the configured source velocity without adding object motion. Deformation of individual vertices is not transferred.</p>
+</dd>
 </dl>
 </section>
 <section id="collection">
@@ -450,6 +452,12 @@ Press Esc during an active bake to stop.</p>
 </a>
 </figure>
 <p>All meshes in the selected collection can be used as sources or obstacles.</p>
+<dl class="simple">
+<dt><strong>Deforming</strong></dt><dd><p>If this is on, deformation is taken into account for every mesh in the collection. Only turn this on where deformation is actually happening and important because it can decrease solver performance.</p>
+</dd>
+<dt><strong>Velocity Transfer</strong></dt><dd><p>Percentage of each object’s transform velocity transferred to the flow when the collection is used as a source. The setting applies independently to every mesh in the collection. Deformation of individual vertices is not transferred.</p>
+</dd>
+</dl>
 </section>
 <section id="particle-system">
 <h3>Particle System<a class="headerlink" href="#particle-system" title="Link to this heading">¶</a></h3>
